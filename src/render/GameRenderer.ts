@@ -77,6 +77,9 @@ export class GameRenderer {
   /** id of the boss `this.bossView` currently represents (for hit-flash lookup
    * correctness across a defeat -> new-boss-spawn id change). */
   private currentBossId: number | null = null;
+  /** Previous frame's `state.anchorX`, used to derive the "formation is
+   * advancing" cue heroView reads for its determined-march lean/bob boost. */
+  private lastAnchorX: number | null = null;
 
   /** Set up the Pixi Application and scene layers. Client-only. */
   async create(canvasParent: HTMLElement): Promise<void> {
@@ -106,6 +109,7 @@ export class GameRenderer {
     this.app = app;
     this.startTime = performance.now();
     this.lastDrawMs = 0;
+    this.lastAnchorX = null;
     canvasParent.appendChild(app.canvas);
 
     const world = new Container();
@@ -174,9 +178,15 @@ export class GameRenderer {
 
     this.environment?.update(dt, state);
 
-    this.heroPool.beginFrame();
-    for (const h of state.heroes) updateHeroView(this.heroPool.get(h.id), h);
-    this.heroPool.endFrame();
+    const marching = this.lastAnchorX != null && state.anchorX > this.lastAnchorX + 1e-3;
+    this.lastAnchorX = state.anchorX;
+
+    const heroPool = this.heroPool;
+    heroPool.beginFrame();
+    state.heroes.forEach((h, slot) => {
+      updateHeroView(heroPool.get(h.id), h, { dt, slot, events: frameEvents, marching });
+    });
+    heroPool.endFrame();
 
     // Enemies list is empty during the boss phase (the sim clears it on entry).
     this.enemyPool.beginFrame();
@@ -236,6 +246,7 @@ export class GameRenderer {
       this.bossView = null;
     }
     this.currentBossId = null;
+    this.lastAnchorX = null;
     this.bossHpBar = null;
     this.bossLabel = null;
     this.layers = null;
