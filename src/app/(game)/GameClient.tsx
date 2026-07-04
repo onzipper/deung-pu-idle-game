@@ -11,6 +11,11 @@
  *      off the Zustand store onto the engine state / `AudioController`,
  *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
  *      once and hands it to the FIRST fixed sub-step of the frame,
+ *   2b. shapes this frame's real elapsed seconds through `TimeDirector`
+ *      (`./timeDirector.ts`) using LAST frame's events, for hit-stop/slow-mo
+ *      (M4 juice) — ONLY the accumulator's input is shaped; the renderer,
+ *      audio, and the ~10Hz UI-sync below all keep using the real elapsed
+ *      time so fx/SFX/HUD stay snappy even while the sim is frozen/slowed,
  *   3. asks the fixed-timestep accumulator how many `FIXED_DT` sub-steps to
  *      run (the speed multiplier = more sub-steps, never a bigger dt) and
  *      runs `step()` that many times, concatenating each sub-step's
@@ -56,6 +61,7 @@ import {
   type EngineSnapshot,
   type HeroSummary,
 } from "@/ui/store/gameStore";
+import { TimeDirector } from "./timeDirector";
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
@@ -189,11 +195,15 @@ export function GameClient() {
     const renderer = new GameRenderer();
     const audio = new AudioController();
     const acc = createAccumulator();
+    const timeDirector = new TimeDirector();
 
     let rafId = 0;
     let lastTime = performance.now();
     let uiSyncAccum = 0;
     let cancelled = false;
+    // Previous rAF frame's event batch — TimeDirector reacts to these (a
+    // one-frame trigger latency is expected/fine; see timeDirector.ts).
+    let lastFrameEvents: GameEvent[] = [];
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
@@ -242,12 +252,17 @@ export function GameClient() {
         advanceStage: pending.advanceStage || undefined,
       };
 
+      // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
+      // LAST frame's events — real `elapsed` still drives the renderer, audio,
+      // and UI-sync below so fx/SFX/HUD never stutter, even mid-freeze.
+      const simElapsed = timeDirector.shape(elapsed, lastFrameEvents);
+
       // `state.events` is cleared at the START of each step() and holds only
       // that sub-step's events; a speed multiplier runs more than one sub-step
       // per rAF frame, so we must collect across ALL of them before draw() —
       // otherwise 2x/3x speed would silently drop every event but the last
       // sub-step's (see engine/state/events.ts's collection contract).
-      const steps = drainAccumulator(acc, elapsed, store.speed);
+      const steps = drainAccumulator(acc, simElapsed, store.speed);
       const frameEvents: GameEvent[] = [];
       for (let i = 0; i < steps; i++) {
         step(state, i === 0 ? firstInput : {});
@@ -262,6 +277,10 @@ export function GameClient() {
         uiSyncAccum -= UI_SYNC_INTERVAL;
         store.syncFromEngine(buildSnapshot(state));
       }
+
+      // Feeds TimeDirector's trigger scan on the NEXT rAF frame (one-frame
+      // latency by design — see timeDirector.ts's class doc).
+      lastFrameEvents = frameEvents;
     }
 
     // ---- M3: autosave (server-authoritative persistence) ----
