@@ -19,17 +19,20 @@ model User {
 // One row per player save slot. `data` holds the versioned SaveData JSON blob
 // (see src/engine/state). `lastSeen` drives capped offline-idle earnings.
 // `version` mirrors SaveData.version so migrations can target rows by schema age.
+//
+// MVP: exactly one save slot per user, so `userId` is UNIQUE. This is what lets
+// `persistSave` upsert by userId (Prisma upsert needs a unique field in `where`).
+// A unique constraint also provides the index, so no separate @@index is needed.
+// When multi-slot saves land, drop the unique for `@@unique([userId, slot])`.
 model SaveState {
   id        String   @id @default(cuid())
-  userId    String
+  userId    String   @unique
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   version   Int
   data      Json
   lastSeen  DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@index([userId])
 }
 
 // Future (M5): leaderboards

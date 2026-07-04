@@ -27,14 +27,18 @@
 import { useEffect, useRef } from "react";
 import {
   CONFIG,
+  FIXED_DT,
   bossHint,
   createAccumulator,
   drainAccumulator,
   initGameState,
+  migrate,
   step,
+  toSaveData,
   upgradeCost,
   type FrameInput,
   type GameState,
+  type SaveData,
 } from "@/engine";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
@@ -53,6 +57,19 @@ const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
  * Real offline-idle catch-up is a separate, capped M3 concern (`server/offline.ts`).
  */
 const MAX_FRAME_SECONDS = 0.25;
+
+/** Wall time between periodic autosave POSTs. */
+const AUTOSAVE_INTERVAL_MS = 30_000;
+
+/**
+ * Wall-clock budget for replaying capped offline-idle time synchronously on
+ * load. A full `offlineCapHours` (8h ≈ 1.7M fixed steps @60Hz) would freeze the
+ * tab, so we replay as many real `step()`s as fit in this budget and DROP the
+ * remainder. Bounded by wall time (not a fixed step count) so it stays jank-free
+ * on any machine. Exact long-idle fidelity is an M4 concern (a coarse
+ * closed-form idle-rate model, or a chunked/worker catch-up).
+ */
+const OFFLINE_SYNC_BUDGET_MS = 250;
 
 function buildSnapshot(state: GameState): EngineSnapshot {
   const heroes: HeroSummary[] = state.heroes.map((h) => ({
@@ -89,10 +106,10 @@ export function GameClient() {
     const arenaEl = arenaRef.current;
     if (!arenaEl) return;
 
-    // Fresh per mount — a fixed seed would also be fine here; the engine
-    // itself stays pure either way. Save/load (M3) will pass a loaded
-    // `SaveData` as the second arg instead of starting cold.
-    const state = initGameState(Date.now() >>> 0);
+    const seed = Date.now() >>> 0;
+    // Starts cold; if a save loads, `state` is re-initialised from it before the
+    // loop begins (below). Keeping it always-defined avoids use-before-assign.
+    let state = initGameState(seed);
     const renderer = new GameRenderer();
     const acc = createAccumulator();
 
@@ -100,6 +117,7 @@ export function GameClient() {
     let lastTime = performance.now();
     let uiSyncAccum = 0;
     let cancelled = false;
+    let autosaveTimer: ReturnType<typeof setInterval> | undefined;
 
     function frame(now: number) {
       rafId = requestAnimationFrame(frame);
@@ -138,22 +156,111 @@ export function GameClient() {
       }
     }
 
-    // Pixi init is async; only start the loop once it resolves, and guard
-    // against the effect having already been cleaned up in the meantime
-    // (React Strict Mode's dev-mode mount/unmount/mount) by tearing the
-    // renderer back down instead of leaking an orphaned canvas.
-    void renderer.create(arenaEl).then(() => {
+    // ---- M3: autosave (server-authoritative persistence) ----
+    // The server validates every field, ignores the client `lastSeen`, and
+    // re-stamps it. Fire-and-forget: a dropped autosave just means the next one
+    // (or the on-hide beacon) carries the progress.
+    function serialize(): SaveData {
+      return toSaveData(state);
+    }
+
+    function autosave(): void {
+      void fetch("/api/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(serialize()),
+        keepalive: true,
+      }).catch(() => {
+        /* offline / transient failure — next autosave retries */
+      });
+    }
+
+    // On tab-hide (covers most real "closing the game" cases): sendBeacon is
+    // guaranteed to flush during unload where a normal fetch may be killed.
+    function onVisibility(): void {
+      if (document.visibilityState !== "hidden") return;
+      const blob = new Blob([JSON.stringify(serialize())], {
+        type: "application/json",
+      });
+      navigator.sendBeacon("/api/save", blob);
+    }
+
+    // Pixi init + save load run in parallel; the loop starts only after both
+    // resolve. Guards against the effect having been cleaned up mid-flight
+    // (React Strict Mode's dev mount/unmount/mount) by tearing the renderer
+    // back down instead of leaking an orphaned canvas.
+    const boot = async (): Promise<void> => {
+      // ---- load the server-authoritative save (before initGameState) ----
+      let loaded: SaveData | undefined;
+      let offlineSeconds = 0;
+      let offlineCapped = false;
+      try {
+        const res = await fetch("/api/save", { method: "GET" });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            save: SaveData | null;
+            offline?: { creditedSeconds: number; capped: boolean };
+          };
+          // Server already migrated; pass through migrate() again defensively —
+          // never trust a received save's shape/version (CLAUDE.md rule).
+          if (json.save) loaded = migrate(json.save);
+          if (json.offline) {
+            offlineSeconds = json.offline.creditedSeconds;
+            offlineCapped = json.offline.capped;
+          }
+        }
+      } catch {
+        /* first run / network down: start cold */
+      }
+
+      if (cancelled) return;
+
+      if (loaded) state = initGameState(seed, loaded);
+
+      // ---- offline-idle catch-up ----
+      // Replay the capped offline seconds through the SAME fixed-step primitive
+      // the live loop uses, bounded by OFFLINE_SYNC_BUDGET_MS (see its comment).
+      const totalOfflineSteps = Math.floor(offlineSeconds / FIXED_DT);
+      if (totalOfflineSteps > 0) {
+        const goldBefore = state.gold;
+        const deadline = performance.now() + OFFLINE_SYNC_BUDGET_MS;
+        let ran = 0;
+        for (; ran < totalOfflineSteps; ran++) {
+          step(state, {});
+          // Amortise the clock read so it doesn't dominate the tight loop.
+          if ((ran & 0x3ff) === 0 && performance.now() >= deadline) {
+            ran++;
+            break;
+          }
+        }
+        // TODO(M4): surface this in the HUD instead of the console.
+        console.log(
+          `ได้ทองระหว่างออฟไลน์ +${state.gold - goldBefore} ` +
+            `(${Math.round(offlineSeconds)}s${offlineCapped ? ", capped" : ""}, ` +
+            `simulated ${ran}/${totalOfflineSteps} steps)`,
+        );
+      }
+
+      await renderer.create(arenaEl);
       if (cancelled) {
         renderer.destroy();
         return;
       }
+
+      autosaveTimer = setInterval(autosave, AUTOSAVE_INTERVAL_MS);
+      document.addEventListener("visibilitychange", onVisibility);
+
       lastTime = performance.now();
       rafId = requestAnimationFrame(frame);
-    });
+    };
+
+    void boot();
 
     return () => {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
+      if (autosaveTimer) clearInterval(autosaveTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
       renderer.destroy();
     };
   }, []);

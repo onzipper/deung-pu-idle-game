@@ -12,6 +12,7 @@ import { clamp } from "@/engine/core/math";
 import { makeHero } from "@/engine/entities";
 import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
 import type { Upgrades } from "@/engine/systems/stats";
+import { SAVE_VERSION } from "@/engine/state/version";
 
 /** High-level flow phase (POC PHASE). Boss/victory transitions land in Phase B. */
 export type Phase = "battle" | "boss" | "victory";
@@ -109,4 +110,24 @@ export function initGameState(seed: number, save?: SaveData): GameState {
   };
   initHeroes(state);
   return state;
+}
+
+/**
+ * Serialise a live `GameState` down to the persisted `SaveData` subset.
+ *
+ * The inverse of `initGameState(seed, save)`: only progress + economy are kept
+ * (transient battlefield arrays are rebuilt on load). `unlocked` is derived from
+ * the number of unlocked slots via `SLOT_ORDER`. `lastSeen` is a server-owned
+ * field — the client cannot be trusted to stamp wall-clock time (offline-idle
+ * anti-cheat), so it is emitted as 0 and the server overwrites it on persist.
+ */
+export function toSaveData(state: GameState): SaveData {
+  return {
+    version: SAVE_VERSION,
+    stage: state.stage,
+    gold: state.gold,
+    unlocked: SLOT_ORDER.slice(0, state.heroSlots),
+    upgrades: { ...state.upgrades },
+    lastSeen: 0,
+  };
 }
