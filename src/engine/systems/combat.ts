@@ -110,9 +110,9 @@ export function updateHeroes(state: GameState): void {
 
     if (t.attack === "melee") {
       // CHARGE: if any enemy is within the wide charge-seek range, sprint at it
-      // (chargeSpeed) with a loosened forward leash (meleeChargeLeash / chargeCap)
-      // so the swordsman genuinely runs across the field to smash it. With nothing
-      // in charge range he falls back to the calm hold-formation walk (heroMove,
+      // (chargeSpeed) with a loosened forward leash (meleeChargeLeash) and a DYNAMIC
+      // forward cap so the swordsman genuinely runs across the field to smash it. With
+      // nothing in charge range he falls back to the calm hold-formation walk (heroMove,
       // tight meleeLeash / midCap) toward his home slot.
       const chargeTgt = nearestWithin(targets, h.x, CONFIG.chargeSeekRange);
       let goalX: number;
@@ -126,7 +126,19 @@ export function updateHeroes(state: GameState): void {
               (d > 0 ? -CONFIG.meleeApproachGap : CONFIG.meleeApproachGap)
             : h.x;
         moveSpeed = CONFIG.chargeSpeed;
-        upperCap = Math.min(homeX + CONFIG.meleeChargeLeash, CONFIG.chargeCap);
+        // Dynamic forward cap (86d3k2nhm follow-up): the cap FOLLOWS the charge target
+        // (up to chargeHardCap) so it never sits between the swordsman and the enemy.
+        // A static chargeCap froze him mid-field waiting for enemies to walk in AND left
+        // ranged enemies resting beyond his reach dealing free hits; tracking the target
+        // both kills the park and guarantees he can always close to melee range.
+        // chargeCap is the floor (stay aggressive vs a close/behind target),
+        // chargeHardCap the ceiling (spawn-relative, keeps an entrance corridor).
+        const dynCap = clamp(
+          chargeTgt.x - CONFIG.meleeApproachGap,
+          CONFIG.chargeCap,
+          CONFIG.chargeHardCap,
+        );
+        upperCap = Math.min(homeX + CONFIG.meleeChargeLeash, dynCap);
       } else {
         goalX = homeX;
         moveSpeed = CONFIG.heroMove;
@@ -140,10 +152,15 @@ export function updateHeroes(state: GameState): void {
         near && Math.abs(near.x - h.x) < CONFIG.kiteDist
           ? h.x - CONFIG.rangedKiteStep
           : homeX;
+      // Upper clamp uses rangedForwardCap (spawn-relative safety net), NOT the POC
+      // absolute midCap: homeX = anchorX + offset carries the -26/-74 formation spread,
+      // so a cap above the max homeX preserves spacing at ANY anchor depth. midCap(400)
+      // collided (archer & mage both pinned to 400 -> exact stack) once the anchor pushed
+      // deep — fixed here (86d3k2nhm follow-up).
       goalX = clamp(
         goalX,
         CONFIG.rangedMinX,
-        Math.min(homeX + CONFIG.rangedHomeFront, CONFIG.midCap),
+        Math.min(homeX + CONFIG.rangedHomeFront, CONFIG.rangedForwardCap),
       );
       h.x += clamp(goalX - h.x, -CONFIG.heroMove * FIXED_DT, CONFIG.heroMove * FIXED_DT);
     }

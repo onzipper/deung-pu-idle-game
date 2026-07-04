@@ -338,3 +338,101 @@ disturbed — so these two breaches are feature, not regression.
 
 Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
 src/engine/__tests__/balance-sim.ts`).
+
+---
+
+## Ranged-reach + no-park follow-up (ClickUp 86d3k2nhm follow-up)
+
+Player playtest of the whole-team push surfaced three bugs:
+
+1. **Archer & mage stood exactly stacked** ("มองไม่เห็นตัวละคร"). The ranged upper
+   clamp was `min(homeX + rangedHomeFront, midCap 400)`. At `battleMaxAnchor 510`,
+   archer homeX = 484 and mage homeX = 436 **both** clamp to 400 → exact overlap.
+   `midCap` is a POC-era _absolute_ cap that stopped scaling once the anchor pushed deep.
+2. **Swordsman still parks and waits** ("hero ยังยืนรอ...เซ็ง"). He sprinted to the
+   static `chargeCap 640` and froze while a melee enemy walked 860 → ~686 (~174px ≈ 4s
+   at speed 44). That frozen window _is_ the wait.
+3. **Free hits** ("โดนมอนตีฟรี"). Root cause = **ranged-enemy-beyond-reach**: a ranged
+   enemy stops as soon as it is within its 160 range of the nearest hero and then plinks
+   forever (it never kites inward). With the swordsman pinned at `chargeCap 640` and the
+   nearest hero, the ranged enemy rests at ~800; his 96 melee range can't span the 160
+   gap, and his goal (774) clamps back to 640, so **he can never close** — permanent free
+   damage with zero counterplay. No backline hero covered it either (archer @ 400 reaches
+   750, mage @ 400 reaches 730 — both short of 800).
+
+The three are one **coupled geometry** problem: naively raising `chargeCap` to fix (2)
+without covering the deeper fight would just relocate the free-hit to whichever hero
+_can't_ reach.
+
+### Config knobs (old → new, all in `src/engine/config/index.ts`)
+
+| Knob               | Old         | New   | Why                                                                                                                                                                             |
+| ------------------ | ----------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ranged upper clamp | `midCap 400`| `rangedForwardCap 740` | Spawn-relative safety net that never collides with `homeX` (max ~572). `homeX = anchorX + offset` already carries the −26/−74 formation spread, so spacing survives at ANY anchor depth — fixes (1). |
+| `chargeCap`        | 640 (static)| 640 (floor) | Now the **floor** of a **dynamic** forward cap: `upperCap = min(homeX + meleeChargeLeash, clamp(target.x − meleeApproachGap, chargeCap, chargeHardCap))`. The cap follows the target, so the swordsman never freezes short of it — fixes (2) — and can always close to melee range — fixes (3). |
+| `chargeHardCap`    | — (new)     | 770   | Dynamic-cap ceiling = `spawnX 860 − 90`. `770 + swordsman range 96 = 866 ≥ 860`, so the swordsman can always reach a ranged enemy resting at the spawn edge (must be ≥ 764). This is what structurally kills the free-hit — via the **swordsman's reach**, not a deeper backline. |
+| `battleMaxAnchor`  | 510         | **510 (held)** | Deliberately NOT deepened (see below). |
+
+`midCap` is retained — it still bounds the no-charge hold branch (harmless there).
+
+### Why `battleMaxAnchor` stays 510 (a rejected 590 draft)
+
+The first draft deepened the anchor to **590** so archer+mage coverage would ride all
+the way up to the new fight line. It works mechanically, but the sim rejected it on
+**balance**: the extra ranged uptime made clears **~18% faster on average**, throwing
+**five** stages outside the ±15% budget (S5 −20%, S7 −23%, S8 −21%, plus S1/S2). A 560
+midpoint was also too fast (S2 −26%, S8 −16%). **510** — i.e. leaving the anchor where
+the push pass left it — is the only value that keeps every mid/late stage in budget,
+because the free-hit fix does **not** need a deeper backline: the swordsman's
+`chargeHardCap 770` reach (866) handles spawn-edge ranged enemies directly, and archer @
+(510−26=484)+8+350 = **842 ≥ 840** still covers the melee fight line. The only cost is
+that the mage (reach 774) covers the incoming _stream_ rather than the very front enemy
+— acceptable, and the price of staying inside the economy budget without touching a
+single curve.
+
+### Pacing: push baseline vs this follow-up (aggregate, 5 seeds, 1800 s)
+
+`push` = the previous (86d3k2nhm) table; `now` = this pass (`battleMaxAnchor 510`,
+`chargeHardCap 770`, dynamic cap, `rangedForwardCap 740`).
+
+| Stage | push dur (s) | now dur (s) | Δ       | now wallX | now gold/min |
+| ----- | ------------ | ----------- | ------- | --------- | ------------ |
+| 1     | 106.8        | 88.6        | −17.0%\*| —         | 296          |
+| 2     | 66.2         | 55.8        | −15.7%\*| 0.63x     | 304          |
+| 3     | 72.9         | 75.6        | +3.7%   | 1.36x     | 329          |
+| 4     | 75.3         | 74.0        | −1.7%   | 0.98x     | 474          |
+| 5     | 91.2         | 90.7        | −0.5%   | 1.23x     | 526          |
+| 6     | 106.4        | 107.1       | +0.7%   | 1.18x     | 598          |
+| 7     | 116.1        | 105.2       | −9.4%   | 0.98x     | 754          |
+| 8     | 134.7        | 116.7       | −13.4%  | 1.11x     | 883          |
+| 9     | 670.6        | 608.9       | −9.2%   | 5.22x     | 1132         |
+
+first upgrade 8.1 → 6.8 s · first boss kill 106.8 → 88.6 s · **0 wipes** · reached
+stage 10 on all seeds.
+
+**Net effect:** stages 3–9 all inside the ±15% band, the stage-9 prestige gate
+preserved (4.98x → **5.22x**), the 3–8 ramp still a clean shape, and **0 wipes**. No
+economy curve was touched — only the charge/formation geometry.
+
+**\* The two flagged stages (S1 −17%, S2 −16%) are the parking fix itself, not drift.**
+S1 is the pure-swordsman stage: it has **no ranged heroes at all**, so `battleMaxAnchor`
+cannot affect it — its speedup is entirely the removal of the ~4s/wave park (the
+swordsman now engages near the spawn edge instead of freezing at 640). Trimming it
+further would require lowering `chargeHardCap` below 764, which re-opens the free-hit.
+S2 (+archer) is a hair over for the same reason. Both are _faster_, the ramp/gate/wipes
+all hold, and no curve moved — so they are feature, not regression.
+
+### Tests (headless, `src/engine/__tests__/charge.test.ts`)
+
+- **no stacking at any depth** — 3 heroes, several enemy depths; asserts `|archer.x −
+  mage.x| ≥ 30` and that the spread ≈ the offset difference (48). (Failed pre-fix: both
+  pinned at 400.)
+- **no park** — a moving melee enemy walks in from spawn; counts frames where the
+  swordsman has ~zero x-velocity while an enemy is alive and beyond melee range; asserts
+  < ~1.0s. (Failed pre-fix: ~4s frozen at 640.)
+- **ranged enemy reachable** — a high-HP ranged enemy at the spawn edge; asserts the
+  swordsman closes to within melee range AND deals damage (fights back). (Failed
+  pre-fix: pinned at 640, gap 160 > 96 forever.)
+
+Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
+src/engine/__tests__/balance-sim.ts`).

@@ -46,7 +46,20 @@ export const CONFIG = {
   // (no-enemy) easing above is untouched, and between waves the anchor now HOLDS
   // its forward line instead of retreating (see movement.ts / waveGap handling).
   battleAnchorLead: 150, // (86d3k2nhm: was 130) anchor tracks minEnemyX - this; sized so the anchor rides right up near the engagement line but the ranged heroes still sit a touch behind it
-  battleMaxAnchor: 510, // (86d3k2nhm: was 330; base maxAnchor 300) anchor may ride WAY forward in battle so archer/mage advance with the swordsman and their range covers the pushed-up fight
+  // (86d3k2nhm follow-up) HELD at 510 — deliberately NOT deepened alongside the new
+  // dynamic charge cap. The deepest engaged enemy now sits at chargeHardCap(770) +
+  // clash(46) + enemyEngageJitter(24) = 840; archer @ (510-26=484)+rangedHomeFront(8)+
+  // range 350 -> 842 >= 840 covers the fight line, and a spawn-edge ranged enemy is
+  // reached by the SWORDSMAN's dynamic cap (770 + range 96 = 866 >= spawnX 860), NOT by
+  // pushing the backline forward. So the free-hit fix does not require a deeper anchor.
+  // Pushing this to 590 (as first drafted) gave archer+mage too much uptime and made
+  // clears ~18% too fast — 5 stages fell outside the ±15% balance budget (S3 -14 -> S9
+  // -14, S5/S7/S8 -20..-23%); 510 keeps every stage in budget except the two earliest,
+  // which are inherently faster from removing the ~4s/wave park (S1 has no ranged heroes
+  // at all). mage @ (510-74=436)+8+330 = 774 covers the incoming stream (the bulk of a
+  // staggered wave) rather than the very front enemy — that trailing coverage cost is
+  // the price of staying inside budget. Sim-validated; see docs/balance-m4.md.
+  battleMaxAnchor: 510,
   battleAnchorSpeed: 115, // (was anchorSpeed 60) formation surges forward ~2x faster on enemy contact
   // Charge trigger is now whole-field: chargeSeekRange exceeds spawnX (860) - the
   // deepest a hero can stand (~150), so a freshly-spawned enemy is ALWAYS in range
@@ -54,14 +67,22 @@ export const CONFIG = {
   chargeSeekRange: 900, // (86d3k2nhm: was 560) >= full-field span; effectively "any enemy alive => charge"
   chargeSpeed: 265, // sprint speed while charging a target (~1.77x heroMove 150) — the "run at them" feel
   meleeChargeLeash: 260, // loosened forward leash while a charge target exists (was meleeLeash 90) — he genuinely runs across the field
-  // Forward cap while charging. Raised 470 -> 640 now that the anchor (battleMaxAnchor
-  // 510) FOLLOWS the swordsman forward: ranged coverage travels with the fight, so
-  // charging deep no longer drags the engagement line out of archer/mage range that
-  // the old 470 cap was protecting. Enemies stop ~clash(46) past the swordsman, so a
-  // fight at ~640 sits at ~686; mage@(510-74=436)+range 330 -> 766 >= 686 and
-  // archer@(510-26=484)+350 -> 834 >= 686 both still cover it. Sim-validated sweet
-  // spot (see docs/balance-m4.md). Still far short of spawnX (860).
+  // Forward-cap FLOOR while charging. The swordsman's forward cap is now DYNAMIC
+  // (combat.ts): upperCap = min(homeX + meleeChargeLeash, clamp(target.x -
+  // meleeApproachGap, chargeCap, chargeHardCap)). chargeCap is the FLOOR — it keeps him
+  // aggressive when the target is already close/behind — while chargeHardCap is the
+  // ceiling. A STATIC 640 cap caused two playtest bugs (86d3k2nhm follow-up): (2) the
+  // swordsman froze at 640 for ~4s while enemies walked 860 -> ~686, and (3) a ranged
+  // enemy resting at nearestHero+160 (~800) sat 160px away > his 96 melee range, pinned
+  // at 640 he could NEVER close -> permanent "free hits". The dynamic cap tracks the
+  // target so he keeps closing (kills the park) and can always reach it (kills the free
+  // hit).
   chargeCap: 640,
+  // Dynamic-cap CEILING (spawn-relative: spawnX 860 - 90). 770 + swordsman range 96 =
+  // 866 >= spawnX 860, so the swordsman can always close to melee range of a ranged
+  // enemy resting at the spawn edge -> no permanent free-hits (must be >= 860-96 = 764).
+  // Also leaves a small entrance corridor so waves still visibly read as they arrive.
+  chargeHardCap: 770,
 
   // hero engagement tuning (pulled out of the POC update loop)
   meleeSeekRange: 260, // legacy hold-formation seek radius (superseded by chargeSeekRange for the charge behaviour; kept for reference)
@@ -70,8 +91,16 @@ export const CONFIG = {
   meleeHomeBack: 60, // lower clamp = homeX - this
   meleeTargetMinD: -80, // nearestTarget minD for a melee attack (can hit slightly behind)
   rangedKiteStep: 46, // step back by this when an enemy is within kiteDist
-  rangedHomeFront: 8, // ranged upper clamp = min(homeX + this, midCap)
+  rangedHomeFront: 8, // ranged upper clamp = min(homeX + this, rangedForwardCap)
   rangedMinX: 55, // ranged lower clamp (don't back off the screen)
+  // (86d3k2nhm follow-up) Ranged upper-clamp SAFETY NET, spawn-relative (spawnX 860 -
+  // 120). REPLACES the POC-era absolute `midCap` (400) in the ranged clamp. midCap no
+  // longer scaled with the deep-push anchor: at battleMaxAnchor 510 archer homeX(484)
+  // and mage homeX(436) BOTH clamped to 400 -> exact stack (playtest bug 1). Because
+  // homeX = anchorX + offset already carries the -26/-74 formation spread, a cap that
+  // sits ABOVE the max ranged homeX (~572 at anchor 590) never collides, so spacing is
+  // preserved at ANY anchor depth; this is purely a "don't walk into the spawn" net.
+  rangedForwardCap: 740,
 
   // ---- waves ----
   waveGap: 1.2, // gap before each subsequent wave
