@@ -3,26 +3,32 @@
  *
  * Lifecycle contract (driven by the integration layer, NOT by this class):
  *   const renderer = new GameRenderer();
- *   await renderer.create(canvasParent);   // once, client-only (e.g. in a useEffect)
- *   renderer.draw(state);                  // every rAF, reading the engine's GameState
- *   renderer.destroy();                    // on unmount — safe to call even if
- *                                           // create() never resolved, and safe to
- *                                           // call create() again afterwards
- *                                           // (covers React StrictMode's mount/
- *                                           // unmount/mount dev double-invoke).
+ *   await renderer.create(canvasParent);       // once, client-only (e.g. in a useEffect)
+ *   renderer.draw(state, frameEvents);         // every rAF; frameEvents = this frame's
+ *                                               // sub-steps' state.events, concatenated
+ *                                               // by the caller (see GameClient.tsx).
+ *                                               // Omit frameEvents and fx just idles.
+ *   renderer.destroy();                        // on unmount — safe to call even if
+ *                                               // create() never resolved, and safe to
+ *                                               // call create() again afterwards
+ *                                               // (covers React StrictMode's mount/
+ *                                               // unmount/mount dev double-invoke).
  *
  * One-way data flow: `draw()` only reads `GameState` fields and mutates Pixi
  * display objects. It never mutates `state` and never calls back into `@/engine`.
  */
 
 import { Application, Container, Graphics, Text } from "pixi.js";
+import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
+import { FxController } from "@/render/fx/FxController";
 import {
   computeWorldTransform,
   GROUND_Y,
   WORLD_HEIGHT,
   WORLD_WIDTH,
+  type WorldTransform,
 } from "@/render/layout";
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
@@ -44,7 +50,9 @@ interface Layers {
   /** Heroes, enemies, boss. */
   entities: Container;
   projectiles: Container;
-  /** Reserved for M4 (particles/screenshake/hit-flash filters) — empty for now. */
+  /** M4 juice: damage numbers, particle bursts, rings, arena flash — owned by
+   * `FxController`. Hit-flash itself tints entity views directly (in
+   * `entities`), not this layer. */
   fx: Container;
   /** Screen-anchored, arena-embedded readouts (currently: the boss HP bar). */
   overlay: Container;
@@ -62,6 +70,17 @@ export class GameRenderer {
   private bossLabel: Text | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private startTime = 0;
+  /** Real elapsed ms at the previous draw() call — used to derive a real-time
+   * dt for fx (never the sub-step count, so speed x2/x3 never fast-forwards
+   * the juice itself). */
+  private lastDrawMs = 0;
+  /** The letterbox transform from the last resize; screenshake composes an
+   * offset ON TOP of this each draw(), never mutating it. */
+  private baseTransform: WorldTransform = { scale: 1, x: 0, y: 0 };
+  private fx: FxController | null = null;
+  /** id of the boss `this.bossView` currently represents (for hit-flash lookup
+   * correctness across a defeat -> new-boss-spawn id change). */
+  private currentBossId: number | null = null;
 
   /** Set up the Pixi Application and scene layers. Client-only. */
   async create(canvasParent: HTMLElement): Promise<void> {
@@ -90,6 +109,7 @@ export class GameRenderer {
     });
     this.app = app;
     this.startTime = performance.now();
+    this.lastDrawMs = 0;
     canvasParent.appendChild(app.canvas);
 
     const world = new Container();
@@ -122,6 +142,8 @@ export class GameRenderer {
     });
     overlay.addChild(this.bossHpBar, this.bossLabel);
 
+    this.fx = new FxController(fx, (target, id) => this.getEntityView(target, id));
+
     // Pixi's built-in `resizeTo` only reacts to `window` resize events; a
     // ResizeObserver on the actual mount element is what makes layout-driven
     // (not just viewport) resizes (sidebar toggles, flex reflow, etc.) safe.
@@ -130,8 +152,14 @@ export class GameRenderer {
     this.handleResize(canvasParent);
   }
 
-  /** One-way read of engine state -> Pixi display objects. Call every rAF. */
-  draw(state: GameState): void {
+  /**
+   * One-way read of engine state -> Pixi display objects. Call every rAF.
+   * `frameEvents` is the caller's cross-sub-step collection of this frame's
+   * `state.events` (see `render/README.md` / the M4 task's collection
+   * contract) — optional/defaulted so existing single-arg call sites keep
+   * compiling; omit it and the fx layer simply reacts to nothing that frame.
+   */
+  draw(state: GameState, frameEvents: GameEvent[] = []): void {
     if (
       !this.app ||
       !this.layers ||
@@ -142,6 +170,11 @@ export class GameRenderer {
       return;
     }
     const elapsedMs = performance.now() - this.startTime;
+    // Real wall-clock dt since the last draw(), clamped against a stalled tab
+    // dumping one giant catch-up tick into the fx layer. This is deliberately
+    // independent of the speed multiplier / sub-step count.
+    const dt = Math.min(0.25, Math.max(0, (elapsedMs - this.lastDrawMs) / 1000));
+    this.lastDrawMs = elapsedMs;
 
     this.heroPool.beginFrame();
     for (const h of state.heroes) updateHeroView(this.heroPool.get(h.id), h);
@@ -158,10 +191,12 @@ export class GameRenderer {
         this.layers.entities.addChild(this.bossView);
       }
       updateBossView(this.bossView, state.boss, elapsedMs);
+      this.currentBossId = state.boss.id;
     } else if (this.bossView) {
       this.layers.entities.removeChild(this.bossView);
       this.bossView.destroy({ children: true });
       this.bossView = null;
+      this.currentBossId = null;
     }
     this.drawBossOverlay(state);
 
@@ -170,6 +205,14 @@ export class GameRenderer {
       updateProjectileView(this.projectilePool.get(p.id), p, state);
     }
     this.projectilePool.endFrame();
+
+    // fx: entity views for this frame all exist by now, so hit-flash lookups
+    // (by id) resolve correctly even for entities that just spawned.
+    if (this.fx) {
+      if (frameEvents.length) this.fx.consumeEvents(frameEvents, state);
+      this.fx.update(dt);
+      this.applyWorldTransform();
+    }
   }
 
   /** Full teardown. Idempotent — safe to call multiple times / before create(). */
@@ -184,10 +227,14 @@ export class GameRenderer {
     this.enemyPool = null;
     this.projectilePool = null;
 
+    this.fx?.destroy();
+    this.fx = null;
+
     if (this.bossView) {
       this.bossView.destroy({ children: true });
       this.bossView = null;
     }
+    this.currentBossId = null;
     this.bossHpBar = null;
     this.bossLabel = null;
     this.layers = null;
@@ -212,9 +259,33 @@ export class GameRenderer {
     if (w > 0 && h > 0) {
       this.app.renderer.resize(w, h);
     }
-    const t = computeWorldTransform(this.app.screen.width, this.app.screen.height);
-    this.world.scale.set(t.scale);
-    this.world.position.set(t.x, t.y);
+    this.baseTransform = computeWorldTransform(
+      this.app.screen.width,
+      this.app.screen.height,
+    );
+    this.world.scale.set(this.baseTransform.scale);
+    this.applyWorldTransform();
+  }
+
+  /**
+   * Re-applies `baseTransform + current screenshake offset` to `world`'s
+   * position every time either one changes — an additive compose, NEVER a
+   * destructive overwrite of the letterbox transform the resize math owns.
+   */
+  private applyWorldTransform(): void {
+    if (!this.world) return;
+    const shake = this.fx?.shakeOffset ?? { x: 0, y: 0 };
+    this.world.position.set(
+      this.baseTransform.x + shake.x,
+      this.baseTransform.y + shake.y,
+    );
+  }
+
+  /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */
+  private getEntityView(target: HitTargetKind, id: number): Container | null {
+    if (target === "hero") return this.heroPool?.peek(id) ?? null;
+    if (target === "enemy") return this.enemyPool?.peek(id) ?? null;
+    return id === this.currentBossId ? this.bossView : null;
   }
 
   private drawBossOverlay(state: GameState): void {

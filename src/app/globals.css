@@ -24,3 +24,47 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * M4 "light touch" UI juice — plain CSS transitions/keyframes only (see
+ * sr-uxui-game-designer's framer-motion/gsap decision in the M4 task notes:
+ * neither is installed for these two one-shot pulses, both are cheap enough
+ * as pure CSS). Triggered by `usePulseOnIncrease` toggling a class when a
+ * throttled snapshot value (gold, upgrade level) increases.
+ */
+@keyframes gold-pulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.25);
+    color: #ffd873;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes buy-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(52, 211, 153, 0);
+  }
+  40% {
+    transform: scale(1.06);
+    box-shadow: 0 0 14px rgba(52, 211, 153, 0.55);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
+.animate-gold-pulse {
+  display: inline-block;
+  animation: gold-pulse 0.26s ease-out;
+}
+
+.animate-buy-pulse {
+  animation: buy-pulse 0.3s ease-out;
+}

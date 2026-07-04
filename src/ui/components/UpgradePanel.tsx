@@ -7,6 +7,7 @@
  */
 
 import { SPEED_UPGRADE_CAP, type Upgrades } from "@/engine";
+import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { UPGRADE_LABELS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -17,6 +18,7 @@ function UpgradeButton({ stat }: { stat: keyof Upgrades }) {
   const cost = useGameStore((s) => s.upgradeCosts[stat]);
   const gold = useGameStore((s) => s.gold);
   const buyUpgrade = useGameStore((s) => s.buyUpgrade);
+  const boughtPulse = usePulseOnIncrease(level, 300);
 
   const capped = stat === "speed" && level >= SPEED_UPGRADE_CAP;
   const affordable = gold >= cost && !capped;
@@ -27,7 +29,7 @@ function UpgradeButton({ stat }: { stat: keyof Upgrades }) {
       type="button"
       disabled={!affordable}
       onClick={() => buyUpgrade(stat)}
-      className="flex min-w-24 flex-1 flex-col items-center gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-zinc-100 transition enabled:hover:border-emerald-400 enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+      className={`flex min-w-24 flex-1 flex-col items-center gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-zinc-100 transition enabled:hover:border-emerald-400 enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 ${boughtPulse ? "animate-buy-pulse" : ""}`}
     >
       <span className="text-xs font-semibold">
         {label.icon} {label.name}

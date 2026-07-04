@@ -15,18 +15,22 @@ Runs outside React. The Pixi `Application` is created once (client-only, `useEff
 import { GameRenderer } from "@/render/GameRenderer";
 
 const renderer = new GameRenderer();
-await renderer.create(canvasParent);  // once, client-only (e.g. inside a useEffect)
-renderer.draw(state);                 // every rAF; state is the engine's GameState
-renderer.destroy();                   // on unmount
+await renderer.create(canvasParent);       // once, client-only (e.g. inside a useEffect)
+renderer.draw(state, frameEvents);         // every rAF; state is the engine's GameState,
+                                            // frameEvents is this frame's sub-steps'
+                                            // state.events concatenated by the caller
+                                            // (see GameClient.tsx) — optional/defaulted
+                                            // to [] for backward compatibility.
+renderer.destroy();                        // on unmount
 ```
 
 - `create(canvasParent: HTMLElement): Promise<void>` — async Pixi v8 `Application.init()`, appends `app.canvas` to `canvasParent`, builds the layer stack, and starts a `ResizeObserver` on `canvasParent` (Pixi's own `resizeTo` only reacts to `window` resizes, not layout-driven container resizes, so this class drives `renderer.resize()` itself). Idempotent — calling `create()` again tears down any previous instance first, and `destroy()` is safe to call before `create()` ever resolved. This covers React StrictMode's dev-mode mount/unmount/mount.
-- `draw(state: GameState): void` — one-way read of engine state into Pixi display objects. Must be called by the integration layer's rAF loop (this class does not run its own ticker against engine state). Never mutates `state`.
-- `destroy(): void` — full teardown: disconnects the resize observer, clears all entity pools, destroys the boss view/overlay, and destroys the Pixi `Application` (`removeView: true` + children/texture cleanup).
+- `draw(state: GameState, frameEvents: GameEvent[] = []): void` — one-way read of engine state into Pixi display objects, then hands `frameEvents` to the `fx` layer's `FxController` (hit flashes, damage numbers, kill pops, screenshake, skill/boss VFX — see below) and advances every fx timer by a real-wall-clock `dt` computed from `performance.now()` deltas (NOT the sub-step count, so a 2x/3x speed multiplier never fast-forwards the juice itself). Must be called by the integration layer's rAF loop (this class does not run its own ticker against engine state). Never mutates `state` or the events it's handed.
+- `destroy(): void` — full teardown: disconnects the resize observer, clears all entity pools, destroys the fx controller, the boss view/overlay, and the Pixi `Application` (`removeView: true` + children/texture cleanup).
 
 ### Scene layers (children of a `world` container, in this z-order)
 
-`background` (static sky/ground/grid, drawn once) -> `entities` (heroes, enemies, boss) -> `projectiles` -> `fx` (empty in M2 — **the M4 juice hook**: hit-flash, screenshake, particle bursts, kill pops all mount here) -> `overlay` (screen-anchored arena readouts; currently just the boss HP bar + enrage label, POC-faithful — does not duplicate the React HUD).
+`background` (static sky/ground/grid, drawn once) -> `entities` (heroes, enemies, boss) -> `projectiles` -> `fx` (M4 juice: damage numbers, particle bursts, expanding rings, full-arena flash — see `fx/` below; hit-flash itself tints entity views directly in `entities`, not this layer) -> `overlay` (screen-anchored arena readouts; currently just the boss HP bar + enrage label, POC-faithful — does not duplicate the React HUD).
 
 `world` is scaled+letterboxed from a fixed logical coordinate space (`src/render/layout.ts`: `WORLD_WIDTH=900`, `WORLD_HEIGHT=300`, `GROUND_Y = CONFIG.layout.groundY`) to whatever pixel size the canvas actually is, so every view module draws in engine coordinates directly (no manual scaling math per shape) and resizing the container never rebuilds the scene.
 
@@ -45,6 +49,16 @@ Each is a pooled-by-id `Container` (see `Pool.ts`: mark-and-sweep per `draw()` c
 - Every radius/size passed to a Pixi `Graphics` call is wrapped in `safeRadius()` (`theme.ts`, `Math.max(0, r)`) — see call sites in `hpBar.ts`, `enemyView.ts`, `bossView.ts`, `projectileView.ts`, `GameRenderer.ts`'s background/overlay bars.
 - No hand-built canvas gradients anywhere; glow/soft edges (projectile halo, boss telegraph ring) are done with layered `alpha` on plain `Graphics` fills/strokes. Pixi filters (`pixi.js` built-ins, e.g. `ColorMatrixFilter`/`BlurFilter`) are the option to reach for once real bloom/glow is wanted — not manual `createRadialGradient`.
 
-## What's deliberately NOT here yet (M4)
+## `fx/` — M4 juice (event-driven, real-time, pooled)
 
-`fx` layer is present but empty. Hit-flash tinting, screenshake, kill-pop bursts, particle systems, and skill/boss cast VFX are M4 juice — they hook into `fx` (and/or per-view tint) once Framer Motion / Pixi particles / GSAP land, per `CLAUDE.md`'s milestone plan. `draw()` intentionally does not diff HP between frames to detect "just got hit" — that kind of transient, render-only animation state is exactly what M4 adds, kept out of `GameState`.
+`src/render/fx/FxController.ts` owns the `fx` layer's children and is the one-way consumer of a frame's collected `GameEvent[]` (see `engine/state/events.ts` and the collection contract in `GameClient.tsx`). Rule of thumb used throughout: **continuous/persistent** visuals (boss enrage aura, telegraph ring closing in) read `GameState` directly every frame in the relevant view module, same as HP bars; **edge-triggered, transient** juice (numbers, flashes, pops, shake) is driven from `consumeEvents()` here. All fx state is render-only and never touches `GameState`.
+
+- `particles.ts` (`ParticlePool`) — one shared, fixed-size ring-buffer pool of `Graphics` dots backing every burst effect (kill pops, skill/meteor impacts, boss-defeated burst + gold shower, wave-spawn poof, hero-revive sparkle, boss-retreat puff). `burst()`/`shower()` are thin spawn helpers over it. Radii always `safeRadius()`-clamped.
+- `floatingText.ts` (`FloatingTextPool`) — pooled, ring-buffer `Text` labels that rise + fade over a real-time duration. Two instances: damage numbers (cap 40, per spec) and a separate small "event text" pool (cap 16; kill/boss gold so it can't evict an in-flight damage number).
+- `hitFlash.ts` (`HitFlashController`) — brief "flash to white" on the hit target's own view container via a `ColorMatrixFilter` (map-to-white matrix + the filter's own `alpha` driven 1 -> 0 as the mix uniform); filters are attached only while flashing and returned to a free-list after, so idle entities pay zero extra render cost. No hand-built gradients.
+- `rings.ts` (`RingPool`) — pooled expanding/fading stroked-circle rings (swordsman spin cast, boss-telegraph intensify pulse, boss-slam-land shockwave). This is exactly the effect class the POC's negative-radius crash came from; every radius here runs through `safeRadius()`.
+- `screenShake.ts` (`ScreenShake`) — exponential-decay amplitude + rotating direction; `GameRenderer` composes its `offset` ON TOP of the letterbox `baseTransform` every `draw()` (`applyWorldTransform()`), never overwriting the resize math. Mild on `heroDown`, strong on `bossSlamLand`; a retrigger takes the max amplitude, not a sum.
+- `arenaFlash.ts` (`ArenaFlash`) — single reusable full-bleed rect for boss-enraged / boss-defeated / stage-advanced beats; peak-alpha kept subtle (~0.2-0.3) by design — no strobing.
+- `FxController.ts` — wires the above to specific `GameEvent` types and exposes `consumeEvents(events, state)`, `update(dt)` (real seconds, never sub-step count — so 2x/3x speed never fast-forwards the juice), and `shakeOffset`.
+
+`draw()` intentionally does not diff HP between frames to detect "just got hit" — the `hit` event carries that instead, which is the whole reason the event buffer exists.

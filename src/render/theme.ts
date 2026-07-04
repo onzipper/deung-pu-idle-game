@@ -25,6 +25,20 @@ export const PALETTE = {
   bossLight: 0xb3a9ff,
   deadHero: 0x3a4270,
   shadow: 0x000000,
+
+  // ---- M4 fx-only accents (damage numbers / flashes / bursts) ----
+  /** Neutral flash target color for the hit-flash filter (lerp-to-white). */
+  flashWhite: 0xffffff,
+  /** Normal-attack damage number color (enemy/boss taking a basic hit). */
+  dmgNormal: 0xf4f1ea,
+  /** Damage-taken-by-hero number color. */
+  dmgHeroTaken: 0xff6b6b,
+  /** Skill-sourced damage number / impact accent color. */
+  dmgSkill: 0xffe066,
+  /** Kill-pop burst + gold-gained text color. */
+  killGold: 0xf2b134,
+  /** Boss enrage aura / telegraph-intensify accent. */
+  enrageAura: 0xff3b3b,
 } as const;
 
 /** Hero class -> {body, accent (weapon glint / flash)} color. */

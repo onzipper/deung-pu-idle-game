@@ -17,13 +17,17 @@ const CORE_R = 34;
 export interface BossView extends Container {
   body: Graphics;
   telegraphRing: Graphics;
+  /** Persistent enrage aura (M4 juice) — driven straight off `boss.enraged`,
+   * not an event, since it's continuous state rather than a one-shot beat. */
+  enrageAura: Graphics;
 }
 
 export function createBossView(): BossView {
   const view = new Container() as BossView;
+  view.enrageAura = new Graphics();
   view.body = new Graphics();
   view.telegraphRing = new Graphics();
-  view.addChild(view.telegraphRing, view.body);
+  view.addChild(view.enrageAura, view.telegraphRing, view.body);
   return view;
 }
 
@@ -34,6 +38,16 @@ export function updateBossView(view: BossView, boss: Boss, elapsedMs: number): v
   // Subtle idle pulse while winding up, matching the POC's sin-driven radius.
   const pulse = boss.telegraph > 0 ? 3 * Math.sin(elapsedMs / 40) : 0;
   const r = safeRadius(CORE_R + pulse);
+
+  view.enrageAura.clear();
+  if (boss.enraged) {
+    // Slow breathing pulse, subtle by design (no strobing) — a persistent
+    // reminder the boss is enraged beyond the one-shot bossEnraged flash.
+    const auraPulse = 0.18 + 0.1 * Math.sin(elapsedMs / 220);
+    view.enrageAura
+      .circle(0, CY, safeRadius(r + 10))
+      .stroke({ width: 5, color: PALETTE.enrageAura, alpha: auraPulse });
+  }
 
   const g = view.body;
   g.clear();

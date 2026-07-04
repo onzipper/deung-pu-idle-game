@@ -13,8 +13,13 @@
  *      once and hands it to the FIRST fixed sub-step of the frame,
  *   3. asks the fixed-timestep accumulator how many `FIXED_DT` sub-steps to
  *      run (the speed multiplier = more sub-steps, never a bigger dt) and
- *      runs `step()` that many times,
- *   4. draws the resulting state with the (one-way, read-only) `GameRenderer`,
+ *      runs `step()` that many times, concatenating each sub-step's
+ *      `state.events` into one `frameEvents` array (M4 juice feed — the buffer
+ *      is cleared at the START of every step(), so a multi-sub-step frame
+ *      must collect across all of them or a speed multiplier silently drops
+ *      events),
+ *   4. draws the resulting state + `frameEvents` with the (one-way,
+ *      read-only) `GameRenderer`, which reacts to them on its `fx` layer,
  *   5. at the throttled `CONFIG.uiSyncHz` cadence, pushes a HUD-only snapshot
  *      back into the store via `syncFromEngine`.
  *
@@ -37,6 +42,7 @@ import {
   toSaveData,
   upgradeCost,
   type FrameInput,
+  type GameEvent,
   type GameState,
   type SaveData,
 } from "@/engine";
@@ -229,12 +235,19 @@ export function GameClient() {
         advanceStage: pending.advanceStage || undefined,
       };
 
+      // `state.events` is cleared at the START of each step() and holds only
+      // that sub-step's events; a speed multiplier runs more than one sub-step
+      // per rAF frame, so we must collect across ALL of them before draw() —
+      // otherwise 2x/3x speed would silently drop every event but the last
+      // sub-step's (see engine/state/events.ts's collection contract).
       const steps = drainAccumulator(acc, elapsed, store.speed);
+      const frameEvents: GameEvent[] = [];
       for (let i = 0; i < steps; i++) {
         step(state, i === 0 ? firstInput : {});
+        frameEvents.push(...state.events);
       }
 
-      renderer.draw(state);
+      renderer.draw(state, frameEvents);
 
       uiSyncAccum += elapsed;
       if (uiSyncAccum >= UI_SYNC_INTERVAL) {

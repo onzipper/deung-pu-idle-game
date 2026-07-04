@@ -5,6 +5,7 @@
  * toward boss-readiness. Reads only the throttled snapshot fields it needs.
  */
 
+import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { useGameStore } from "@/ui/store/gameStore";
 
 export function HudBar() {
@@ -15,6 +16,7 @@ export function HudBar() {
   const killGoal = useGameStore((s) => s.killGoal);
 
   const pct = killGoal > 0 ? Math.min(100, (kills / killGoal) * 100) : 0;
+  const goldPulse = usePulseOnIncrease(gold);
 
   return (
     <div className="flex w-full flex-col gap-1 rounded-xl bg-zinc-900/80 px-4 py-2 text-zinc-100">
@@ -27,7 +29,9 @@ export function HudBar() {
         </span>
         <div className="flex-1" />
         <span className="text-xs text-zinc-400">ทอง</span>
-        <span className="font-mono text-sm font-bold text-amber-400">
+        <span
+          className={`font-mono text-sm font-bold text-amber-400 ${goldPulse ? "animate-gold-pulse" : ""}`}
+        >
           {gold.toLocaleString()}
         </span>
       </div>

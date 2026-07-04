@@ -24,6 +24,16 @@ export class Pool<V extends Container> {
     this.seen.clear();
   }
 
+  /**
+   * Look up an already-live view for `id` WITHOUT creating one and WITHOUT
+   * marking it seen (read-only peek). Used by fx modules (e.g. hit-flash) that
+   * need to find "the view for this entity id" after the normal per-frame
+   * `get()` pass has already run, without disturbing mark-and-sweep bookkeeping.
+   */
+  peek(id: number): V | undefined {
+    return this.live.get(id);
+  }
+
   /** Get (or lazily create) the view for `id`. Marks it as present this frame. */
   get(id: number): V {
     this.seen.add(id);

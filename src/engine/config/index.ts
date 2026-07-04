@@ -267,7 +267,7 @@ export const SKILL_TYPES: Record<HeroClass, SkillType> = {
   mage: { cd: 12, radius: 90, mult: 3.2, targets: 0, projSpeed: 560 },
 };
 
-export interface UpgradeLine {
+export interface UpgradeLineDef {
   base: number;
   growth: number;
   /** Per-level effect (e.g. +12% atk per level). */
@@ -276,9 +276,9 @@ export interface UpgradeLine {
 
 /** The three upgrade lines. `speed` alone is capped (see `speedCap`). */
 export const UPGRADES: {
-  atk: UpgradeLine;
-  speed: UpgradeLine;
-  hp: UpgradeLine;
+  atk: UpgradeLineDef;
+  speed: UpgradeLineDef;
+  hp: UpgradeLineDef;
 } = {
   // M4 tune: atk growth 1.45 -> 1.38. atk is the boss-gating stat (team power =
   // sum of heroAtk), so its high-level cost is what builds the wall. 1.38 barely
