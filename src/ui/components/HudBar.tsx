@@ -39,8 +39,14 @@ export function HudBar() {
         </span>
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/10 px-2.5 py-1">
-          <span className="text-base leading-none" aria-hidden>
-            🪙
+          {/* CSS-drawn coin: the 🪙 emoji (Unicode 13) has no glyph on Windows 10 */}
+          <span
+            aria-hidden
+            className="relative inline-block h-4 w-4 shrink-0 rounded-full border-2 border-amber-600 bg-amber-400 shadow-[inset_0_-2px_2px_rgba(0,0,0,0.25)]"
+          >
+            <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black leading-none text-amber-700">
+              ฿
+            </span>
           </span>
           <span
             className={`text-xl font-extrabold text-ddp-gold tabular-nums ${goldPulse ? "animate-gold-pulse" : ""}`}
