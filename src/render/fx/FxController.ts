@@ -22,15 +22,24 @@ import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { HERO_COLORS, PALETTE } from "@/render/theme";
 import { ArenaFlash } from "@/render/fx/arenaFlash";
 import { BossEcho } from "@/render/fx/bossEcho";
+import { CameraPunch } from "@/render/fx/cameraPunch";
 import { CorpseEchoPool } from "@/render/fx/corpseEcho";
 import { FloatingTextPool } from "@/render/fx/floatingText";
 import { HitFlashController } from "@/render/fx/hitFlash";
+import { ImpactFilterController } from "@/render/fx/impactFilters";
 import { burst, ParticlePool, shower } from "@/render/fx/particles";
 import { RingPool } from "@/render/fx/rings";
 import { ScreenShake } from "@/render/fx/screenShake";
+import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
+import { getSwordTipPos, isSwordSwinging, type HeroView } from "@/render/views/heroView";
 
 /** Looks up the live Pixi view for an entity id, if one currently exists. */
 export type EntityViewLookup = (target: HitTargetKind, id: number) => Container | null;
+
+/** Looks up the live, concretely-typed `HeroView` for a hero id (needed by
+ * `weaponTrail.ts`'s rig hooks, which `EntityViewLookup`'s generic `Container`
+ * return type can't express). */
+export type HeroViewLookup = (id: number) => HeroView | null;
 
 /** Cap on concurrently visible damage numbers (spec: ~40, drop-oldest). */
 const DAMAGE_NUMBER_CAP = 40;
@@ -51,6 +60,7 @@ function clamp(v: number, lo: number, hi: number): number {
 
 export class FxController {
   private readonly corpseLayer: Container;
+  private readonly trailLayer: Container;
   private readonly ringsLayer: Container;
   private readonly particlesLayer: Container;
   private readonly textLayer: Container;
@@ -63,35 +73,72 @@ export class FxController {
   private readonly eventText: FloatingTextPool;
   private readonly hitFlash = new HitFlashController();
   private readonly shake = new ScreenShake();
+  private readonly punch = new CameraPunch();
   private readonly flash: ArenaFlash;
+  private readonly impactFilters: ImpactFilterController;
+  private readonly weaponTrail: WeaponTrailController;
+  /** Reused every frame — `getSwordTipPos()` writes into this instead of
+   * allocating a fresh point (zero steady-state allocation). */
+  private readonly tipScratch = { x: 0, y: 0 };
+  /** Reused every frame and passed to `WeaponTrailController.update()`; its
+   * nested `tip` always points at `tipScratch`. */
+  private readonly trailFrame: WeaponTrailFrame = {
+    tip: this.tipScratch,
+    swinging: false,
+    bodyX: 0,
+    color: HERO_COLORS.swordsman.light,
+  };
 
   /** Rolling average hit magnitude, used to scale damage-number font size. */
   private avgHit = 20;
 
   constructor(
     fxContainer: Container,
+    world: Container,
     private readonly lookupView: EntityViewLookup,
+    private readonly lookupHeroView: HeroViewLookup,
   ) {
     // Sub-layers in z-order: corpse echoes (bottom, "the body collapsing")
-    // -> rings -> particles -> text -> full-arena flash (top), so numbers
-    // stay readable over bursts and the flash never hides them.
+    // -> weapon trail -> rings -> particles -> text -> full-arena flash (top),
+    // so numbers stay readable over bursts and the flash never hides them.
     this.corpseLayer = new PixiContainer();
+    this.trailLayer = new PixiContainer();
     this.ringsLayer = new PixiContainer();
     this.particlesLayer = new PixiContainer();
     this.textLayer = new PixiContainer();
-    fxContainer.addChild(this.corpseLayer, this.ringsLayer, this.particlesLayer, this.textLayer);
+    fxContainer.addChild(
+      this.corpseLayer,
+      this.trailLayer,
+      this.ringsLayer,
+      this.particlesLayer,
+      this.textLayer,
+    );
 
     this.corpseEcho = new CorpseEchoPool(this.corpseLayer);
+    this.weaponTrail = new WeaponTrailController(this.trailLayer);
     this.rings = new RingPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
     this.damageNumbers = new FloatingTextPool(this.textLayer, DAMAGE_NUMBER_CAP);
     this.eventText = new FloatingTextPool(this.textLayer, EVENT_TEXT_CAP);
     this.flash = new ArenaFlash(WORLD_WIDTH, WORLD_HEIGHT);
+    this.impactFilters = new ImpactFilterController(world);
     fxContainer.addChild(this.bossEcho.view, this.flash.view);
   }
 
   get shakeOffset(): { x: number; y: number } {
     return this.shake.offset;
+  }
+
+  /** Multiplicative scale factor from the in-flight camera punch (1 = idle) —
+   * `GameRenderer.applyWorldTransform()` composes this onto `baseTransform.scale`. */
+  get punchScale(): number {
+    return this.punch.scale;
+  }
+
+  /** Additive world-space nudge from the in-flight camera punch — composed
+   * onto the letterbox offset + screenshake offset. */
+  get punchOffset(): { x: number; y: number } {
+    return this.punch.offset;
   }
 
   /** React to this frame's (already-collected, cross-sub-step) events. */
@@ -111,6 +158,7 @@ export class FxController {
           break;
         case "heroDown":
           this.shake.trigger(3); // mild
+          this.impactFilters.triggerRgbSplit();
           break;
         case "heroRevived":
           this.onHeroRevived(ev);
@@ -131,6 +179,8 @@ export class FxController {
           break;
         case "bossSlamLand":
           this.shake.trigger(8); // strong
+          this.punch.trigger("bossSlamLand", ev.x);
+          this.impactFilters.triggerShockwave(ev.x, GROUND_Y);
           this.rings.spawn({
             x: ev.x,
             y: GROUND_Y,
@@ -180,9 +230,10 @@ export class FxController {
   }
 
   /** Advance every effect by `dt` REAL seconds (never sub-step count). */
-  update(dt: number): void {
+  update(dt: number, state: GameState): void {
     this.hitFlash.update(dt);
     this.shake.update(dt);
+    this.punch.update(dt);
     this.corpseEcho.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
@@ -190,21 +241,43 @@ export class FxController {
     this.damageNumbers.update(dt);
     this.eventText.update(dt);
     this.flash.update(dt);
+    this.impactFilters.update(dt);
+    this.updateWeaponTrail(dt, state);
   }
 
   destroy(): void {
     this.hitFlash.destroy();
     this.corpseEcho.destroy();
     this.bossEcho.destroy();
+    this.weaponTrail.destroy();
+    this.impactFilters.destroy();
     this.rings.destroy();
     this.particles.destroy();
     this.damageNumbers.destroy();
     this.eventText.destroy();
     this.flash.destroy();
     this.corpseLayer.destroy();
+    this.trailLayer.destroy();
     this.ringsLayer.destroy();
     this.particlesLayer.destroy();
     this.textLayer.destroy();
+  }
+
+  /** Continuous (not event-driven) per-frame read of `state.heroes` +
+   * the swordsman's live `HeroView` rig — see `weaponTrail.ts`'s doc comment
+   * for why this doesn't fit the edge-triggered `consumeEvents()` shape. */
+  private updateWeaponTrail(dt: number, state: GameState): void {
+    const swordsman = state.heroes.find((h) => h.cls === "swordsman" && !h.dead);
+    const view = swordsman ? this.lookupHeroView(swordsman.id) : null;
+    const hasTip = swordsman && view ? getSwordTipPos(view, this.tipScratch) : false;
+
+    if (swordsman && view && hasTip) {
+      this.trailFrame.swinging = isSwordSwinging(view);
+      this.trailFrame.bodyX = swordsman.x;
+      this.weaponTrail.update(dt, this.trailFrame);
+    } else {
+      this.weaponTrail.update(dt, null);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -243,7 +316,9 @@ export class FxController {
     });
 
     if (isSkill) {
-      // One impact burst per AOE moment, not one per target it happens to hit.
+      // One impact burst (+ shockwave ripple) per AOE moment, not one per
+      // target it happens to hit — covers both the mage's meteor and the
+      // swordsman's spin, whichever landed several hits in the same instant.
       const key = `${Math.round(ev.x / 24)}:${Math.round(y / 24)}`;
       if (!skillImpactSeen.has(key)) {
         skillImpactSeen.add(key);
@@ -252,6 +327,7 @@ export class FxController {
           life: 0.35,
           radius: 3,
         });
+        this.impactFilters.triggerShockwave(ev.x, y);
       }
     }
   }
@@ -295,6 +371,7 @@ export class FxController {
     const hero = state.heroes[ev.slot];
     const x = hero ? hero.x : 0;
     const colors = HERO_COLORS[ev.heroClass];
+    this.punch.trigger("skillCast", x);
 
     if (ev.heroClass === "swordsman") {
       this.rings.spawn({
@@ -325,6 +402,9 @@ export class FxController {
 
   private onBossDefeated(ev: Extract<GameEvent, { type: "bossDefeated" }>): void {
     this.flash.trigger(PALETTE.killGold, 0.32);
+    // Symmetric punch (no `worldX` bias) — a boss-defeated beat isn't "toward
+    // a point", it's the whole arena celebrating.
+    this.punch.trigger("bossDefeated");
     burst(this.particles, ev.x, BOSS_CY, 26, PALETTE.killGold, {
       speed: 200,
       life: 0.6,

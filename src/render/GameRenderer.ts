@@ -18,13 +18,15 @@
  * display objects. It never mutates `state` and never calls back into `@/engine`.
  */
 
-import { Application, Container, Graphics, Text } from "pixi.js";
+import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
 import { Environment } from "@/render/environment/Environment";
 import { FxController } from "@/render/fx/FxController";
-import { computeWorldTransform, WORLD_WIDTH, type WorldTransform } from "@/render/layout";
+import { RENDER_FX } from "@/render/fxConfig";
+import { createBloomFilter } from "@/render/fx/impactFilters";
+import { computeWorldTransform, WORLD_HEIGHT, WORLD_WIDTH, type WorldTransform } from "@/render/layout";
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
 import {
@@ -113,6 +115,12 @@ export class GameRenderer {
     canvasParent.appendChild(app.canvas);
 
     const world = new Container();
+    // Pin the filter-coordinate space to `world`'s own local (logical) origin
+    // — see `fx/impactFilters.ts`'s doc comment for exactly why this makes
+    // the shockwave filter's world-coord -> filter-space mapping a plain
+    // multiply-by-scale instead of manual bounds/toGlobal bookkeeping, and
+    // why it stays correct across resizes with zero extra work here.
+    world.filterArea = new Rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     app.stage.addChild(world);
     this.world = world;
 
@@ -123,6 +131,16 @@ export class GameRenderer {
     const overlay = new Container();
     world.addChild(background, entities, projectiles, fx, overlay);
     this.layers = { background, entities, projectiles, fx, overlay };
+
+    // Persistent, subtle bloom on the projectiles + fx layers ONLY (never the
+    // whole stage) — one shared filter instance, see `createBloomFilter()`'s
+    // doc comment for why sharing is safe here. `RENDER_FX.bloom` is the
+    // runtime kill-switch (see `fxConfig.ts`).
+    if (RENDER_FX.bloom) {
+      const bloom = createBloomFilter();
+      projectiles.filters = [bloom];
+      fx.filters = [bloom];
+    }
 
     this.environment = new Environment(background);
 
@@ -142,7 +160,12 @@ export class GameRenderer {
     });
     overlay.addChild(this.bossHpBar, this.bossLabel);
 
-    this.fx = new FxController(fx, (target, id) => this.getEntityView(target, id));
+    this.fx = new FxController(
+      fx,
+      world,
+      (target, id) => this.getEntityView(target, id),
+      (id) => this.heroPool?.peek(id) ?? null,
+    );
 
     // Pixi's built-in `resizeTo` only reacts to `window` resize events; a
     // ResizeObserver on the actual mount element is what makes layout-driven
@@ -220,7 +243,7 @@ export class GameRenderer {
     // (by id) resolve correctly even for entities that just spawned.
     if (this.fx) {
       if (frameEvents.length) this.fx.consumeEvents(frameEvents, state);
-      this.fx.update(dt);
+      this.fx.update(dt, state);
       this.applyWorldTransform();
     }
   }
@@ -277,21 +300,29 @@ export class GameRenderer {
       this.app.screen.width,
       this.app.screen.height,
     );
-    this.world.scale.set(this.baseTransform.scale);
+    // Scale is fully owned by `applyWorldTransform()` (base * camera-punch),
+    // so it's the single source of truth for `world.scale` — called right
+    // below, no separate `scale.set()` needed here.
     this.applyWorldTransform();
   }
 
   /**
-   * Re-applies `baseTransform + current screenshake offset` to `world`'s
-   * position every time either one changes — an additive compose, NEVER a
+   * Re-applies `baseTransform` (letterbox) composed with the CURRENT
+   * screenshake offset + camera-punch scale/offset to `world` every time any
+   * of them changes — an additive/multiplicative compose, NEVER a
    * destructive overwrite of the letterbox transform the resize math owns.
+   * Scale: `baseTransform.scale * punchScale`. Position: `baseTransform.xy +
+   * shakeOffset + punchOffset`.
    */
   private applyWorldTransform(): void {
     if (!this.world) return;
     const shake = this.fx?.shakeOffset ?? { x: 0, y: 0 };
+    const punchScale = this.fx?.punchScale ?? 1;
+    const punchOffset = this.fx?.punchOffset ?? { x: 0, y: 0 };
+    this.world.scale.set(this.baseTransform.scale * punchScale);
     this.world.position.set(
-      this.baseTransform.x + shake.x,
-      this.baseTransform.y + shake.y,
+      this.baseTransform.x + shake.x + punchOffset.x,
+      this.baseTransform.y + shake.y + punchOffset.y,
     );
   }
 

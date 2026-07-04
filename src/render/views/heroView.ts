@@ -556,6 +556,38 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   }
 }
 
+// ---------------------------------------------------------------------------
+// `fx/weaponTrail.ts` hooks — minimal readonly queries instead of the fx
+// layer reaching into the rig's internal Graphics/animation state directly.
+// ---------------------------------------------------------------------------
+
+/** Fixed LOCAL point (within `weaponArm`'s own coordinate frame) at the
+ * blade tip — must track the segment drawn in `buildRig`'s swordsman branch
+ * (`bx=12, by=HEAD_Y-2`; tip at `bx+10, by-16`). */
+const SWORD_TIP_LOCAL = { x: 22, y: HEAD_Y - 18 };
+
+/**
+ * World-space (i.e. `view.parent`-relative — the same logical coordinate
+ * space every other `fx/` module already places things in) position of the
+ * swordsman's weapon tip THIS frame, written into `out`. Returns `false`
+ * (leaving `out` untouched) for any non-swordsman hero, or a view not yet
+ * attached under a parent Container — callers should treat that as "no trail
+ * sample this frame".
+ */
+export function getSwordTipPos(view: HeroView, out: { x: number; y: number }): boolean {
+  if (view.cls !== "swordsman" || !view.parent) return false;
+  view.parent.toLocal(SWORD_TIP_LOCAL, view.weaponArm, out);
+  return true;
+}
+
+/** True while the swordsman's swing (basic melee) or spin (skill) attack
+ * animation is actively playing — the window `fx/weaponTrail.ts` should be
+ * laying down new ribbon points, as opposed to idle sway/locomotion. */
+export function isSwordSwinging(view: HeroView): boolean {
+  const kind = view.anim.attack?.kind;
+  return view.cls === "swordsman" && (kind === "swing" || kind === "spin");
+}
+
 /** Toggle the ghost look via `tint` only (never re-walks a Graphics path) —
  * applied once on the dead/alive transition edge, not per frame. */
 function setGhostTint(view: HeroView, dead: boolean): void {
