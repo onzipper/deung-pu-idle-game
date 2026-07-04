@@ -145,7 +145,8 @@ export function SkillBar() {
           aria-hidden
           className={`h-1.5 w-1.5 rounded-full ${autoCast ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
         />
-        🪄 Auto สกิล: {autoCast ? "เปิด" : "ปิด"}
+        {/* ✨ not 🪄: the magic-wand emoji (Unicode 13) has no glyph on Windows 10 */}
+        ✨ Auto สกิล: {autoCast ? "เปิด" : "ปิด"}
       </button>
     </div>
   );
