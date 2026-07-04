@@ -161,6 +161,31 @@ export const CONFIG = {
     projMinStep: 12, // arrival threshold = max(this, speed * dt)
   },
 
+  // ---- archer basic-attack volley (86d3k2rgf) ----
+  // The archer's BASIC attack fires a mini-volley of `archerVolleyCount` small
+  // arrows at the SAME target instead of a single arrow ("ยิงลูกธนูย่อยๆ" — a
+  // rapid-fire feel). Total damage per attack is UNCHANGED: it is split across
+  // the volley (per-arrow = heroAtk / count; the LAST arrow carries the float
+  // remainder so the volley sums BIT-EXACTLY to the old single-arrow damage — no
+  // rounding drift). The archer SKILL (SKILL_TYPES.archer, 3 SEPARATE targets)
+  // is deliberately left alone and stays the multi-target spread; the basic
+  // volley is 3 arrows at ONE target.
+  //
+  // `archerVolleyOffsets` is a FIXED per-arrow table (length must equal
+  // `archerVolleyCount`). It carries NO RNG on purpose: the seeded RNG stream
+  // order is load-bearing for wave composition, so combat must never draw from
+  // it. The small spawn jitter (dx/dy) plus the ±5% speed variance (speedMult)
+  // stagger the arrows so they leave slightly apart and arrive on different
+  // frames — that is what sells the rapid-fire look and yields up to 3 separate
+  // damage-number ticks instead of one lumped hit. Deterministic because the
+  // table is constant.
+  archerVolleyCount: 3,
+  archerVolleyOffsets: [
+    { dx: 0, dy: -5, speedMult: 1.05 },
+    { dx: -4, dy: 0, speedMult: 1.0 },
+    { dx: 4, dy: 5, speedMult: 0.95 },
+  ] as const,
+
   // ---- skills ----
   skills: {
     meteorSpawnY: -48, // meteor projectile spawns at this absolute y (falls to impact)

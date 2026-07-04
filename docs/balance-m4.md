@@ -212,12 +212,12 @@ the ranged heroes visibly push up too (they keep their kite behaviour).
 | Knob                | Value | Meaning                                                                                              |
 | ------------------- | ----- | ---------------------------------------------------------------------------------------------------- |
 | `battleAnchorLead`  | 130   | Anchor lead while enemies present (was `anchorLead` 170) — formation rides closer to the enemy line. |
-| `battleMaxAnchor`   | 330   | Anchor forward cap in battle (was `maxAnchor` 300) — ranged heroes push ~30px further up.             |
+| `battleMaxAnchor`   | 330   | Anchor forward cap in battle (was `maxAnchor` 300) — ranged heroes push ~30px further up.            |
 | `battleAnchorSpeed` | 115   | Anchor ease speed in battle (was `anchorSpeed` 60) — the team surges forward ~2x faster on contact.  |
-| `chargeSeekRange`   | 560   | Swordsman starts charging at any enemy within this (was the tight `meleeSeekRange` 260).              |
-| `chargeSpeed`       | 265   | Sprint speed while charging (~1.77x `heroMove` 150) — the "run at them" feel.                         |
-| `meleeChargeLeash`  | 260   | Loosened forward leash while a charge target exists (was `meleeLeash` 90).                            |
-| `chargeCap`         | 470   | Hard forward cap while charging (~70px past `midCap` 400; far short of `spawnX` 860).                 |
+| `chargeSeekRange`   | 560   | Swordsman starts charging at any enemy within this (was the tight `meleeSeekRange` 260).             |
+| `chargeSpeed`       | 265   | Sprint speed while charging (~1.77x `heroMove` 150) — the "run at them" feel.                        |
+| `meleeChargeLeash`  | 260   | Loosened forward leash while a charge target exists (was `meleeLeash` 90).                           |
+| `chargeCap`         | 470   | Hard forward cap while charging (~70px past `midCap` 400; far short of `spawnX` 860).                |
 
 The non-battle (no-enemy) easing knobs (`maxAnchor` / `anchorSpeed` / `anchorLead`)
 are untouched — the formation still eases calmly home between waves.
@@ -232,17 +232,17 @@ ranged coverage while still a clear sprint past the old hold (214 start → 470 
 
 ### Pacing: M4 baseline vs hero-charge (aggregate, 5 seeds, 1800 s)
 
-| Stage | M4 dur (s) | charge dur (s) | Δ      | charge wallX | charge gold/min |
-| ----- | ---------- | -------------- | ------ | ------------ | --------------- |
-| 1     | 150.0      | 137.1          | −8.6%  | —            | 190             |
-| 2     | 79.3       | 72.0           | −9.2%  | 0.53x        | 226             |
-| 3     | 85.4       | 80.1           | −6.2%  | 1.11x        | 309             |
-| 4     | 100.2      | 92.5           | −7.7%  | 1.16x        | 380             |
-| 5     | 111.0      | 103.6          | −6.7%  | 1.12x        | 453             |
-| 6     | 130.4      | 120.7          | −7.4%  | 1.16x        | 522             |
-| 7     | 141.1      | 129.9          | −7.9%  | 1.08x        | 612             |
-| 8     | 157.8      | 148.3          | −6.0%  | 1.14x        | 696             |
-| 9     | 775.4      | 743.0          | −4.2%  | 5.01x        | 928             |
+| Stage | M4 dur (s) | charge dur (s) | Δ     | charge wallX | charge gold/min |
+| ----- | ---------- | -------------- | ----- | ------------ | --------------- |
+| 1     | 150.0      | 137.1          | −8.6% | —            | 190             |
+| 2     | 79.3       | 72.0           | −9.2% | 0.53x        | 226             |
+| 3     | 85.4       | 80.1           | −6.2% | 1.11x        | 309             |
+| 4     | 100.2      | 92.5           | −7.7% | 1.16x        | 380             |
+| 5     | 111.0      | 103.6          | −6.7% | 1.12x        | 453             |
+| 6     | 130.4      | 120.7          | −7.4% | 1.16x        | 522             |
+| 7     | 141.1      | 129.9          | −7.9% | 1.08x        | 612             |
+| 8     | 157.8      | 148.3          | −6.0% | 1.14x        | 696             |
+| 9     | 775.4      | 743.0          | −4.2% | 5.01x        | 928             |
 
 **Net effect:** a uniform **4–9% speedup at every stage** — the "faster clears from
 better melee uptime" the task anticipated, and well inside the ±15% band, so no
@@ -268,12 +268,12 @@ whole team _back_. The fix: the whole field triggers the charge, the anchor ride
 
 ### Config knobs (old → new, all in `src/engine/config/index.ts`)
 
-| Knob                | Old | New | Why                                                                                                                                                                             |
-| ------------------- | --- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chargeSeekRange`   | 560 | 900 | Whole-field trigger. 900 ≥ the full span from the deepest a hero stands (~150) to `spawnX` (860), so a freshly-spawned enemy is charged the instant a wave appears — no wave-start idle. |
-| `battleMaxAnchor`   | 330 | 510 | The team pushes DEEP. Archer/mage advance with the swordsman so their range covers the pushed-up fight instead of falling behind it.                                            |
-| `battleAnchorLead`  | 130 | 150 | Anchor tracks `minEnemyX − lead`; sized so the anchor rides right up near the engagement line while the ranged heroes still sit a touch behind it.                              |
-| `chargeCap`         | 470 | 640 | Cap UNLOCKED now that the anchor (510) follows forward. The old 470 existed only to keep fights inside a _stationary_ ranged band; with coverage travelling, deep charging no longer strands the archer/mage. |
+| Knob               | Old | New | Why                                                                                                                                                                                                           |
+| ------------------ | --- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chargeSeekRange`  | 560 | 900 | Whole-field trigger. 900 ≥ the full span from the deepest a hero stands (~150) to `spawnX` (860), so a freshly-spawned enemy is charged the instant a wave appears — no wave-start idle.                      |
+| `battleMaxAnchor`  | 330 | 510 | The team pushes DEEP. Archer/mage advance with the swordsman so their range covers the pushed-up fight instead of falling behind it.                                                                          |
+| `battleAnchorLead` | 130 | 150 | Anchor tracks `minEnemyX − lead`; sized so the anchor rides right up near the engagement line while the ranged heroes still sit a touch behind it.                                                            |
+| `chargeCap`        | 470 | 640 | Cap UNLOCKED now that the anchor (510) follows forward. The old 470 existed only to keep fights inside a _stationary_ ranged band; with coverage travelling, deep charging no longer strands the archer/mage. |
 
 Ranged-coverage re-validation at the new depth: enemies stop ~`clash` (46) past the
 swordsman, so a `chargeCap` fight at ~640 sits at ~686. mage @ (510−74=436) + range
@@ -366,12 +366,12 @@ _can't_ reach.
 
 ### Config knobs (old → new, all in `src/engine/config/index.ts`)
 
-| Knob               | Old         | New   | Why                                                                                                                                                                             |
-| ------------------ | ----------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ranged upper clamp | `midCap 400`| `rangedForwardCap 740` | Spawn-relative safety net that never collides with `homeX` (max ~572). `homeX = anchorX + offset` already carries the −26/−74 formation spread, so spacing survives at ANY anchor depth — fixes (1). |
-| `chargeCap`        | 640 (static)| 640 (floor) | Now the **floor** of a **dynamic** forward cap: `upperCap = min(homeX + meleeChargeLeash, clamp(target.x − meleeApproachGap, chargeCap, chargeHardCap))`. The cap follows the target, so the swordsman never freezes short of it — fixes (2) — and can always close to melee range — fixes (3). |
-| `chargeHardCap`    | — (new)     | 770   | Dynamic-cap ceiling = `spawnX 860 − 90`. `770 + swordsman range 96 = 866 ≥ 860`, so the swordsman can always reach a ranged enemy resting at the spawn edge (must be ≥ 764). This is what structurally kills the free-hit — via the **swordsman's reach**, not a deeper backline. |
-| `battleMaxAnchor`  | 510         | **510 (held)** | Deliberately NOT deepened (see below). |
+| Knob               | Old          | New                    | Why                                                                                                                                                                                                                                                                                             |
+| ------------------ | ------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ranged upper clamp | `midCap 400` | `rangedForwardCap 740` | Spawn-relative safety net that never collides with `homeX` (max ~572). `homeX = anchorX + offset` already carries the −26/−74 formation spread, so spacing survives at ANY anchor depth — fixes (1).                                                                                            |
+| `chargeCap`        | 640 (static) | 640 (floor)            | Now the **floor** of a **dynamic** forward cap: `upperCap = min(homeX + meleeChargeLeash, clamp(target.x − meleeApproachGap, chargeCap, chargeHardCap))`. The cap follows the target, so the swordsman never freezes short of it — fixes (2) — and can always close to melee range — fixes (3). |
+| `chargeHardCap`    | — (new)      | 770                    | Dynamic-cap ceiling = `spawnX 860 − 90`. `770 + swordsman range 96 = 866 ≥ 860`, so the swordsman can always reach a ranged enemy resting at the spawn edge (must be ≥ 764). This is what structurally kills the free-hit — via the **swordsman's reach**, not a deeper backline.               |
+| `battleMaxAnchor`  | 510          | **510 (held)**         | Deliberately NOT deepened (see below).                                                                                                                                                                                                                                                          |
 
 `midCap` is retained — it still bounds the no-charge hold branch (harmless there).
 
@@ -395,17 +395,17 @@ single curve.
 `push` = the previous (86d3k2nhm) table; `now` = this pass (`battleMaxAnchor 510`,
 `chargeHardCap 770`, dynamic cap, `rangedForwardCap 740`).
 
-| Stage | push dur (s) | now dur (s) | Δ       | now wallX | now gold/min |
-| ----- | ------------ | ----------- | ------- | --------- | ------------ |
-| 1     | 106.8        | 88.6        | −17.0%\*| —         | 296          |
-| 2     | 66.2         | 55.8        | −15.7%\*| 0.63x     | 304          |
-| 3     | 72.9         | 75.6        | +3.7%   | 1.36x     | 329          |
-| 4     | 75.3         | 74.0        | −1.7%   | 0.98x     | 474          |
-| 5     | 91.2         | 90.7        | −0.5%   | 1.23x     | 526          |
-| 6     | 106.4        | 107.1       | +0.7%   | 1.18x     | 598          |
-| 7     | 116.1        | 105.2       | −9.4%   | 0.98x     | 754          |
-| 8     | 134.7        | 116.7       | −13.4%  | 1.11x     | 883          |
-| 9     | 670.6        | 608.9       | −9.2%   | 5.22x     | 1132         |
+| Stage | push dur (s) | now dur (s) | Δ        | now wallX | now gold/min |
+| ----- | ------------ | ----------- | -------- | --------- | ------------ |
+| 1     | 106.8        | 88.6        | −17.0%\* | —         | 296          |
+| 2     | 66.2         | 55.8        | −15.7%\* | 0.63x     | 304          |
+| 3     | 72.9         | 75.6        | +3.7%    | 1.36x     | 329          |
+| 4     | 75.3         | 74.0        | −1.7%    | 0.98x     | 474          |
+| 5     | 91.2         | 90.7        | −0.5%    | 1.23x     | 526          |
+| 6     | 106.4        | 107.1       | +0.7%    | 1.18x     | 598          |
+| 7     | 116.1        | 105.2       | −9.4%    | 0.98x     | 754          |
+| 8     | 134.7        | 116.7       | −13.4%   | 1.11x     | 883          |
+| 9     | 670.6        | 608.9       | −9.2%    | 5.22x     | 1132         |
 
 first upgrade 8.1 → 6.8 s · first boss kill 106.8 → 88.6 s · **0 wipes** · reached
 stage 10 on all seeds.
@@ -425,7 +425,7 @@ all hold, and no curve moved — so they are feature, not regression.
 ### Tests (headless, `src/engine/__tests__/charge.test.ts`)
 
 - **no stacking at any depth** — 3 heroes, several enemy depths; asserts `|archer.x −
-  mage.x| ≥ 30` and that the spread ≈ the offset difference (48). (Failed pre-fix: both
+mage.x| ≥ 30` and that the spread ≈ the offset difference (48). (Failed pre-fix: both
   pinned at 400.)
 - **no park** — a moving melee enemy walks in from spawn; counts frames where the
   swordsman has ~zero x-velocity while an enemy is alive and beyond melee range; asserts
@@ -433,6 +433,97 @@ all hold, and no curve moved — so they are feature, not regression.
 - **ranged enemy reachable** — a high-HP ranged enemy at the spawn edge; asserts the
   swordsman closes to within melee range AND deals damage (fights back). (Failed
   pre-fix: pinned at 640, gap 160 > 96 forever.)
+
+Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
+src/engine/__tests__/balance-sim.ts`).
+
+---
+
+## Archer basic-attack volley (ClickUp 86d3k2rgf)
+
+Player request: _"ยิงลูกธนูย่อยๆ เวลายิงธรรมดา"_ — the archer's **basic** attack
+should feel like a rapid-fire mini-volley, not one fat arrow. The archer now
+fires `archerVolleyCount` (3) small arrows at the **same** target per basic
+attack. The archer **skill** (3 SEPARATE targets) is untouched and stays the
+multi-target spread — the two are deliberately distinct.
+
+### Damage is conserved exactly (no buff, no nerf)
+
+Total damage per basic attack is **unchanged** — it is split across the volley:
+
+- per-arrow `= heroAtk / archerVolleyCount` (a **float**, never rounded per
+  arrow — rounding each arrow to an int would drift the total),
+- the **last** arrow carries `heroAtk − per·(count−1)`, so the volley sums
+  **bit-exactly** to the old single-arrow damage. For a ~⅓ split the remainder
+  is exact by the Sterbenz lemma (`2·per` sits in `[total/2, 2·total]`, so
+  `total − 2·per` is representable), i.e. no rounding drift at all.
+
+`heroAtk` stays float-safe through `applyDamage` (it only does `hp -= amount`),
+so nothing downstream re-rounds the per-arrow damage.
+
+### New config knobs (all in `src/engine/config/index.ts`)
+
+| Knob                  | Value                                                         | Meaning                                                                                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `archerVolleyCount`   | `3`                                                           | Arrows per basic attack (all at the same target).                                                                                                                                                                       |
+| `archerVolleyOffsets` | `[{dx:0,dy:−5,×1.05}, {dx:−4,dy:0,×1.00}, {dx:4,dy:5,×0.95}]` | **FIXED** per-arrow spawn jitter (dx/dy) + ±5% travel-speed variance (`speedMult`). Staggers the arrows so they leave/land on slightly different frames → the rapid-fire look and up to 3 separate damage-number ticks. |
+
+**No RNG was added.** The offsets are a constant table read directly in
+`combat.ts` — combat never draws from the seeded RNG (that stream's cursor is
+load-bearing for wave composition). Determinism is preserved: the existing
+full-replay suites (`determinism.test.ts`, `events.test.ts`) stay byte-identical,
+and a dedicated volley-replay test confirms it too.
+
+### Events
+
+Each basic attack now emits `archerVolleyCount` `projectileSpawn(arrow)` events
+and up to `archerVolleyCount` `hit` events (one per arrow that lands) — more,
+smaller damage ticks, which is the desired feel. If the target dies mid-flight
+the remaining arrows expire (existing homing behaviour), so an attack can land
+fewer than 3 hits. `events.test.ts` (which only asserts "some arrow spawned")
+stays green.
+
+### Pacing: no measurable drift, no compensation needed
+
+`prev` = the ranged-reach follow-up table above (the latest committed baseline);
+`volley` = this pass. Same 5 seeds, 1800 s.
+
+| Stage | prev dur (s) | volley dur (s) | Δ     |
+| ----- | ------------ | -------------- | ----- |
+| 1     | 88.6         | 88.6           | 0.0%  |
+| 2     | 55.8         | 55.7           | −0.2% |
+| 3     | 75.6         | 75.8           | +0.3% |
+| 4     | 74.0         | 73.9           | −0.1% |
+| 5     | 90.7         | 90.7           | 0.0%  |
+| 6     | 107.1        | 106.8          | −0.3% |
+| 7     | 105.2        | 105.2          | 0.0%  |
+| 8     | 116.7        | 117.4          | +0.6% |
+| 9     | 608.9        | 609.5          | +0.1% |
+
+first upgrade 6.8 s · first boss kill 88.6 s · **0 wipes** · reached stage 10 on
+all seeds · stage-9 gate preserved (5.22x → **5.19x**).
+
+**Why the drift is ~zero.** Total damage per attack is identical, so the only
+possible movement is overkill/expiry wastage: (a) the killing arrow now overkills
+by at most ~⅓ of the old hit, which slightly _reduces_ waste, and (b) an arrow
+can expire if the target dies before it lands, which slightly _increases_ waste.
+Over short arrow flight times these cancel to well under the ±0.6% seen —
+comfortably inside the ±3–5% budget — so **no config compensation (e.g. a
+`dmgMult` nudge) was required**. `HERO_TYPES.archer.dmgMult` stays `0.55`.
+
+### Tests (`src/engine/__tests__/archer-volley.test.ts`)
+
+- **volley count** — one basic attack spawns exactly `archerVolleyCount` arrows,
+  all with the same `targetId`.
+- **event count** — one `projectileSpawn(arrow)` per volley arrow.
+- **bit-exact split** — across atk levels 0/1/5/7/13/20 (7 → total 10, a
+  non-multiple of 3, is the drift-exposing case), the per-arrow damages sum
+  `=== heroAtk` exactly.
+- **delivered damage** — against a high-HP target the whole volley hits and
+  delivers the old single-arrow total (to double precision), every arrow
+  resolved.
+- **no RNG / determinism** — two independent runs of the same volley scenario
+  are byte-identical.
 
 Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
 src/engine/__tests__/balance-sim.ts`).

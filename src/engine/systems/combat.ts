@@ -122,8 +122,7 @@ export function updateHeroes(state: GameState): void {
         const d = chargeTgt.x - h.x;
         goalX =
           Math.abs(d) > CONFIG.meleeStopGap
-            ? chargeTgt.x +
-              (d > 0 ? -CONFIG.meleeApproachGap : CONFIG.meleeApproachGap)
+            ? chargeTgt.x + (d > 0 ? -CONFIG.meleeApproachGap : CONFIG.meleeApproachGap)
             : h.x;
         moveSpeed = CONFIG.chargeSpeed;
         // Dynamic forward cap (86d3k2nhm follow-up): the cap FOLLOWS the charge target
@@ -175,22 +174,34 @@ export function updateHeroes(state: GameState): void {
         if (t.attack === "melee") {
           applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {
-          const px = h.x + L.heroProjSpawnXOffset;
-          const py = L.groundY - L.heroProjSpawnYOffset;
-          state.projectiles.push({
-            id: state.nextId++,
-            team: "hero",
-            kind: "arrow",
-            x: px,
-            y: py,
-            damage: dmg,
-            speed: t.projSpeed,
-            targetId: tgt.id,
-            tx: 0,
-            ty: 0,
-            aoe: 0,
-          });
-          state.events.push({ type: "projectileSpawn", kind: "arrow", x: px, y: py });
+          // Basic-attack VOLLEY (86d3k2rgf): fire `archerVolleyCount` small arrows
+          // at the SAME target. Damage is split as a float — per-arrow = dmg /
+          // count, and the LAST arrow carries `dmg - per*(count-1)` so the volley
+          // sums BIT-EXACTLY to the old single-arrow `dmg` (Sterbenz makes that
+          // remainder exact for a ~1/3 split). Offsets come from a FIXED table —
+          // NO RNG draw here (the seeded stream is reserved for wave composition).
+          const count = CONFIG.archerVolleyCount;
+          const per = dmg / count;
+          for (let i = 0; i < count; i++) {
+            const off = CONFIG.archerVolleyOffsets[i];
+            const arrowDmg = i === count - 1 ? dmg - per * (count - 1) : per;
+            const px = h.x + L.heroProjSpawnXOffset + off.dx;
+            const py = L.groundY - L.heroProjSpawnYOffset + off.dy;
+            state.projectiles.push({
+              id: state.nextId++,
+              team: "hero",
+              kind: "arrow",
+              x: px,
+              y: py,
+              damage: arrowDmg,
+              speed: t.projSpeed * off.speedMult,
+              targetId: tgt.id,
+              tx: 0,
+              ty: 0,
+              aoe: 0,
+            });
+            state.events.push({ type: "projectileSpawn", kind: "arrow", x: px, y: py });
+          }
         } else {
           const px = h.x + L.heroProjSpawnXOffset;
           const py = L.groundY - L.heroProjSpawnYOffset;
@@ -244,10 +255,7 @@ function projHitSource(kind: Projectile["kind"]): HitSource {
 // Projectiles
 // ---------------------------------------------------------------------------
 
-function findById(
-  state: GameState,
-  id: number | null,
-): Hero | Enemy | Boss | null {
+function findById(state: GameState, id: number | null): Hero | Enemy | Boss | null {
   if (id == null) return null;
   for (const h of state.heroes) if (h.id === id) return h;
   for (const e of state.enemies) if (e.id === id) return e;
