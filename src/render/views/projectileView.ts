@@ -10,7 +10,7 @@ import { Container, Graphics } from "pixi.js";
 import type { CombatTarget, Hero, Projectile, ProjectileKind } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 import { GROUND_Y } from "@/render/layout";
-import { PROJECTILE_COLORS, safeRadius } from "@/render/theme";
+import { PALETTE, PROJECTILE_COLORS, safeRadius } from "@/render/theme";
 
 export interface ProjectileView extends Container {
   body: Graphics;
@@ -33,6 +33,88 @@ function findTarget(state: GameState, id: number | null): (Hero | CombatTarget) 
   return null;
 }
 
+// ---- arrow-family silhouette (86d3k2t18 "ลูกธนูไม่เหมือนลูกธนูเลย" redesign) ----
+// One Graphics, drawn once per kind change (existing build-once-per-kind
+// pattern above) — a tapered two-tone shaft (poly, not a bare stroke, so it
+// reads as a shaft rather than a dash) + a wider triangular head + 2 angled
+// fletching fins at the tail. `bolt` (enemy crossbow bolt) reuses the same
+// rig but shorter/no fletching/a dark "menacing" tip instead of steel, so it
+// stays instantly distinguishable from a hero arrow at a glance.
+const ARROW_TAIL_X = -15;
+const ARROW_HEAD_JOIN_X = 6;
+const ARROW_TIP_X = 15;
+const ARROW_HEAD_HALF_W = 4;
+const ARROW_SHAFT_HALF_W_TAIL = 1.3;
+const ARROW_SHAFT_HALF_W_HEAD = 0.7;
+const ARROW_FIN_SPREAD = 6;
+const ARROW_FIN_TIP_OFFSET = 6;
+
+/** `rainArrow` reuses the exact hero-arrow silhouette, just a touch smaller
+ * (spec: "same silhouette slightly smaller"); `bolt` is deliberately shorter
+ * (a stubbier, more efficient-looking enemy projectile). */
+function arrowScaleFor(kind: ProjectileKind): number {
+  if (kind === "bolt") return 0.72;
+  if (kind === "rainArrow") return 0.85;
+  return 1;
+}
+
+function drawArrowFamily(g: Graphics, kind: ProjectileKind, color: number): void {
+  const s = arrowScaleFor(kind);
+  const tailX = ARROW_TAIL_X * s;
+  const headJoinX = ARROW_HEAD_JOIN_X * s;
+  const tipX = (kind === "bolt" ? ARROW_TIP_X - 2 : ARROW_TIP_X) * s;
+  const headHalfW = (kind === "bolt" ? ARROW_HEAD_HALF_W - 1 : ARROW_HEAD_HALF_W) * s;
+  const shaftHalfTail = ARROW_SHAFT_HALF_W_TAIL * s;
+  const shaftHalfHead = ARROW_SHAFT_HALF_W_HEAD * s;
+
+  // Shaft: a tapered quad (not a bare stroke) so it reads as wood/a shaft,
+  // not a dash — one tone (ivory/wood for hero arrows, the kind's own color
+  // for a bolt).
+  g.poly(
+    [
+      tailX,
+      -shaftHalfTail,
+      headJoinX,
+      -shaftHalfHead,
+      headJoinX,
+      shaftHalfHead,
+      tailX,
+      shaftHalfTail,
+    ],
+    true,
+  ).fill({ color, alpha: kind === "bolt" ? 1 : 0.95 });
+
+  // Head: a wider triangular head, second tone — neutral steel for hero
+  // arrows (same "armament is one material" language as `heroView.ts`'s
+  // weapon glyphs), a dark near-navy outline tone for the bolt's menacing tip.
+  const headColor = kind === "bolt" ? PALETTE.outline : PALETTE.steel;
+  g.poly([tipX, 0, headJoinX, -headHalfW, headJoinX, headHalfW], true).fill(headColor);
+
+  if (kind === "bolt") {
+    // Enemy bolt: no fletching — a small dark tail knob instead (stubbier,
+    // more "fired from a mechanism" than a fletched hero arrow).
+    g.circle(tailX + 1.5 * s, 0, safeRadius(1.6 * s)).fill({
+      color: PALETTE.outline,
+      alpha: 0.9,
+    });
+    return;
+  }
+
+  // Hero arrow / rain arrow: 2 small angled fletching fins at the tail,
+  // same shaft tone at reduced alpha (subtle two-tone, no third color).
+  const finBaseX = tailX + 2 * s;
+  const finTipX = tailX - ARROW_FIN_TIP_OFFSET * s;
+  const finSpread = ARROW_FIN_SPREAD * s;
+  g.poly(
+    [finBaseX, -shaftHalfTail, finTipX, -finSpread, finBaseX + 3 * s, -1.5 * s],
+    true,
+  ).fill({ color, alpha: 0.75 });
+  g.poly(
+    [finBaseX, shaftHalfTail, finTipX, finSpread, finBaseX + 3 * s, 1.5 * s],
+    true,
+  ).fill({ color, alpha: 0.75 });
+}
+
 function drawBody(g: Graphics, kind: ProjectileKind): void {
   const color = PROJECTILE_COLORS[kind];
   g.clear();
@@ -49,11 +131,9 @@ function drawBody(g: Graphics, kind: ProjectileKind): void {
     g.circle(0, 0, r).fill({ color, alpha: 0.95 });
     g.circle(0, 0, safeRadius(r + 6)).fill({ color, alpha: 0.3 });
   } else {
-    // arrow / bolt: shaft + triangular head, drawn facing +x (rotated per-frame)
-    g.moveTo(-8, 0)
-      .lineTo(6, 0)
-      .stroke({ width: kind === "bolt" ? 2.5 : 2.5, color, cap: "round" });
-    g.poly([10, 0, 4, -3, 4, 3], true).fill(color);
+    // arrow / bolt / rainArrow: tapered shaft + triangular head + fletching,
+    // drawn facing +x (rotated per-frame in `updateProjectileView()`).
+    drawArrowFamily(g, kind, color);
   }
 }
 

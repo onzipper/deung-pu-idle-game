@@ -20,7 +20,7 @@ import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
-import { ENEMY_COLORS, HERO_COLORS, PALETTE } from "@/render/theme";
+import { ENEMY_COLORS, HERO_COLORS, PALETTE, PROJECTILE_COLORS } from "@/render/theme";
 import { ArenaFlash } from "@/render/fx/arenaFlash";
 import { ArmorShardPool } from "@/render/fx/armorShard";
 import { BossEcho } from "@/render/fx/bossEcho";
@@ -37,6 +37,7 @@ import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
 import { burst, burstDirectional, burstInward, ParticlePool, shower } from "@/render/fx/particles";
 import { PortalPool } from "@/render/fx/portal";
+import { GroundArrowPool, RainShadowPool } from "@/render/fx/rainScene";
 import { RingPool } from "@/render/fx/rings";
 import { RuneGlyphPool } from "@/render/fx/runeGlyph";
 import { ScreenShake } from "@/render/fx/screenShake";
@@ -97,11 +98,27 @@ const KNOCKBACK_MAG = 2.6; // px — spec: "2-3px"
  * ~0.5s-cd basic attack drives these). */
 const MAX_KNOCKBACK = 6;
 
-// ---- archer: skill "brighter tracer" window (item 9) -----------------------
-/** Real seconds after an archer `skillCast` during which any NEW arrow
- * tracer track gets the boosted (brighter/thicker) style — long enough to
- * cover all 3 staggered releases (see heroView's `TRIPLE_DURATION`). */
-const ARCHER_SKILL_TRACER_BOOST_WINDOW = 0.45;
+// ---- archer: ARROW RAIN skill scene (86d3k2t18) ----------------------------
+// Replaces the old "triple shot" cast fx (3 fan flash-lines toward the
+// nearest targets + a brighter-tracer window on new `arrow` tracks) now that
+// the skill is a field-wide AoE rain of 9 `rainArrow` drops instead — see
+// `onArcherRainCast()`/`updateRainArrowTracking()` below.
+/** A few upward light streaks off the bow at cast time ("volley launch" cue,
+ * before the rain telegraphs its landing zone below) — kept to a handful,
+ * short-lived, reusing the generic `FlashLinePool`. */
+const RAIN_LAUNCH_STREAK_COUNT = 4;
+const RAIN_LAUNCH_STREAK_HEIGHT = 30;
+const RAIN_LAUNCH_STREAK_SPREAD = 10;
+/** Clutter guard: at most this many drops are tracked for the falling-shadow
+ * + landing sequence at once — 9 drops per cast + a little slack for 3x-speed
+ * volley overlap; extra drops beyond the cap are silently skipped (the
+ * pools underneath also cap+drop on their own, this just avoids growing an
+ * unbounded tracking array). */
+const MAX_PENDING_RAIN_ARROWS = 12;
+/** Dirt + a few archer-tinted feather motes on landing (small, NOT the boss-
+ * slam-sized impact burst — this is a hail of small arrows, not a nuke). */
+const RAIN_LAND_DIRT_COUNT = 4;
+const RAIN_LAND_FEATHER_COUNT = 3;
 
 // ---- mage: meteor scene (item 11) ------------------------------------------
 /** At most 1-2 meteors are ever realistically in flight at once (12s skill
@@ -210,6 +227,15 @@ interface PendingMeteor {
   tx: number;
 }
 
+/** One in-flight ARROW RAIN drop being tracked from cast to landing — `id`
+ * matches it against `state.projectiles` (unlike the single-meteor case,
+ * several drops can share a similar `tx`, so id is the reliable key here). */
+interface PendingRainArrow {
+  id: number;
+  tx: number;
+  ty: number;
+}
+
 export class FxController {
   private readonly corpseLayer: Container;
   private readonly trailLayer: Container;
@@ -254,6 +280,10 @@ export class FxController {
   private readonly scorches: ScorchPool;
   private readonly castAura: CastAuraController;
 
+  // ---- ARROW RAIN skill scene (86d3k2t18) ----------------------------------
+  private readonly rainShadows: RainShadowPool;
+  private readonly groundArrows: GroundArrowPool;
+
   // ---- DEATH & SPAWN DRAMA (86d3k2qjk) additions ---------------------------
   private readonly portals: PortalPool;
   private readonly armorShards: ArmorShardPool;
@@ -292,14 +322,14 @@ export class FxController {
    * starts, so this doubles as "was this hit the swordsman's basic attack"). */
   private swingThisFrame: { comboIndex: number } | null = null;
 
-  /** Real seconds remaining on the archer's "just cast triple" brighter-
-   * tracer window (item 9) — any arrow tracer track BOUND while this is > 0
-   * gets the boosted style for its whole life. */
-  private archerSkillBoostT = 0;
-
   /** In-flight mage meteors being tracked for the ground-rune / scorch-on-
    * impact sequence (item 11) — see `updateMeteorTracking()`. */
   private readonly pendingMeteors: PendingMeteor[] = [];
+
+  /** In-flight ARROW RAIN drops being tracked from cast to landing (86d3k2t18)
+   * — see `onArcherRainCast()`/`updateRainArrowTracking()`. Capped at
+   * `MAX_PENDING_RAIN_ARROWS`; extra drops beyond that are silently skipped. */
+  private readonly pendingRainArrows: PendingRainArrow[] = [];
 
   /** "This view has a decaying position nudge" entries (item 3) — reaches
    * directly into the SAME `Container` `hitFlash.ts` already reaches into
@@ -341,6 +371,8 @@ export class FxController {
     this.scorches = new ScorchPool(this.corpseLayer);
     this.portals = new PortalPool(this.corpseLayer);
     this.armorShards = new ArmorShardPool(this.corpseLayer);
+    this.rainShadows = new RainShadowPool(this.corpseLayer);
+    this.groundArrows = new GroundArrowPool(this.corpseLayer);
     this.weaponTrail = new WeaponTrailController(this.trailLayer);
     this.tracers = new TracerPool(this.trailLayer);
     this.crescents = new CrescentPool(this.heroFxLayer);
@@ -492,6 +524,8 @@ export class FxController {
     this.scorches.update(dt);
     this.portals.update(dt);
     this.armorShards.update(dt);
+    this.rainShadows.update(dt);
+    this.groundArrows.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
     this.lightPillars.update(dt);
@@ -510,11 +544,11 @@ export class FxController {
     this.updateTracers(dt, state);
     this.updateCastAura(dt, state);
     this.updateMeteorTracking(state);
+    this.updateRainArrowTracking(state);
     this.updateKnockback(dt);
     this.updateEnemySpawns(state);
     this.updateBossDeathStages(dt);
     this.detectBossEntrance(state);
-    this.archerSkillBoostT = Math.max(0, this.archerSkillBoostT - dt);
   }
 
   destroy(): void {
@@ -523,6 +557,8 @@ export class FxController {
     this.scorches.destroy();
     this.portals.destroy();
     this.armorShards.destroy();
+    this.rainShadows.destroy();
+    this.groundArrows.destroy();
     this.bossEcho.destroy();
     this.weaponTrail.destroy();
     this.tracers.destroy();
@@ -763,7 +799,7 @@ export class FxController {
     if (ev.heroClass === "swordsman") {
       this.onSwordSpinCast(hero, x, colors.light);
     } else if (ev.heroClass === "archer") {
-      this.onArcherTripleCast(x, colors.light, state);
+      this.onArcherRainCast(x, colors.light, state);
     } else {
       this.onMageMeteorCast(x, colors.light, state);
     }
@@ -826,34 +862,81 @@ export class FxController {
     }
   }
 
-  /** Archer skill (triple shot) — brief draw-and-hold glow (item 9's front
-   * half; the hold itself is heroView's `triple` anim lead-in), the
-   * brighter-tracer boost window, and 3 fan-direction flash lines toward the
-   * skill's own target selection. */
-  private onArcherTripleCast(x: number, color: number, state: GameState): void {
+  /** Archer skill (ARROW RAIN, 86d3k2t18) — a bow flash + a handful of
+   * upward "volley launch" streaks at cast time, then seeds the falling
+   * shadow markers (+ landing tracking) for all 9 drops the engine already
+   * pushed synchronously into `state.projectiles` this same step (same
+   * readback convention as `onMageMeteorCast()`'s single meteor, generalized
+   * to N drops). The old "3 fan flash-lines toward the nearest targets" read
+   * no longer matches the skill (it now blankets a whole zone, not 3 picked
+   * targets), so that beat is replaced outright rather than kept alongside. */
+  private onArcherRainCast(x: number, color: number, state: GameState): void {
+    // Bow flash: quick expanding ring + a tiny release burst at the bow.
     this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 11, duration: 0.15, width: 2, color });
     burst(this.particles, x, HERO_MID_Y, 5, color, { speed: 60, life: 0.2, radius: 2 });
 
-    this.archerSkillBoostT = ARCHER_SKILL_TRACER_BOOST_WINDOW;
-
-    // Mirrors `castSkill()`'s own "nearest `sk.targets`" target pick
-    // (`engine/systems/skills.ts`) — read-only, for fx placement only, never
-    // feeds back into game logic.
-    const candidates: { x: number }[] = [...state.enemies];
-    if (state.boss) candidates.push(state.boss);
-    const near = candidates.sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x)).slice(0, 3);
-    for (const t of near) {
+    // Volley launch: a few quick streaks firing upward off the bow, reading
+    // as "arrows loosed skyward" before the rain telegraphs its landing zone.
+    for (let i = 0; i < RAIN_LAUNCH_STREAK_COUNT; i++) {
+      const jitter = (Math.random() - 0.5) * RAIN_LAUNCH_STREAK_SPREAD;
+      const height = RAIN_LAUNCH_STREAK_HEIGHT * (0.7 + Math.random() * 0.5);
       this.flashLines.spawn({
-        x1: x,
+        x1: x + jitter,
         y1: HERO_MID_Y,
-        x2: t.x,
-        y2: HERO_MID_Y,
+        x2: x + jitter * 1.3,
+        y2: HERO_MID_Y - height,
         color,
         width: 1.6,
-        life: 0.14,
-        alpha: 0.65,
+        life: 0.16,
+        alpha: 0.6,
       });
     }
+
+    // The 9 `rainArrow` drops were just pushed synchronously this same
+    // engine step (`engine/systems/skills.ts`) — read them back for their
+    // exact (tx,ty) + flight time rather than re-deriving either.
+    const drops = state.projectiles.filter((p) => p.team === "hero" && p.kind === "rainArrow");
+    for (const p of drops) {
+      if (this.pendingRainArrows.length >= MAX_PENDING_RAIN_ARROWS) break;
+      const fallDist = Math.hypot(p.tx - p.x, p.ty - p.y);
+      const fallTime = Math.max(0.1, fallDist / Math.max(1, p.speed));
+      this.rainShadows.trySpawn({ x: p.tx, y: p.ty, life: fallTime, color });
+      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty });
+    }
+  }
+
+  /** Continuous per-frame check of the ARROW RAIN drops queued by
+   * `onArcherRainCast()`: the frame a tracked drop's id disappears from
+   * `state.projectiles` (i.e. it just resolved on the ground — same
+   * "vanished this frame" detection `updateMeteorTracking()` uses), fires
+   * the landing puff + ground-stuck-arrow decal. */
+  private updateRainArrowTracking(state: GameState): void {
+    if (!this.pendingRainArrows.length) return;
+    for (let i = this.pendingRainArrows.length - 1; i >= 0; i--) {
+      const entry = this.pendingRainArrows[i];
+      const stillFalling = state.projectiles.some((p) => p.id === entry.id);
+      if (!stillFalling) {
+        this.onRainArrowLanded(entry.tx, entry.ty);
+        this.pendingRainArrows.splice(i, 1);
+      }
+    }
+  }
+
+  /** One ARROW RAIN drop resolving: a small dirt + feather puff (NOT the
+   * bigger AOE impact burst class — this is a hail of small arrows, not a
+   * nuke) plus a brief arrow-stuck-in-ground decal. */
+  private onRainArrowLanded(x: number, y: number): void {
+    burst(this.particles, x, y, RAIN_LAND_DIRT_COUNT, PALETTE.muted, {
+      speed: 55,
+      life: 0.22,
+      radius: 2,
+    });
+    burst(this.particles, x, y, RAIN_LAND_FEATHER_COUNT, HERO_COLORS.archer.light, {
+      speed: 35,
+      life: 0.3,
+      radius: 1.6,
+    });
+    this.groundArrows.spawn(x, y, HERO_COLORS.archer.light);
   }
 
   /** Mage skill (meteor) — "the meteor is a scene" (item 11): a sky flash +
@@ -1021,12 +1104,12 @@ export class FxController {
   private tracerStyleFor(p: Projectile): TracerStyle | null {
     if (p.team !== "hero") return null;
     if (p.kind === "arrow") {
-      const boosted = this.archerSkillBoostT > 0;
-      return {
-        color: HERO_COLORS.archer.light,
-        width: boosted ? 3.4 : 2,
-        alpha: boosted ? 0.85 : 0.5,
-      };
+      return { color: HERO_COLORS.archer.light, width: 2, alpha: 0.5 };
+    }
+    if (p.kind === "rainArrow") {
+      // Archer-green, thinner/dimmer than the meteor's fire trail — a hail
+      // of falling arrows, not one big streak.
+      return { color: PROJECTILE_COLORS.rainArrow, width: 2.4, alpha: 0.55 };
     }
     if (p.kind === "orb") {
       return { color: HERO_COLORS.mage.light, width: 3, alpha: 0.6 };
