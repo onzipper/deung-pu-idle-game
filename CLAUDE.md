@@ -83,3 +83,15 @@ These are **rendering** concerns and belong in `render/`. The pure engine has no
 - **M5** — Prestige/reset loop + server-authoritative economy & anti-cheat.
 
 Current state: **M1 scaffold complete** — Next.js + TS + tooling + the empty 3-layer skeleton. No game logic yet.
+
+## Project subagents
+
+Specialist personas live in `.claude/agents/`. Delegate domain work to them:
+
+- `game-engine-specialist` — pure-TS simulation core, fixed-timestep, determinism (`engine/**`).
+- `sr-nextjs-developer` — App Router, React/Zustand, Pixi mounting (`app/**`, `ui/**`).
+- `sr-backend-developer` — save/load, offline idle, server economy/anti-cheat (`server/**`, `api/**`).
+- `sr-dba` — MySQL/Prisma schema, migrations, indexing (`prisma/**`).
+- `sr-uxui-game-designer` — game feel, juice, animation, HUD/effects (M4).
+- `game-economy-balance-designer` — cost curves, pacing, prestige, balance-sim tuning.
+- `qa-test-engineer` — headless Vitest strategy, determinism/regression tests.
