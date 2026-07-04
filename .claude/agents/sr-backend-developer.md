@@ -1,6 +1,7 @@
 ---
 name: sr-backend-developer
 description: Senior backend engineer for this project's server layer. Use for save/load endpoints, offline-idle calculation, server-authoritative economy and anti-cheat, Prisma data access, request validation, and API design. Use PROACTIVELY when a task touches src/server, src/app/api, src/lib/db, or persistence/economy logic.
+model: opus
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 

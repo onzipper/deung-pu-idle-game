@@ -1,6 +1,7 @@
 ---
 name: game-engine-specialist
 description: Specialist in the pure-TypeScript game simulation core. Use for the fixed-timestep loop, deterministic entity/system architecture, combat/movement/wave/skill/upgrade/boss logic, and porting the POC into engine/. This is the heart of milestone M1. Use PROACTIVELY when a task touches src/engine/** (except when it's purely a test task — then use qa-test-engineer).
+model: opus
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: game-economy-balance-designer
 description: Idle-game economy and balance designer. Use for cost curves, progression pacing, prestige/reset loops, offline-earning rates, monetization hooks, and interpreting balance-simulation output. Use PROACTIVELY when a task involves tuning numbers in engine/config, economy math, prestige (M5), or analysing sim results (M4).
+model: opus
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 

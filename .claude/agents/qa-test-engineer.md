@@ -1,6 +1,7 @@
 ---
 name: qa-test-engineer
 description: QA / test engineer for the headless engine and beyond. Use for Vitest strategy, deterministic regression tests, catching POC-class bugs before they hit the screen, and test coverage for combat/skills/waves/boss/economy. Use PROACTIVELY after engine or economy changes, and when a task is primarily about writing or fixing tests.
+model: sonnet
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 

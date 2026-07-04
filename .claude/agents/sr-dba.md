@@ -1,6 +1,7 @@
 ---
 name: sr-dba
 description: Senior database administrator for this project's MySQL + Prisma layer. Use for schema design, Prisma migrations, indexing and query performance, the save_states JSON strategy, DB-level save versioning, and future leaderboards. Use PROACTIVELY when a task touches prisma/schema.prisma, migrations, or data-model decisions.
+model: opus
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 

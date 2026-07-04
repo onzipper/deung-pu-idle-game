@@ -84,14 +84,34 @@ These are **rendering** concerns and belong in `render/`. The pure engine has no
 
 Current state: **M1 scaffold complete** — Next.js + TS + tooling + the empty 3-layer skeleton. No game logic yet.
 
+## Orchestration workflow
+
+**You (Fable) are the orchestrator.** Plan, decompose, and synthesize — but do the heavy *execution* through subagents so Fable tokens are spent only on genuine orchestration and hard reasoning. **Keep your own context lean:** hand subagents a tight spec, and have them return a short, actionable conclusion rather than pulling large outputs back into your context.
+
+Routing:
+- **Reasoning-heavy** (architecture, tricky debugging, algorithm/economy design) → the relevant **Opus** domain agent, or the generic `deep-reasoner` (Opus) when it's not domain-specific.
+- **Mechanical** (boilerplate, tests, formatting, simple/repetitive edits) → the relevant **Sonnet** domain agent, or the generic `fast-worker` (Sonnet).
+- **High-stakes decisions** — task two independent perspectives on the same problem in parallel (e.g. two Opus agents from different angles), then synthesize the best of both **without showing either the other's answer**. (A slot for an external peer like OpenAI Codex can be added here later; not wired up yet.)
+
+Each subagent is pinned to a model in its frontmatter, so delegation is automatically cost-aware — Fable orchestrates, Opus/Sonnet do the work.
+
 ## Project subagents
 
-Specialist personas live in `.claude/agents/`. Delegate domain work to them:
+Personas live in `.claude/agents/`, each pinned to a model. Delegate to them:
 
-- `game-engine-specialist` — pure-TS simulation core, fixed-timestep, determinism (`engine/**`).
-- `sr-nextjs-developer` — App Router, React/Zustand, Pixi mounting (`app/**`, `ui/**`).
-- `sr-backend-developer` — save/load, offline idle, server economy/anti-cheat (`server/**`, `api/**`).
-- `sr-dba` — MySQL/Prisma schema, migrations, indexing (`prisma/**`).
-- `sr-uxui-game-designer` — game feel, juice, animation, HUD/effects (M4).
-- `game-economy-balance-designer` — cost curves, pacing, prestige, balance-sim tuning.
-- `qa-test-engineer` — headless Vitest strategy, determinism/regression tests.
+**Generic (model-tier roles)**
+| Agent | Model | Use for |
+|---|---|---|
+| `deep-reasoner` | Opus | reasoning-heavy, non-domain-specific problems |
+| `fast-worker` | Sonnet | mechanical, well-specified execution |
+
+**Domain experts**
+| Agent | Model | Scope |
+|---|---|---|
+| `game-engine-specialist` | Opus | pure-TS simulation core, fixed-timestep, determinism (`engine/**`) |
+| `game-economy-balance-designer` | Opus | cost curves, pacing, prestige, balance-sim tuning |
+| `sr-dba` | Opus | MySQL/Prisma schema, migrations, indexing (`prisma/**`) |
+| `sr-backend-developer` | Opus | save/load, offline idle, server economy/anti-cheat (`server/**`, `api/**`) |
+| `sr-nextjs-developer` | Sonnet | App Router, React/Zustand, Pixi mounting (`app/**`, `ui/**`) |
+| `sr-uxui-game-designer` | Sonnet | game feel, juice, animation, HUD/effects (M4) |
+| `qa-test-engineer` | Sonnet | headless Vitest strategy, determinism/regression tests |

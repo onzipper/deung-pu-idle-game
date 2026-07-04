@@ -1,6 +1,7 @@
 ---
 name: sr-nextjs-developer
 description: Senior Next.js/React engineer for this project. Use for anything in the app/ or ui/ layers — App Router routes, Server/Client Components, mounting the PixiJS canvas, wiring the Zustand store to the engine, and frontend performance. Use PROACTIVELY when a task touches src/app, src/ui, layout/rendering wiring, or "use client"/"use server" boundaries.
+model: sonnet
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
 
