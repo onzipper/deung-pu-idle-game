@@ -1,0 +1,58 @@
+/**
+ * Visual palette — ported from the POC's CSS custom properties
+ * (`poc-html/idle-brawler-poc.html` `:root` block) so the Pixi rebuild matches
+ * the POC's look. Colors live here only; no other render module should hardcode
+ * a hex value.
+ *
+ * NOTE: these are Pixi color numbers (0xRRGGBB), not CSS strings — Pixi
+ * Graphics fills take numbers directly, sidestepping the POC's
+ * `getComputedStyle(...).trim() || '#fff'` CSS-var fallback dance entirely.
+ */
+
+import type { HeroClass, EnemyKind, ProjectileKind } from "@/engine/entities";
+
+export const PALETTE = {
+  arenaSky: 0x151a30,
+  arenaGround: 0x1e2542,
+  gridLine: 0xffffff, // drawn at low alpha over the ground
+  ivory: 0xf4f1ea,
+  muted: 0x8b93c7,
+  gold: 0xf2b134,
+  hpGood: 0x5dcaa5,
+  hpBad: 0xe24b4a,
+  warn: 0xff5a5a,
+  boss: 0x8b7ff0,
+  bossLight: 0xb3a9ff,
+  deadHero: 0x3a4270,
+  shadow: 0x000000,
+} as const;
+
+/** Hero class -> {body, accent (weapon glint / flash)} color. */
+export const HERO_COLORS: Record<HeroClass, { body: number; light: number }> = {
+  swordsman: { body: 0x35d0c0, light: 0x7ce8dd },
+  archer: { body: 0xb8e04a, light: 0xe3f59a },
+  mage: { body: 0xc77dff, light: 0xe6c9ff },
+};
+
+/** Enemy kind -> body color (POC grunt/runner/tank/shooter). */
+export const ENEMY_COLORS: Record<EnemyKind, number> = {
+  normal: 0xf07a52, // grunt
+  fast: 0xf5c542, // runner
+  tank: 0xc9542f,
+  ranged: 0xe56ba8, // shooter
+};
+
+/** Projectile kind -> body color (falls back to owner's color where the POC
+ * colored per-attack rather than per-kind; arrow/orb use the firing hero's
+ * class color, so callers may override this default). */
+export const PROJECTILE_COLORS: Record<ProjectileKind, number> = {
+  arrow: PALETTE.ivory,
+  orb: PALETTE.ivory,
+  meteor: HERO_COLORS.mage.light,
+  bolt: 0xff9ecb,
+};
+
+/** Clamp any radius/size fed to a Pixi Graphic (POC negative-radius crash rule). */
+export function safeRadius(r: number): number {
+  return Math.max(0, r);
+}
