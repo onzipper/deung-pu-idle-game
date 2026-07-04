@@ -136,6 +136,39 @@ function buildSnapshot(state: GameState): EngineSnapshot {
 export function GameClient() {
   const arenaRef = useRef<HTMLDivElement | null>(null);
 
+  // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
+  // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
+  // log but this never does, React never hydrated even though scripts ran.
+  // Safe to delete alongside src/app/api/client-log once done debugging.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    void fetch("/api/client-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "hydrated",
+        url: window.location.href,
+        time: new Date().toISOString(),
+      }),
+      keepalive: true,
+    }).catch(() => {
+      /* dev diagnostics only — never let this affect the real app */
+    });
+  }, []);
+
+  // DEV-ONLY diagnostics: on-device console (eruda) so we can inspect a
+  // phone's console/network/DOM without plugging in remote devtools. Dynamic
+  // import behind the dev check keeps it out of the production bundle. Safe
+  // to delete once done debugging.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    import("eruda")
+      .then((m) => m.default.init())
+      .catch(() => {
+        /* dev diagnostics only */
+      });
+  }, []);
+
   useEffect(() => {
     const arenaEl = arenaRef.current;
     if (!arenaEl) return;
