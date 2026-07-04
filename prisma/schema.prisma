@@ -1,0 +1,36 @@
+// Prisma schema — ดึ๋งปุ๊ Idle Game
+// Host: MySQL. Run `pnpm db:generate` after edits; `pnpm db:migrate` to apply.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String      @id @default(cuid())
+  createdAt DateTime    @default(now())
+  saves     SaveState[]
+}
+
+// One row per player save slot. `data` holds the versioned SaveData JSON blob
+// (see src/engine/state). `lastSeen` drives capped offline-idle earnings.
+// `version` mirrors SaveData.version so migrations can target rows by schema age.
+model SaveState {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version   Int
+  data      Json
+  lastSeen  DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Future (M5): leaderboards
+// model Leaderboard { ... }
