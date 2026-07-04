@@ -74,6 +74,12 @@ export function updateProjectileView(
     return;
   }
 
+  // Point-target arrows (arrow-rain skill): face the landing point while falling.
+  if (p.kind === "rainArrow") {
+    view.rotation = Math.atan2(p.ty - p.y, p.tx - p.x);
+    return;
+  }
+
   // Homing kinds: face the current target (or its last-known impact height).
   const target = findTarget(state, p.targetId);
   const ty = target != null ? (p.team === "hero" ? GROUND_Y - 16 : GROUND_Y - 30) : p.y;

@@ -77,6 +77,8 @@ export const PROJECTILE_COLORS: Record<ProjectileKind, number> = {
   orb: PALETTE.ivory,
   meteor: HERO_COLORS.mage.light,
   bolt: 0xff9ecb,
+  // arrow-rain skill projectiles (engine kind "rainArrow") — archer class light
+  rainArrow: HERO_COLORS.archer.light,
 };
 
 /** Clamp any radius/size fed to a Pixi Graphic (POC negative-radius crash rule). */
