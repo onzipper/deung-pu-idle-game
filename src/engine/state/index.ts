@@ -12,7 +12,10 @@ import { clamp } from "@/engine/core/math";
 import { makeHero } from "@/engine/entities";
 import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
 import type { Upgrades } from "@/engine/systems/stats";
+import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
+
+export * from "@/engine/state/events";
 
 /** High-level flow phase (POC PHASE). Boss/victory transitions land in Phase B. */
 export type Phase = "battle" | "boss" | "victory";
@@ -48,6 +51,12 @@ export interface GameState {
   rngState: number;
   /** Monotonic id source for entities/projectiles. */
   nextId: number;
+  /**
+   * Per-step event buffer for render/audio juice. Cleared at the START of each
+   * `step()`, filled during the step, drained by the outside layers after it.
+   * Deterministic, one-way (engine never reads it), and NEVER persisted.
+   */
+  events: GameEvent[];
 }
 
 /**
@@ -107,6 +116,7 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     bossReady: false,
     rngState: seed >>> 0,
     nextId: 1,
+    events: [],
   };
   initHeroes(state);
   return state;

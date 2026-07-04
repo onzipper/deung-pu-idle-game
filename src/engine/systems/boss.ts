@@ -51,14 +51,16 @@ export function updateBoss(state: GameState): void {
 
   if (!b.enraged && b.hp < b.maxHp * B.enrageThreshold) {
     b.enraged = true;
+    state.events.push({ type: "bossEnraged", x: b.x, y: b.y });
   }
 
   // Slam: winds up (telegraph) then lands an AOE on the whole living team.
   if (b.telegraph > 0) {
     b.telegraph -= FIXED_DT;
     if (b.telegraph <= 0) {
+      state.events.push({ type: "bossSlamLand", x: b.x, y: b.y });
       for (const h of aliveHeroes(state)) {
-        applyDamage(h, Math.round(b.atk * B.slamMult));
+        applyDamage(state, h, Math.round(b.atk * B.slamMult), "slam");
       }
       b.skillCd = b.enraged ? B.slamCdEnraged : B.slamCdNormal;
     }
@@ -66,6 +68,7 @@ export function updateBoss(state: GameState): void {
     b.skillCd -= FIXED_DT;
     if (b.skillCd <= 0) {
       b.telegraph = b.enraged ? B.telegraphEnraged : B.telegraphNormal;
+      state.events.push({ type: "bossSlamTelegraph", x: b.x, y: b.y });
     }
   }
 
@@ -74,7 +77,7 @@ export function updateBoss(state: GameState): void {
   if (b.cd <= 0) {
     const h = nearestAliveHero(state, b.x);
     if (h) {
-      applyDamage(h, b.atk);
+      applyDamage(state, h, b.atk, "attack");
       b.cd = b.enraged ? B.attackCdEnraged : B.attackCdNormal;
     }
   }
@@ -82,13 +85,23 @@ export function updateBoss(state: GameState): void {
 
 /** Boss defeated: pay out and flag victory (nextStage is a separate action). */
 export function onBossKilled(state: GameState): void {
-  state.gold += CONFIG.goldPerBoss(state.stage);
+  const goldGained = CONFIG.goldPerBoss(state.stage);
+  state.gold += goldGained;
+  const bx = state.boss?.x ?? 0;
+  const by = state.boss?.y ?? 0;
   state.boss = null;
   state.phase = "victory";
+  state.events.push({ type: "bossDefeated", x: bx, y: by, goldGained });
+  state.events.push({ type: "stageCleared", stage: state.stage });
 }
 
 /** Team wiped: boss leaves, revive the team, resume normal waves (retry allowed). */
 export function bossRetreat(state: GameState): void {
+  state.events.push({
+    type: "bossRetreat",
+    x: state.boss?.x ?? 0,
+    y: state.boss?.y ?? 0,
+  });
   state.boss = null;
   state.phase = "battle";
   state.projectiles = state.projectiles.filter((p) => p.team === "hero");

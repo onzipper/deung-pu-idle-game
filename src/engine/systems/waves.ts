@@ -45,6 +45,7 @@ export function startWave(state: GameState, rng: Rng): void {
     state.enemies.push(e);
   });
   state.waveGap = CONFIG.waveGap;
+  state.events.push({ type: "waveSpawn", wave: state.wave });
 }
 
 /** Count down the inter-wave gap and spawn when the arena is clear. */

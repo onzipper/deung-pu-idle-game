@@ -43,6 +43,10 @@ export interface FrameInput {
 export function step(state: GameState, input: FrameInput = {}): GameState {
   const rng = createRng(state.rngState);
 
+  // Drop last step's events before this step fills them (one-way render/audio
+  // buffer). Clear-in-place keeps the array identity stable and allocation-light.
+  state.events.length = 0;
+
   // --- discrete player actions (valid across phases) ---
   if (input.buyUpgrade) buyUpgrade(state, input.buyUpgrade);
   if (input.advanceStage && state.phase === "victory") nextStage(state);

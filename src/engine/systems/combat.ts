@@ -29,7 +29,7 @@ import {
   nearestWithin,
 } from "@/engine/systems/targeting";
 import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
-import type { GameState } from "@/engine/state";
+import type { GameState, HitSource } from "@/engine/state";
 
 const L = CONFIG.layout;
 
@@ -45,6 +45,13 @@ export function decayHeroTimers(state: GameState): void {
       if (h.reviveTimer <= 0) {
         h.dead = false;
         h.hp = h.maxHp * CONFIG.reviveHpFraction;
+        state.events.push({
+          type: "heroRevived",
+          id: h.id,
+          cls: h.cls,
+          x: h.x,
+          y: h.y,
+        });
       }
     }
     if (h.skillCd > 0) h.skillCd = Math.max(0, h.skillCd - FIXED_DT);
@@ -81,7 +88,7 @@ export function updateEnemies(state: GameState): void {
         if (e.cd <= 0) {
           const h = nearestAliveHero(state, e.x);
           if (h) {
-            applyDamage(h, e.atk);
+            applyDamage(state, h, e.atk, "attack");
             e.cd = CONFIG.enemyMeleeAtkCd;
           }
         }
@@ -139,14 +146,16 @@ export function updateHeroes(state: GameState): void {
         h.cd = heroAtkSpeed(h.cls, state.upgrades);
         const dmg = heroAtk(h.cls, state.upgrades);
         if (t.attack === "melee") {
-          applyDamage(tgt, dmg);
+          applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {
+          const px = h.x + L.heroProjSpawnXOffset;
+          const py = L.groundY - L.heroProjSpawnYOffset;
           state.projectiles.push({
             id: state.nextId++,
             team: "hero",
             kind: "arrow",
-            x: h.x + L.heroProjSpawnXOffset,
-            y: L.groundY - L.heroProjSpawnYOffset,
+            x: px,
+            y: py,
             damage: dmg,
             speed: t.projSpeed,
             targetId: tgt.id,
@@ -154,13 +163,16 @@ export function updateHeroes(state: GameState): void {
             ty: 0,
             aoe: 0,
           });
+          state.events.push({ type: "projectileSpawn", kind: "arrow", x: px, y: py });
         } else {
+          const px = h.x + L.heroProjSpawnXOffset;
+          const py = L.groundY - L.heroProjSpawnYOffset;
           state.projectiles.push({
             id: state.nextId++,
             team: "hero",
             kind: "orb",
-            x: h.x + L.heroProjSpawnXOffset,
-            y: L.groundY - L.heroProjSpawnYOffset,
+            x: px,
+            y: py,
             damage: dmg,
             speed: t.projSpeed,
             targetId: null,
@@ -168,6 +180,7 @@ export function updateHeroes(state: GameState): void {
             ty: L.groundY - L.heroProjImpactYOffset,
             aoe: t.aoe,
           });
+          state.events.push({ type: "projectileSpawn", kind: "orb", x: px, y: py });
         }
       }
     }
@@ -175,12 +188,14 @@ export function updateHeroes(state: GameState): void {
 }
 
 function spawnBolt(state: GameState, e: Enemy, h: Hero): void {
+  const px = e.x - L.boltSpawnXOffset;
+  const py = L.groundY - L.enemyProjSpawnYOffset;
   state.projectiles.push({
     id: state.nextId++,
     team: "enemy",
     kind: "bolt",
-    x: e.x - L.boltSpawnXOffset,
-    y: L.groundY - L.enemyProjSpawnYOffset,
+    x: px,
+    y: py,
     damage: e.atk,
     speed: ENEMY_TYPES.ranged.projSpeed,
     targetId: h.id,
@@ -188,6 +203,14 @@ function spawnBolt(state: GameState, e: Enemy, h: Hero): void {
     ty: 0,
     aoe: 0,
   });
+  state.events.push({ type: "projectileSpawn", kind: "bolt", x: px, y: py });
+}
+
+/** Map a projectile kind to the `hit`-event source flavour it lands with. */
+function projHitSource(kind: Projectile["kind"]): HitSource {
+  if (kind === "bolt") return "bolt";
+  if (kind === "meteor") return "skill";
+  return "attack";
 }
 
 // ---------------------------------------------------------------------------
@@ -224,8 +247,9 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
     const dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);
     if (d <= arrive) {
+      const src = projHitSource(p.kind);
       for (const target of list) {
-        if (Math.abs(target.x - p.tx) < p.aoe) applyDamage(target, p.damage);
+        if (Math.abs(target.x - p.tx) < p.aoe) applyDamage(state, target, p.damage, src);
       }
       return true;
     }
@@ -245,7 +269,7 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
   const dy = ty - p.y;
   const d = Math.hypot(dx, dy);
   if (d <= arrive) {
-    applyDamage(target, p.damage);
+    applyDamage(state, target, p.damage, projHitSource(p.kind));
     return true;
   }
   p.x += (dx / d) * p.speed * FIXED_DT;
@@ -262,7 +286,15 @@ export function resolveDeaths(state: GameState): void {
     state.enemies = state.enemies.filter((e) => {
       if (e.hp <= 0) {
         state.kills++;
-        state.gold += CONFIG.goldPerKill(state.stage);
+        const goldGained = CONFIG.goldPerKill(state.stage);
+        state.gold += goldGained;
+        state.events.push({
+          type: "kill",
+          kind: e.kind,
+          x: e.x,
+          y: e.y,
+          goldGained,
+        });
         return false;
       }
       return true;

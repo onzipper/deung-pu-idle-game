@@ -23,4 +23,5 @@ export function nextStage(state: GameState): void {
   state.anchorX = CONFIG.baseAnchor;
   if (state.heroSlots < CONFIG.maxHeroes) state.heroSlots++;
   initHeroes(state);
+  state.events.push({ type: "stageAdvanced", stage: state.stage });
 }

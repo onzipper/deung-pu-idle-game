@@ -50,24 +50,31 @@ export function castSkill(state: GameState, hero: Hero): boolean {
   }
 
   hero.skillCd = sk.cd;
+  state.events.push({
+    type: "skillCast",
+    heroClass: hero.cls,
+    slot: state.heroes.indexOf(hero),
+  });
 
   if (hero.cls === "swordsman") {
     const dmg = Math.round(heroAtk(hero.cls, state.upgrades) * sk.mult);
     for (const e of targets) {
-      if (Math.abs(e.x - hero.x) < sk.radius) applyDamage(e, dmg);
+      if (Math.abs(e.x - hero.x) < sk.radius) applyDamage(state, e, dmg, "skill");
     }
   } else if (hero.cls === "archer") {
     const near = [...targets]
       .sort((a, b) => Math.abs(a.x - hero.x) - Math.abs(b.x - hero.x))
       .slice(0, sk.targets);
     const dmg = Math.round(heroAtk(hero.cls, state.upgrades) * sk.mult);
+    const px = hero.x + L.heroProjSpawnXOffset;
+    const py = L.groundY - L.heroProjSpawnYOffset;
     for (const e of near) {
       state.projectiles.push({
         id: state.nextId++,
         team: "hero",
         kind: "arrow",
-        x: hero.x + L.heroProjSpawnXOffset,
-        y: L.groundY - L.heroProjSpawnYOffset,
+        x: px,
+        y: py,
         damage: dmg,
         speed: sk.projSpeed,
         targetId: e.id,
@@ -75,6 +82,7 @@ export function castSkill(state: GameState, hero: Hero): boolean {
         ty: 0,
         aoe: 0,
       });
+      state.events.push({ type: "projectileSpawn", kind: "arrow", x: px, y: py });
     }
   } else {
     // mage meteor: falls onto the nearest target's x (guard guarantees one).
@@ -92,6 +100,12 @@ export function castSkill(state: GameState, hero: Hero): boolean {
       tx,
       ty: L.groundY - L.heroProjImpactYOffset,
       aoe: sk.radius,
+    });
+    state.events.push({
+      type: "projectileSpawn",
+      kind: "meteor",
+      x: tx,
+      y: CONFIG.skills.meteorSpawnY,
     });
   }
 

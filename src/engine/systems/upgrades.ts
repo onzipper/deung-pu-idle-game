@@ -25,6 +25,7 @@ export function buyUpgrade(state: GameState, stat: keyof Upgrades): boolean {
 
   state.gold -= cost;
   state.upgrades[stat]++;
+  state.events.push({ type: "upgradeBought", line: stat, level: state.upgrades[stat] });
 
   if (stat === "hp") {
     const m = heroMaxHp(state.upgrades);
