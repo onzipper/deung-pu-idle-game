@@ -14,6 +14,7 @@ import { forwardRef, type ReactNode } from "react";
 import { BossPanel } from "@/ui/components/BossPanel";
 import { HudBar } from "@/ui/components/HudBar";
 import { SkillBar } from "@/ui/components/SkillBar";
+import { SoundToggle } from "@/ui/components/SoundToggle";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
 import { UpgradePanel } from "@/ui/components/UpgradePanel";
 
@@ -41,6 +42,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           <BossPanel />
         </div>
         <SpeedSelector />
+        <SoundToggle />
       </div>
       <UpgradePanel />
     </div>

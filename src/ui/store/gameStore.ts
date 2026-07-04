@@ -64,6 +64,37 @@ function emptyPendingInput(): PendingInput {
   return { castSkills: [], buyUpgrade: null, challengeBoss: false, advanceStage: false };
 }
 
+/** localStorage key for the sound preference. This is a CLIENT PREFERENCE,
+ * not game progress — it intentionally never goes through `SaveData`/the
+ * server (see `src/engine/state/version.ts`'s save-versioning rule, which
+ * only applies to actual save data).
+ *
+ * The store field itself always INITIALISES to `false` (sound on), even in
+ * the browser — reading `localStorage` synchronously at module-init time
+ * would make the server-rendered HTML and the first client render disagree
+ * whenever a returning player had muted, causing a React hydration mismatch.
+ * `readStoredSoundMuted()` is instead called from a mount-only `useEffect`
+ * (see `SoundToggle.tsx`) that applies the persisted value AFTER hydration. */
+const SOUND_MUTED_STORAGE_KEY = "ddp-sound-muted";
+
+export function readStoredSoundMuted(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SOUND_MUTED_STORAGE_KEY) === "1";
+  } catch {
+    return false; // storage blocked (private mode/quota) — default to sound on
+  }
+}
+
+function writeSoundMuted(muted: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SOUND_MUTED_STORAGE_KEY, muted ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
 const emptyBossHint: BossHint = {
   stage: 1,
   bossHp: 0,
@@ -91,6 +122,11 @@ export interface HudState {
   speed: SpeedMultiplier;
   autoUpgrade: boolean;
   autoCast: boolean;
+  /** Client-side sound preference (persisted to localStorage, NOT SaveData —
+   * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
+   * every frame and applies it to the `AudioController`, same pattern as
+   * `speed`/`autoUpgrade`/`autoCast`. */
+  soundMuted: boolean;
 
   // ---- intent queue: drained by the integration loop into FrameInput ----
   pendingInput: PendingInput;
@@ -101,6 +137,11 @@ export interface HudState {
   setSpeed: (speed: SpeedMultiplier) => void;
   toggleAutoUpgrade: () => void;
   toggleAutoCast: () => void;
+  toggleSound: () => void;
+  /** Mount-effect-only: apply the persisted preference once, post-hydration
+   * (see `soundMuted`'s doc comment). Does NOT re-persist (avoids a
+   * redundant localStorage write on every mount). */
+  setSoundMuted: (muted: boolean) => void;
 
   /** Queue a skill cast for hero slot `i` (deduped; consumed on next drain). */
   castSkill: (slot: number) => void;
@@ -129,6 +170,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   speed: 1,
   autoUpgrade: false,
   autoCast: false,
+  soundMuted: false,
 
   pendingInput: emptyPendingInput(),
 
@@ -137,6 +179,13 @@ export const useGameStore = create<HudState>((set, get) => ({
   setSpeed: (speed) => set({ speed }),
   toggleAutoUpgrade: () => set((s) => ({ autoUpgrade: !s.autoUpgrade })),
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
+  toggleSound: () =>
+    set((s) => {
+      const soundMuted = !s.soundMuted;
+      writeSoundMuted(soundMuted);
+      return { soundMuted };
+    }),
+  setSoundMuted: (soundMuted) => set({ soundMuted }),
 
   castSkill: (slot) =>
     set((s) => ({

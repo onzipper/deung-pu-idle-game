@@ -7,8 +7,8 @@
  * Owns the live `GameState` and the render `Application` as plain closures
  * inside a single `useEffect` (never React state — see `CLAUDE.md`'s no
  * per-frame-state-in-React rule). Each rAF tick:
- *   1. copies the UI-owned `speed`/`autoUpgrade`/`autoCast` flags off the
- *      Zustand store onto the engine state,
+ *   1. copies the UI-owned `speed`/`autoUpgrade`/`autoCast`/`soundMuted` flags
+ *      off the Zustand store onto the engine state / `AudioController`,
  *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
  *      once and hands it to the FIRST fixed sub-step of the frame,
  *   3. asks the fixed-timestep accumulator how many `FIXED_DT` sub-steps to
@@ -19,7 +19,9 @@
  *      must collect across all of them or a speed multiplier silently drops
  *      events),
  *   4. draws the resulting state + `frameEvents` with the (one-way,
- *      read-only) `GameRenderer`, which reacts to them on its `fx` layer,
+ *      read-only) `GameRenderer`, which reacts to them on its `fx` layer, then
+ *      hands the same `frameEvents` to the `AudioController` (`render/audio`)
+ *      for SFX — same one-way, event-driven shape as the fx layer,
  *   5. at the throttled `CONFIG.uiSyncHz` cadence, pushes a HUD-only snapshot
  *      back into the store via `syncFromEngine`.
  *
@@ -46,6 +48,7 @@ import {
   type GameState,
   type SaveData,
 } from "@/engine";
+import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
 import {
@@ -184,6 +187,7 @@ export function GameClient() {
     // loop begins (below). Keeping it always-defined avoids use-before-assign.
     let state = initGameState(seed);
     const renderer = new GameRenderer();
+    const audio = new AudioController();
     const acc = createAccumulator();
 
     let rafId = 0;
@@ -223,6 +227,9 @@ export function GameClient() {
       // UI-owned flags the engine reads directly (not part of FrameInput).
       state.autoUpgrade = store.autoUpgrade;
       state.autoCast = store.autoCast;
+      // UI-owned sound preference — applied to the audio module every frame,
+      // same pattern (never queued through FrameInput; it isn't sim state).
+      audio.setMuted(store.soundMuted);
 
       // Drain the one-shot intent queue exactly once per real frame; only the
       // first fixed sub-step of this frame gets it (remaining sub-steps, if
@@ -248,6 +255,7 @@ export function GameClient() {
       }
 
       renderer.draw(state, frameEvents);
+      if (frameEvents.length) audio.consumeEvents(frameEvents);
 
       uiSyncAccum += elapsed;
       if (uiSyncAccum >= UI_SYNC_INTERVAL) {
@@ -284,6 +292,14 @@ export function GameClient() {
       });
       navigator.sendBeacon("/api/save", blob);
     }
+
+    // Browsers block audio output until a real user gesture — resume() is
+    // idempotent/cheap, so just call it on every pointerdown inside the arena
+    // rather than trying to detect "the first one" ourselves.
+    function onPointerDown(): void {
+      audio.resume();
+    }
+    arenaEl.addEventListener("pointerdown", onPointerDown);
 
     // Pixi init + save load run in parallel; the loop starts only after both
     // resolve. Guards against the effect having been cleaned up mid-flight
@@ -378,9 +394,11 @@ export function GameClient() {
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
       document.removeEventListener("visibilitychange", onVisibility);
+      arenaEl.removeEventListener("pointerdown", onPointerDown);
       errorEl?.remove();
       errorEl = null;
       renderer.destroy();
+      audio.destroy();
     };
   }, []);
 
