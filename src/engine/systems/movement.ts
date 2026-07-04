@@ -17,26 +17,38 @@ import type { GameState } from "@/engine/state";
  * Ease the formation anchor toward (min enemy x - lead), clamped.
  *
  * In BATTLE (enemies present) the anchor uses the aggressive `battle*` knobs: a
- * smaller lead + higher cap + faster ease speed, so the whole team — ranged
- * heroes included — surges forward to meet the enemy line instead of hanging back
- * at base. With no enemies it eases home at the calmer base speed/cap.
+ * smaller lead + high cap + faster ease speed, so the whole team — ranged heroes
+ * included — surges forward and rides right up near the enemy line so their range
+ * covers the pushed-up fight (86d3k2nhm).
+ *
+ * Between waves (phase "battle", no enemies alive) the anchor HOLDS its forward
+ * line rather than retreating to base: the team is journeying forward, so it must
+ * never visibly walk backwards during a waveGap. Only outside a live battle
+ * (e.g. after a victory, before the next stage resets it) does it ease calmly home.
  */
 export function updateAnchor(state: GameState): void {
   const targets = getTargets(state);
-  let target: number = CONFIG.baseAnchor;
-  let speed: number = CONFIG.anchorSpeed;
   if (targets.length) {
     const minEnemyX = Math.min(...targets.map((e) => e.x));
-    target = clamp(
+    const target = clamp(
       minEnemyX - CONFIG.battleAnchorLead,
       CONFIG.baseAnchor,
       CONFIG.battleMaxAnchor,
     );
-    speed = CONFIG.battleAnchorSpeed;
+    state.anchorX += clamp(
+      target - state.anchorX,
+      -CONFIG.battleAnchorSpeed * FIXED_DT,
+      CONFIG.battleAnchorSpeed * FIXED_DT,
+    );
+    return;
   }
+
+  // No enemies. During an active stage this is a between-waves gap: hold the
+  // forward line (no retreat). Otherwise ease home at the calm base speed.
+  if (state.phase === "battle") return;
   state.anchorX += clamp(
-    target - state.anchorX,
-    -speed * FIXED_DT,
-    speed * FIXED_DT,
+    CONFIG.baseAnchor - state.anchorX,
+    -CONFIG.anchorSpeed * FIXED_DT,
+    CONFIG.anchorSpeed * FIXED_DT,
   );
 }

@@ -38,23 +38,30 @@ export const CONFIG = {
   meleeLeash: 90,
   kiteDist: 100,
 
-  // ---- charge behaviour (task 86d3k2he0: heroes RUN AT + SMASH monsters) ----
-  // When enemies are on the field the whole formation surges forward faster and
-  // further, and the swordsman sprints across the field to hit them instead of
-  // waiting in formation. These are the ONLY knobs that make the team aggressive;
-  // the non-battle (no-enemy) easing above is untouched.
-  battleAnchorLead: 130, // (was anchorLead 170) smaller lead => anchor pushes closer to the enemy line in battle
-  battleMaxAnchor: 330, // (was maxAnchor 300) anchor may ride ~30px further forward in battle, so ranged heroes visibly push up
+  // ---- charge behaviour (task 86d3k2he0 -> 86d3k2nhm: heroes RUN AT + SMASH,
+  //      whole team pushes forward at ALL times, no standing around waiting) ----
+  // When ANY enemy is alive the swordsman sprints at the nearest one and the whole
+  // formation surges deep so the ranged heroes' coverage TRAVELS with the fight.
+  // These are the ONLY knobs that make the team aggressive; the non-battle
+  // (no-enemy) easing above is untouched, and between waves the anchor now HOLDS
+  // its forward line instead of retreating (see movement.ts / waveGap handling).
+  battleAnchorLead: 150, // (86d3k2nhm: was 130) anchor tracks minEnemyX - this; sized so the anchor rides right up near the engagement line but the ranged heroes still sit a touch behind it
+  battleMaxAnchor: 510, // (86d3k2nhm: was 330; base maxAnchor 300) anchor may ride WAY forward in battle so archer/mage advance with the swordsman and their range covers the pushed-up fight
   battleAnchorSpeed: 115, // (was anchorSpeed 60) formation surges forward ~2x faster on enemy contact
-  chargeSeekRange: 560, // wide radius: the swordsman starts charging at any enemy within this (was the tight meleeSeekRange 260) — reaches freshly-spawned enemies mid-field
+  // Charge trigger is now whole-field: chargeSeekRange exceeds spawnX (860) - the
+  // deepest a hero can stand (~150), so a freshly-spawned enemy is ALWAYS in range
+  // and the swordsman charges the instant a wave appears (no wave-start idling).
+  chargeSeekRange: 900, // (86d3k2nhm: was 560) >= full-field span; effectively "any enemy alive => charge"
   chargeSpeed: 265, // sprint speed while charging a target (~1.77x heroMove 150) — the "run at them" feel
   meleeChargeLeash: 260, // loosened forward leash while a charge target exists (was meleeLeash 90) — he genuinely runs across the field
-  // Forward cap while charging. Kept only ~70px past midCap (400): charging DEEPER
-  // (tried 560) drags the engagement line right, out of the archer/mage range, and
-  // net-SLOWS clears despite better melee uptime. 470 keeps the fight inside ranged
-  // coverage (mage@~256 range 330 -> 586 >= engage@~516) while still a clear sprint
-  // past the old hold (214 start -> 470 = a 256px run). Never near spawnX (860).
-  chargeCap: 470,
+  // Forward cap while charging. Raised 470 -> 640 now that the anchor (battleMaxAnchor
+  // 510) FOLLOWS the swordsman forward: ranged coverage travels with the fight, so
+  // charging deep no longer drags the engagement line out of archer/mage range that
+  // the old 470 cap was protecting. Enemies stop ~clash(46) past the swordsman, so a
+  // fight at ~640 sits at ~686; mage@(510-74=436)+range 330 -> 766 >= 686 and
+  // archer@(510-26=484)+350 -> 834 >= 686 both still cover it. Sim-validated sweet
+  // spot (see docs/balance-m4.md). Still far short of spawnX (860).
+  chargeCap: 640,
 
   // hero engagement tuning (pulled out of the POC update loop)
   meleeSeekRange: 260, // legacy hold-formation seek radius (superseded by chargeSeekRange for the charge behaviour; kept for reference)

@@ -253,3 +253,88 @@ and there are **0 wipes** across all seeds. Only the new charge knobs were tuned
 
 Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
 src/engine/__tests__/balance-sim.ts`).
+
+---
+
+## Whole-team forward push (ClickUp 86d3k2nhm)
+
+Player feedback after the hero-charge pass: heroes **still visibly wait** — the old
+`chargeSeekRange` (560) only fired once an enemy walked in from the spawn edge
+(860), so the swordsman idled at wave start, and the `chargeCap` (470) plus a
+shallow `battleMaxAnchor` (330) kept fights inside the ranged band by keeping the
+whole team _back_. The fix: the whole field triggers the charge, the anchor rides
+**deep** so the archer/mage coverage travels WITH the fight, and the formation
+**never retreats between waves**.
+
+### Config knobs (old → new, all in `src/engine/config/index.ts`)
+
+| Knob                | Old | New | Why                                                                                                                                                                             |
+| ------------------- | --- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chargeSeekRange`   | 560 | 900 | Whole-field trigger. 900 ≥ the full span from the deepest a hero stands (~150) to `spawnX` (860), so a freshly-spawned enemy is charged the instant a wave appears — no wave-start idle. |
+| `battleMaxAnchor`   | 330 | 510 | The team pushes DEEP. Archer/mage advance with the swordsman so their range covers the pushed-up fight instead of falling behind it.                                            |
+| `battleAnchorLead`  | 130 | 150 | Anchor tracks `minEnemyX − lead`; sized so the anchor rides right up near the engagement line while the ranged heroes still sit a touch behind it.                              |
+| `chargeCap`         | 470 | 640 | Cap UNLOCKED now that the anchor (510) follows forward. The old 470 existed only to keep fights inside a _stationary_ ranged band; with coverage travelling, deep charging no longer strands the archer/mage. |
+
+Ranged-coverage re-validation at the new depth: enemies stop ~`clash` (46) past the
+swordsman, so a `chargeCap` fight at ~640 sits at ~686. mage @ (510−74=436) + range
+330 → **766 ≥ 686**; archer @ (510−26=484) + 350 → **834 ≥ 686**. Both still cover
+the deepest engagement, so the "charging deeper net-slows clears" trap from the 470
+era does **not** reappear (confirmed by the sim below — every stage got _faster_).
+
+Unchanged: `chargeSpeed` (265), `meleeChargeLeash` (260), `battleAnchorSpeed` (115),
+the ranged kite behaviour (still steps back by `rangedKiteStep` when an enemy is
+within `kiteDist`), the boss fight (boss `engageX` still derives from `frontHeroX`),
+and all M4 curves (`enemyHp`/`atk`, `bossHp`/`atk`, `UPGRADES`, `goldPerKill`,
+`killGoal`, `bossHintPowerDivisor`). No curve was touched.
+
+### No retreat between waves
+
+`updateAnchor` (`src/engine/systems/movement.ts`) previously eased the anchor back
+toward `baseAnchor` whenever the field was empty — so the team walked _backwards_
+during every `waveGap`. Now, while a stage is live (`phase === "battle"`) and no
+enemy is alive, the anchor **holds its forward line** (early-returns, no movement).
+It only eases home outside a live battle. The render layer's parallax already sells
+"journeying forward"; the formation now agrees.
+
+### Pacing: hero-charge baseline vs whole-team push (aggregate, 5 seeds, 1800 s)
+
+`charge` = the previous (86d3k2he0) table; `push` = this pass.
+
+| Stage | charge dur (s) | push dur (s) | Δ          | push wallX | push gold/min |
+| ----- | -------------- | ------------ | ---------- | ---------- | ------------- |
+| 1     | 137.1          | 106.8        | **−22.1%** | —          | 246           |
+| 2     | 72.0           | 66.2         | −8.1%      | 0.62x      | 251           |
+| 3     | 80.1           | 72.9         | −9.0%      | 1.10x      | 342           |
+| 4     | 92.5           | 75.3         | **−18.6%** | 1.03x      | 471           |
+| 5     | 103.6          | 91.2         | −12.0%     | 1.21x      | 519           |
+| 6     | 120.7          | 106.4        | −11.8%     | 1.17x      | 597           |
+| 7     | 129.9          | 116.1        | −10.6%     | 1.09x      | 682           |
+| 8     | 148.3          | 134.7        | −9.2%      | 1.16x      | 772           |
+| 9     | 743.0          | 670.6        | −9.7%      | 4.98x      | 1029          |
+
+first upgrade 11.8 → 8.1 s · first boss kill 137.1 → 106.8 s · **0 wipes** · reached
+stage 10.
+
+**Net effect:** a uniform **~8–12% speedup** across stages 2–9 (all inside the ±15%
+band), the stage-9 prestige gate preserved (5.01x → **4.98x**), the 3–8 ramp still a
+clean 1.03–1.21x, and **0 wipes**. Only the charge/anchor knobs moved — no curve.
+
+**Two intentional fast-side overshoots.** Stage 1 (−22.1%) and stage 4 (−18.6%)
+exceed the ±15% band, both _faster_, and both are the direct, desired consequence of
+the task ("eliminate every standing-around moment"), not balance drift:
+
+- **Stage 1** is the pure-swordsman stage, where the old wave-start idle (waiting for
+  each spawn to walk into the tight 560 range) was the single biggest time sink.
+  Removing it is exactly the point; the effect is trigger-bound and cannot be tuned
+  back without re-introducing the waiting (a gentler cap/anchor variant, 490/600,
+  still lands stage 1 at −18%). first-boss-kill drops 137 → 107 s, still inside the
+  2–4 min hook target.
+- **Stage 4** is the first stage where all three heroes plus the deep anchor let the
+  ranged coverage travel with a fast melee push — the "ranged advance with the fight"
+  win the task asked for. gold/min jumps 380 → 471 accordingly.
+
+The ramp shape stays smooth, the gate holds, nothing wipes, and no economy curve was
+disturbed — so these two breaches are feature, not regression.
+
+Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
+src/engine/__tests__/balance-sim.ts`).
