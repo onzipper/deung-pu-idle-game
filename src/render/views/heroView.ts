@@ -232,68 +232,79 @@ export function createHeroView(): HeroView {
   return view;
 }
 
-/** One-time geometry + color build for `cls` — never touched again after
- * this (only transforms/tint change per frame from here on). */
+/**
+ * One-time geometry + color build for `cls` — never touched again after this
+ * (only transforms/tint change per frame from here on).
+ *
+ * IMPORTANT — absolute coordinates only, even though every part below lives
+ * inside a container whose `pivot` is also non-zero (hip/shoulder/feet):
+ * Pixi's transform is `parent = position + R·(local − pivot)`. Every rig
+ * container here is set up with `pivot === position` (see `createHeroView`),
+ * which makes it a pure ROTATION-about-that-point with zero net translation
+ * at rest — Pixi already performs the `local − pivot` subtraction. Drawing a
+ * part's Graphics path pre-subtracted (e.g. `HEAD_Y - HIP_Y`) subtracts the
+ * SAME offset a second time, collapsing everything toward world y≈0 (the
+ * exact "hero parts floating near the top of the sky" bug this replaced).
+ * The fix: every coordinate below is the plain absolute constant
+ * (HIP_Y/HEAD_Y/SHOULDER_Y/GROUND_Y), identical to the old flat stick
+ * figure's numbers — verified against real Pixi bounds in
+ * `src/render/views/__tests__/rig.test.ts`.
+ */
 function buildRig(view: HeroView, cls: HeroClass): void {
   const colors = HERO_COLORS[cls];
 
   // Legs: a straight hip->foot segment each; the walk cycle swings them via
   // `.rotation` around the hip pivot set in createHeroView.
   for (const leg of [view.legBack, view.legFront]) {
-    leg.moveTo(0, 0)
-      .lineTo(0, FEET_Y - HIP_Y)
+    leg.moveTo(0, HIP_Y)
+      .lineTo(0, FEET_Y)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
   }
 
-  // Torso: spine + head (+ a mage hood/collar, POC-faithful), local coords
-  // relative to the hip pivot (upperBody.pivot = HIP_Y).
+  // Torso: spine + head (+ a mage hood/collar, POC-faithful) — absolute
+  // coordinates (upperBody.pivot = (0, HIP_Y) handles the hip-pivot rotation).
   const t = view.torso;
-  t.moveTo(0, HEAD_Y + 6 - HIP_Y)
-    .lineTo(0, 0)
+  t.moveTo(0, HEAD_Y + 6)
+    .lineTo(0, HIP_Y)
     .stroke({ width: 2.4, color: colors.body, cap: "round" });
-  t.circle(0, HEAD_Y - HIP_Y, HEAD_R).fill(colors.body);
+  t.circle(0, HEAD_Y, HEAD_R).fill(colors.body);
   if (cls === "mage") {
-    t.poly(
-      [-6, HEAD_Y - 4 - HIP_Y, 6, HEAD_Y - 4 - HIP_Y, 0, HEAD_Y - 15 - HIP_Y],
-      true,
-    ).fill(colors.body);
+    t.poly([-6, HEAD_Y - 4, 6, HEAD_Y - 4, 0, HEAD_Y - 15], true).fill(colors.body);
   }
 
-  // Off arm: a plain relaxed arm, local coords relative to the shoulder pivot.
+  // Off arm: a plain relaxed arm — absolute coordinates (shoulder pivot).
   view.offArm
-    .moveTo(0, 0)
-    .lineTo(-9, 6)
+    .moveTo(0, SHOULDER_Y)
+    .lineTo(-9, SHOULDER_Y + 6)
     .stroke({ width: 2.2, color: colors.body, cap: "round" });
 
-  // Weapon arm: class-specific arm + weapon, local coords relative to the
-  // shoulder pivot (SHOULDER_Y) — ported 1:1 from the old flat drawWeapon().
+  // Weapon arm: class-specific arm + weapon — ported 1:1 (absolute
+  // coordinates) from the old flat drawWeapon().
   const g = view.weaponArm;
   if (cls === "swordsman") {
     const bx = 12;
-    const byLocal = HEAD_Y - 2 - SHOULDER_Y;
-    g.moveTo(0, 0)
-      .lineTo(bx, byLocal)
+    const by = HEAD_Y - 2;
+    g.moveTo(0, SHOULDER_Y)
+      .lineTo(bx, by)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.moveTo(bx, byLocal)
-      .lineTo(bx + 10, byLocal - 16)
+    g.moveTo(bx, by)
+      .lineTo(bx + 10, by - 16)
       .stroke({ width: 3, color: colors.light, cap: "round" });
   } else if (cls === "archer") {
     const bx = 11;
-    const handYLocal = HEAD_Y + 4 - SHOULDER_Y;
-    g.moveTo(0, 0)
-      .lineTo(bx, handYLocal)
+    g.moveTo(0, SHOULDER_Y)
+      .lineTo(bx, HEAD_Y + 4)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.arc(bx + 3, handYLocal, 11, -1.1, 1.1).stroke({ width: 1.6, color: colors.light });
+    g.arc(bx + 3, HEAD_Y + 4, 11, -1.1, 1.1).stroke({ width: 1.6, color: colors.light });
   } else {
     const sx = 11;
-    const handYLocal = HEAD_Y + 4 - SHOULDER_Y;
-    g.moveTo(0, 0)
-      .lineTo(sx, handYLocal)
+    g.moveTo(0, SHOULDER_Y)
+      .lineTo(sx, HEAD_Y + 4)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.moveTo(sx, HEAD_Y - 14 - SHOULDER_Y)
-      .lineTo(sx, GROUND_Y - 16 - SHOULDER_Y)
+    g.moveTo(sx, HEAD_Y - 14)
+      .lineTo(sx, GROUND_Y - 16)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.circle(sx, HEAD_Y - 16 - SHOULDER_Y, safeRadius(5)).fill({
+    g.circle(sx, HEAD_Y - 16, safeRadius(5)).fill({
       color: colors.light,
       alpha: 0.9,
     });

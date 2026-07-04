@@ -190,7 +190,9 @@ export class GameRenderer {
 
     // Enemies list is empty during the boss phase (the sim clears it on entry).
     this.enemyPool.beginFrame();
-    for (const e of state.enemies) updateEnemyView(this.enemyPool.get(e.id), e);
+    for (const e of state.enemies) {
+      updateEnemyView(this.enemyPool.get(e.id), e, { dt, events: frameEvents });
+    }
     this.enemyPool.endFrame();
 
     if (state.boss) {
@@ -198,7 +200,7 @@ export class GameRenderer {
         this.bossView = createBossView();
         this.layers.entities.addChild(this.bossView);
       }
-      updateBossView(this.bossView, state.boss, elapsedMs);
+      updateBossView(this.bossView, state.boss, { elapsedMs, dt, events: frameEvents });
       this.currentBossId = state.boss.id;
     } else if (this.bossView) {
       this.layers.entities.removeChild(this.bossView);

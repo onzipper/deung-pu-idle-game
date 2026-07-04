@@ -21,6 +21,8 @@ import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { HERO_COLORS, PALETTE } from "@/render/theme";
 import { ArenaFlash } from "@/render/fx/arenaFlash";
+import { BossEcho } from "@/render/fx/bossEcho";
+import { CorpseEchoPool } from "@/render/fx/corpseEcho";
 import { FloatingTextPool } from "@/render/fx/floatingText";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { burst, ParticlePool, shower } from "@/render/fx/particles";
@@ -48,10 +50,13 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 export class FxController {
+  private readonly corpseLayer: Container;
   private readonly ringsLayer: Container;
   private readonly particlesLayer: Container;
   private readonly textLayer: Container;
 
+  private readonly corpseEcho: CorpseEchoPool;
+  private readonly bossEcho = new BossEcho();
   private readonly rings: RingPool;
   private readonly particles: ParticlePool;
   private readonly damageNumbers: FloatingTextPool;
@@ -67,20 +72,22 @@ export class FxController {
     fxContainer: Container,
     private readonly lookupView: EntityViewLookup,
   ) {
-    // Sub-layers in z-order: rings (bottom) -> particles -> text -> full-arena
-    // flash (top), so numbers stay readable over bursts and the flash never
-    // hides them.
+    // Sub-layers in z-order: corpse echoes (bottom, "the body collapsing")
+    // -> rings -> particles -> text -> full-arena flash (top), so numbers
+    // stay readable over bursts and the flash never hides them.
+    this.corpseLayer = new PixiContainer();
     this.ringsLayer = new PixiContainer();
     this.particlesLayer = new PixiContainer();
     this.textLayer = new PixiContainer();
-    fxContainer.addChild(this.ringsLayer, this.particlesLayer, this.textLayer);
+    fxContainer.addChild(this.corpseLayer, this.ringsLayer, this.particlesLayer, this.textLayer);
 
+    this.corpseEcho = new CorpseEchoPool(this.corpseLayer);
     this.rings = new RingPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
     this.damageNumbers = new FloatingTextPool(this.textLayer, DAMAGE_NUMBER_CAP);
     this.eventText = new FloatingTextPool(this.textLayer, EVENT_TEXT_CAP);
     this.flash = new ArenaFlash(WORLD_WIDTH, WORLD_HEIGHT);
-    fxContainer.addChild(this.flash.view);
+    fxContainer.addChild(this.bossEcho.view, this.flash.view);
   }
 
   get shakeOffset(): { x: number; y: number } {
@@ -151,6 +158,10 @@ export class FxController {
             life: 0.4,
             radius: 3,
           });
+          // `state.boss` is already null by the time this event is seen (the
+          // live BossView is destroyed this same frame) — the turn-away
+          // slide-out plays on this one-shot echo instead (see bossEcho.ts).
+          this.bossEcho.trigger("retreat", ev.x, BOSS_CY);
           break;
         case "waveSpawn":
           burst(this.particles, CONFIG.spawnX, GROUND_Y - 16, 6, PALETTE.muted, {
@@ -172,6 +183,8 @@ export class FxController {
   update(dt: number): void {
     this.hitFlash.update(dt);
     this.shake.update(dt);
+    this.corpseEcho.update(dt);
+    this.bossEcho.update(dt);
     this.rings.update(dt);
     this.particles.update(dt);
     this.damageNumbers.update(dt);
@@ -181,11 +194,14 @@ export class FxController {
 
   destroy(): void {
     this.hitFlash.destroy();
+    this.corpseEcho.destroy();
+    this.bossEcho.destroy();
     this.rings.destroy();
     this.particles.destroy();
     this.damageNumbers.destroy();
     this.eventText.destroy();
     this.flash.destroy();
+    this.corpseLayer.destroy();
     this.ringsLayer.destroy();
     this.particlesLayer.destroy();
     this.textLayer.destroy();
@@ -257,6 +273,11 @@ export class FxController {
       duration: 0.7,
       rise: 34,
     });
+    // The engine removes the dead enemy from state this same step, so
+    // `enemyView.ts`'s pooled view is already gone — this brief crumple
+    // echo (kept subtle; the burst above already covers the "impact") is
+    // the render-side stand-in for a death animation.
+    this.corpseEcho.spawn(ev.x, GROUND_Y - 4, ev.kind, size);
   }
 
   private onHeroRevived(ev: Extract<GameEvent, { type: "heroRevived" }>): void {
@@ -319,6 +340,10 @@ export class FxController {
       duration: 1.1,
       rise: 46,
     });
+    // `state.boss` is already null by the time this event is seen (the live
+    // BossView is destroyed this same frame) — the collapse-forward plays on
+    // this one-shot echo instead (see bossEcho.ts).
+    this.bossEcho.trigger("defeat", ev.x, BOSS_CY);
   }
 
   /** Best-effort "above the head" y for a hit's damage number (entities are
