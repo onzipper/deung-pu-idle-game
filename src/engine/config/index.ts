@@ -7,12 +7,7 @@
  * stage number `n`, exactly as the POC wrote them.
  */
 
-import type {
-  HeroClass,
-  EnemyKind,
-  AttackKind,
-  EnemyBehavior,
-} from "@/engine/entities";
+import type { HeroClass, EnemyKind, AttackKind, EnemyBehavior } from "@/engine/entities";
 
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
@@ -76,11 +71,23 @@ export const CONFIG = {
 
   // ---- curves (functions of stage n), verbatim from the POC ----
   killGoal: (n: number): number => 10 + n * 5,
-  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.23, n - 1)),
+  // M4 tune: HP scaling exponent 1.23 -> 1.20. `heroAtk` is ADDITIVE
+  // (base*(1+per*level)) while enemy/boss HP is GEOMETRIC, so the atk level (and
+  // its geometric cost) needed to keep pace grows super-linearly with stage — a
+  // wall is structurally unavoidable. 1.20 is identical at stage 1 (exp 0) and
+  // only bends the LATE curve down, buying ~1 extra smooth stage and lowering the
+  // wall's height without touching the early-game feel. Same base is reused for
+  // bossHp, so the boss-power target (rec = bossHp / divisor) softens in lockstep.
+  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1)),
   enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1)),
-  bossHp: (n: number): number => Math.round(25 * Math.pow(1.23, n - 1) * 16),
+  bossHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * 16),
   bossAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * 2.1),
-  goldPerKill: (n: number): number => 5 + n * 2,
+  // M4 tune: gold/kill was purely linear (5 + 2n) while upgrade costs are
+  // geometric, so late stages starved and the wall spiked. A gentle 1.05^(n-1)
+  // multiplier keeps stage 1-3 values effectively unchanged (7, 9, 12 vs 7, 9,
+  // 11) but lets income track the cost curve deeper, converting the old stage-8
+  // stall into a comfortable stage and pushing the hard stall out to stage 9.
+  goldPerKill: (n: number): number => Math.round((5 + n * 2) * Math.pow(1.05, n - 1)),
   goldPerBoss: (n: number): number => 50 + n * 20,
 
   // ---- spatial layout ----
@@ -273,7 +280,14 @@ export const UPGRADES: {
   speed: UpgradeLine;
   hp: UpgradeLine;
 } = {
-  atk: { base: 25, growth: 1.45, per: 0.12 },
+  // M4 tune: atk growth 1.45 -> 1.38. atk is the boss-gating stat (team power =
+  // sum of heroAtk), so its high-level cost is what builds the wall. 1.38 barely
+  // moves L0-3 costs (25/35/48/66 vs 25/36/53/76) but roughly halves L12+ costs,
+  // softening the stage-9 wall (~7.5x -> ~4.9x) and shaving stage 1. It also makes
+  // atk the cheapest-GROWTH line, so the cheapest-first auto-buy funnels a bit
+  // more into the stat that actually advances the boss gate — without starving hp
+  // /speed (final mix stays ~atk 40% / hp 33% / speed 27%, no dominant line).
+  atk: { base: 25, growth: 1.38, per: 0.12 },
   speed: { base: 32, growth: 1.55, per: 0.06 },
   hp: { base: 22, growth: 1.48, per: 0.15 },
 };
