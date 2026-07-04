@@ -196,3 +196,60 @@ SEEDS=7,8,9 pnpm sim           # different RNG streams
 
 Output = per-seed table + a cross-seed AGGREGATE table + PACING FLAGS + a
 `SIM_JSON {...}` line for tooling.
+
+---
+
+## Hero charge (ClickUp 86d3k2he0)
+
+Player feedback: _"I want our heroes to RUN AT and SMASH the monsters."_ The old
+movement had the team hold a formation anchor mid-left and wait for enemies to
+walk in. This pass makes the **swordsman sprint across the field** at any enemy in
+a wide seek range, and makes the **whole formation surge forward** on contact so
+the ranged heroes visibly push up too (they keep their kite behaviour).
+
+### New config knobs (all in `src/engine/config/index.ts`)
+
+| Knob                | Value | Meaning                                                                                              |
+| ------------------- | ----- | ---------------------------------------------------------------------------------------------------- |
+| `battleAnchorLead`  | 130   | Anchor lead while enemies present (was `anchorLead` 170) — formation rides closer to the enemy line. |
+| `battleMaxAnchor`   | 330   | Anchor forward cap in battle (was `maxAnchor` 300) — ranged heroes push ~30px further up.             |
+| `battleAnchorSpeed` | 115   | Anchor ease speed in battle (was `anchorSpeed` 60) — the team surges forward ~2x faster on contact.  |
+| `chargeSeekRange`   | 560   | Swordsman starts charging at any enemy within this (was the tight `meleeSeekRange` 260).              |
+| `chargeSpeed`       | 265   | Sprint speed while charging (~1.77x `heroMove` 150) — the "run at them" feel.                         |
+| `meleeChargeLeash`  | 260   | Loosened forward leash while a charge target exists (was `meleeLeash` 90).                            |
+| `chargeCap`         | 470   | Hard forward cap while charging (~70px past `midCap` 400; far short of `spawnX` 860).                 |
+
+The non-battle (no-enemy) easing knobs (`maxAnchor` / `anchorSpeed` / `anchorLead`)
+are untouched — the formation still eases calmly home between waves.
+
+**Why `chargeCap` is only 470, not deeper.** A first pass used `chargeCap = 560`.
+Charging that deep drags the engagement line to the right, **out of the archer/mage
+range** (mage @ ~256 reaches ~586; a fight at ~606 falls outside it), so the team
+loses ranged DPS and clears got _slower_ despite better melee uptime — stage 3 went
+**+17% vs the M4 baseline**. Pulling the cap back to 470 keeps the fight inside
+ranged coverage while still a clear sprint past the old hold (214 start → 470 = a
+256px run). The swordsman still visibly runs across the field and smashes.
+
+### Pacing: M4 baseline vs hero-charge (aggregate, 5 seeds, 1800 s)
+
+| Stage | M4 dur (s) | charge dur (s) | Δ      | charge wallX | charge gold/min |
+| ----- | ---------- | -------------- | ------ | ------------ | --------------- |
+| 1     | 150.0      | 137.1          | −8.6%  | —            | 190             |
+| 2     | 79.3       | 72.0           | −9.2%  | 0.53x        | 226             |
+| 3     | 85.4       | 80.1           | −6.2%  | 1.11x        | 309             |
+| 4     | 100.2      | 92.5           | −7.7%  | 1.16x        | 380             |
+| 5     | 111.0      | 103.6          | −6.7%  | 1.12x        | 453             |
+| 6     | 130.4      | 120.7          | −7.4%  | 1.16x        | 522             |
+| 7     | 141.1      | 129.9          | −7.9%  | 1.08x        | 612             |
+| 8     | 157.8      | 148.3          | −6.0%  | 1.14x        | 696             |
+| 9     | 775.4      | 743.0          | −4.2%  | 5.01x        | 928             |
+
+**Net effect:** a uniform **4–9% speedup at every stage** — the "faster clears from
+better melee uptime" the task anticipated, and well inside the ±15% band, so no
+compensating change to the M4-tuned curves (`enemyHp`/`atk`, `UPGRADES`,
+`goldPerKill`, `killGoal`, `bossHintPowerDivisor`) was needed. The stage-3–8 ramp
+stays a clean 1.08–1.16x, the stage-9 prestige gate is preserved (4.91x → 5.01x),
+and there are **0 wipes** across all seeds. Only the new charge knobs were tuned.
+
+Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
+src/engine/__tests__/balance-sim.ts`).

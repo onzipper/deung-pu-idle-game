@@ -109,21 +109,31 @@ export function updateHeroes(state: GameState): void {
     const homeX = state.anchorX + t.offset;
 
     if (t.attack === "melee") {
-      const tgt = nearestWithin(targets, h.x, CONFIG.meleeSeekRange);
-      let goalX = homeX;
-      if (tgt) {
-        const d = tgt.x - h.x;
+      // CHARGE: if any enemy is within the wide charge-seek range, sprint at it
+      // (chargeSpeed) with a loosened forward leash (meleeChargeLeash / chargeCap)
+      // so the swordsman genuinely runs across the field to smash it. With nothing
+      // in charge range he falls back to the calm hold-formation walk (heroMove,
+      // tight meleeLeash / midCap) toward his home slot.
+      const chargeTgt = nearestWithin(targets, h.x, CONFIG.chargeSeekRange);
+      let goalX: number;
+      let moveSpeed: number;
+      let upperCap: number;
+      if (chargeTgt) {
+        const d = chargeTgt.x - h.x;
         goalX =
           Math.abs(d) > CONFIG.meleeStopGap
-            ? tgt.x + (d > 0 ? -CONFIG.meleeApproachGap : CONFIG.meleeApproachGap)
+            ? chargeTgt.x +
+              (d > 0 ? -CONFIG.meleeApproachGap : CONFIG.meleeApproachGap)
             : h.x;
+        moveSpeed = CONFIG.chargeSpeed;
+        upperCap = Math.min(homeX + CONFIG.meleeChargeLeash, CONFIG.chargeCap);
+      } else {
+        goalX = homeX;
+        moveSpeed = CONFIG.heroMove;
+        upperCap = Math.min(homeX + CONFIG.meleeLeash, CONFIG.midCap);
       }
-      goalX = clamp(
-        goalX,
-        homeX - CONFIG.meleeHomeBack,
-        Math.min(homeX + CONFIG.meleeLeash, CONFIG.midCap),
-      );
-      h.x += clamp(goalX - h.x, -CONFIG.heroMove * FIXED_DT, CONFIG.heroMove * FIXED_DT);
+      goalX = clamp(goalX, homeX - CONFIG.meleeHomeBack, upperCap);
+      h.x += clamp(goalX - h.x, -moveSpeed * FIXED_DT, moveSpeed * FIXED_DT);
     } else {
       const near = nearestAny(targets, h.x);
       let goalX =

@@ -28,8 +28,8 @@ export const CONFIG = {
 
   // ---- formation / movement ----
   baseAnchor: 180,
-  maxAnchor: 300,
-  anchorSpeed: 60,
+  maxAnchor: 300, // anchor upper clamp when NO enemies are present (easing home)
+  anchorSpeed: 60, // anchor ease speed when NO enemies present
   /** Anchor tracks (min enemy x - anchorLead), clamped to [baseAnchor,maxAnchor]. */
   anchorLead: 170,
   heroMove: 150,
@@ -38,8 +38,26 @@ export const CONFIG = {
   meleeLeash: 90,
   kiteDist: 100,
 
+  // ---- charge behaviour (task 86d3k2he0: heroes RUN AT + SMASH monsters) ----
+  // When enemies are on the field the whole formation surges forward faster and
+  // further, and the swordsman sprints across the field to hit them instead of
+  // waiting in formation. These are the ONLY knobs that make the team aggressive;
+  // the non-battle (no-enemy) easing above is untouched.
+  battleAnchorLead: 130, // (was anchorLead 170) smaller lead => anchor pushes closer to the enemy line in battle
+  battleMaxAnchor: 330, // (was maxAnchor 300) anchor may ride ~30px further forward in battle, so ranged heroes visibly push up
+  battleAnchorSpeed: 115, // (was anchorSpeed 60) formation surges forward ~2x faster on enemy contact
+  chargeSeekRange: 560, // wide radius: the swordsman starts charging at any enemy within this (was the tight meleeSeekRange 260) — reaches freshly-spawned enemies mid-field
+  chargeSpeed: 265, // sprint speed while charging a target (~1.77x heroMove 150) — the "run at them" feel
+  meleeChargeLeash: 260, // loosened forward leash while a charge target exists (was meleeLeash 90) — he genuinely runs across the field
+  // Forward cap while charging. Kept only ~70px past midCap (400): charging DEEPER
+  // (tried 560) drags the engagement line right, out of the archer/mage range, and
+  // net-SLOWS clears despite better melee uptime. 470 keeps the fight inside ranged
+  // coverage (mage@~256 range 330 -> 586 >= engage@~516) while still a clear sprint
+  // past the old hold (214 start -> 470 = a 256px run). Never near spawnX (860).
+  chargeCap: 470,
+
   // hero engagement tuning (pulled out of the POC update loop)
-  meleeSeekRange: 260, // nearestWithin radius when a melee hero looks for a target
+  meleeSeekRange: 260, // legacy hold-formation seek radius (superseded by chargeSeekRange for the charge behaviour; kept for reference)
   meleeStopGap: 34, // |d| > this => approach, else hold
   meleeApproachGap: 26, // stop this far short of the target
   meleeHomeBack: 60, // lower clamp = homeX - this
