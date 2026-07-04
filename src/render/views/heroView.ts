@@ -254,61 +254,223 @@ function buildRig(view: HeroView, cls: HeroClass): void {
   const colors = HERO_COLORS[cls];
 
   // Legs: a straight hip->foot segment each; the walk cycle swings them via
-  // `.rotation` around the hip pivot set in createHeroView.
+  // `.rotation` around the hip pivot set in createHeroView. A small
+  // shade-tone boot cap at the foot keeps the silhouette from just fading to
+  // a bare line tip.
   for (const leg of [view.legBack, view.legFront]) {
-    leg.moveTo(0, HIP_Y)
+    leg
+      .moveTo(0, HIP_Y)
       .lineTo(0, FEET_Y)
-      .stroke({ width: 2.4, color: colors.body, cap: "round" });
+      .stroke({ width: 2.6, color: colors.body, cap: "round" });
+    leg
+      .moveTo(-1.6, FEET_Y)
+      .lineTo(1.6, FEET_Y)
+      .stroke({ width: 2.6, color: colors.shade, cap: "round" });
   }
 
-  // Torso: spine + head (+ a mage hood/collar, POC-faithful) — absolute
-  // coordinates (upperBody.pivot = (0, HIP_Y) handles the hip-pivot rotation).
+  // Torso: class-specific armor/robe/cloak block (drawn first, so it sits
+  // BEHIND the spine+head below), then the shared spine+head, then a
+  // class-specific head topper (helm/hood/hat) + minimal face. All absolute
+  // coordinates — `upperBody.pivot = (0, HIP_Y)` handles the hip rotation;
+  // every extra shape here is just another draw call into the SAME `torso`
+  // Graphics (no new display objects — build-once/transform-only per the
+  // module doc comment).
   const t = view.torso;
+
+  if (cls === "swordsman") {
+    // Chest plate + pauldrons — flat armor block over the spine.
+    t.roundRect(-4, SHOULDER_Y - 1, 8, HIP_Y - SHOULDER_Y - 3, 2)
+      .fill(colors.light)
+      .stroke({ width: 1, color: PALETTE.outline, alpha: 0.5 });
+    t.circle(-4.5, SHOULDER_Y, 3.2).fill(colors.light);
+    t.circle(4.5, SHOULDER_Y, 3.2).fill(colors.light);
+  } else if (cls === "archer") {
+    // Cloak drape (back triangle) + quiver + fletching pokes, drawn first so
+    // the spine/hood render on top of it.
+    t.poly([-6, SHOULDER_Y, -10, HIP_Y - 2, -2, HIP_Y + 2, 2, SHOULDER_Y + 2], true).fill({
+      color: colors.shade,
+      alpha: 0.9,
+    });
+    t.moveTo(-8, SHOULDER_Y - 2)
+      .lineTo(-4, SHOULDER_Y - 15)
+      .stroke({ width: 4, color: colors.shade, cap: "round" });
+    t.moveTo(-4, SHOULDER_Y - 15)
+      .lineTo(-2.5, SHOULDER_Y - 20)
+      .stroke({ width: 1.2, color: colors.light, cap: "round" });
+    t.moveTo(-4, SHOULDER_Y - 14)
+      .lineTo(-5.5, SHOULDER_Y - 19)
+      .stroke({ width: 1.2, color: colors.light, cap: "round" });
+  } else {
+    // Robe body — wide hem stopping above the knee so leg-swing stays
+    // legible under it — plus a belt/sash at the waist.
+    const hemY = HIP_Y + (FEET_Y - HIP_Y) * 0.45;
+    t.poly([-3, SHOULDER_Y, 3, SHOULDER_Y, 9, hemY, -9, hemY], true).fill(colors.body);
+    t.moveTo(-9, hemY)
+      .lineTo(9, hemY)
+      .stroke({ width: 1.4, color: colors.light, alpha: 0.8, cap: "round" });
+    t.roundRect(-6, HIP_Y - 3, 12, 3, 1).fill(colors.shade);
+    t.circle(0, HIP_Y - 1.5, 1.3).fill(colors.light);
+  }
+
   t.moveTo(0, HEAD_Y + 6)
     .lineTo(0, HIP_Y)
-    .stroke({ width: 2.4, color: colors.body, cap: "round" });
+    .stroke({ width: 2.6, color: colors.body, cap: "round" });
   t.circle(0, HEAD_Y, HEAD_R).fill(colors.body);
-  if (cls === "mage") {
-    t.poly([-6, HEAD_Y - 4, 6, HEAD_Y - 4, 0, HEAD_Y - 15], true).fill(colors.body);
+
+  if (cls === "swordsman") {
+    // Two-tone open-face helm: a light cap over the top half of the head, a
+    // short plume, and a thin visor-slit — minimal "there's a face" cue.
+    t.poly(arcFanPoints(0, HEAD_Y, HEAD_R + 1, Math.PI, Math.PI * 2), true).fill(colors.light);
+    t.poly(
+      [-2, HEAD_Y - HEAD_R - 1, 2, HEAD_Y - HEAD_R - 1, 0, HEAD_Y - HEAD_R - 8],
+      true,
+    ).fill(colors.light);
+    t.moveTo(-3, HEAD_Y + 1)
+      .lineTo(3, HEAD_Y + 1)
+      .stroke({ width: 1.3, color: PALETTE.outline, alpha: 0.7, cap: "round" });
+  } else if (cls === "archer") {
+    // Hood: a shaded back-peak layered behind a body-tone rim, a shadowed
+    // "face pocket", and a pair of eye dots peeking out on the +x
+    // (heroes-face-right) side.
+    t.poly(
+      [
+        -HEAD_R - 2,
+        HEAD_Y + 2,
+        HEAD_R - 2,
+        HEAD_Y + 2,
+        HEAD_R,
+        HEAD_Y - HEAD_R - 1,
+        -1,
+        HEAD_Y - HEAD_R - 7,
+        -HEAD_R - 5,
+        HEAD_Y - 3,
+      ],
+      true,
+    ).fill(colors.shade);
+    t.circle(0, HEAD_Y, HEAD_R + 1).fill(colors.body);
+    t.circle(HEAD_R * 0.3, HEAD_Y + 1, HEAD_R * 0.6).fill({ color: colors.shade, alpha: 0.6 });
+    t.circle(HEAD_R * 0.55, HEAD_Y - 1, 1).fill(PALETTE.outline);
+    t.circle(HEAD_R * 0.55, HEAD_Y + 2, 1).fill(PALETTE.outline);
+  } else {
+    // Pointed hat: flat brim + a forward-leaning cone + a thin band, plus a
+    // peeking pair of eye dots below the brim.
+    t.poly([-10, HEAD_Y + 1, 10, HEAD_Y + 1, 8, HEAD_Y + 3, -8, HEAD_Y + 3], true).fill(
+      colors.shade,
+    );
+    t.poly([-6, HEAD_Y - 3, 6, HEAD_Y - 3, 1, HEAD_Y - 22], true).fill(colors.body);
+    t.moveTo(-4, HEAD_Y - 9)
+      .lineTo(4, HEAD_Y - 9)
+      .stroke({ width: 1.3, color: colors.light, alpha: 0.8 });
+    t.circle(-1, HEAD_Y, 1).fill(PALETTE.outline);
+    t.circle(3, HEAD_Y, 1).fill(PALETTE.outline);
   }
 
   // Off arm: a plain relaxed arm — absolute coordinates (shoulder pivot).
+  // Swordsman also gets a small shield strapped to it (off-hand block).
   view.offArm
     .moveTo(0, SHOULDER_Y)
     .lineTo(-9, SHOULDER_Y + 6)
     .stroke({ width: 2.2, color: colors.body, cap: "round" });
+  if (cls === "swordsman") {
+    view.offArm
+      .roundRect(-13.5, SHOULDER_Y + 1, 7, 11, 2)
+      .fill(colors.body)
+      .stroke({ width: 1, color: PALETTE.outline, alpha: 0.5 });
+    view.offArm.circle(-10, SHOULDER_Y + 6.5, 1.4).fill(colors.light);
+  }
 
-  // Weapon arm: class-specific arm + weapon — ported 1:1 (absolute
-  // coordinates) from the old flat drawWeapon().
+  // Weapon arm: class-specific arm + weapon — absolute coordinates
+  // (shoulder pivot), same convention as everything above.
   const g = view.weaponArm;
   if (cls === "swordsman") {
     const bx = 12;
     const by = HEAD_Y - 2;
     g.moveTo(0, SHOULDER_Y)
       .lineTo(bx, by)
-      .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.moveTo(bx, by)
-      .lineTo(bx + 10, by - 16)
-      .stroke({ width: 3, color: colors.light, cap: "round" });
+      .stroke({ width: 2.6, color: colors.body, cap: "round" });
+    // Big sword: a tapered blade poly (reads as a blade, not a stick) with a
+    // distinct crossguard perpendicular to it. Tip position is mirrored in
+    // `SWORD_TIP_LOCAL` below (the weapon-trail hook) — keep them in sync.
+    const tipX = bx + 12;
+    const tipY = by - 20;
+    const dx = tipX - bx;
+    const dy = tipY - by;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = dx / len;
+    const ny = dy / len;
+    const px = -ny;
+    const py = nx;
+    const halfW = 2.2;
+    g.poly(
+      [bx + px * halfW, by + py * halfW, tipX, tipY, bx - px * halfW, by - py * halfW],
+      true,
+    ).fill(PALETTE.steel);
+    g.moveTo(bx - px * 5, by - py * 5)
+      .lineTo(bx + px * 5, by + py * 5)
+      .stroke({ width: 2.2, color: colors.light, cap: "round" });
   } else if (cls === "archer") {
     const bx = 11;
+    const cx = bx + 3;
+    const cy = HEAD_Y + 4;
+    const r = 13;
     g.moveTo(0, SHOULDER_Y)
-      .lineTo(bx, HEAD_Y + 4)
+      .lineTo(bx, cy)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.arc(bx + 3, HEAD_Y + 4, 11, -1.1, 1.1).stroke({ width: 1.6, color: colors.light });
+    g.arc(cx, cy, r, -1.1, 1.1).stroke({ width: 1.8, color: colors.light });
+    const p1x = cx + r * Math.cos(-1.1);
+    const p1y = cy + r * Math.sin(-1.1);
+    const p2x = cx + r * Math.cos(1.1);
+    const p2y = cy + r * Math.sin(1.1);
+    // Bowstring (chord), pulled back slightly toward -x — "always under
+    // tension" per the rest-angle tuning above — plus a nocked arrow aimed
+    // forward (+x, the facing direction).
+    const stringX = cx - r * 0.15;
+    g.moveTo(p1x, p1y)
+      .lineTo(stringX, cy)
+      .lineTo(p2x, p2y)
+      .stroke({ width: 1, color: PALETTE.steel, alpha: 0.8 });
+    g.moveTo(stringX, cy)
+      .lineTo(stringX + 15, cy)
+      .stroke({ width: 1.4, color: colors.light, cap: "round" });
+    g.poly([stringX + 15, cy - 2, stringX + 19, cy, stringX + 15, cy + 2], true).fill(
+      PALETTE.steel,
+    );
   } else {
     const sx = 11;
     g.moveTo(0, SHOULDER_Y)
       .lineTo(sx, HEAD_Y + 4)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.moveTo(sx, HEAD_Y - 14)
+    g.moveTo(sx, HEAD_Y - 18)
       .lineTo(sx, GROUND_Y - 16)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.circle(sx, HEAD_Y - 16, safeRadius(5)).fill({
-      color: colors.light,
-      alpha: 0.9,
+    // Crystal head: layered flat-alpha "glow" rings (no gradients) around a
+    // bright core — the cast "pulse" scales `weaponArm` as a whole, so the
+    // glow breathes with it for free.
+    g.circle(sx, HEAD_Y - 20, safeRadius(7)).fill({ color: colors.light, alpha: 0.16 });
+    g.circle(sx, HEAD_Y - 20, safeRadius(5)).fill({ color: colors.light, alpha: 0.32 });
+    g.circle(sx, HEAD_Y - 20, safeRadius(3)).fill({ color: colors.light, alpha: 0.95 });
+    g.circle(sx, HEAD_Y - 20, safeRadius(3)).stroke({
+      width: 1,
+      color: PALETTE.outline,
+      alpha: 0.5,
     });
   }
+}
+
+/** Sampled points around a circular arc, for use with `Graphics.poly()` —
+ * deliberately NOT `Graphics.arc().fill()`: an arc has no explicit start
+ * `moveTo`, and filling one collapses the shape toward the path's stale
+ * pen position (world-origin-ish) instead of the arc's own coordinates.
+ * `poly()` always builds a fully explicit, self-contained closed shape, so
+ * it can't inherit garbage from whatever was drawn immediately before it. */
+function arcFanPoints(cx: number, cy: number, r: number, start: number, end: number): number[] {
+  const segments = 8;
+  const pts: number[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = start + ((end - start) * i) / segments;
+    pts.push(cx + r * Math.cos(angle), cy + r * Math.sin(angle));
+  }
+  return pts;
 }
 
 function clamp01(v: number): number {
@@ -563,8 +725,8 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
 
 /** Fixed LOCAL point (within `weaponArm`'s own coordinate frame) at the
  * blade tip — must track the segment drawn in `buildRig`'s swordsman branch
- * (`bx=12, by=HEAD_Y-2`; tip at `bx+10, by-16`). */
-const SWORD_TIP_LOCAL = { x: 22, y: HEAD_Y - 18 };
+ * (`bx=12, by=HEAD_Y-2`; tip at `bx+12, by-20`). */
+const SWORD_TIP_LOCAL = { x: 24, y: HEAD_Y - 22 };
 
 /**
  * World-space (i.e. `view.parent`-relative — the same logical coordinate

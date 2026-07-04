@@ -1,15 +1,17 @@
 /**
- * Boss view: big hexagon body + a procedural rig giving it a heavy, readable
- * presence — slow stomping advance, an unmistakable slam wind-up "tell" that
- * peaks exactly when the telegraph ends, a permanent enrage scale-up +
- * tremor, and small attack/crush beats.
+ * Boss view: big hexagon body — topped with a crown/horns, armor-plate
+ * seams, and menacing eyes (PROCEDURAL V2, task 86d3k2nj3) — + a procedural
+ * rig giving it a heavy, readable presence — slow stomping advance, an
+ * unmistakable slam wind-up "tell" that peaks exactly when the telegraph
+ * ends, a permanent enrage scale-up + tremor, and small attack/crush beats.
  *
  *   BossView (Container, position = boss.x + lunge, each frame)
  *   └── bodyRoot (Container, pivot+position = (0, GROUND_Y) — ground pivot for
  *       bob/lean/windup-raise/crush-squash/enrage-scale composition)
  *       ├── enrageAura (Graphics, redrawn every frame — continuous state)
  *       ├── telegraphRing (Graphics, redrawn every frame — continuous state)
- *       └── body (Graphics, redrawn every frame — continuous state; hexagon)
+ *       └── body (Graphics, redrawn every frame — continuous state; hexagon
+ *           + crown/horns + plate seams + eyes, all one Graphics)
  *
  * `body`/`enrageAura`/`telegraphRing` already redrew from scratch every frame
  * BEFORE this rig existed (their color/radius pulse off `boss.telegraph`/
@@ -256,10 +258,41 @@ export function updateBossView(view: BossView, boss: Boss, ctx: BossFrameContext
       .stroke({ width: 5, color: PALETTE.enrageAura, alpha: auraPulse });
   }
 
+  // PROCEDURAL V2 (task 86d3k2nj3): crown/horns + armor-plate seams +
+  // menacing eyes, layered onto the same continuously-redrawn hexagon body
+  // (see the module doc comment for why this redraws every frame rather
+  // than build-once — it already did, before this task). Horns/eyes tint to
+  // `PALETTE.enrageAura` while enraged so the menace reads at a glance, on
+  // top of the existing body-color/aura enrage tells.
+  const menaceColor = boss.enraged ? PALETTE.enrageAura : PALETTE.bossLight;
+
   const g = view.body;
   g.clear();
   g.regularPoly(0, CY, r, 6, Math.PI / 6).fill(color);
+  // Armor-plate seams — flat-alpha lines across the hexagon face.
+  g.moveTo(-r * 0.55, CY - r * 0.32)
+    .lineTo(r * 0.55, CY - r * 0.32)
+    .stroke({ width: 2, color: 0x000000, alpha: 0.22 });
+  g.moveTo(-r * 0.4, CY + r * 0.28)
+    .lineTo(r * 0.4, CY + r * 0.28)
+    .stroke({ width: 2, color: 0x000000, alpha: 0.18 });
+  // Horns + a small crown spike, rising off the top of the hexagon.
+  g.poly(
+    [-r * 0.32, CY - r * 0.85, -r * 0.52, CY - r * 1.55, -r * 0.1, CY - r * 0.95],
+    true,
+  ).fill(menaceColor);
+  g.poly(
+    [r * 0.32, CY - r * 0.85, r * 0.52, CY - r * 1.55, r * 0.1, CY - r * 0.95],
+    true,
+  ).fill(menaceColor);
+  g.poly([-r * 0.1, CY - r * 0.95, r * 0.1, CY - r * 0.95, 0, CY - r * 1.3], true).fill(
+    PALETTE.bossLight,
+  );
   g.circle(0, CY, 10).fill(PALETTE.arenaSky);
+  // Menacing eyes — brighten/redden with the enrage/telegraph state.
+  const eyeColor = boss.telegraph > 0 || boss.enraged ? PALETTE.warn : PALETTE.bossLight;
+  g.circle(-4, CY - 2, 2).fill(eyeColor);
+  g.circle(4, CY - 2, 2).fill(eyeColor);
 
   const ring = view.telegraphRing;
   ring.clear();

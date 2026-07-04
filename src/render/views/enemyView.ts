@@ -1,6 +1,10 @@
 /**
- * Enemy view: kind-specific silhouette + a small procedural rig giving each
- * kind its own movement "personality." Rigs stay deliberately simpler than
+ * Enemy view: kind-specific silhouette (PROCEDURAL V2, task 86d3k2nj3 —
+ * `normal` upright wedge w/ a plain double-eyed brow, `fast` a distinct low
+ * sleek silhouette w/ an angry eye-slit, `tank` an armored block w/ plate
+ * seams + heavy jaw, `ranged` a hooded kite w/ glowing eyes + a visible
+ * weapon tip) + a small procedural rig giving each kind its own movement
+ * "personality." Rigs stay deliberately simpler than
  * `heroView.ts` (many enemies can be on screen at once): body + legs + one
  * accent limb + HP bar, built ONCE per id (first sight — same pooling
  * contract as before), transform-only per frame after that.
@@ -33,7 +37,7 @@ import { Container, Graphics } from "pixi.js";
 import type { Enemy, EnemyKind } from "@/engine/entities";
 import type { GameEvent } from "@/engine/state";
 import { GROUND_Y } from "@/render/layout";
-import { ENEMY_COLORS, safeRadius } from "@/render/theme";
+import { ENEMY_COLORS, PALETTE, safeRadius } from "@/render/theme";
 import { drawHpBar } from "@/render/views/hpBar";
 
 // ---------------------------------------------------------------------------
@@ -182,7 +186,14 @@ function frontPoint(kind: EnemyKind, size: number): { x: number; y: number } {
 }
 
 /** (Re)draw the body + legs + limb only once per id (kind/size are fixed for
- * an entity's lifetime — same guarantee `enemyView.ts` always relied on). */
+ * an entity's lifetime — same guarantee `enemyView.ts` always relied on).
+ * Personality details below are all extra draw calls into the SAME 3
+ * Graphics objects (`body`/`legs`/`limbArm`) — the per-enemy display-object
+ * budget (`body`, `legs`, `limbArm`, `hpBar`) is unchanged from before this
+ * task, which matters with many enemies live at once. Colors stay
+ * kind-coded (`color` = the kind's single base hex); shading/eyes/plates use
+ * plain black/white alpha overlays on that same hue, never a new palette
+ * entry per kind — the flat-alpha-layering rule, not gradients. */
 function buildRig(view: EnemyView, kind: EnemyKind, size: number): void {
   const s = Math.max(0.1, size);
   const color = ENEMY_COLORS[kind];
@@ -190,19 +201,63 @@ function buildRig(view: EnemyView, kind: EnemyKind, size: number): void {
   const g = view.body;
   g.clear();
   if (kind === "tank") {
-    g.roundRect(-12 * s, GROUND_Y - 30 * s, safeRadius(24 * s), safeRadius(28 * s), 4).fill(
-      color,
-    );
+    // Armored block: base plate + two darker seam lines (layered plates) +
+    // a jutting heavy jaw + small menacing eyes.
+    const bx = -12 * s;
+    const by = GROUND_Y - 30 * s;
+    const bw = safeRadius(24 * s);
+    const bh = safeRadius(28 * s);
+    g.roundRect(bx, by, bw, bh, 4).fill(color);
+    g.rect(bx, by + bh * 0.32, bw, Math.max(1, 1.2 * s)).fill({ color: 0x000000, alpha: 0.25 });
+    g.rect(bx, by + bh * 0.62, bw, Math.max(1, 1.2 * s)).fill({ color: 0x000000, alpha: 0.2 });
+    g.roundRect(bx + 1.5 * s, GROUND_Y - 9 * s, 7 * s, 5 * s, 1).fill({
+      color: 0x000000,
+      alpha: 0.45,
+    });
+    g.circle(-6 * s, GROUND_Y - 26 * s, safeRadius(1.7 * s)).fill({
+      color: 0x000000,
+      alpha: 0.65,
+    });
+    g.circle(-9.5 * s, GROUND_Y - 26 * s, safeRadius(1.7 * s)).fill({
+      color: 0x000000,
+      alpha: 0.65,
+    });
   } else if (kind === "ranged") {
+    // Kite body + a hooded shadow over the top half + faint glowing eyes.
     const cy = GROUND_Y - 16;
     g.poly([0, cy - 10 * s, 10 * s, cy, 0, cy + 10 * s, -10 * s, cy], true).fill(color);
+    g.poly([0, cy - 10 * s, 6 * s, cy - 2 * s, 0, cy + 2 * s, -6 * s, cy - 2 * s], true).fill({
+      color: 0x000000,
+      alpha: 0.28,
+    });
+    g.circle(-2.2 * s, cy - 2.5 * s, safeRadius(1.1 * s)).fill({ color: 0xffffff, alpha: 0.85 });
+  } else if (kind === "fast") {
+    // Low, elongated sleek silhouette (distinct from `normal`'s upright
+    // wedge) + a sharp angry-slit brow.
+    g.poly(
+      [-17 * s, GROUND_Y - 10, 9 * s, GROUND_Y - 20, 15 * s, GROUND_Y - 8, 7 * s, GROUND_Y - 2],
+      true,
+    ).fill(color);
+    g.moveTo(-11 * s, GROUND_Y - 15)
+      .lineTo(-4 * s, GROUND_Y - 18)
+      .stroke({ width: 1.4, color: PALETTE.outline, alpha: 0.7, cap: "round" });
+    g.moveTo(-11 * s, GROUND_Y - 12)
+      .lineTo(-4 * s, GROUND_Y - 14.5)
+      .stroke({ width: 1.4, color: PALETTE.outline, alpha: 0.7, cap: "round" });
   } else {
+    // Workmanlike upright wedge + a plain double-eyed brow.
     g.poly(
       [-15 * s, GROUND_Y - 16, 13 * s, GROUND_Y - 16 - 14 * s, 13 * s, GROUND_Y - 2],
       true,
     ).fill(color);
+    g.moveTo(-11 * s, GROUND_Y - 22)
+      .lineTo(-3 * s, GROUND_Y - 24)
+      .stroke({ width: 1.2, color: 0x000000, alpha: 0.3, cap: "round" });
   }
-  g.circle(-3, GROUND_Y - 17, 2.5).fill({ color: 0x000000, alpha: 0.5 });
+  if (kind !== "tank" && kind !== "ranged") {
+    g.circle(-3 * s, GROUND_Y - 17, safeRadius(2.5 * s)).fill({ color: 0x000000, alpha: 0.5 });
+    g.circle(-8 * s, GROUND_Y - 17, safeRadius(2 * s)).fill({ color: 0x000000, alpha: 0.5 });
+  }
 
   view.legs.clear();
   view.legs
@@ -231,6 +286,16 @@ function buildRig(view: EnemyView, kind: EnemyKind, size: number): void {
     .moveTo(front.x, front.y)
     .lineTo(front.x - armLen, front.y)
     .stroke({ width: kind === "ranged" ? 2.2 : 1.8, color, cap: "round" });
+  if (kind === "ranged") {
+    // Small crossbow-limb chevron at the weapon tip — "visible weapon".
+    const tipX = front.x - armLen;
+    const tipY = front.y;
+    view.limbArm
+      .moveTo(tipX, tipY - 3 * s)
+      .lineTo(tipX + 3 * s, tipY)
+      .lineTo(tipX, tipY + 3 * s)
+      .stroke({ width: 1.4, color, cap: "round" });
+  }
 }
 
 function clamp01(v: number): number {

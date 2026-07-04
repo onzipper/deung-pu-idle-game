@@ -39,13 +39,26 @@ export const PALETTE = {
   killGold: 0xf2b134,
   /** Boss enrage aura / telegraph-intensify accent. */
   enrageAura: 0xff3b3b,
+
+  // ---- PROCEDURAL V2 silhouette accents (task 86d3k2nj3) ----
+  /** Thin dark line stroked around armor/robe/silhouette shapes so entities
+   * "pop" off the desaturated scenery (art-direction rule in `README.md`) —
+   * a flat near-navy, not pure black, so it reads as an outline rather than
+   * a hard cutout. Shared across hero/enemy/boss rigs. */
+  outline: 0x11142a,
+  /** Neutral metal accent for blades/crossguards/arrowheads/staff bands —
+   * shared across weapon glyphs so armament reads as "the same material"
+   * regardless of hero class. */
+  steel: 0xd7deee,
 } as const;
 
-/** Hero class -> {body, accent (weapon glint / flash)} color. */
-export const HERO_COLORS: Record<HeroClass, { body: number; light: number }> = {
-  swordsman: { body: 0x35d0c0, light: 0x7ce8dd },
-  archer: { body: 0xb8e04a, light: 0xe3f59a },
-  mage: { body: 0xc77dff, light: 0xe6c9ff },
+/** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe
+ * undertone, armor recess)} color — the "2-3 flat tones per part" layering
+ * the art brief calls for, all plain fills/alpha (no gradients). */
+export const HERO_COLORS: Record<HeroClass, { body: number; light: number; shade: number }> = {
+  swordsman: { body: 0x35d0c0, light: 0x7ce8dd, shade: 0x1f8f83 },
+  archer: { body: 0xb8e04a, light: 0xe3f59a, shade: 0x7a9e2e },
+  mage: { body: 0xc77dff, light: 0xe6c9ff, shade: 0x8a4fc2 },
 };
 
 /** Enemy kind -> body color (POC grunt/runner/tank/shooter). */
