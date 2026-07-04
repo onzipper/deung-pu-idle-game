@@ -18,3 +18,7 @@ export * from "@/engine/state/version";
 // (e.g. team power for the boss hint, target lists for drawing).
 export * from "@/engine/systems/stats";
 export * from "@/engine/systems/targeting";
+
+// Read-only boss-hint data for the UI panel. The sim itself is driven only
+// through `step(state, input)`; systems are not part of the public surface.
+export { bossHint, type BossHint } from "@/engine/systems/boss";

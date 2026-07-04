@@ -100,7 +100,19 @@ export const CONFIG = {
     projMinStep: 12, // arrival threshold = max(this, speed * dt)
   },
 
-  // ---- boss (Phase B — numbers ported now so the table is complete) ----
+  // ---- skills ----
+  skills: {
+    meteorSpawnY: -48, // meteor projectile spawns at this absolute y (falls to impact)
+    mageFallbackAheadX: 150, // if no target, aim the meteor at h.x + this
+  },
+
+  // ---- flow / progression ----
+  bossHintPowerDivisor: 26, // recommendedPower = round(bossHp / this)
+  bossRetreatWaveGap: 1.0, // waveGap after a boss retreat (team wipe)
+  nextStageWaveGap: 0.8, // waveGap at the start of a new stage
+  autoUpgradeInterval: 0.15, // seconds between auto-upgrade attempts (POC 150ms tick)
+
+  // ---- boss (movement + slam/enrage tuning) ----
   boss: {
     y: 190,
     initialCd: 1.2,
@@ -237,13 +249,15 @@ export interface SkillType {
   mult: number;
   /** Number of targets (archer spread); 0 otherwise. */
   targets: number;
+  /** Skill projectile speed (archer arrows / mage meteor); 0 for the melee spin. */
+  projSpeed: number;
 }
 
-/** Per-class skill tuning. Numbers only — the cast LOGIC is Phase B. */
+/** Per-class skill tuning. */
 export const SKILL_TYPES: Record<HeroClass, SkillType> = {
-  swordsman: { cd: 8, radius: 95, mult: 2.2, targets: 0 },
-  archer: { cd: 7, radius: 0, mult: 1.35, targets: 3 },
-  mage: { cd: 12, radius: 90, mult: 3.2, targets: 0 },
+  swordsman: { cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0 },
+  archer: { cd: 7, radius: 0, mult: 1.35, targets: 3, projSpeed: 840 },
+  mage: { cd: 12, radius: 90, mult: 3.2, targets: 0, projSpeed: 560 },
 };
 
 export interface UpgradeLine {

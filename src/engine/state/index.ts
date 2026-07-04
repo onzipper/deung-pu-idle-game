@@ -29,6 +29,8 @@ export interface GameState {
   upgrades: Upgrades;
   autoUpgrade: boolean;
   autoCast: boolean;
+  /** Countdown driving the auto-upgrade cadence (POC ticked every 150ms). */
+  autoUpgradeTimer: number;
   /** Number of hero slots currently unlocked (1..maxHeroes). */
   heroSlots: number;
   heroes: Hero[];
@@ -64,7 +66,7 @@ export interface SaveData {
 }
 
 /** Build a fresh set of heroes for the currently unlocked slots. */
-function initHeroes(state: GameState): void {
+export function initHeroes(state: GameState): void {
   state.heroes = [];
   for (let i = 0; i < state.heroSlots; i++) {
     state.heroes.push(makeHero(state.nextId++, SLOT_ORDER[i], state.upgrades));
@@ -93,6 +95,7 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     upgrades,
     autoUpgrade: false,
     autoCast: false,
+    autoUpgradeTimer: CONFIG.autoUpgradeInterval,
     heroSlots,
     heroes: [],
     enemies: [],

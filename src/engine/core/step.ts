@@ -16,6 +16,10 @@ import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
+import { processSkills } from "@/engine/systems/skills";
+import { buyUpgrade, processAutoUpgrade } from "@/engine/systems/upgrades";
+import { startBossFight, updateBoss } from "@/engine/systems/boss";
+import { nextStage } from "@/engine/systems/flow";
 import {
   decayHeroTimers,
   updateEnemies,
@@ -24,38 +28,45 @@ import {
   resolveDeaths,
 } from "@/engine/systems/combat";
 
-/**
- * Per-step player input. Phase A wires no player actions yet; Phase B populates
- * this (skill casts, upgrade purchases, boss challenge, auto toggles).
- */
+/** Per-step player input. Every field is optional; omit for a pure idle step. */
 export interface FrameInput {
-  /** Hero-slot indices to cast a skill this step (Phase B). */
+  /** Hero-slot indices to cast a skill this step (subject to the range guard). */
   castSkills?: number[];
-  /** Upgrade line to purchase this step, if affordable (Phase B). */
+  /** Upgrade line to purchase this step, if affordable / uncapped. */
   buyUpgrade?: "atk" | "speed" | "hp";
-  /** Begin the boss fight this step (Phase B). */
+  /** Begin the boss fight (only honoured when bossReady && phase "battle"). */
   challengeBoss?: boolean;
+  /** Advance to the next stage (only honoured when phase "victory"). */
+  advanceStage?: boolean;
 }
 
-export function step(
-  state: GameState,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Phase B reads player input here.
-  input: FrameInput = {},
-): GameState {
-  // Victory pauses the sim (the POC loop skipped update() while victorious).
-  if (state.phase === "victory") return state;
-
+export function step(state: GameState, input: FrameInput = {}): GameState {
   const rng = createRng(state.rngState);
 
+  // --- discrete player actions (valid across phases) ---
+  if (input.buyUpgrade) buyUpgrade(state, input.buyUpgrade);
+  if (input.advanceStage && state.phase === "victory") nextStage(state);
+  if (input.challengeBoss && state.bossReady && state.phase === "battle") {
+    startBossFight(state);
+  }
+
+  // Victory pauses the sim (the POC loop skipped update() while victorious).
+  // An advanceStage above may already have flipped us back to "battle".
+  if (state.phase === "victory") {
+    state.rngState = rng.state();
+    return state;
+  }
+
   decayHeroTimers(state);
-  // --- skills hook (Phase B): auto-cast + queued casts run here, before movement.
+  processSkills(state, input); // manual casts + guarded auto-cast
   updateAnchor(state);
   updateWaveSpawns(state, rng);
-  updateEnemies(state);
+  updateEnemies(state); // no-op during the boss phase (field is cleared)
+  if (state.phase === "boss") updateBoss(state);
   updateHeroes(state);
   updateProjectiles(state);
-  resolveDeaths(state);
-  // --- boss hook (Phase B): boss spawn/slam/enrage/retreat + victory transition.
+  processAutoUpgrade(state);
+  resolveDeaths(state); // enemy kills / boss kill / boss retreat / bossReady
 
   state.time += FIXED_DT;
   state.rngState = rng.state();

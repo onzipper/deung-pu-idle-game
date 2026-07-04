@@ -17,6 +17,8 @@ import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
 import { heroAtk, heroAtkSpeed } from "@/engine/systems/stats";
+import { applyDamage, isHero } from "@/engine/systems/damage";
+import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
 import {
   aliveHeroes,
   frontHeroX,
@@ -30,24 +32,6 @@ import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
 const L = CONFIG.layout;
-
-// ---------------------------------------------------------------------------
-// Damage
-// ---------------------------------------------------------------------------
-
-/** A hero is the only target that dies-and-revives; enemies/boss just drop HP. */
-function isHero(t: Hero | Enemy | Boss): t is Hero {
-  return "reviveTimer" in t;
-}
-
-/** Apply `amount` damage; start a hero's revive timer when it drops. */
-export function applyDamage(target: Hero | Enemy | Boss, amount: number): void {
-  target.hp -= amount;
-  if (isHero(target) && target.hp <= 0 && !target.dead) {
-    target.dead = true;
-    target.reviveTimer = CONFIG.heroReviveTime;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Timers
@@ -283,8 +267,9 @@ export function resolveDeaths(state: GameState): void {
       }
       return true;
     });
+  } else if (state.boss && state.boss.hp <= 0) {
+    onBossKilled(state); // gold reward + phase -> victory
   }
-  // Boss kill / retreat resolution is Phase B.
 
   if (
     state.phase === "battle" &&
@@ -292,5 +277,10 @@ export function resolveDeaths(state: GameState): void {
     state.kills >= CONFIG.killGoal(state.stage)
   ) {
     state.bossReady = true;
+  }
+
+  // Team wiped during the boss fight -> boss retreats, back to normal waves.
+  if (state.phase === "boss" && aliveHeroes(state).length === 0) {
+    bossRetreat(state);
   }
 }
