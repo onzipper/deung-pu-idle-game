@@ -104,6 +104,14 @@ Personas live in `.claude/agents/`, each pinned to a model. Delegate to them:
 |---|---|---|
 | `deep-reasoner` | Opus | reasoning-heavy, non-domain-specific problems |
 | `fast-worker` | Sonnet | mechanical, well-specified execution |
+| `haiku-worker` | Haiku | trivial fully-specified single-file edits (label/knob/doc changes) |
+
+**Token discipline (learned from the M4 build-out):**
+- One agent = one task; spawn fresh with a tight brief instead of chaining SendMessage (chained context re-reads cost 2-3x).
+- Feel/knob tuning on files the orchestrator knows → orchestrator edits directly; don't spawn an agent for a constant change.
+- Batch same-area items into one medium task (~100-150k tokens); avoid 10+ item mega-passes and avoid single-item micro-agents (fixed ~20-40k context-read cost each).
+- Agent returns: ≤20 lines, conclusions only; put detail in the commit message or docs/ — the orchestrator's context is the scarcest resource.
+- Shared context across tasks goes in repo files (render/README.md art direction, docs/balance-m4.md), never in chat history.
 
 **Domain experts**
 | Agent | Model | Scope |

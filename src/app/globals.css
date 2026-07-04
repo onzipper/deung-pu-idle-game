@@ -1,8 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+
+  /* The whole game is dark-themed by design (jewel-tone entities over a dusk
+     arena, see src/render/theme.ts) — there is no light variant to branch on,
+     so this is a flat token, not an OS-preference-driven one. */
+  --background: #0a0d1a;
+  --foreground: #f4f1ea;
+
+  /* -------------------------------------------------------------------------
+   * ดึ๋งปุ๊ HUD design tokens (task 86d3k2tap)
+   * Mirrors the in-canvas jewel-tone palette (src/render/theme.ts PALETTE)
+   * so the React chrome reads as part of the same world as the Pixi arena
+   * instead of a generic app shell wrapped around it. Consumed either as
+   * Tailwind utilities (bg-ddp-panel, text-ddp-gold, border-ddp-border — see
+   * the @theme block below) or, for shape/elevation, as arbitrary-value
+   * utilities referencing the raw var (rounded-[var(--ddp-radius-lg)]).
+   * ---------------------------------------------------------------------- */
+  --ddp-panel: rgba(19, 24, 44, 0.88);
+  --ddp-panel-strong: rgba(13, 16, 32, 0.97);
+  --ddp-border: #2a3260;
+  --ddp-border-soft: rgba(143, 151, 201, 0.28);
+  --ddp-ink: #f4f1ea;
+  --ddp-ink-muted: #8f97c9;
+  --ddp-gold: #f2b134;
+  --ddp-gold-bright: #ffd873;
+  --ddp-boss: #8b7ff0;
+  --ddp-boss-light: #b3a9ff;
+  --ddp-good: #4ade80;
+  --ddp-bad: #e24b4a;
+
+  --ddp-radius-lg: 1.25rem; /* panels/dock/arena frame */
+  --ddp-radius-md: 0.85rem; /* buttons/chips */
+
+  --ddp-shadow-panel:
+    0 12px 32px -14px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --ddp-shadow-btn: 0 2px 0 rgba(0, 0, 0, 0.4), 0 8px 16px -10px rgba(0, 0, 0, 0.6);
 }
 
 @theme inline {
@@ -10,17 +44,102 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-ddp-panel: var(--ddp-panel);
+  --color-ddp-panel-strong: var(--ddp-panel-strong);
+  --color-ddp-border: var(--ddp-border);
+  --color-ddp-border-soft: var(--ddp-border-soft);
+  --color-ddp-ink: var(--ddp-ink);
+  --color-ddp-ink-muted: var(--ddp-ink-muted);
+  --color-ddp-gold: var(--ddp-gold);
+  --color-ddp-gold-bright: var(--ddp-gold-bright);
+  --color-ddp-boss: var(--ddp-boss);
+  --color-ddp-boss-light: var(--ddp-boss-light);
+  --color-ddp-good: var(--ddp-good);
+  --color-ddp-bad: var(--ddp-bad);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* next/font self-hosted Chakra Petch (Thai + Latin, see layout.tsx) as the
+     ONE display/body face for the whole HUD. Chosen over a Latin-only display
+     font + separate Thai fallback because Chakra Petch is Thai-drawn (not a
+     Latin face with a Thai substitute) — headers, numerals, and Thai labels
+     share one gamey, slightly angular voice instead of visibly swapping fonts
+     mid-string. System Thai fallbacks stay in the stack in case the
+     self-hosted font ever fails to load. */
+  font-family: var(--font-display), "Noto Sans Thai", "Segoe UI", Tahoma, sans-serif;
+  overflow-x: hidden;
+}
+
+/*
+ * M4 "light touch" UI juice — plain CSS transitions/keyframes only (see
+ * sr-uxui-game-designer's framer-motion/gsap decision in the M4 task notes:
+ * neither is installed for these one-shot pulses/sweeps, both are cheap
+ * enough as pure CSS).
+ */
+@keyframes gold-pulse {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.25);
+    color: var(--ddp-gold-bright);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes buy-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(52, 211, 153, 0);
+  }
+  40% {
+    transform: scale(1.06);
+    box-shadow: 0 0 14px rgba(52, 211, 153, 0.55);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
+/* Slow, subtle "come tap me" breathing glow for buttons that are affordable /
+ * ready-to-cast right now (task 86d3k2tap's "inviting glow" affordance).
+ * Only animates opacity on an absolutely-positioned ::before layer (never
+ * layout/box-shadow-on-the-real-box every frame) so it stays cheap even with
+ * several buttons animating on a phone. */
+@keyframes ddp-invite-glow {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+/* Skill cooldown sweep: a linear `height` wipe whose duration is the skill's
+ * max cooldown and whose animation-delay is negative by the already-elapsed
+ * amount (see SkillBar.tsx's useCastKey/delay math) — resumes mid-flight from
+ * a single throttled snapshot value instead of a 60 Hz store write. */
+@keyframes ddp-cooldown-sweep {
+  from {
+    height: 100%;
+  }
+  to {
+    height: 0%;
+  }
+}
+
+.animate-gold-pulse {
+  display: inline-block;
+  animation: gold-pulse 0.26s ease-out;
+}
+
+.animate-buy-pulse {
+  animation: buy-pulse 0.3s ease-out;
 }
