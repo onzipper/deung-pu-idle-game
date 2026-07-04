@@ -71,6 +71,40 @@ const AUTOSAVE_INTERVAL_MS = 30_000;
  */
 const OFFLINE_SYNC_BUDGET_MS = 250;
 
+/** Wall-clock timeout for the blocking save-load GET so a hung/flaky network
+ * (LAN / Tailscale over plain HTTP on mobile) can never stop the game from
+ * starting — on timeout we abort and boot a fresh game. */
+const SAVE_LOAD_TIMEOUT_MS = 6_000;
+
+/** Fetch with a hard timeout via AbortController (works on older mobile Safari
+ * that lacks `AbortSignal.timeout`). */
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Wait until the mount element has been laid out to a non-zero size (mobile
+ * flex/aspect-ratio can report 0x0 for the first frame or two). Bounded so a
+ * genuinely collapsed layout still proceeds (the renderer's own resize guard
+ * then keeps it at a safe fallback size until the ResizeObserver fires).
+ */
+async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void> {
+  for (let i = 0; i < maxFrames; i++) {
+    if (el.clientWidth > 0 && el.clientHeight > 0) return;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
 function buildSnapshot(state: GameState): EngineSnapshot {
   const heroes: HeroSummary[] = state.heroes.map((h) => ({
     cls: h.cls,
@@ -118,6 +152,26 @@ export function GameClient() {
     let uiSyncAccum = 0;
     let cancelled = false;
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
+    // A non-React DOM node we may append to the (React-owned) arena div to show
+    // a fatal init error; tracked so cleanup can remove it before a remount.
+    let errorEl: HTMLElement | null = null;
+
+    /**
+     * Never fail silently: any init error becomes a visible Thai message inside
+     * the arena slot plus a real console.error. This is the safety net that
+     * turns an opaque "the game never starts" phone report into a readable
+     * cause on-screen (WebGL2 unsupported, save-load crash, Pixi init reject…).
+     */
+    function showFatalError(reason: string): void {
+      if (!arenaEl) return;
+      if (!errorEl) {
+        errorEl = document.createElement("div");
+        errorEl.className =
+          "absolute inset-0 z-10 flex items-center justify-center p-4 text-center text-sm font-medium text-red-300";
+        arenaEl.appendChild(errorEl);
+      }
+      errorEl.textContent = `ไม่สามารถเริ่มเกมได้: ${reason}`;
+    }
 
     function frame(now: number) {
       rafId = requestAnimationFrame(frame);
@@ -195,7 +249,11 @@ export function GameClient() {
       let offlineSeconds = 0;
       let offlineCapped = false;
       try {
-        const res = await fetch("/api/save", { method: "GET" });
+        const res = await fetchWithTimeout(
+          "/api/save",
+          { method: "GET" },
+          SAVE_LOAD_TIMEOUT_MS,
+        );
         if (res.ok) {
           const json = (await res.json()) as {
             save: SaveData | null;
@@ -210,7 +268,8 @@ export function GameClient() {
           }
         }
       } catch {
-        /* first run / network down: start cold */
+        /* first run / network down / slow-LAN timeout: start cold rather than
+           blocking the game from ever starting */
       }
 
       if (cancelled) return;
@@ -241,6 +300,11 @@ export function GameClient() {
         );
       }
 
+      // Don't init Pixi against a 0x0 mount (mobile aspect-ratio/flex reflow can
+      // report zero for the first frame or two).
+      await waitForNonZeroSize(arenaEl);
+      if (cancelled) return;
+
       await renderer.create(arenaEl);
       if (cancelled) {
         renderer.destroy();
@@ -254,13 +318,22 @@ export function GameClient() {
       rafId = requestAnimationFrame(frame);
     };
 
-    void boot();
+    // Surface any boot failure instead of letting `void boot()` swallow the
+    // rejection (which previously left the loop unstarted and the whole HUD
+    // frozen at store defaults with no error anywhere).
+    boot().catch((err: unknown) => {
+      if (cancelled) return;
+      console.error("[GameClient] boot failed:", err);
+      showFatalError(err instanceof Error ? err.message : String(err));
+    });
 
     return () => {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
       document.removeEventListener("visibilitychange", onVisibility);
+      errorEl?.remove();
+      errorEl = null;
       renderer.destroy();
     };
   }, []);

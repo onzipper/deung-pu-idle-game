@@ -69,6 +69,17 @@ export class GameRenderer {
     // instance before building a fresh one instead of leaking two Applications.
     if (this.app) this.destroy();
 
+    // Pixi v8's WebGL renderer requires WebGL2 (WebGL1 is unsupported); we force
+    // `preference: "webgl"` below because WebGPU is still flaky on mobile
+    // Chrome/Safari. Probe WebGL2 up front so an unsupported device fails with a
+    // clear, catchable error instead of an opaque `Application.init()` rejection
+    // that the caller can only surface as "something went wrong".
+    if (!isWebGL2Available()) {
+      throw new Error(
+        "อุปกรณ์หรือเบราว์เซอร์นี้ไม่รองรับ WebGL2 ซึ่งจำเป็นต่อการเรนเดอร์เกม",
+      );
+    }
+
     const app = new Application();
     await app.init({
       backgroundColor: PALETTE.arenaSky,
@@ -226,6 +237,21 @@ export class GameRenderer {
 
     this.bossLabel.text = `บอสด่าน ${state.stage}${boss.enraged ? "  ⚡ENRAGED" : ""}`;
     this.bossLabel.position.set(bx, by - 16);
+  }
+}
+
+/**
+ * Probe for a usable WebGL2 context. Pixi v8's WebGL renderer requires WebGL2
+ * (WebGL1 is unsupported); older/low-end mobile browsers, or a device under
+ * memory pressure, can fail to create one. WebGL is NOT a secure-context-gated
+ * API, so this works identically on http:// LAN/Tailscale origins and https://.
+ */
+function isWebGL2Available(): boolean {
+  try {
+    const canvas = document.createElement("canvas");
+    return !!canvas.getContext("webgl2");
+  } catch {
+    return false;
   }
 }
 
