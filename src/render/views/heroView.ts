@@ -81,12 +81,32 @@ const SWING_DURATION = 0.22;
 const SWING_AMPLITUDE = 1.35;
 const LUNGE_PX = 5;
 
+// ---------------------------------------------------------------------------
+// Swordsman basic-attack combo (HERO SIGNATURE PASS 86d3k2q8f, item 1): 3
+// visually-distinct swings cycling on every basic attack, all sharing the
+// SAME `SWING_DURATION` above (render curve varies, game timing doesn't).
+// ---------------------------------------------------------------------------
+/** Index 2 ("thrust") uses a much smaller arc + a bigger forward lunge. */
+const THRUST_SWING_FRAC = 0.35; // fraction of SWING_AMPLITUDE thrust rotates through
+const THRUST_LUNGE_MULT = 2.2; // thrust lunges further than a slash
+const THRUST_OFFARM_KICK = 0.25; // off-arm/shield braces forward slightly on a thrust
+
 const SPIN_DURATION = 0.4; // matches FxController's swordsman-spin ring
 
 const RELEASE_DURATION = 0.16;
 const RELEASE_KICK = 0.55;
+/** Archer basic-shot pose alternation (item 8): odd `shotPoseIndex` values
+ * loft the bow a little further on release — "bow angle changes only", the
+ * projectile itself still flies per the engine's own targeting. */
+const HIGH_ARC_EXTRA_KICK = 0.3;
 const TRIPLE_GAP = 0.11;
-const TRIPLE_DURATION = TRIPLE_GAP * 2 + RELEASE_DURATION;
+/** Brief draw-and-hold lead-in before the 3 staggered releases (item 9) —
+ * a pure render-timing extension (this whole triple anim is already a
+ * render-only construct; the engine's 3 arrows all actually spawn
+ * synchronously at `t=0` regardless of this cosmetic stagger). */
+const TRIPLE_HOLD_LEAD = 0.15;
+const TRIPLE_HOLD_DRAW_ANGLE = 0.22;
+const TRIPLE_DURATION = TRIPLE_HOLD_LEAD + TRIPLE_GAP * 2 + RELEASE_DURATION;
 
 const STAFF_PULSE_DURATION = 0.28;
 const STAFF_RAISE = 0.4;
@@ -95,6 +115,8 @@ const STAFF_PULSE_SCALE = 0.1;
 const CASTHOLD_DURATION = 0.55;
 const CASTHOLD_RISE_FRAC = 0.4;
 const CASTHOLD_RAISE = 1.0;
+/** Robe/hat flutter amplitude (radians) during cast-hold — item 12. */
+const CASTHOLD_SWAY_AMPLITUDE = 0.05;
 
 const DEATH_FALL_DURATION = 0.4;
 const DEATH_FALL_ANGLE = 1.4; // ~80°, short of fully flat (stays legible)
@@ -128,6 +150,17 @@ interface HeroAnimState {
   /** -1 once the revive bounce has fully settled. */
   reviveT: number;
   attack: AttackAnim | null;
+  /** Swordsman basic-attack combo cycle (0/1/2 = up-slash/down-slash/thrust),
+   * advanced once per new "swing" (HERO SIGNATURE PASS item 1). */
+  comboIndex: number;
+  /** Archer basic-shot pose alternation (0/1 = straight/high-arc), advanced
+   * once per new "release" (item 8). */
+  shotPoseIndex: number;
+  /** Monotonic counter bumped on every `startAttack()` call (any kind) — lets
+   * `fx/FxController.ts` detect "a new swordsman swing started THIS frame"
+   * from outside via `peekSwordSwing()` without re-deriving the cd-reset
+   * tell itself (item 2's per-swing slash crescent). */
+  attackSeq: number;
 }
 
 export interface HeroView extends Container {
@@ -181,6 +214,12 @@ export function createHeroView(): HeroView {
   upperBody.position.set(0, HIP_Y);
 
   const torso = new Graphics();
+  // Pivot/position pair (cancels at rotation=0, same convention as every
+  // other rig container — see the module doc comment) so `torso.rotation`
+  // can be nudged a tiny amount for the mage's cast-hold robe/hat flutter
+  // (item 12) without disturbing the rest-pose bounds `rig.test.ts` checks.
+  torso.pivot.set(0, HEAD_Y);
+  torso.position.set(0, HEAD_Y);
   const offArm = new Graphics();
   const weaponArm = new Graphics();
   offArm.pivot.set(0, SHOULDER_Y);
@@ -228,6 +267,9 @@ export function createHeroView(): HeroView {
     deathT: -1,
     reviveT: -1,
     attack: null,
+    comboIndex: 0,
+    shotPoseIndex: 0,
+    attackSeq: 0,
   };
   return view;
 }
@@ -503,6 +545,9 @@ function startAttack(anim: HeroAnimState, kind: AttackKindAnim): void {
               ? STAFF_PULSE_DURATION
               : CASTHOLD_DURATION;
   anim.attack = { kind, t: 0, duration };
+  anim.attackSeq++;
+  if (kind === "swing") anim.comboIndex = (anim.comboIndex + 1) % 3;
+  else if (kind === "release") anim.shotPoseIndex = (anim.shotPoseIndex + 1) % 2;
 }
 
 interface AttackFx {
@@ -531,9 +576,20 @@ function resolveAttack(anim: HeroAnimState, dt: number): AttackFx {
 
   switch (atk.kind) {
     case "swing": {
+      // 3 visually-distinct swings cycling on combo index (item 1) — same
+      // total `SWING_DURATION` regardless of which one plays; only the
+      // rotation curve/lunge differ. 0 = up-slash (swings up), 1 =
+      // down-slash (mirrored, swings down), 2 = thrust (small arc, big lunge).
       const swing = Math.sin(progress * Math.PI);
-      out.weaponDelta = swing * SWING_AMPLITUDE;
-      out.lungeX = swing * LUNGE_PX;
+      if (anim.comboIndex === 2) {
+        out.weaponDelta = swing * SWING_AMPLITUDE * THRUST_SWING_FRAC;
+        out.lungeX = swing * LUNGE_PX * THRUST_LUNGE_MULT;
+        out.offArmDelta = -swing * THRUST_OFFARM_KICK; // shield braces forward
+      } else {
+        const sign = anim.comboIndex === 1 ? -1 : 1;
+        out.weaponDelta = sign * swing * SWING_AMPLITUDE;
+        out.lungeX = swing * LUNGE_PX;
+      }
       break;
     }
     case "spin": {
@@ -542,15 +598,29 @@ function resolveAttack(anim: HeroAnimState, dt: number): AttackFx {
       break;
     }
     case "release": {
-      out.weaponDelta = -Math.sin(progress * Math.PI) * RELEASE_KICK;
+      // Straight (pose 0) vs high-arc (pose 1, item 8) — bow-angle-only pose
+      // variety; the projectile itself still flies per the engine's targeting.
+      const extra = anim.shotPoseIndex === 1 ? HIGH_ARC_EXTRA_KICK : 0;
+      out.weaponDelta = -Math.sin(progress * Math.PI) * (RELEASE_KICK + extra);
       break;
     }
     case "triple": {
-      const pulseIdx = Math.min(2, Math.floor(atk.t / (RELEASE_DURATION + TRIPLE_GAP)));
-      const localT = atk.t - pulseIdx * (RELEASE_DURATION + TRIPLE_GAP);
+      // Brief draw-and-hold lead-in (item 9), then the existing 3 staggered
+      // kick-pulses, now offset by the hold — the bow stays drawn back
+      // between pulses instead of snapping to rest.
+      if (atk.t < TRIPLE_HOLD_LEAD) {
+        const p = clamp01(atk.t / TRIPLE_HOLD_LEAD);
+        out.weaponDelta = -easeOutQuad(p) * TRIPLE_HOLD_DRAW_ANGLE;
+        break;
+      }
+      const tLocal = atk.t - TRIPLE_HOLD_LEAD;
+      const pulseIdx = Math.min(2, Math.floor(tLocal / (RELEASE_DURATION + TRIPLE_GAP)));
+      const localT = tLocal - pulseIdx * (RELEASE_DURATION + TRIPLE_GAP);
       if (localT <= RELEASE_DURATION) {
         const p = clamp01(localT / RELEASE_DURATION);
-        out.weaponDelta = -Math.sin(p * Math.PI) * RELEASE_KICK;
+        out.weaponDelta = -TRIPLE_HOLD_DRAW_ANGLE - Math.sin(p * Math.PI) * RELEASE_KICK;
+      } else {
+        out.weaponDelta = -TRIPLE_HOLD_DRAW_ANGLE;
       }
       break;
     }
@@ -669,6 +739,20 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   }
   view.weaponArm.scale.set(attackFx.weaponScale, attackFx.weaponScale);
 
+  // ---- mage cast-hold robe/hat flutter (item 12) ---------------------------
+  // Subtle rotation sway on the torso (hood/hat + robe silhouette) while
+  // `castHold` is active — reuses the existing breathing-phase clock, scaled
+  // in by the hold's own progress so it eases on/off with the cast rather
+  // than popping. Harmless no-op for the other two classes / at rest (torso's
+  // pivot===position at rest, see `createHeroView`, so rotation=0 there is
+  // exactly the unchanged rest pose `rig.test.ts` checks).
+  if (hero.cls === "mage" && anim.attack?.kind === "castHold") {
+    const holdFrac = clamp01(anim.attack.t / anim.attack.duration);
+    view.torso.rotation = Math.sin(anim.breathPhase * 1.6) * CASTHOLD_SWAY_AMPLITUDE * holdFrac;
+  } else {
+    view.torso.rotation = 0;
+  }
+
   // ---- death fall / revive bounce (bodyRoot only — hp/revive UI untouched) --
   if (hero.dead) {
     if (anim.deathT >= 0) {
@@ -748,6 +832,35 @@ export function getSwordTipPos(view: HeroView, out: { x: number; y: number }): b
 export function isSwordSwinging(view: HeroView): boolean {
   const kind = view.anim.attack?.kind;
   return view.cls === "swordsman" && (kind === "swing" || kind === "spin");
+}
+
+// ---------------------------------------------------------------------------
+// `fx/FxController.ts` hooks (HERO SIGNATURE PASS 86d3k2q8f) — same minimal
+// readonly-query pattern as `getSwordTipPos`/`isSwordSwinging` above.
+// ---------------------------------------------------------------------------
+
+/** Snapshot of a swordsman's currently-playing "swing" (basic attack) anim,
+ * or `null` if it isn't a swordsman or no swing is currently playing. */
+export interface SwingSnapshot {
+  /** 0/1/2 — up-slash/down-slash/thrust (see `resolveAttack`'s "swing" case). */
+  comboIndex: number;
+  /** `HeroAnimState.attackSeq` at read time — compare across frames to
+   * detect "a NEW swing started" without re-deriving the cd-reset tell. */
+  seq: number;
+}
+
+/** Read-only peek at a swordsman's in-flight "swing" attack, for the
+ * per-swing slash-crescent fx (item 2) — edge-detected by the CALLER
+ * comparing `seq` across frames (see `FxController.detectSwordSwingStart()`). */
+export function peekSwordSwing(view: HeroView): SwingSnapshot | null {
+  if (view.cls !== "swordsman" || view.anim.attack?.kind !== "swing") return null;
+  return { comboIndex: view.anim.comboIndex, seq: view.anim.attackSeq };
+}
+
+/** True while the mage's `castHold` (skill cast) anim is actively playing —
+ * drives the orbiting cast-aura sparkles (item 12). */
+export function isCastHolding(view: HeroView): boolean {
+  return view.cls === "mage" && view.anim.attack?.kind === "castHold";
 }
 
 /** Toggle the ghost look via `tint` only (never re-walks a Graphics path) —

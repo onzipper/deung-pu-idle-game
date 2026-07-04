@@ -165,6 +165,71 @@ export function burst(
   }
 }
 
+/** A narrow directional mini-burst (hit-impact sparks, HERO SIGNATURE PASS
+ * task item 3) — same per-particle spread as `burst()`, but confined to a
+ * cone around `angle` instead of a full circle, so a struck-direction impact
+ * reads as "this way" rather than an omnidirectional pop. */
+export function burstDirectional(
+  pool: ParticlePool,
+  x: number,
+  y: number,
+  count: number,
+  color: number,
+  angle: number,
+  opts?: { speed?: number; life?: number; radius?: number; spread?: number },
+): void {
+  const speed = opts?.speed ?? 100;
+  const life = opts?.life ?? 0.28;
+  const radius = opts?.radius ?? 2.5;
+  const spread = opts?.spread ?? 1.2; // radians, total cone width
+  for (let i = 0; i < count; i++) {
+    const a = angle + (Math.random() - 0.5) * spread;
+    const s = speed * (0.6 + Math.random() * 0.6);
+    pool.spawn({
+      x,
+      y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s,
+      life: life * (0.7 + Math.random() * 0.6),
+      radius: radius * (0.7 + Math.random() * 0.6),
+      color,
+      drag: 0.08,
+    });
+  }
+}
+
+/** Inward-converging sparkle (charge-up cue, item 4) — particles start on a
+ * ring of `ringRadius` around (x,y) and drift TOWARD the center, the mirror
+ * image of `burst()`. */
+export function burstInward(
+  pool: ParticlePool,
+  x: number,
+  y: number,
+  count: number,
+  color: number,
+  ringRadius: number,
+  opts?: { speed?: number; life?: number; radius?: number },
+): void {
+  const speed = opts?.speed ?? 80;
+  const life = opts?.life ?? 0.18;
+  const radius = opts?.radius ?? 2;
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+    const r = ringRadius * (0.7 + Math.random() * 0.4);
+    const s = speed * (0.7 + Math.random() * 0.5);
+    pool.spawn({
+      x: x + Math.cos(angle) * r,
+      y: y + Math.sin(angle) * r,
+      vx: -Math.cos(angle) * s,
+      vy: -Math.sin(angle) * s,
+      life,
+      radius,
+      color,
+      drag: 0.02,
+    });
+  }
+}
+
 /** A shower of particles falling from above (boss-defeated gold rain). */
 export function shower(
   pool: ParticlePool,

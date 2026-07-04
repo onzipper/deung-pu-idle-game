@@ -21,12 +21,17 @@
 
 import { WORLD_WIDTH } from "@/render/layout";
 
-export type CameraPunchKind = "skillCast" | "bossSlamLand" | "bossDefeated";
+export type CameraPunchKind = "skillCast" | "swordSpin" | "bossSlamLand" | "bossDefeated";
 
 /** Peak scale multiplier (1.0 = no zoom) per trigger kind — see the task
- * spec's exact values. */
+ * spec's exact values. `swordSpin` (HERO SIGNATURE PASS item 6) is a
+ * slightly stronger variant of the generic `skillCast` punch, specifically
+ * for the swordsman's crescent-nova spin — "strongest wins" (see
+ * `trigger()`) means it naturally takes over from a plain `skillCast` punch
+ * that happened to fire the same instant. */
 const PEAK_SCALE: Record<CameraPunchKind, number> = {
   skillCast: 1.02,
+  swordSpin: 1.035,
   bossSlamLand: 1.045,
   bossDefeated: 1.06,
 };
@@ -35,6 +40,7 @@ const PEAK_SCALE: Record<CameraPunchKind, number> = {
  * scaled with the same "how big a deal is this" ladder as `PEAK_SCALE`. */
 const PEAK_NUDGE_PX: Record<CameraPunchKind, number> = {
   skillCast: 1.5,
+  swordSpin: 2.2,
   bossSlamLand: 3,
   bossDefeated: 4,
 };
