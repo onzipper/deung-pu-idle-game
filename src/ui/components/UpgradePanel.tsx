@@ -3,7 +3,11 @@
 /**
  * Three independent upgrade lines (atk / speed / hp) + an auto-buy toggle.
  * Buying is an intent — `buyUpgrade(stat)` only queues it; the integration
- * loop drains the queue into `FrameInput.buyUpgrade` for the engine to apply.
+ * loop drains it into `FrameInput.buyUpgrade` for the engine to apply.
+ *
+ * Button states (task 86d3k2tap): affordable gets an inviting emerald glow,
+ * un-affordable is visibly "locked" (grayscale + a corner lock badge, not
+ * just dimmed opacity), capped shows a distinct MAX state.
  */
 
 import { SPEED_UPGRADE_CAP, type Upgrades } from "@/engine";
@@ -22,6 +26,7 @@ function UpgradeButton({ stat }: { stat: keyof Upgrades }) {
 
   const capped = stat === "speed" && level >= SPEED_UPGRADE_CAP;
   const affordable = gold >= cost && !capped;
+  const locked = !affordable && !capped;
   const label = UPGRADE_LABELS[stat];
 
   return (
@@ -29,13 +34,30 @@ function UpgradeButton({ stat }: { stat: keyof Upgrades }) {
       type="button"
       disabled={!affordable}
       onClick={() => buyUpgrade(stat)}
-      className={`flex min-w-24 flex-1 flex-col items-center gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-zinc-100 transition enabled:hover:border-emerald-400 enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 ${boughtPulse ? "animate-buy-pulse" : ""}`}
+      aria-label={`${label.name} เลเวล ${level}${
+        capped ? " สูงสุดแล้ว" : `, ราคา ${cost.toLocaleString()} ทอง`
+      }`}
+      className={`relative flex min-h-11 min-w-24 flex-1 flex-col items-center gap-0.5 rounded-(--ddp-radius-md) border px-3 py-2.5 shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.97] ${
+        affordable
+          ? "border-emerald-400/60 bg-ddp-panel-strong text-ddp-ink before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_16px_3px_rgba(52,211,153,0.5)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] hover:brightness-110"
+          : capped
+            ? "cursor-default border-ddp-boss/50 bg-ddp-panel-strong text-ddp-ink"
+            : "cursor-not-allowed border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted grayscale"
+      } ${boughtPulse ? "animate-buy-pulse" : ""}`}
     >
-      <span className="text-xs font-semibold">
+      {locked && (
+        <span
+          aria-hidden
+          className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-ddp-border bg-black/80 text-[9px]"
+        >
+          🔒
+        </span>
+      )}
+      <span className="text-xs font-bold">
         {label.icon} {label.name}
       </span>
-      <span className="text-[10px] text-zinc-400">Lv.{level}</span>
-      <span className="font-mono text-[11px] text-amber-400">
+      <span className="text-[10px] text-ddp-ink-muted">Lv.{level}</span>
+      <span className="text-[11px] font-bold text-ddp-gold tabular-nums">
         {capped ? "MAX" : cost.toLocaleString()}
       </span>
     </button>
@@ -47,21 +69,31 @@ export function UpgradePanel() {
   const toggleAutoUpgrade = useGameStore((s) => s.toggleAutoUpgrade);
 
   return (
-    <div className="flex flex-wrap items-stretch gap-2 rounded-xl bg-zinc-900/80 px-3 py-2">
-      {STATS.map((stat) => (
-        <UpgradeButton key={stat} stat={stat} />
-      ))}
-      <button
-        type="button"
-        onClick={toggleAutoUpgrade}
-        className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-          autoUpgrade
-            ? "border-emerald-400 bg-emerald-400 text-emerald-950"
-            : "border-zinc-700 bg-zinc-800 text-zinc-400"
-        }`}
-      >
-        💰 Auto อัป: {autoUpgrade ? "เปิด" : "ปิด"}
-      </button>
+    <div className="flex flex-col gap-2">
+      <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+        อัพเกรด
+      </span>
+      <div className="flex flex-wrap items-stretch gap-2">
+        {STATS.map((stat) => (
+          <UpgradeButton key={stat} stat={stat} />
+        ))}
+        <button
+          type="button"
+          onClick={toggleAutoUpgrade}
+          aria-pressed={autoUpgrade}
+          className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-bold shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.97] ${
+            autoUpgrade
+              ? "border-emerald-400 bg-emerald-400 text-emerald-950"
+              : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`h-1.5 w-1.5 rounded-full ${autoUpgrade ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
+          />
+          💰 Auto อัป: {autoUpgrade ? "เปิด" : "ปิด"}
+        </button>
+      </div>
     </div>
   );
 }

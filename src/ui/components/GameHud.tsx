@@ -28,23 +28,43 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
   canvasSlotRef,
 ) {
   return (
-    <div className="flex w-full max-w-3xl flex-col gap-2 p-3">
+    // Mobile-portrait-first shell: arena is the hero and always comes first;
+    // the console dock (skills / speed+sound / upgrades) follows as one
+    // coherent bottom panel rather than scattered floating boxes. Bottom
+    // safe-area padding covers the phone home-indicator inset.
+    <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
       <HudBar />
+
       <div
         ref={canvasSlotRef}
-        className="relative aspect-[820/300] w-full overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950"
+        // Aspect matches the engine's logical arena (src/render/layout.ts
+        // WORLD_WIDTH=900/WORLD_HEIGHT=300) so GameRenderer's letterboxing
+        // has nothing to pad — the frame IS the world, no dead bars.
+        className="relative aspect-900/300 w-full overflow-hidden rounded-(--ddp-radius-lg) border border-ddp-border bg-[#151a30] shadow-(--ddp-shadow-panel)"
       >
         {children}
+        {/* Decorative inner frame (thin rim + soft vignette) drawn ON TOP of
+            wherever GameRenderer imperatively appends its <canvas> — purely
+            cosmetic, pointer-events-none so it never intercepts the arena's
+            own pointerdown (audio-resume) listener. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-5 rounded-(--ddp-radius-lg) shadow-[inset_0_0_0_1px_rgba(143,151,201,0.18),inset_0_0_46px_12px_rgba(0,0,0,0.35)]"
+        />
       </div>
-      <SkillBar />
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <BossPanel />
+
+      <BossPanel />
+
+      <div className="flex flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
+        <SkillBar />
+        <div className="h-px bg-ddp-border-soft" />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SpeedSelector />
+          <SoundToggle />
         </div>
-        <SpeedSelector />
-        <SoundToggle />
+        <div className="h-px bg-ddp-border-soft" />
+        <UpgradePanel />
       </div>
-      <UpgradePanel />
     </div>
   );
 });

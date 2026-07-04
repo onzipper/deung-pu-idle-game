@@ -35,9 +35,9 @@ export function SoundToggle() {
       aria-pressed={!soundMuted}
       aria-label={soundMuted ? "เปิดเสียง" : "ปิดเสียง"}
       title={soundMuted ? "เปิดเสียง" : "ปิดเสียง"}
-      className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-sm font-semibold transition ${
+      className={`flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-(--ddp-radius-md) border px-3 text-lg shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.95] ${
         soundMuted
-          ? "border-zinc-700 bg-zinc-800 text-zinc-500"
+          ? "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
           : "border-emerald-400 bg-emerald-400 text-emerald-950"
       }`}
     >

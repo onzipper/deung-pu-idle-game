@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Chakra_Petch, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -10,6 +10,20 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+/**
+ * HUD display/body face (task 86d3k2tap — full HUD redesign). Chakra Petch is
+ * drawn for BOTH Latin and Thai (not a Latin face with a generic Thai
+ * fallback), so headers, tabular numerals, and Thai copy in the HUD all read
+ * as one gamey, legible voice. Self-hosted via next/font (bundled at build
+ * time, no runtime Google Fonts CDN request) — see globals.css's `body`
+ * font-family for where this is consumed, and its Thai system fallbacks.
+ */
+const chakraPetch = Chakra_Petch({
+  variable: "--font-display",
+  subsets: ["latin", "thai"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -123,7 +137,7 @@ export default function RootLayout({
   return (
     <html
       lang="th"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${chakraPetch.variable} h-full antialiased`}
     >
       <head>
         {process.env.NODE_ENV === "development" && (
@@ -133,7 +147,10 @@ export default function RootLayout({
           />
         )}
       </head>
-      <body className="min-h-full flex flex-col bg-zinc-950">{children}</body>
+      {/* Background/text color come from globals.css's `body { }` rule
+          (--background/--foreground tokens) — not redeclared here so there is
+          exactly one source of truth for the app-wide dark theme. */}
+      <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );
 }
