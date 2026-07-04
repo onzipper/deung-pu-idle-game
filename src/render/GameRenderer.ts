@@ -22,14 +22,9 @@ import { Application, Container, Graphics, Text } from "pixi.js";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
+import { Environment } from "@/render/environment/Environment";
 import { FxController } from "@/render/fx/FxController";
-import {
-  computeWorldTransform,
-  GROUND_Y,
-  WORLD_HEIGHT,
-  WORLD_WIDTH,
-  type WorldTransform,
-} from "@/render/layout";
+import { computeWorldTransform, WORLD_WIDTH, type WorldTransform } from "@/render/layout";
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
 import {
@@ -78,6 +73,7 @@ export class GameRenderer {
    * offset ON TOP of this each draw(), never mutating it. */
   private baseTransform: WorldTransform = { scale: 1, x: 0, y: 0 };
   private fx: FxController | null = null;
+  private environment: Environment | null = null;
   /** id of the boss `this.bossView` currently represents (for hit-flash lookup
    * correctness across a defeat -> new-boss-spawn id change). */
   private currentBossId: number | null = null;
@@ -124,7 +120,7 @@ export class GameRenderer {
     world.addChild(background, entities, projectiles, fx, overlay);
     this.layers = { background, entities, projectiles, fx, overlay };
 
-    drawBackground(background);
+    this.environment = new Environment(background);
 
     this.heroPool = new Pool(entities, createHeroView);
     this.enemyPool = new Pool(entities, createEnemyView);
@@ -175,6 +171,8 @@ export class GameRenderer {
     // independent of the speed multiplier / sub-step count.
     const dt = Math.min(0.25, Math.max(0, (elapsedMs - this.lastDrawMs) / 1000));
     this.lastDrawMs = elapsedMs;
+
+    this.environment?.update(dt, state);
 
     this.heroPool.beginFrame();
     for (const h of state.heroes) updateHeroView(this.heroPool.get(h.id), h);
@@ -229,6 +227,9 @@ export class GameRenderer {
 
     this.fx?.destroy();
     this.fx = null;
+
+    this.environment?.destroy();
+    this.environment = null;
 
     if (this.bossView) {
       this.bossView.destroy({ children: true });
@@ -324,25 +325,4 @@ function isWebGL2Available(): boolean {
   } catch {
     return false;
   }
-}
-
-/** Sky + ground fill + a faint diagonal grid on the ground (POC `render()` top). */
-function drawBackground(container: Container): void {
-  const g = new Graphics();
-  const margin = 20;
-  g.rect(-margin, -margin, WORLD_WIDTH + margin * 2, WORLD_HEIGHT + margin * 2).fill(
-    PALETTE.arenaSky,
-  );
-  g.rect(
-    -margin,
-    GROUND_Y,
-    WORLD_WIDTH + margin * 2,
-    safeRadius(WORLD_HEIGHT - GROUND_Y + margin * 2),
-  ).fill(PALETTE.arenaGround);
-  for (let gx = 0; gx < WORLD_WIDTH; gx += 40) {
-    g.moveTo(gx, GROUND_Y)
-      .lineTo(gx - 18, WORLD_HEIGHT)
-      .stroke({ width: 1, color: PALETTE.gridLine, alpha: 0.05 });
-  }
-  container.addChild(g);
 }
