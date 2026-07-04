@@ -20,8 +20,9 @@ import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
-import { HERO_COLORS, PALETTE } from "@/render/theme";
+import { ENEMY_COLORS, HERO_COLORS, PALETTE } from "@/render/theme";
 import { ArenaFlash } from "@/render/fx/arenaFlash";
+import { ArmorShardPool } from "@/render/fx/armorShard";
 import { BossEcho } from "@/render/fx/bossEcho";
 import { CameraPunch } from "@/render/fx/cameraPunch";
 import { CastAuraController } from "@/render/fx/castAura";
@@ -32,11 +33,14 @@ import { FloatingTextPool } from "@/render/fx/floatingText";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
+import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
 import { burst, burstDirectional, burstInward, ParticlePool, shower } from "@/render/fx/particles";
+import { PortalPool } from "@/render/fx/portal";
 import { RingPool } from "@/render/fx/rings";
 import { RuneGlyphPool } from "@/render/fx/runeGlyph";
 import { ScreenShake } from "@/render/fx/screenShake";
+import { SoulWispPool } from "@/render/fx/soulWisp";
 import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
 import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
 import {
@@ -115,6 +119,86 @@ function estimateMeteorFallTime(): number {
   return Math.max(0.2, dropDist / Math.max(1, SKILL_TYPES.mage.projSpeed));
 }
 
+// ---------------------------------------------------------------------------
+// DEATH & SPAWN DRAMA (86d3k2qjk) knobs — centralized per beat below. Engine
+// untouched; every one of these is render-only, driven by `state`/events the
+// engine already exposes (see the event-wiring table in the module doc
+// comment above each handler).
+// ---------------------------------------------------------------------------
+
+// ---- enemy death v2: kind-colored dissolve burst + soul wisp + tank shards -
+/** Bigger, slower-drifting than the existing gold kill-pop above it. */
+const DEATH_DISSOLVE_COUNT = 14;
+const DEATH_DISSOLVE_SPEED = 55;
+const DEATH_DISSOLVE_LIFE = 0.6;
+const DEATH_DISSOLVE_RADIUS = 4;
+/** Slight negative "gravity" (an upward drift) — reads as dissolving away,
+ * not falling debris (that's the tank-shard job below). */
+const DEATH_DISSOLVE_GRAVITY = -35;
+const DEATH_DISSOLVE_DRAG = 0.4;
+
+const SOUL_WISP_ENEMY_RADIUS = 2.5;
+const SOUL_WISP_ENEMY_RISE = 40; // spec: "~40px"
+const SOUL_WISP_ENEMY_LIFE = 0.9;
+
+/** Launch cone (radians) around straight-up for tank armor shards. */
+const TANK_SHARD_SPREAD = 1.8;
+const TANK_SHARD_SPEED = 100;
+const TANK_SHARD_LIFE = 0.5;
+
+// ---- hero death v2: soul wisp + contracting ring ---------------------------
+const SOUL_WISP_HERO_RADIUS = 4.5; // "slightly larger" than the enemy wisp
+const SOUL_WISP_HERO_RISE = 50;
+const SOUL_WISP_HERO_LIFE = 1.1;
+/** `RingPool` just linearly interpolates r0 -> r1 — passing r0 > r1 is
+ * exactly the "dim ring CONTRACTS around the body" read the spec asks for,
+ * no new ring-direction concept needed. Both already run through
+ * `safeRadius()` inside `rings.ts`. */
+const HERO_DEATH_RING_R0 = 46;
+const HERO_DEATH_RING_R1 = 6;
+const HERO_DEATH_RING_DURATION = 0.45;
+
+// ---- hero revive v2: light pillar + brighter sparkle burst -----------------
+const REVIVE_SPARKLE_COUNT = 16;
+const REVIVE_SPARKLE_SPEED = 70;
+const REVIVE_SPARKLE_LIFE = 0.55;
+const REVIVE_PILLAR_HEAD_MARGIN = 26; // px above HERO_TOP_Y the beam starts
+const REVIVE_PILLAR_WIDTH = 16;
+const REVIVE_PILLAR_DURATION = 0.35;
+
+// ---- boss entrance (state.boss null -> object): dust + dark tint + shake --
+const BOSS_ENTRANCE_DUST_COUNT = 16;
+const BOSS_ENTRANCE_DUST_SPEED = 90;
+const BOSS_ENTRANCE_DUST_LIFE = 0.5;
+const BOSS_ENTRANCE_DARK_TINT = 0x000000;
+const BOSS_ENTRANCE_DARK_ALPHA = 0.25; // spec: "subtle ~0.25"
+const BOSS_ENTRANCE_SHAKE = 4; // mild — he's stomping in, not slamming yet
+
+// ---- boss death v2: staged escalating pulses BEFORE the gold shower/echo --
+interface BossDeathStageSpec {
+  /** Real seconds after `bossDefeated` this pulse fires. */
+  t: number;
+  radius: number;
+  particleCount: number;
+  speed: number;
+  color: number;
+}
+/** 3 pulses, 0.15s apart (spec), escalating in size/color toward the gold
+ * payout that follows — total staged-pulse span is 0.3s, keeping the whole
+ * "boss going down in stages" beat (pulses + the existing ~0.5s collapse
+ * echo that follows) under the spec's ~0.8s budget. */
+const BOSS_DEATH_STAGE_SPEC: readonly BossDeathStageSpec[] = [
+  { t: 0, radius: 50, particleCount: 10, speed: 140, color: PALETTE.warn },
+  { t: 0.15, radius: 76, particleCount: 14, speed: 170, color: PALETTE.warn },
+  { t: 0.3, radius: 104, particleCount: 18, speed: 200, color: PALETTE.killGold },
+];
+const BOSS_DEATH_STAGE_SHAKE = 5;
+
+interface BossDeathStage extends BossDeathStageSpec {
+  x: number;
+  y: number;
+}
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -170,6 +254,33 @@ export class FxController {
   private readonly scorches: ScorchPool;
   private readonly castAura: CastAuraController;
 
+  // ---- DEATH & SPAWN DRAMA (86d3k2qjk) additions ---------------------------
+  private readonly portals: PortalPool;
+  private readonly armorShards: ArmorShardPool;
+  private readonly soulWisps: SoulWispPool;
+  private readonly lightPillars: LightPillarPool;
+
+  /** Last-seen "does a boss currently exist" — `state.boss` transitions
+   * null -> object with no dedicated event (the player's `challengeBoss`
+   * input flips it directly; see `engine/systems/boss.ts`), so the entrance
+   * beat is detected the same continuous-per-frame way as
+   * `updateWeaponTrail()`/`updateCastAura()` below, in `update()`. */
+  private hadBoss = false;
+
+  /** Render-side mirror of `Pool`'s own mark-and-sweep "first sight" — a
+   * whole wave of enemies can appear in ONE engine step, so this is checked
+   * every `update()` call (not gated behind `frameEvents.length`) against the
+   * live `state.enemies` list. `frameEnemyIdScratch` is cleared and refilled
+   * every frame (never a fresh `Set`, so this is zero steady-state
+   * allocation, same convention as `Pool.beginFrame()`'s `seen` set). */
+  private readonly seenEnemyIds = new Set<number>();
+  private readonly frameEnemyIdScratch = new Set<number>();
+
+  /** In-flight staged boss-defeat pulses + the deferred "final" payout beat —
+   * see `onBossDefeated()`/`updateBossDeathStages()`. */
+  private readonly bossDeathStages: BossDeathStage[] = [];
+  private bossDeathFinal: Extract<GameEvent, { type: "bossDefeated" }> | null = null;
+
   /** Edge-detection for the swordsman's per-swing crescent (item 2) —
    * compared against `peekSwordSwing()`'s monotonic `seq` every frame a
    * `consumeEvents()` call runs. */
@@ -205,10 +316,12 @@ export class FxController {
     private readonly lookupHeroView: HeroViewLookup,
   ) {
     // Sub-layers in z-order: corpse echoes (bottom, "the body collapsing" +
-    // ground scorch marks) -> weapon trail + projectile tracers -> the new
-    // hero-signature bits (crescents/ghost blades/fan flashes/rune glyphs/
-    // cast aura) -> rings -> particles -> text -> full-arena flash (top), so
-    // numbers stay readable over bursts and the flash never hides them.
+    // ground scorch marks + spawn portals + tank armor shards — all
+    // ground/body-adjacent decals) -> weapon trail + projectile tracers ->
+    // the hero-signature bits (crescents/ghost blades/fan flashes/rune
+    // glyphs/cast aura) -> rings (+ revive light pillars) -> particles
+    // (+ soul wisps) -> text -> full-arena flash (top), so numbers stay
+    // readable over bursts and the flash never hides them.
     this.corpseLayer = new PixiContainer();
     this.trailLayer = new PixiContainer();
     this.heroFxLayer = new PixiContainer();
@@ -226,6 +339,8 @@ export class FxController {
 
     this.corpseEcho = new CorpseEchoPool(this.corpseLayer);
     this.scorches = new ScorchPool(this.corpseLayer);
+    this.portals = new PortalPool(this.corpseLayer);
+    this.armorShards = new ArmorShardPool(this.corpseLayer);
     this.weaponTrail = new WeaponTrailController(this.trailLayer);
     this.tracers = new TracerPool(this.trailLayer);
     this.crescents = new CrescentPool(this.heroFxLayer);
@@ -234,7 +349,9 @@ export class FxController {
     this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer);
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.rings = new RingPool(this.ringsLayer);
+    this.lightPillars = new LightPillarPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
+    this.soulWisps = new SoulWispPool(this.particlesLayer);
     this.damageNumbers = new FloatingTextPool(this.textLayer, DAMAGE_NUMBER_CAP);
     this.eventText = new FloatingTextPool(this.textLayer, EVENT_TEXT_CAP);
     this.flash = new ArenaFlash(WORLD_WIDTH, WORLD_HEIGHT);
@@ -292,6 +409,7 @@ export class FxController {
         case "heroDown":
           this.shake.trigger(3); // mild
           this.impactFilters.triggerRgbSplit();
+          this.onHeroDown(ev);
           break;
         case "heroRevived":
           this.onHeroRevived(ev);
@@ -372,14 +490,18 @@ export class FxController {
     this.punch.update(dt);
     this.corpseEcho.update(dt);
     this.scorches.update(dt);
+    this.portals.update(dt);
+    this.armorShards.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
+    this.lightPillars.update(dt);
     this.crescents.update(dt);
     this.ghostBlades.update(dt);
     this.flashLines.update(dt);
     this.runeGlyphs.update(dt);
     this.meteorSky.update(dt);
     this.particles.update(dt);
+    this.soulWisps.update(dt);
     this.damageNumbers.update(dt);
     this.eventText.update(dt);
     this.flash.update(dt);
@@ -389,6 +511,9 @@ export class FxController {
     this.updateCastAura(dt, state);
     this.updateMeteorTracking(state);
     this.updateKnockback(dt);
+    this.updateEnemySpawns(state);
+    this.updateBossDeathStages(dt);
+    this.detectBossEntrance(state);
     this.archerSkillBoostT = Math.max(0, this.archerSkillBoostT - dt);
   }
 
@@ -396,6 +521,8 @@ export class FxController {
     this.hitFlash.destroy();
     this.corpseEcho.destroy();
     this.scorches.destroy();
+    this.portals.destroy();
+    this.armorShards.destroy();
     this.bossEcho.destroy();
     this.weaponTrail.destroy();
     this.tracers.destroy();
@@ -407,7 +534,9 @@ export class FxController {
     this.castAura.destroy();
     this.impactFilters.destroy();
     this.rings.destroy();
+    this.lightPillars.destroy();
     this.particles.destroy();
+    this.soulWisps.destroy();
     this.damageNumbers.destroy();
     this.eventText.destroy();
     this.flash.destroy();
@@ -502,13 +631,30 @@ export class FxController {
     }
   }
 
+  /** Enemy death v2 (DEATH & SPAWN DRAMA item 1): the existing gold kill-pop
+   * + corpse-crumple base layer, PLUS a bigger kind-colored "dissolving"
+   * burst, a rising soul wisp (skipped outright if the wisp pool is
+   * saturated — see `soulWisp.ts`), and — tank only — a couple of arcing
+   * armor-shard chips. */
   private onKill(ev: Extract<GameEvent, { type: "kill" }>): void {
     const size = ENEMY_TYPES[ev.kind]?.size ?? 1;
     const y = GROUND_Y - 20 - 8 * size;
+    const kindColor = ENEMY_COLORS[ev.kind];
+
     burst(this.particles, ev.x, y, 10, PALETTE.killGold, {
       speed: 110,
       life: 0.45,
       radius: 3,
+    });
+    // Kind-colored dissolve burst — bigger + slower than the gold pop above,
+    // with a slight upward drift so it reads as "breaking apart", not just
+    // more of the same gold sparkle.
+    burst(this.particles, ev.x, y, DEATH_DISSOLVE_COUNT, kindColor, {
+      speed: DEATH_DISSOLVE_SPEED,
+      life: DEATH_DISSOLVE_LIFE,
+      radius: DEATH_DISSOLVE_RADIUS,
+      gravity: DEATH_DISSOLVE_GRAVITY,
+      drag: DEATH_DISSOLVE_DRAG,
     });
     this.eventText.spawn({
       x: ev.x,
@@ -524,13 +670,84 @@ export class FxController {
     // echo (kept subtle; the burst above already covers the "impact") is
     // the render-side stand-in for a death animation.
     this.corpseEcho.spawn(ev.x, GROUND_Y - 4, ev.kind, size);
+
+    this.soulWisps.trySpawn({
+      x: ev.x,
+      y: y - 6,
+      color: kindColor,
+      radius: SOUL_WISP_ENEMY_RADIUS,
+      rise: SOUL_WISP_ENEMY_RISE,
+      life: SOUL_WISP_ENEMY_LIFE,
+    });
+
+    if (ev.kind === "tank") {
+      const shardCount = 2 + Math.floor(Math.random() * 2); // 2 or 3
+      for (let i = 0; i < shardCount; i++) {
+        const angle = -Math.PI / 2 + (Math.random() - 0.5) * TANK_SHARD_SPREAD;
+        this.armorShards.spawn({
+          x: ev.x,
+          y,
+          angle,
+          speed: TANK_SHARD_SPEED * (0.8 + Math.random() * 0.4),
+          color: kindColor,
+          w: 8,
+          h: 6,
+          life: TANK_SHARD_LIFE,
+        });
+      }
+    }
   }
 
+  /** Hero death v2 (item 3): a class-colored soul wisp + a dim ring that
+   * CONTRACTS around the body (kept alongside the existing fall — see
+   * `heroView.ts`'s `DEATH_FALL_*`, untouched). */
+  private onHeroDown(ev: Extract<GameEvent, { type: "heroDown" }>): void {
+    const colors = HERO_COLORS[ev.cls];
+    this.soulWisps.spawn({
+      x: ev.x,
+      y: HERO_TOP_Y,
+      color: colors.light,
+      radius: SOUL_WISP_HERO_RADIUS,
+      rise: SOUL_WISP_HERO_RISE,
+      life: SOUL_WISP_HERO_LIFE,
+    });
+    this.rings.spawn({
+      x: ev.x,
+      y: HERO_MID_Y,
+      r0: HERO_DEATH_RING_R0,
+      r1: HERO_DEATH_RING_R1,
+      duration: HERO_DEATH_RING_DURATION,
+      width: 3,
+      color: PALETTE.deadHero,
+    });
+  }
+
+  /** Hero revive v2 (item 4): a light pillar dropping from above + a radial
+   * sparkle burst (kept from the original, punched up) + a brief bright
+   * flash pulse on the body itself (reuses `hitFlash.ts`'s white
+   * `ColorMatrixFilter` flash — same "punch to white" read as a landed hit,
+   * here standing in for "life snapping back in") — alongside the existing
+   * spring-bounce in `heroView.ts` (untouched). */
   private onHeroRevived(ev: Extract<GameEvent, { type: "heroRevived" }>): void {
-    burst(this.particles, ev.x, HERO_TOP_Y, 10, HERO_COLORS[ev.cls].light, {
-      speed: 60,
-      life: 0.5,
+    const colors = HERO_COLORS[ev.cls];
+
+    const view = this.lookupView("hero", ev.id);
+    if (view) this.hitFlash.trigger(view);
+
+    burst(this.particles, ev.x, HERO_TOP_Y, REVIVE_SPARKLE_COUNT, colors.light, {
+      speed: REVIVE_SPARKLE_SPEED,
+      life: REVIVE_SPARKLE_LIFE,
       radius: 2.5,
+    });
+
+    const topY = HERO_TOP_Y - REVIVE_PILLAR_HEAD_MARGIN;
+    this.lightPillars.spawn({
+      x: ev.x,
+      topY,
+      height: GROUND_Y - topY,
+      color: colors.light,
+      duration: REVIVE_PILLAR_DURATION,
+      width: REVIVE_PILLAR_WIDTH,
     });
   }
 
@@ -852,11 +1069,67 @@ export class FxController {
     }
   }
 
+  /** Boss death v2 (item 6): queues 3 escalating explosion pulses (particle
+   * burst + ring each), 0.15s apart, and DEFERS the existing gold-shower/
+   * echo payout beat until they finish — "going down in stages" before the
+   * celebration. Runs on real time (`updateBossDeathStages()`, called from
+   * `update(dt, ...)`), so it plays through the 120ms hit-stop + 0.25x
+   * slow-mo `TimeDirector` applies on this same event — that's correct and
+   * desired (see the module's DEATH & SPAWN DRAMA knobs block for the
+   * timing/budget notes). */
   private onBossDefeated(ev: Extract<GameEvent, { type: "bossDefeated" }>): void {
+    this.bossDeathStages.length = 0;
+    for (const spec of BOSS_DEATH_STAGE_SPEC) {
+      this.bossDeathStages.push({ ...spec, x: ev.x, y: BOSS_CY });
+    }
+    this.bossDeathFinal = ev;
+  }
+
+  /** Advances the staged boss-defeat pulses queued by `onBossDefeated()`;
+   * once all have fired, plays the (unchanged) gold-shower/echo finale once. */
+  private updateBossDeathStages(dt: number): void {
+    if (!this.bossDeathStages.length && !this.bossDeathFinal) return;
+    for (let i = this.bossDeathStages.length - 1; i >= 0; i--) {
+      const stage = this.bossDeathStages[i];
+      stage.t -= dt;
+      if (stage.t <= 0) {
+        this.fireBossDeathStage(stage);
+        this.bossDeathStages.splice(i, 1);
+      }
+    }
+    if (!this.bossDeathStages.length && this.bossDeathFinal) {
+      this.fireBossDeathFinal(this.bossDeathFinal);
+      this.bossDeathFinal = null;
+    }
+  }
+
+  private fireBossDeathStage(stage: BossDeathStage): void {
+    burst(this.particles, stage.x, stage.y, stage.particleCount, stage.color, {
+      speed: stage.speed,
+      life: 0.32,
+      radius: 4,
+    });
+    this.rings.spawn({
+      x: stage.x,
+      y: stage.y,
+      r0: 10,
+      r1: stage.radius,
+      duration: 0.3,
+      width: 4,
+      color: stage.color,
+    });
+    this.shake.trigger(BOSS_DEATH_STAGE_SHAKE);
+  }
+
+  /** The pre-existing boss-defeated payout beat (gold burst + shower +
+   * "+gold" text + collapse echo) — unchanged, just now fired AFTER the
+   * staged pulses above instead of immediately on the event. */
+  private fireBossDeathFinal(ev: Extract<GameEvent, { type: "bossDefeated" }>): void {
     this.flash.trigger(PALETTE.killGold, 0.32);
     // Symmetric punch (no `worldX` bias) — a boss-defeated beat isn't "toward
     // a point", it's the whole arena celebrating.
     this.punch.trigger("bossDefeated");
+    this.impactFilters.triggerShockwave(ev.x, BOSS_CY);
     burst(this.particles, ev.x, BOSS_CY, 26, PALETTE.killGold, {
       speed: 200,
       life: 0.6,
@@ -876,6 +1149,54 @@ export class FxController {
     // BossView is destroyed this same frame) — the collapse-forward plays on
     // this one-shot echo instead (see bossEcho.ts).
     this.bossEcho.trigger("defeat", ev.x, BOSS_CY);
+  }
+
+  /** Enemy spawn v2 (item 2): render-side mirror of `Pool`'s own "first
+   * sight" mark-and-sweep (see the `seenEnemyIds` field doc comment) — opens
+   * a ground portal at each newly-seen enemy's spawn point. Called every
+   * `update()` (NOT gated behind `frameEvents.length`), since a whole wave
+   * can appear in one engine step with no accompanying event beyond the
+   * once-per-wave `waveSpawn`. */
+  private updateEnemySpawns(state: GameState): void {
+    this.frameEnemyIdScratch.clear();
+    for (const e of state.enemies) {
+      this.frameEnemyIdScratch.add(e.id);
+      if (!this.seenEnemyIds.has(e.id)) {
+        this.seenEnemyIds.add(e.id);
+        this.portals.spawn(e.x, GROUND_Y, ENEMY_COLORS[e.kind], e.size);
+      }
+    }
+    for (const id of this.seenEnemyIds) {
+      if (!this.frameEnemyIdScratch.has(id)) this.seenEnemyIds.delete(id);
+    }
+  }
+
+  /** Boss entrance (item 5): `state.boss` has no dedicated "challenge
+   * started" event (the player's `challengeBoss` input flips the field
+   * directly — see `engine/systems/boss.ts`), so this is a continuous
+   * null -> object edge-check, same shape as `updateMeteorTracking()`. */
+  private detectBossEntrance(state: GameState): void {
+    const hasBoss = !!state.boss;
+    if (hasBoss && !this.hadBoss && state.boss) {
+      this.onBossEntrance(state.boss.x);
+    }
+    this.hadBoss = hasBoss;
+  }
+
+  /** Dust wave at his spawn edge + a brief ambient darkening + a mild
+   * ground-shake as he stomps in — `x` only (the dust wave belongs at
+   * `GROUND_Y`, not the boss's own `y`, same convention `bossSlamLand`
+   * already uses). */
+  private onBossEntrance(x: number): void {
+    burst(this.particles, x, GROUND_Y - 4, BOSS_ENTRANCE_DUST_COUNT, PALETTE.muted, {
+      speed: BOSS_ENTRANCE_DUST_SPEED,
+      life: BOSS_ENTRANCE_DUST_LIFE,
+      radius: 3.5,
+    });
+    // Ambient darkening — the same reusable full-bleed flash used for
+    // enrage/defeat/stage-advanced, just tinted dark instead of bright.
+    this.flash.trigger(BOSS_ENTRANCE_DARK_TINT, BOSS_ENTRANCE_DARK_ALPHA);
+    this.shake.trigger(BOSS_ENTRANCE_SHAKE);
   }
 
   /** Best-effort "above the head" y for a hit's damage number (entities are

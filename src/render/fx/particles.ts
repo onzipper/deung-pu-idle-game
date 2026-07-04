@@ -137,18 +137,23 @@ export class ParticlePool {
   }
 }
 
-/** A small circular burst (kill pops, impacts, spawn poofs). */
+/** A small circular burst (kill pops, impacts, spawn poofs). `gravity`/`drag`
+ * default to the original "pop and settle fast" feel (0 / 0.06); DEATH & SPAWN
+ * DRAMA's kind-colored "dissolve" burst (86d3k2qjk item 1) overrides both for
+ * a slower, slightly buoyant drift instead. */
 export function burst(
   pool: ParticlePool,
   x: number,
   y: number,
   count: number,
   color: number,
-  opts?: { speed?: number; life?: number; radius?: number },
+  opts?: { speed?: number; life?: number; radius?: number; gravity?: number; drag?: number },
 ): void {
   const speed = opts?.speed ?? 90;
   const life = opts?.life ?? 0.4;
   const radius = opts?.radius ?? 3;
+  const gravity = opts?.gravity ?? 0;
+  const drag = opts?.drag ?? 0.06;
   for (let i = 0; i < count; i++) {
     const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
     const s = speed * (0.6 + Math.random() * 0.6);
@@ -160,7 +165,8 @@ export function burst(
       life: life * (0.7 + Math.random() * 0.6),
       radius: radius * (0.7 + Math.random() * 0.6),
       color,
-      drag: 0.06,
+      gravity,
+      drag,
     });
   }
 }

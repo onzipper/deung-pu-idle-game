@@ -110,8 +110,17 @@ const ENEMY_MOTION: Record<EnemyKind, EnemyKindParams> = {
 };
 
 const LEG_BASE_Y = GROUND_Y - 2;
+/** The hop/landing-settle itself — kept unchanged from before DEATH & SPAWN
+ * DRAMA (86d3k2qjk item 2): the "materialize" beat now wrapping around it is
+ * `fx/portal.ts`'s ground portal, opened by `FxController.updateEnemySpawns()`
+ * off this same first-sight edge (a render-side mirror of `Pool`'s own
+ * mark-and-sweep — see that method's doc comment). */
 const SPAWN_DURATION = 0.35;
 const SPAWN_HOP_HEIGHT = 14;
+/** Fade-in window, real seconds — matches `fx/portal.ts`'s `PORTAL_OPEN_DURATION`
+ * (kept as a plain literal, not an import: `enemyView.ts` has no other `fx/`
+ * dependency, and the two only need to stay ROUGHLY in sync, not exactly). */
+const SPAWN_FADE_DURATION = 0.15;
 /** Below this normalized speed, treat the entity as "stationary" (AIM pose
  * for ranged; idle shuffle otherwise). */
 const AIM_SPEED_THRESHOLD = 0.08;
@@ -434,11 +443,15 @@ export function updateEnemyView(view: EnemyView, enemy: Enemy, ctx: EnemyFrameCo
   anim.armAngle += (armTarget - anim.armAngle) * clamp01(dt * ARM_SMOOTH);
 
   // ---- spawn-in entrance beat (first sight only) --------------------------
+  // The hop/landing-settle below is unchanged; the fade-in is new (DEATH &
+  // SPAWN DRAMA v2) so the body "steps out of" `fx/portal.ts`'s ground
+  // portal rather than just popping fully-formed into view.
   let spawnHop = 0;
   if (anim.spawnT >= 0 && anim.spawnT < SPAWN_DURATION) {
     anim.spawnT += dt;
     const p = clamp01(anim.spawnT / SPAWN_DURATION);
     spawnHop = -SPAWN_HOP_HEIGHT * (1 - easeOutBack(p));
+    view.alpha = clamp01(anim.spawnT / SPAWN_FADE_DURATION);
     if (p >= 1) anim.spawnT = -1;
   }
 
