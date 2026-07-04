@@ -30,10 +30,16 @@ export function updateAnchor(state: GameState): void {
   const targets = getTargets(state);
   if (targets.length) {
     const minEnemyX = Math.min(...targets.map((e) => e.x));
+    // During the boss phase the lone boss engages near the spawn edge (~836), well
+    // beyond the shared battleMaxAnchor(510). Use a deeper boss-only cap so the anchor
+    // tracks the boss and the ranged heroes stay in range of it (playtest fix
+    // "ตัวตีไกลไม่ตีบอส"). Normal waves keep the shallower cap so pacing is unchanged.
+    const maxAnchor =
+      state.phase === "boss" ? CONFIG.boss.maxAnchor : CONFIG.battleMaxAnchor;
     const target = clamp(
       minEnemyX - CONFIG.battleAnchorLead,
       CONFIG.baseAnchor,
-      CONFIG.battleMaxAnchor,
+      maxAnchor,
     );
     state.anchorX += clamp(
       target - state.anchorX,

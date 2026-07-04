@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { initGameState, step, frontHeroX, CONFIG, FIXED_DT, SLOT_ORDER } from "@/engine";
+import {
+  initGameState,
+  step,
+  frontHeroX,
+  CONFIG,
+  FIXED_DT,
+  SLOT_ORDER,
+  HERO_TYPES,
+} from "@/engine";
 import type { GameState, SaveData } from "@/engine";
 import { threeHeroSave } from "./helpers";
 
@@ -164,6 +172,50 @@ describe("boss retreat / re-challenge loop", () => {
       expect(s.waveGap).toBe(CONFIG.bossRetreatWaveGap);
       expect(s.heroes.every((h) => !h.dead && h.hp === h.maxHp)).toBe(true);
     }
+  });
+});
+
+/**
+ * Playtest bug "ตัวตีไกลไม่ตีบอส" (ranged heroes don't attack the boss): the boss
+ * engages near the spawn edge (~836), but the shared battleMaxAnchor(510) clamped
+ * the formation too shallow — archer(484)+350 and mage(436)+330 both fell just
+ * short, so the backline stood idle. The boss-phase anchor cap (CONFIG.boss.maxAnchor)
+ * lets the anchor track the boss so the ranged heroes stay in range.
+ */
+describe("boss-phase ranged coverage (ตัวตีไกลไม่ตีบอส)", () => {
+  it("archer and mage close into range of the boss and damage it", () => {
+    const s = initGameState(2, threeHeroSave(5));
+    // Tanky team + tanky boss so the duel lasts long enough to observe positioning
+    // (nobody dies), and the boss walks in from spawn naturally (no engage skip).
+    for (const h of s.heroes) {
+      h.maxHp = 1e9;
+      h.hp = 1e9;
+    }
+    s.bossReady = true;
+    step(s, { challengeBoss: true });
+    s.boss!.maxHp = 1e9;
+    s.boss!.hp = 1e9;
+
+    const sword = s.heroes[0];
+    const archer = s.heroes[1];
+    const mage = s.heroes[2];
+    expect(archer.cls).toBe("archer");
+    expect(mage.cls).toBe("mage");
+
+    const hpBefore = s.boss!.hp;
+    for (let i = 0; i < 400; i++) {
+      // Mute the swordsman entirely: only the ranged heroes can damage the boss, so
+      // any boss-hp loss PROVES the backline reached it.
+      sword.cd = 999;
+      sword.skillCd = 999;
+      step(s, {});
+    }
+
+    // Structural: both ranged heroes are within their own range of the boss...
+    expect(s.boss!.x - archer.x).toBeLessThanOrEqual(HERO_TYPES.archer.range);
+    expect(s.boss!.x - mage.x).toBeLessThanOrEqual(HERO_TYPES.mage.range);
+    // ...and actually hit it (boss hp dropped with the swordsman muted).
+    expect(s.boss!.hp).toBeLessThan(hpBefore);
   });
 });
 

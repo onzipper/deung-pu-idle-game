@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initGameState, step, CONFIG, HERO_TYPES } from "@/engine";
+import { initGameState, step, CONFIG, HERO_TYPES, heroAtkSpeed } from "@/engine";
 import type { Enemy, GameState } from "@/engine";
 import { makeStubEnemy, threeHeroSave } from "./helpers";
 
@@ -211,6 +211,83 @@ describe("formation + engagement follow-up (86d3k2nhm)", () => {
     // Structural guarantee: he gets within striking distance...
     expect(minGap).toBeLessThanOrEqual(swordRange);
     // ...and actually retaliates (the enemy is not an untouchable free-hitter).
+    expect(dealtDamage).toBe(true);
+  });
+});
+
+/**
+ * Playtest bug "มอนตีดาบฟรี" (monsters hit the swordsman for free): while he
+ * sprint-charges he outran slow enemies, leaving them behind him in the old
+ * asymmetric attack window's blind spot (80–96px back), where they plinked him
+ * with no possible counter. Fixed structurally by (a) symmetric melee targeting
+ * (hit the nearest foe within range on EITHER side) and (b) a rear contact reach
+ * so a further-behind enemy re-approaches instead of free-hitting.
+ */
+describe("swordsman free-hit fix (มอนตีดาบฟรี)", () => {
+  /** A stationary melee attacker that keeps swinging (huge HP, real cooldown). */
+  const attacker = (id: number, x: number): Enemy => ({
+    ...makeStubEnemy(id, x, 1_000_000),
+    atk: 6,
+    cd: 0.5,
+  });
+
+  it("surrounded by 2+ melee foes he is never idle — swings each cooldown and retaliates against BOTH", () => {
+    const s = initGameState(1);
+    s.waveGap = 1e9;
+    const sword = s.heroes[0];
+    const range = HERO_TYPES.swordsman.range; // 96
+
+    // Two attackers wedged just behind him, past the OLD [-80] attack window but
+    // inside his 96 melee reach. With the asymmetric window he could not target
+    // anything behind -80; symmetric targeting lets him swing back at them.
+    const e1 = attacker(1, sword.x - 85);
+    const e2 = attacker(2, sword.x - 88);
+    s.enemies = [e1, e2];
+    expect(sword.x - e1.x).toBeLessThanOrEqual(range); // genuinely in melee range
+    expect(sword.x - e1.x).toBeGreaterThan(-CONFIG.meleeTargetMinD); // past the old window
+
+    let swings = 0;
+    let tookDamage = false;
+    const dur = 240; // ~4s (huge-HP foes stay alive the whole window)
+    for (let i = 0; i < dur; i++) {
+      const before = s.enemies.reduce((a, e) => a + e.hp, 0);
+      const hpB = sword.hp;
+      step(s, {});
+      if (s.enemies.reduce((a, e) => a + e.hp, 0) < before) swings++;
+      if (sword.hp < hpB) tookDamage = true;
+    }
+
+    // He is under fire from the surrounding pack...
+    expect(tookDamage).toBe(true);
+    // ...and is NEVER idle: he lands roughly one swing per attack cooldown across
+    // the whole window (the old blind spot would have produced ZERO — nothing was
+    // targetable on his back side, i.e. free hits).
+    const expected = (dur * CONFIG.speeds[0]) / 60 / heroAtkSpeed("swordsman", s.upgrades);
+    expect(swings).toBeGreaterThanOrEqual(Math.floor(expected) - 1);
+  });
+
+  it("a straggler further behind than melee reach re-approaches instead of free-hitting", () => {
+    const s = initGameState(1);
+    s.waveGap = 1e9;
+    const sword = s.heroes[0];
+    // A slow straggler far behind the front line: under the POC's one-sided engage
+    // test it plinked from out of reach forever. Now it must walk back toward the
+    // line (its x INCREASES) until it re-enters melee contact.
+    const straggler: Enemy = { ...makeStubEnemy(1, sword.x - 200, 1_000_000), atk: 6, cd: 0.5, speed: 40 };
+    s.enemies = [straggler];
+    const startX = straggler.x;
+    let dealtDamage = false;
+    let reEngaged = false;
+    for (let i = 0; i < 600; i++) {
+      const hpB = sword.hp;
+      step(s, {});
+      if (sword.hp < hpB) dealtDamage = true;
+      if (sword.x - straggler.x <= HERO_TYPES.swordsman.range) reEngaged = true;
+    }
+    // It moved back toward the line (re-approach), not further away...
+    expect(straggler.x).toBeGreaterThan(startX);
+    // ...and got back into the swordsman's reach so any hit it lands is retaliable.
+    expect(reEngaged).toBe(true);
     expect(dealtDamage).toBe(true);
   });
 });

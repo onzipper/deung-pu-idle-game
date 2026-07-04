@@ -89,7 +89,7 @@ export const CONFIG = {
   meleeStopGap: 34, // |d| > this => approach, else hold
   meleeApproachGap: 26, // stop this far short of the target
   meleeHomeBack: 60, // lower clamp = homeX - this
-  meleeTargetMinD: -80, // nearestTarget minD for a melee attack (can hit slightly behind)
+  meleeTargetMinD: -80, // (superseded by symmetric |Δx| ≤ range melee targeting — see combat.ts free-hit fix; kept for reference)
   rangedKiteStep: 46, // step back by this when an enemy is within kiteDist
   rangedHomeFront: 8, // ranged upper clamp = min(homeX + this, rangedForwardCap)
   rangedMinX: 55, // ranged lower clamp (don't back off the screen)
@@ -114,6 +114,20 @@ export const CONFIG = {
   enemyEngageJitter: 24, // engageOffset = rng() * this
   enemyInitialCdJitter: 0.8, // starting attack cd = rng() * this
   enemyMeleeAtkCd: 1.0, // melee enemy attack cooldown
+  // Free-hit fix ("มอนตีดาบฟรี"): a melee enemy only lands hits inside a CONTACT
+  // BAND around the front line. The upper edge is engageX (fX + clash + jitter, its
+  // normal front stop); this is the lower edge — how far BEHIND the front hero it may
+  // still attack from. When the swordsman sprint-charges (chargeSpeed 265) he outruns
+  // slow melee enemies, leaving them behind him; with the POC's one-sided `e.x <=
+  // engageX` test they kept plinking him from ARBITRARILY far back (well beyond his
+  // 96 melee reach) and he could never retaliate = the "free hit". Kept < swordsman
+  // range (96) so any enemy still allowed to attack sits inside his reach; a melee
+  // enemy that has fallen further behind than this RE-APPROACHES the line (walks back
+  // into contact) instead of free-hitting. Only ever triggers for left-behind enemies
+  // — a normally-approaching enemy (e.x > engageX) is untouched, so wave pacing holds.
+  // 90 sits strictly inside the swordsman's 96 melee reach, so every enemy still
+  // ALLOWED to attack from behind is one he can symmetrically swing back at.
+  enemyBehindReach: 90,
 
   /** Stage-gated random thresholds for wave composition (POC rollWave). */
   waveComp: {
@@ -186,10 +200,46 @@ export const CONFIG = {
     { dx: 4, dy: 5, speedMult: 0.95 },
   ] as const,
 
+  // ---- archer ARROW RAIN skill drop pattern (86d3k2t18) ----
+  // FIXED per-drop table (length MUST equal SKILL_TYPES.archer.targets). Carries NO
+  // RNG on purpose (see archerVolleyOffsets). `dx` spreads the landing x around the
+  // cluster centroid so the rain blankets a zone (not a single point); `ry` is extra
+  // spawn HEIGHT so the drops fall for slightly different durations and land across
+  // several frames (the raining-in look + staggered damage ticks) rather than one
+  // lump. Deterministic because the table is constant.
+  arrowRainOffsets: [
+    { dx: -96, ry: 0 },
+    { dx: -72, ry: 34 },
+    { dx: -48, ry: 12 },
+    { dx: -24, ry: 46 },
+    { dx: 0, ry: 20 },
+    { dx: 24, ry: 52 },
+    { dx: 48, ry: 8 },
+    { dx: 72, ry: 38 },
+    { dx: 96, ry: 26 },
+  ] as const,
+
   // ---- skills ----
   skills: {
     meteorSpawnY: -48, // meteor projectile spawns at this absolute y (falls to impact)
     mageFallbackAheadX: 150, // if no target, aim the meteor at h.x + this
+    // Archer ARROW RAIN ("ฝนลูกธนู"): the skill spawns `SKILL_TYPES.archer.targets`
+    // small point-target arrows that FALL from the sky (reusing the meteor mechanic)
+    // onto a zone centred on the centroid of the foes within `arrowRainRange`. Each
+    // drop is a small AoE (`SKILL_TYPES.archer.radius`) dealing heroAtk *
+    // `SKILL_TYPES.archer.mult` (sim-tuned for effective DPS, not raw total). Landing
+    // spread + spawn-height stagger come from a FIXED table (`arrowRainOffsets`) —
+    // NO RNG (the seeded stream is reserved for wave composition), so it stays
+    // deterministic.
+    arrowRainSpawnY: -60, // base spawn y (above the top); each arrow adds its ry stagger
+    // The rain ARCS from the sky, so it out-ranges the archer's direct-fire basic
+    // attack (HERO_TYPES.archer.range 350): the guard + centroid use THIS range. The
+    // archer's formation slot sits ~400px back from the enemy line on average, so a
+    // 350 cast range gated the skill to ~6% of frames (vs the old spread, which had
+    // NO range limit and fired every cooldown) — starving S2/S3 clears. A field-
+    // spanning artillery range restores the old cast cadence; per-drop power is tuned
+    // (SKILL_TYPES.archer.mult) to keep total DPS in the balance budget.
+    arrowRainRange: 760,
   },
 
   // ---- flow / progression ----
@@ -201,6 +251,22 @@ export const CONFIG = {
   // ---- boss (movement + slam/enrage tuning) ----
   boss: {
     y: 190,
+    // Boss-phase anchor cap (playtest fix "ตัวตีไกลไม่ตีบอส" — ranged heroes not
+    // hitting the boss). During the boss phase `getTargets` is the single boss, so
+    // `updateAnchor` already tracks (boss.x - battleAnchorLead); but the shared
+    // `battleMaxAnchor` (510) clamps the anchor too shallow for a boss that engages
+    // near the spawn edge: the boss settles at frontHeroX + clash + engageExtra ≈
+    // chargeHardCap(770)+66 = 836, while archer(510-26=484)+range 350 = 834 and
+    // mage(510-74=436)+range 330 = 766 both fall SHORT of 836 -> the backline stands
+    // idle. This boss-only cap lets the anchor ride up to (boss.x - battleAnchorLead)
+    // ≈ 836-150 = 686 so mage(686-74=612)+330 = 942 and archer(686-26=660)+350 = 1010
+    // both cover the boss with margin. It is boss-scoped on purpose: raising the
+    // GLOBAL battleMaxAnchor would deepen the normal-wave push and blow the pacing
+    // budget (see battleMaxAnchor note), whereas a lone boss (no wave stream to walk
+    // into) is safe to close on. The swordsman is unaffected — his charge is capped
+    // by chargeHardCap(770) regardless of anchor depth, so the boss still engages at
+    // ~836 and this only pulls the backline into range. Sim-validated.
+    maxAnchor: 700,
     initialCd: 1.2,
     initialSkillCd: 5,
     moveSpeed: 40,
@@ -330,19 +396,27 @@ export const ENEMY_TYPES: Record<EnemyKind, EnemyType> = {
 
 export interface SkillType {
   cd: number;
-  /** AoE radius (swordsman spin / mage meteor); 0 for the archer. */
+  /** AoE radius: swordsman spin / mage meteor blast / archer per-rain-drop splash. */
   radius: number;
+  /** Damage multiplier on heroAtk. For the archer this is PER falling arrow. */
   mult: number;
-  /** Number of targets (archer spread); 0 otherwise. */
+  /** For the archer ARROW RAIN this is the NUMBER OF DROPS; 0 for other classes. */
   targets: number;
-  /** Skill projectile speed (archer arrows / mage meteor); 0 for the melee spin. */
+  /** Skill projectile speed (archer rain-drop fall / mage meteor); 0 for the spin. */
   projSpeed: number;
 }
 
 /** Per-class skill tuning. */
 export const SKILL_TYPES: Record<HeroClass, SkillType> = {
   swordsman: { cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0 },
-  archer: { cd: 7, radius: 0, mult: 1.35, targets: 3, projSpeed: 840 },
+  // ARROW RAIN (86d3k2t18): `targets` drops fall over the cluster, each a `radius`
+  // splash for `mult` * heroAtk. Unlike the OLD nearest-3 spread (3 * 1.35 = 4.05
+  // heroAtk onto exactly 3 foes) the rain reliably BLANKETS every enemy in its zone
+  // every cooldown (whole-field arc range, see skills.arrowRainRange), so per-drop
+  // `mult` is tuned WELL below the old per-hit value — 9 * 0.29 = 2.61 nominal — to
+  // land the same EFFECTIVE DPS. Sim-tuned to keep S1–S9 time-to-clear within ±15%
+  // of the pre-change table (0 wipes). Was { radius:0, mult:1.35, targets:3 }.
+  archer: { cd: 7, radius: 44, mult: 0.29, targets: 9, projSpeed: 900 },
   mage: { cd: 12, radius: 90, mult: 3.2, targets: 0, projSpeed: 560 },
 };
 

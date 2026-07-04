@@ -11,6 +11,7 @@ import {
   type GameState,
   type SaveData,
 } from "@/engine";
+import { makeStubEnemy } from "./helpers";
 
 /**
  * Phase B smoke tests: skills, upgrades, auto systems, boss flow. Deterministic
@@ -88,9 +89,14 @@ describe("skills", () => {
     expect(cast.boss!.hp).toBeLessThan(noCast.boss!.hp);
   });
 
-  it("archer spread fires extra projectiles and starts its cooldown", () => {
+  it("archer arrow rain drops falling arrows and starts its cooldown", () => {
     const s = initGameState(7, threeHeroSave());
-    runUntil(s, (st) => st.enemies.length > 0, 3000);
+    // Arrow rain needs a foe within archer range (guard); put a cluster in range.
+    const archer = s.heroes[1];
+    s.enemies = [
+      makeStubEnemy(1, archer.x + 220),
+      makeStubEnemy(2, archer.x + 260),
+    ];
 
     const cast = clone(s);
     const noCast = clone(s);
@@ -98,6 +104,9 @@ describe("skills", () => {
     step(noCast, {});
 
     expect(cast.heroes[1].skillCd).toBe(SKILL_TYPES.archer.cd);
+    // Rain spawns `targets` falling drops in the one cast step.
+    const drops = cast.projectiles.filter((p) => p.kind === "rainArrow");
+    expect(drops.length).toBe(SKILL_TYPES.archer.targets);
     expect(cast.projectiles.length).toBeGreaterThan(noCast.projectiles.length);
   });
 });

@@ -18,8 +18,16 @@ export type AttackKind = "melee" | "arrow" | "aoe";
 /** How an enemy engages. */
 export type EnemyBehavior = "melee" | "ranged";
 
-/** Projectile flavours (arrow/bolt home on a target; orb/meteor hit a point). */
-export type ProjectileKind = "arrow" | "orb" | "meteor" | "bolt";
+/**
+ * Projectile flavours.
+ *  - arrow / bolt: HOME on a live target id.
+ *  - orb / meteor / rainArrow: POINT-target — fall/travel to a fixed (tx,ty) and
+ *    resolve as an AoE there. `rainArrow` is one drop of the archer's ARROW RAIN
+ *    skill (many small arrows falling from the sky over the enemy cluster); it
+ *    reuses the meteor's falling-point mechanic but is a distinct kind so render
+ *    can draw a small arrow instead of a meteor.
+ */
+export type ProjectileKind = "arrow" | "orb" | "meteor" | "bolt" | "rainArrow";
 
 /** Which side fired a projectile / owns an entity. */
 export type Team = "hero" | "enemy";

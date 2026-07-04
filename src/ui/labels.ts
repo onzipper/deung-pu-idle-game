@@ -13,7 +13,7 @@ export const HERO_LABELS: Record<HeroClass, { name: string; icon: string }> = {
 
 export const SKILL_LABELS: Record<HeroClass, { name: string; icon: string }> = {
   swordsman: { name: "หมุนฟัน", icon: "\u{1F300}" }, // 🌀
-  archer: { name: "ยิงกระจาย", icon: "\u{1F3AF}" }, // 🎯
+  archer: { name: "ฝนลูกธนู", icon: "\u{1F327}️" }, // 🌧️ arrow rain
   mage: { name: "อุกกาบาต", icon: "☄️" }, // ☄️
 };
 

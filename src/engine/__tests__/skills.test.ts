@@ -1,46 +1,91 @@
 import { describe, it, expect } from "vitest";
-import { initGameState, step, heroAtk, SKILL_TYPES, HERO_TYPES } from "@/engine";
+import { initGameState, step, heroAtk, SKILL_TYPES, HERO_TYPES, CONFIG } from "@/engine";
 import { threeHeroSave, makeStubEnemy } from "./helpers";
 
 /**
- * Deep skill-system regression coverage (Phase C handoff): archer's specific
- * nearest-3 selection, mage meteor AOE + its range guard, per-class cooldown
- * independence, and full-team auto-cast. Builds on phase-b.test.ts, which
- * only smoke-tests the swordsman spin and a generic archer cast.
+ * Deep skill-system regression coverage (Phase C handoff): the archer's ARROW
+ * RAIN ("ฝนลูกธนู", 86d3k2t18), mage meteor AOE + its range guard, per-class
+ * cooldown independence, and full-team auto-cast. Builds on phase-b.test.ts,
+ * which only smoke-tests the swordsman spin and a generic archer cast.
  */
 
-describe("archer spread skill", () => {
-  it("hits exactly the nearest 3 targets by distance, not just the first 3", () => {
+describe("archer arrow-rain skill", () => {
+  it("drops arrowRainCount falling arrows centred on the in-range cluster centroid, then starts cooldown", () => {
     const s = initGameState(7, threeHeroSave());
     const archer = s.heroes[1];
     expect(archer.cls).toBe("archer");
-    archer.cd = 999; // suppress the normal attack so only the skill's arrows show up
+    archer.cd = 999; // suppress the normal volley so only the skill's drops show up
     archer.skillCd = 0;
 
-    // Distances from the archer: id1=40, id2=30, id3=80, id4=200, id5=500.
-    // Nearest 3 by |dx| are id2 (30), id1 (40), id3 (80) — deliberately NOT
-    // the first 3 in array order, so this catches a "slice(0,3)" bug.
+    // A cluster fully within archer range; centroid is their mean x. Include a foe
+    // OUT of range (well past archer.x + range): it must NOT shift the centroid.
+    const inRange = [archer.x + 200, archer.x + 240, archer.x + 280];
+    const centroid = inRange.reduce((a, b) => a + b, 0) / inRange.length;
     s.enemies = [
-      makeStubEnemy(1, archer.x + 40),
-      makeStubEnemy(2, archer.x - 30),
-      makeStubEnemy(3, archer.x + 80),
-      makeStubEnemy(4, archer.x + 200),
-      makeStubEnemy(5, archer.x + 500),
+      ...inRange.map((x, i) => makeStubEnemy(i + 1, x)),
+      makeStubEnemy(99, archer.x + CONFIG.skills.arrowRainRange + 120), // out of rain range
     ];
 
     step(s, { castSkills: [1] });
 
-    const skillDmg = Math.round(
-      heroAtk("archer", s.upgrades) * SKILL_TYPES.archer.mult,
-    );
-    const skillArrows = s.projectiles.filter(
-      (p) => p.kind === "arrow" && p.damage === skillDmg,
-    );
-    expect(skillArrows.length).toBe(3);
-    expect(
-      skillArrows.map((p) => p.targetId).sort((a, b) => (a ?? 0) - (b ?? 0)),
-    ).toEqual([1, 2, 3]);
+    const drops = s.projectiles.filter((p) => p.kind === "rainArrow");
+    expect(drops.length).toBe(SKILL_TYPES.archer.targets);
+    // Point-target falling projectiles (like the meteor): no homing id, small AoE.
+    expect(drops.every((p) => p.targetId === null)).toBe(true);
+    expect(drops.every((p) => p.aoe === SKILL_TYPES.archer.radius)).toBe(true);
+    // Landing xs = centroid + the FIXED offset table (deterministic, no RNG).
+    const gotTx = drops.map((p) => p.tx).sort((a, b) => a - b);
+    const wantTx = CONFIG.arrowRainOffsets
+      .map((o) => centroid + o.dx)
+      .sort((a, b) => a - b);
+    expect(gotTx).toEqual(wantTx);
     expect(archer.skillCd).toBe(SKILL_TYPES.archer.cd);
+  });
+
+  it("the drops FALL and resolve as AoE damage (not stranded mid-air) — the meteor-never-explodes guard, for rain", () => {
+    const s = initGameState(7, threeHeroSave());
+    const archer = s.heroes[1];
+    archer.cd = 999;
+    archer.skillCd = 0;
+    s.heroes[0].cd = 999; // mute swordsman + mage so only the rain touches enemy hp
+    s.heroes[2].cd = 999;
+
+    // A wide wall of enemies blanketing the whole rain zone so every drop lands on
+    // someone. HP huge so none die mid-fall (which would let a drop expire early).
+    const centroid = archer.x + 240;
+    const wall = [];
+    for (let i = 0; i < 13; i++) wall.push(makeStubEnemy(i + 1, centroid - 96 + i * 16, 1_000_000));
+    s.enemies = wall;
+    const hpBefore = wall.reduce((a, e) => a + e.hp, 0);
+
+    step(s, { castSkills: [1] }); // drops spawn (up in the air, no hit yet)
+    expect(s.projectiles.some((p) => p.kind === "rainArrow")).toBe(true);
+
+    let resolved = false;
+    for (let i = 0; i < 120 && !resolved; i++) {
+      step(s, {});
+      resolved = !s.projectiles.some((p) => p.kind === "rainArrow");
+    }
+    expect(resolved).toBe(true); // every drop reached the ground and exploded
+
+    const hpAfter = s.enemies.reduce((a, e) => a + e.hp, 0);
+    const dealt = hpBefore - hpAfter;
+    // Total potential ≈ count * per-drop (each of the `targets` drops splashes at
+    // least one enemy in the packed wall); matches the design total heroAtk.
+    const perDrop = Math.round(heroAtk("archer", s.upgrades) * SKILL_TYPES.archer.mult);
+    expect(dealt).toBeGreaterThanOrEqual(SKILL_TYPES.archer.targets * perDrop);
+  });
+
+  it("range guard: never casts (no cooldown, no drops) with nothing within rain range", () => {
+    const s = initGameState(7, threeHeroSave());
+    const archer = s.heroes[1];
+    archer.skillCd = 0;
+    s.enemies = [makeStubEnemy(1, archer.x + CONFIG.skills.arrowRainRange + 80)]; // out of rain range
+
+    step(s, { castSkills: [1] });
+
+    expect(archer.skillCd).toBe(0); // guard failed -> no cast, no wasted cooldown
+    expect(s.projectiles.some((p) => p.kind === "rainArrow")).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@ import {
   type GameEvent,
   type SaveData,
 } from "@/engine";
-import { threeHeroSave, runUntil } from "./helpers";
+import { threeHeroSave, runUntil, makeStubEnemy } from "./helpers";
 
 /**
  * Per-step EVENT BUFFER (M4 render/audio juice feed). Verifies events are
@@ -123,16 +123,17 @@ describe("combat events", () => {
     expect(typesOf(collectEvents(s, 600)).has("hit")).toBe(true);
   });
 
-  it("emits skillCast (with slot) + skill-sourced hit when a skill is cast", () => {
+  it("emits skillCast (with slot) + rainArrow spawns when the archer casts", () => {
     const s = initGameState(7, threeHeroSave());
-    runUntil(s, (st) => st.enemies.length > 0, 3000);
-    step(s, { castSkills: [1] }); // archer spread
+    // Arrow rain needs a foe within archer range (guard).
+    s.enemies = [makeStubEnemy(1, s.heroes[1].x + 220)];
+    step(s, { castSkills: [1] }); // archer arrow rain
     const cast = s.events.find((e) => e.type === "skillCast");
     expect(cast).toMatchObject({ type: "skillCast", heroClass: "archer", slot: 1 });
-    // Archer skill spawns arrows this step.
-    expect(s.events.some((e) => e.type === "projectileSpawn" && e.kind === "arrow")).toBe(
-      true,
-    );
+    // Arrow rain spawns falling rainArrow drops this step.
+    expect(
+      s.events.some((e) => e.type === "projectileSpawn" && e.kind === "rainArrow"),
+    ).toBe(true);
   });
 
   it("swordsman spin emits a skill-sourced hit on an in-range target", () => {

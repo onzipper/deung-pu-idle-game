@@ -527,3 +527,96 @@ comfortably inside the ±3–5% budget — so **no config compensation (e.g. a
 
 Reproduce: `pnpm sim` (or `node ./node_modules/tsx/dist/cli.mjs
 src/engine/__tests__/balance-sim.ts`).
+
+---
+
+## Follow-up — Arrow Rain + boss coverage + free-hit fix (86d3k2t18)
+
+Three combat changes landed together; each shifts pacing, so they were tuned and
+sim-validated as one pass against the prior table
+(88.6 / 55.7 / 75.8 / 73.9 / 90.7 / 106.8 / 105.2 / 117.4 / 609.5), budget ±15%,
+gate ~5x, 0 wipes.
+
+### 1. Archer skill redesign — "ยิงกระจาย" → "ฝนลูกธนู" (ARROW RAIN)
+
+The nearest-3 instant homing spread became a rain of falling arrows. On cast the
+skill spawns `SKILL_TYPES.archer.targets` (**9**) point-target `rainArrow`
+projectiles — a **new `ProjectileKind`** that reuses the meteor's fall-to-`(tx,ty)`
+mechanic (render draws small arrows, not a meteor). They land spread across a zone
+centred on the **centroid of foes within `arrowRainRange`**, via the FIXED
+`arrowRainOffsets` table (dx spread + spawn-height stagger; **no RNG** — the seeded
+stream stays reserved for waves). Each drop is a `radius` **44** splash for
+`mult` **0.29** · heroAtk. The auto-cast guard now covers the archer (needs a foe
+within `arrowRainRange`).
+
+- **Range:** the rain **arcs**, so it uses a dedicated `skills.arrowRainRange`
+  (**760**, field-spanning), not the archer's 350 direct-fire range. This was the
+  load-bearing tuning discovery: the archer's formation slot sits ~**407 px** from
+  the enemy line on average, so a 350-range guard fired the skill in only **6 %** of
+  frames — vs the old spread, which had **no** range limit and fired every cooldown.
+  With a 350 guard the skill starved and S2/S3 ran +17 %/+38 % slow regardless of
+  per-drop power (power is irrelevant if it never casts).
+- **Power:** because the rain now blankets **every** enemy in its zone every
+  cooldown (not just 3), per-drop `mult` is far below the old per-hit 1.35 —
+  `9 · 0.29 = 2.61` nominal buys the same **effective** DPS. Tuned by sweep:
+  `mult` 0.5 → S2/S3/S5/S6 too fast; 0.33 → in band but S2 at the −13 % edge;
+  **0.29** centres every stage within ±7 %.
+
+### 2. Boss coverage — "ตัวตีไกลไม่ตีบอส" (ranged heroes couldn't reach the boss)
+
+`updateAnchor` already tracks the boss (it is the sole `getTargets` entry in the
+boss phase), but the shared `battleMaxAnchor` (510) clamped the formation too
+shallow: the boss engages at `frontHeroX + clash + engageExtra` ≈ `chargeHardCap`
+770 + 66 = **836**, while archer (484 + 350 = 834) and mage (436 + 330 = 766) both
+fell short and stood idle. Fix: a boss-only cap `CONFIG.boss.maxAnchor` (**700**)
+so the anchor rides up to `boss.x − battleAnchorLead` ≈ 686; archer/mage then sit
+at 660/612, comfortably in range. Boss-scoped on purpose — deepening the **global**
+cap would speed normal waves out of budget; a lone boss (no wave stream to walk
+into) is safe to close on. The swordsman is unaffected (his charge is capped by
+`chargeHardCap` regardless of anchor depth), so the boss still engages at ~836.
+
+### 3. Free hits — "มอนตีดาบฟรี" (monsters hit the swordsman for free)
+
+Two coupled causes, both fixed structurally:
+
+- **Asymmetric melee window.** The swordsman targeted `nearestTarget(−80, +96)` —
+  an 80–96 px blind spot behind him. Now melee retaliates against the nearest foe
+  within range on **either** side (`nearestWithin(range)`); ranged stays forward
+  only.
+- **One-sided enemy engage.** A melee enemy attacked whenever `e.x ≤ frontHeroX +
+  clash`, with **no lower bound** — so when the swordsman sprint-charged (265 px/s)
+  past slower enemies, they plinked him from arbitrarily far behind. Now a melee
+  enemy that has fallen further behind its **nearest hero** than `enemyBehindReach`
+  (**90**, < the swordsman's 96 reach) **re-approaches** the line instead of
+  free-hitting. Referenced to the _nearest_ hero, **not** the front line: a first
+  draft using `frontHeroX` made enemies legitimately fighting the **backline** flee
+  toward the charged-ahead swordsman, dodging death and running S2/S3 ~+15–38 %
+  slow — a good reminder to isolate each fix in the sim.
+
+### Result (aggregate, 5 seeds, 1800 s) — all stages within ±15 %, 0 wipes
+
+| Stage | Prior table | New   | Δ      |
+| ----- | ----------- | ----- | ------ |
+| 1     | 88.6        | 86.4  | −2.5 % |
+| 2     | 55.7        | 58.5  | +5.0 % |
+| 3     | 75.8        | 78.8  | +4.0 % |
+| 4     | 73.9        | 73.4  | −0.7 % |
+| 5     | 90.7        | 86.9  | −4.2 % |
+| 6     | 106.8       | 99.9  | −6.5 % |
+| 7     | 105.2       | 98.7  | −6.2 % |
+| 8     | 117.4       | 112.0 | −4.6 % |
+| 9     | 609.5       | 608.2 | −0.2 % |
+
+The stage-9 prestige wall is unchanged in absolute terms (608 vs 609 s); its
+`wallX` ratio reads slightly higher (5.4x) only because S8 got a touch faster.
+
+### Tests
+
+- `skills.test.ts` — rain drop count + centroid landing (fixed offset table),
+  point-target/AoE shape, fall-and-resolve (the meteor-never-explodes guard, for
+  rain), range guard.
+- `phase-b.test.ts` / `events.test.ts` — archer cast now spawns `rainArrow` drops.
+- `boss.test.ts` — boss-phase coverage: with the swordsman muted, archer + mage
+  close into range and damage the boss.
+- `charge.test.ts` — surrounded swordsman never idle (swings each cooldown while
+  taking damage); a straggler beyond reach re-approaches instead of free-hitting.

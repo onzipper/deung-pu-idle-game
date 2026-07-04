@@ -80,17 +80,24 @@ export function updateEnemies(state: GameState): void {
         }
       }
     } else {
+      const h = nearestAliveHero(state, e.x);
       const engageX = fX + CONFIG.clash + e.engageOffset;
       if (e.x > engageX) {
+        // Approach from the front toward the front line (unchanged flow).
         e.x -= e.speed * FIXED_DT;
+      } else if (h && e.x < h.x - CONFIG.enemyBehindReach) {
+        // Left behind by a sprint-charging front hero: it has fallen further behind
+        // its NEAREST hero than melee reach, so instead of free-hitting from out of
+        // range ("มอนตีดาบฟรี") it closes back up to that hero (into retaliation
+        // range). Referenced to the nearest hero — NOT the front line — so an enemy
+        // legitimately fighting the BACKLINE keeps hitting it instead of abandoning it
+        // to chase the charged-ahead swordsman.
+        e.x += e.speed * FIXED_DT;
       } else {
         e.cd -= FIXED_DT;
-        if (e.cd <= 0) {
-          const h = nearestAliveHero(state, e.x);
-          if (h) {
-            applyDamage(state, h, e.atk, "attack");
-            e.cd = CONFIG.enemyMeleeAtkCd;
-          }
+        if (e.cd <= 0 && h) {
+          applyDamage(state, h, e.atk, "attack");
+          e.cd = CONFIG.enemyMeleeAtkCd;
         }
       }
     }
@@ -166,8 +173,15 @@ export function updateHeroes(state: GameState): void {
 
     h.cd -= FIXED_DT;
     if (h.cd <= 0) {
-      const minD = t.attack === "melee" ? CONFIG.meleeTargetMinD : 0;
-      const tgt = nearestTarget(targets, h.x, minD, t.range);
+      // Melee retaliates against the nearest foe within its range on EITHER side
+      // (symmetric |Δx| ≤ range) so a monster in melee contact is never a free
+      // hitter — replaces the POC's asymmetric [meleeTargetMinD, range] window that
+      // left an 80–96px blind spot behind him ("มอนตีดาบฟรี"). Ranged stays forward
+      // only (nearestTarget with minD 0).
+      const tgt =
+        t.attack === "melee"
+          ? nearestWithin(targets, h.x, t.range)
+          : nearestTarget(targets, h.x, 0, t.range);
       if (tgt) {
         h.cd = heroAtkSpeed(h.cls, state.upgrades);
         const dmg = heroAtk(h.cls, state.upgrades);
@@ -247,7 +261,7 @@ function spawnBolt(state: GameState, e: Enemy, h: Hero): void {
 /** Map a projectile kind to the `hit`-event source flavour it lands with. */
 function projHitSource(kind: Projectile["kind"]): HitSource {
   if (kind === "bolt") return "bolt";
-  if (kind === "meteor") return "skill";
+  if (kind === "meteor" || kind === "rainArrow") return "skill";
   return "attack";
 }
 
@@ -277,7 +291,7 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
     p.team === "hero" ? getTargets(state) : aliveHeroes(state);
   const arrive = Math.max(L.projMinStep, p.speed * FIXED_DT);
 
-  if (p.kind === "orb" || p.kind === "meteor") {
+  if (p.kind === "orb" || p.kind === "meteor" || p.kind === "rainArrow") {
     const dx = p.tx - p.x;
     const dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);

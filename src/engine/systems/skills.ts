@@ -4,13 +4,14 @@
  * Three class skills, each on its own cooldown (`hero.skillCd`, decayed by
  * `combat.decayHeroTimers`):
  *  - swordsman: instant AOE spin around itself (all targets within `radius`).
- *  - archer: fires spread arrows at the nearest `targets` foes (fast homing).
+ *  - archer: ARROW RAIN ("ฝนลูกธนู") — many small arrows fall from the sky over
+ *    the enemy cluster (86d3k2t18; was a nearest-3 instant homing spread).
  *  - mage: drops a meteor on the nearest target's x for a wide-radius nuke.
  *
- * The POC's cast GUARD is preserved: never cast without a valid target in range
- * (swordsman needs a foe within spin radius; mage needs one within cast range;
- * archer just needs any target). This is what stops "swinging at air" and is why
- * auto-cast is safe to leave on.
+ * The cast GUARD is preserved: never cast without a valid target in range
+ * (swordsman needs a foe within spin radius; the archer AND mage need one within
+ * their cast range). This is what stops "swinging at air" and is why auto-cast is
+ * safe to leave on.
  */
 
 import { CONFIG, HERO_TYPES, SKILL_TYPES } from "@/engine/config";
@@ -43,6 +44,12 @@ export function castSkill(state: GameState, hero: Hero): boolean {
     return false;
   }
   if (
+    hero.cls === "archer" &&
+    !targets.some((e) => Math.abs(e.x - hero.x) < CONFIG.skills.arrowRainRange)
+  ) {
+    return false;
+  }
+  if (
     hero.cls === "mage" &&
     !targets.some((e) => Math.abs(e.x - hero.x) < HERO_TYPES.mage.range)
   ) {
@@ -62,27 +69,40 @@ export function castSkill(state: GameState, hero: Hero): boolean {
       if (Math.abs(e.x - hero.x) < sk.radius) applyDamage(state, e, dmg, "skill");
     }
   } else if (hero.cls === "archer") {
-    const near = [...targets]
-      .sort((a, b) => Math.abs(a.x - hero.x) - Math.abs(b.x - hero.x))
-      .slice(0, sk.targets);
+    // ARROW RAIN: `sk.targets` small arrows fall from the sky onto a zone centred on
+    // the centroid of the foes within archer range (the guard guarantees ≥1). Each
+    // is a point-target "rainArrow" (meteor-style fall) with a small AoE splash. The
+    // landing spread + spawn-height stagger come from the FIXED arrowRainOffsets
+    // table — NO RNG draw here (the seeded stream is reserved for wave composition).
+    const inRange = targets.filter(
+      (e) => Math.abs(e.x - hero.x) < CONFIG.skills.arrowRainRange,
+    );
+    const cx = inRange.reduce((sum, e) => sum + e.x, 0) / inRange.length;
     const dmg = Math.round(heroAtk(hero.cls, state.upgrades) * sk.mult);
-    const px = hero.x + L.heroProjSpawnXOffset;
-    const py = L.groundY - L.heroProjSpawnYOffset;
-    for (const e of near) {
+    const ty = L.groundY - L.heroProjImpactYOffset;
+    for (let i = 0; i < sk.targets; i++) {
+      const off = CONFIG.arrowRainOffsets[i];
+      const tx = cx + off.dx;
+      const spawnY = CONFIG.skills.arrowRainSpawnY - off.ry;
       state.projectiles.push({
         id: state.nextId++,
         team: "hero",
-        kind: "arrow",
-        x: px,
-        y: py,
+        kind: "rainArrow",
+        x: tx,
+        y: spawnY,
         damage: dmg,
         speed: sk.projSpeed,
-        targetId: e.id,
-        tx: 0,
-        ty: 0,
-        aoe: 0,
+        targetId: null,
+        tx,
+        ty,
+        aoe: sk.radius,
       });
-      state.events.push({ type: "projectileSpawn", kind: "arrow", x: px, y: py });
+      state.events.push({
+        type: "projectileSpawn",
+        kind: "rainArrow",
+        x: tx,
+        y: spawnY,
+      });
     }
   } else {
     // mage meteor: falls onto the nearest target's x (guard guarantees one).
