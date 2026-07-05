@@ -29,27 +29,27 @@ function StatRow({ hero, stat }: { hero: HeroSummary; stat: StatKey }) {
   const canAdd = hero.statPoints > 0 && !autoAllocate;
 
   return (
-    <div className="flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 px-2 py-1">
-      <div className="flex flex-col leading-none">
+    <div className="flex items-center gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 px-2.5 py-1.5">
+      <div className="flex flex-col leading-tight">
         <span
-          className={`text-[10px] font-bold ${isPrimary ? "text-ddp-gold-bright" : "text-ddp-ink"}`}
+          className={`text-xs font-bold ${isPrimary ? "text-ddp-gold-bright" : "text-ddp-ink"}`}
           title={`${t(`full.${stat}`)} — ${t(`effect.${stat}`)}`}
         >
           {t(`names.${stat}`)}
           {isPrimary && (
-            <span className="ml-1 align-middle text-[7px] font-semibold text-ddp-gold-bright/80 uppercase">
+            <span className="ml-1 align-middle text-[9px] font-semibold text-ddp-gold-bright/80 uppercase">
               {t("primaryTag")}
             </span>
           )}
         </span>
-        <span className="text-[11px] font-bold tabular-nums text-ddp-ink">{value}</span>
+        <span className="text-sm font-bold tabular-nums text-ddp-ink">{value}</span>
       </div>
       <button
         type="button"
         disabled={!canAdd}
         onClick={() => allocateStat(stat, 1)}
         aria-label={t("allocateAria", { stat: t(`full.${stat}`) })}
-        className={`ml-auto grid h-6 w-6 place-items-center rounded-full border text-sm font-bold leading-none transition-transform duration-100 active:scale-90 ${
+        className={`ml-auto grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg font-bold leading-none transition-transform duration-100 active:scale-90 ${
           canAdd
             ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-300 hover:bg-emerald-400/25"
             : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted"
@@ -73,20 +73,20 @@ export function StatPanel() {
 
   return (
     <div data-onboarding-anchor="stat-panel" className="flex flex-wrap items-center gap-2">
-      <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+      <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("title")}
       </span>
 
       {hero.statPoints > 0 && (
         <span
-          className="animate-buy-pulse rounded-full border border-ddp-gold/60 bg-ddp-gold/15 px-2 py-0.5 text-[10px] font-bold text-ddp-gold-bright tabular-nums"
+          className="animate-buy-pulse rounded-full border border-ddp-gold/60 bg-ddp-gold/15 px-2.5 py-1 text-xs font-bold text-ddp-gold-bright tabular-nums"
           title={t("pointsTitle")}
         >
           {t("pointsBadge", { count: hero.statPoints })}
         </span>
       )}
 
-      <span className="rounded-full border border-ddp-border-soft bg-black/50 px-2 py-0.5 text-[10px] font-bold text-ddp-ink tabular-nums">
+      <span className="rounded-full border border-ddp-border-soft bg-black/50 px-2.5 py-1 text-xs font-bold text-ddp-ink tabular-nums">
         {t("combatPower")}: {hero.combatPower.toLocaleString()}
       </span>
 

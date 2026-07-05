@@ -7,11 +7,14 @@
  * the HUD shows (gold, stage/wave/kills, heroes, boss hint, upgrade levels).
  *
  * This store also holds the PLAYER -> ENGINE direction of the seam:
- *  - `speed` / `autoUpgrade` / `autoCast` are plain UI-owned state. They are not
- *    part of `FrameInput` (the engine reads `state.autoUpgrade`/`state.autoCast`
- *    directly, and speed only changes how many fixed sub-steps the integration
- *    loop drains per frame) — the loop reads these three fields straight off the
- *    store every frame and applies them; no queueing needed.
+ *  - `autoCast` / `autoAllocate` / `autoReturn` / `autoHpPotion` / `autoManaPotion`
+ *    are plain UI-owned state, not part of `FrameInput` (the engine reads e.g.
+ *    `state.autoCast` directly) — the loop reads these fields straight off the
+ *    store every frame and applies them; no queueing needed. (The player-facing
+ *    1x/2x/3x speed selector was removed in M6.7 — `GameClient`'s loop always
+ *    drains exactly 1 fixed sub-step per real frame now; the engine's own
+ *    `drainAccumulator(acc, dt, speed)` still accepts a speed multiplier for the
+ *    sim/balance harness and tests, it's just never driven above 1 from the UI.)
  *  - Discrete one-shot actions (cast skill, buy upgrade, challenge boss, advance
  *    stage) map 1:1 onto `FrameInput` fields. React must NEVER call into the
  *    engine directly, so these are pushed into `pendingInput` and drained by the
@@ -30,7 +33,6 @@ import type {
   HeroStats,
   Phase,
   ShopItemId,
-  SpeedMultiplier,
   StatKey,
   WorldLocation,
   ZoneKind,
@@ -361,7 +363,6 @@ export interface HudState {
   shop: ShopSummary;
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
-  speed: SpeedMultiplier;
   autoCast: boolean;
   /** Auto-allocate base-stat points into the class primary stat (M5 "Base
    * stats"). UI-owned like `autoCast`: the loop copies it onto `state.autoAllocate`
@@ -383,7 +384,7 @@ export interface HudState {
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
    * every frame and applies it to the `AudioController`, same pattern as
-   * `speed`/`autoUpgrade`/`autoCast`. */
+   * `autoCast`/`autoAllocate`. */
   soundMuted: boolean;
 
   // ---- onboarding/FTUE (M4.8) — see src/ui/onboarding/steps.ts for the
@@ -409,7 +410,6 @@ export interface HudState {
   /** Bulk-apply a throttled snapshot from the engine. */
   syncFromEngine: (snapshot: EngineSnapshot) => void;
 
-  setSpeed: (speed: SpeedMultiplier) => void;
   toggleAutoCast: () => void;
   toggleAutoAllocate: () => void;
   /** Toggle death auto-return (M6 "auto กลับไปฟาร์ม" / "รอที่เมือง"). */
@@ -492,7 +492,6 @@ export const useGameStore = create<HudState>((set, get) => ({
   },
   shop: emptyShop,
 
-  speed: 1,
   autoCast: false,
   autoAllocate: false,
   autoReturn: true,
@@ -510,7 +509,6 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   syncFromEngine: (snapshot) => set({ ...snapshot, hasSyncedOnce: true }),
 
-  setSpeed: (speed) => set({ speed }),
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
   toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
   toggleAutoReturn: () => set((s) => ({ autoReturn: !s.autoReturn })),

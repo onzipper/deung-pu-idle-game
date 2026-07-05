@@ -1,13 +1,19 @@
 "use client";
 
 /**
- * Layout composition: HUD bar, arena/canvas slot, skill bar, boss panel +
- * speed selector, upgrade panel. The canvas itself is NOT owned here — Pixi
- * mounting is the render-integration seam's job. Callers either:
+ * Layout composition: HUD bar, arena/canvas slot, skill bar, boss panel,
+ * console dock. The canvas itself is NOT owned here — Pixi mounting is the
+ * render-integration seam's job. Callers either:
  *  - pass the canvas element (or a render-owning client component) as
  *    `children`, which is rendered inside the arena slot, or
  *  - forward a ref to grab the arena container `div` and mount imperatively
  *    (`app.canvas` appended in a `useEffect`) from outside `ui/`.
+ *
+ * HUD hierarchy (task 86d3jv7m3 readability pass): PRIMARY (top `HudBar` —
+ * zone/stage, gold, zone-unlock progress) > SECONDARY (skill kit's level/XP/
+ * mana rows + boss hint) > TERTIARY (auto-* toggles, settings row). The 1x/2x/
+ * 3x speed selector was removed player-facing (M6.7) — `GameClient`'s loop
+ * always drains 1 fixed sub-step per real frame now.
  */
 
 import { forwardRef, type ReactNode } from "react";
@@ -21,7 +27,6 @@ import { ShopPanel } from "@/ui/components/ShopPanel";
 import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { StatPanel } from "@/ui/components/StatPanel";
-import { SpeedSelector } from "@/ui/components/SpeedSelector";
 import { AutoReturnToggle } from "@/ui/components/AutoReturnToggle";
 import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
 import { WalkControls } from "@/ui/components/WalkControls";
@@ -39,7 +44,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
 ) {
   return (
     // Mobile-portrait-first shell: arena is the hero and always comes first;
-    // the console dock (skills / speed+sound / upgrades) follows as one
+    // the console dock (skills / potions / stats / settings) follows as one
     // coherent bottom panel rather than scattered floating boxes. Bottom
     // safe-area padding covers the phone home-indicator inset.
     <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
@@ -79,22 +84,28 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
 
       <BossPanel />
 
-      <div className="flex flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
+      <div className="flex flex-col gap-3.5 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3.5 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
         <SkillBar />
-        {/* Potion quick-use + return scroll (M6), next to the skill/mana area. */}
-        <ConsumableBar />
+        {/* Potions grouped together (owner ask: "potions near HP/mana") — quick-use
+            + the auto-use toggles/thresholds sit as one block right under the
+            hero's HP/mana rows above, instead of auto-use living all the way
+            down near settings. */}
+        <div className="flex flex-col gap-2">
+          <ConsumableBar />
+          <AutoPotionToggles />
+        </div>
         <div className="h-px bg-ddp-border-soft" />
         <StatPanel />
         <div className="h-px bg-ddp-border-soft" />
-        {/* Auto-use potion toggles + thresholds (M6). */}
-        <AutoPotionToggles />
+        {/* Settings row (tertiary tier): gameplay auto-behavior on the left,
+            system controls (account/help/audio/language) on the right — no
+            longer split around a speed selector (removed, M6.7). */}
         <div
           data-onboarding-anchor="settings-row"
-          className="flex flex-wrap items-center justify-between gap-3"
+          className="flex flex-wrap items-center justify-between gap-2.5"
         >
-          <SpeedSelector />
-          <div className="flex items-center gap-3">
-            <AutoReturnToggle />
+          <AutoReturnToggle />
+          <div className="flex flex-wrap items-center gap-2">
             <SwitchCharacterLink />
             <CodexButton />
             <SoundToggle />

@@ -9,7 +9,7 @@
   "hud": {
     "stageLabel": "Stage",
     "waveLabel": "Wave",
-    "killProgressLabel": "Kills to boss",
+    "zoneUnlockLabel": "Unlock next zone",
     "victoryTitle": "🎉 Stage {stage} cleared!",
     "nextStageButton": "Next Stage →",
     "bossHpLabel": "Boss HP",
@@ -76,7 +76,6 @@
     }
   },
   "settings": {
-    "speedLabel": "Speed",
     "soundOn": "Unmute",
     "soundOff": "Mute",
     "localeLabel": "Language",
@@ -116,7 +115,7 @@
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Speed up the game, mute/unmute sound, switch languages, or tap \"📖 Guide\" to reopen the game guide anytime from this row."
+        "body": "Mute/unmute sound, switch languages, or tap \"📖 Guide\" to reopen the game guide anytime from this row."
       },
       "outro": {
         "title": "You're ready!",
@@ -204,10 +203,6 @@
       "boss": {
         "title": "Challenging the stage boss",
         "body": "The panel below the arena shows the boss's HP, attack power, recommended power, and your current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your hero dies, the boss retreats, your hero fully revives with no penalty, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
-      },
-      "gameSpeed": {
-        "title": "⚡ Game speed",
-        "body": "Switch between 1×/2×/3× anytime from the settings row. The simulation stays exactly as accurate — it simply runs faster."
       },
       "autoCast": {
         "title": "✨ Auto Skill",

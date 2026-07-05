@@ -45,8 +45,8 @@ export function WalkControls() {
         onWalk={walkToZone}
       />
       <div className="flex min-w-0 flex-col items-center text-center">
-        <span className="truncate text-sm font-bold text-emerald-300">{mapName}</span>
-        <span className="text-[11px] font-medium text-ddp-ink-muted">{zoneLabel}</span>
+        <span className="truncate text-base font-bold text-emerald-300">{mapName}</span>
+        <span className="text-xs font-medium text-ddp-ink-muted">{zoneLabel}</span>
       </div>
       <WalkArrow
         dir="right"

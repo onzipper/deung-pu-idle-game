@@ -49,7 +49,7 @@ export function BossPanel() {
       data-onboarding-anchor="boss-panel"
       className="flex flex-wrap items-center gap-3 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)"
     >
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ddp-ink-muted">
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[13px] text-ddp-ink-muted">
         <span>
           {t("bossHpLabel")}{" "}
           <b className="font-bold text-ddp-ink tabular-nums">

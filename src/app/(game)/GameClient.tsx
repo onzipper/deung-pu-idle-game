@@ -7,8 +7,9 @@
  * Owns the live `GameState` and the render `Application` as plain closures
  * inside a single `useEffect` (never React state — see `CLAUDE.md`'s no
  * per-frame-state-in-React rule). Each rAF tick:
- *   1. copies the UI-owned `speed`/`autoUpgrade`/`autoCast`/`soundMuted` flags
- *      off the Zustand store onto the engine state / `AudioController`,
+ *   1. copies the UI-owned `autoCast`/`autoAllocate`/`autoReturn`/auto-potion/
+ *      `soundMuted` flags off the Zustand store onto the engine state /
+ *      `AudioController`,
  *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
  *      once and hands it to the FIRST fixed sub-step of the frame,
  *   2b. shapes this frame's real elapsed seconds through `TimeDirector`
@@ -17,12 +18,14 @@
  *      audio, and the ~10Hz UI-sync below all keep using the real elapsed
  *      time so fx/SFX/HUD stay snappy even while the sim is frozen/slowed,
  *   3. asks the fixed-timestep accumulator how many `FIXED_DT` sub-steps to
- *      run (the speed multiplier = more sub-steps, never a bigger dt) and
- *      runs `step()` that many times, concatenating each sub-step's
+ *      run and runs `step()` that many times, concatenating each sub-step's
  *      `state.events` into one `frameEvents` array (M4 juice feed — the buffer
  *      is cleared at the START of every step(), so a multi-sub-step frame
- *      must collect across all of them or a speed multiplier silently drops
- *      events),
+ *      must collect across all of them). The player-facing 1x/2x/3x speed
+ *      selector was removed (M6.7) — the accumulator is always drained at a
+ *      fixed multiplier of 1 sub-step per real frame now; `drainAccumulator`
+ *      itself still takes a speed argument (used by the sim/balance harness
+ *      and engine tests), it's just hardcoded to `1` from this integration seam,
  *   4. draws the resulting state + `frameEvents` with the (one-way,
  *      read-only) `GameRenderer`, which reacts to them on its `fx` layer, then
  *      hands the same `frameEvents` to the `AudioController` (`render/audio`)
@@ -395,11 +398,14 @@ export function GameClient() {
       const simElapsed = timeDirector.shape(elapsed, lastFrameEvents);
 
       // `state.events` is cleared at the START of each step() and holds only
-      // that sub-step's events; a speed multiplier runs more than one sub-step
-      // per rAF frame, so we must collect across ALL of them before draw() —
-      // otherwise 2x/3x speed would silently drop every event but the last
-      // sub-step's (see engine/state/events.ts's collection contract).
-      const steps = drainAccumulator(acc, simElapsed, store.speed);
+      // that sub-step's events; a stalled/dropped rAF frame can still produce
+      // more than one fixed sub-step here (via `simElapsed`), so we must
+      // collect across ALL of them before draw() (see
+      // engine/state/events.ts's collection contract). The speed multiplier
+      // itself is hardcoded to 1 — the player-facing 1x/2x/3x selector was
+      // removed (M6.7); `drainAccumulator`'s speed parameter still exists for
+      // the sim/balance harness and engine tests.
+      const steps = drainAccumulator(acc, simElapsed, 1);
       const frameEvents: GameEvent[] = [];
       for (let i = 0; i < steps; i++) {
         step(state, i === 0 ? firstInput : {});

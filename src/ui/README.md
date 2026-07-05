@@ -1,13 +1,13 @@
 # `ui/` — React HUD, menus, panels
 
-React components for everything around the game canvas: gold/level HUD, base-stat panel (STR/DEX/INT/VIT + auto-allocate toggle), skill bar (mana costs, per-skill auto-cast slotting, class-change quest affordance), boss hint panel, speed selector.
+React components for everything around the game canvas: gold/level HUD, base-stat panel (STR/DEX/INT/VIT + auto-allocate toggle), skill bar (mana costs, per-skill auto-cast slotting, class-change quest affordance), boss hint panel. (The player-facing 1x/2x/3x speed selector was removed, M6.7 — the integration loop always runs 1 fixed sub-step per real frame now.)
 
 **M5 Character Pivot note**: the old gold-bought atk/speed/hp upgrade lines (`UpgradePanel`, `panels.upgradesLabel`/`upgradeAriaLabel`/`autoUpgradeToggle`) are GONE — a solo hero's power now comes from level + base stats (`StatPanel.tsx`, `allocateStat` intent) + class/skills (`SkillBar.tsx`, mana + cooldown + up to 3 auto-cast slots) + the class-change quest (tier 1 -> 2). Don't resurrect "upgrade" copy/components for this system; see `docs/GDD.md`/`docs/ROADMAP.md` for the current vision.
 
 - `components/` — the React components (built in M2).
 - `store/` — the Zustand store. React reads game numbers from a **throttled** engine snapshot (~10 Hz), never from a per-frame subscription. See `store/gameStore.ts`.
 
-UI dispatches player intent (allocate stat, cast skill, set auto-cast slot, accept/complete the class-change quest, set speed) into the engine; it does not run game logic itself.
+UI dispatches player intent (allocate stat, cast skill, set auto-cast slot, accept/complete the class-change quest) into the engine; it does not run game logic itself.
 
 ## i18n
 
@@ -30,4 +30,4 @@ The player arrives at the FTUE having already created a character and picked a c
 
 `src/ui/codex/` is a separate, always-reopenable reference (unlike the one-shot FTUE above), same data-driven philosophy: `entries.ts` exports `CODEX_CATEGORIES` + `CODEX_ENTRIES` (typed `id` + `category` + optional `contentRef` pointing at an existing engine-content id — `{ kind: "heroClass", id }`) plus the pure `codexEntryRequiredKeys`/`codexEntriesByCategory` helpers, headlessly tested in `codex/__tests__/entries.test.ts` (asserts every required key resolves in BOTH message files, and that `contentRef` entries never redeclare a title). Body copy lives in a `codex` message namespace (`entries.<id>.title`/`.body`, `categories.<id>`, plus panel chrome keys); entries with a `contentRef` resolve their TITLE + ICON from the shared `content` namespace / `labels.ts` icon maps instead (never duplicated). `CodexPanel.tsx` renders the modal (grouped-by-category cards) and is mounted on-demand by `CodexButton.tsx` (settings row, `src/ui/components/`) — purely local `useState` open/close, no store field, and the sim is never paused behind it. The panel's "ดูบทช่วยสอนอีกครั้ง" button calls the store's `resetOnboarding()` action then closes itself, so `OnboardingOverlay` (which renders directly off `onboardingStepIndex`) retriggers immediately. **M5+ topics (gear/quests/items) add coverage by appending `CODEX_ENTRIES` (+ a new `CODEX_CATEGORIES` entry if needed) and matching `messages/*.json` `codex.entries.<id>` keys** — no other file should need changes for a new topic.
 
-Categories today: `coreLoop`, `character` (M5: `characterSlots`, `baseStats`, `manaSkills`, `classQuest` — the systems that replaced the old team + upgrade lines), `heroes` (per-class `contentRef` entries), `boss`, `controls` (`gameSpeed`, `autoCast`, `autoAllocate`), `offlineIdle`.
+Categories today: `coreLoop`, `character` (M5: `characterSlots`, `baseStats`, `manaSkills`, `classQuest` — the systems that replaced the old team + upgrade lines), `heroes` (per-class `contentRef` entries), `boss`, `controls` (`autoCast`, `autoAllocate` — the 1x/2x/3x speed selector + its `gameSpeed` entry were removed player-facing, M6.7), `offlineIdle`.

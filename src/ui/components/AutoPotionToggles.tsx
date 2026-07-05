@@ -35,20 +35,20 @@ function AutoPotionRow({
   const pct = Math.round(threshold * 100);
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1.5">
       <button
         type="button"
         onClick={onToggle}
         aria-pressed={on}
         aria-label={t("autoUseAria", { name: label, state: on ? "on" : "off" })}
-        className={`inline-flex min-h-9 items-center gap-1 rounded-(--ddp-radius-md) border px-2 py-1 text-xs font-bold transition-colors ${
+        className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-2.5 py-1.5 text-xs font-bold transition-colors ${
           on
             ? "border-emerald-400/60 bg-emerald-500/15 text-emerald-300"
             : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
         }`}
       >
         <span aria-hidden>{icon}</span>
-        <span className="text-[10px]">{t("autoLabel")}</span>
+        <span className="text-[11px]">{t("autoLabel")}</span>
       </button>
       <div
         className={`flex items-center rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 ${
@@ -60,11 +60,11 @@ function AutoPotionRow({
           disabled={!on}
           onClick={() => onThreshold(threshold - STEP)}
           aria-label={t("thresholdDownAria", { name: label })}
-          className="min-h-9 w-6 text-sm font-black text-ddp-ink-muted disabled:cursor-not-allowed"
+          className="min-h-11 w-9 text-base font-black text-ddp-ink-muted disabled:cursor-not-allowed"
         >
           −
         </button>
-        <span className="w-9 text-center text-[11px] font-bold tabular-nums text-ddp-ink">
+        <span className="w-10 text-center text-xs font-bold tabular-nums text-ddp-ink">
           {pct}%
         </span>
         <button
@@ -72,7 +72,7 @@ function AutoPotionRow({
           disabled={!on}
           onClick={() => onThreshold(threshold + STEP)}
           aria-label={t("thresholdUpAria", { name: label })}
-          className="min-h-9 w-6 text-sm font-black text-ddp-ink-muted disabled:cursor-not-allowed"
+          className="min-h-11 w-9 text-base font-black text-ddp-ink-muted disabled:cursor-not-allowed"
         >
           +
         </button>

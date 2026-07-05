@@ -55,7 +55,7 @@ export function LocaleSwitch() {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+      <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("localeLabel")}
       </span>
       <div className="flex gap-1 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-1 shadow-(--ddp-shadow-btn)">

@@ -72,7 +72,6 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
 
   { id: "boss", category: "boss" },
 
-  { id: "gameSpeed", category: "controls" },
   { id: "autoCast", category: "controls" },
   { id: "autoAllocate", category: "controls" },
 

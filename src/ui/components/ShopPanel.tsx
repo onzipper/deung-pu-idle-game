@@ -56,29 +56,29 @@ function BuyRow({ item }: { item: ShopItemId }) {
         {ITEM_ICON[item]}
       </span>
       <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-xs font-bold text-ddp-ink">
+        <span className="truncate text-sm font-bold text-ddp-ink">
           {tContent(`${item}.name`)}
         </span>
-        <span className="text-[10px] text-ddp-ink-muted">{tContent(`${item}.desc`)}</span>
+        <span className="truncate text-xs text-ddp-ink-muted">{tContent(`${item}.desc`)}</span>
       </div>
       <div className="flex flex-col items-end">
-        <span className="flex items-center gap-1 text-[11px] font-bold tabular-nums text-ddp-gold-bright">
+        <span className="flex items-center gap-1 text-sm font-bold tabular-nums text-ddp-gold-bright">
           <Coin />
           {price}
         </span>
         <span
-          className={`text-[10px] tabular-nums ${atCap ? "text-emerald-400" : "text-ddp-ink-muted"}`}
+          className={`text-xs tabular-nums ${atCap ? "text-emerald-400" : "text-ddp-ink-muted"}`}
         >
           {t("owned", { count, cap: shop.stackCap })}
         </span>
       </div>
-      <div className="flex gap-1">
+      <div className="flex gap-1.5">
         <button
           type="button"
           disabled={!canBuyOne}
           onClick={() => buy(item, 1)}
           aria-label={t("buyAria", { name: tContent(`${item}.name`), qty: 1 })}
-          className={`min-h-9 min-w-9 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-all active:scale-95 ${
+          className={`min-h-11 min-w-11 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-all active:scale-95 ${
             canBuyOne
               ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:brightness-110"
               : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
@@ -91,7 +91,7 @@ function BuyRow({ item }: { item: ShopItemId }) {
           disabled={!canBuyOne}
           onClick={() => buy(item, 5)}
           aria-label={t("buyAria", { name: tContent(`${item}.name`), qty: 5 })}
-          className={`min-h-9 min-w-9 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-all active:scale-95 ${
+          className={`min-h-11 min-w-11 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-all active:scale-95 ${
             canBuyOne
               ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:brightness-110"
               : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
@@ -116,10 +116,10 @@ export function ShopPanel() {
         <span aria-hidden className="text-sm">
           🏠
         </span>
-        <span className="text-xs font-bold tracking-wide text-ddp-gold-bright">
+        <span className="text-sm font-bold tracking-wide text-ddp-gold-bright">
           {t("title")}
         </span>
-        <span className="text-[10px] text-ddp-ink-muted">{t("subtitle")}</span>
+        <span className="text-xs text-ddp-ink-muted">{t("subtitle")}</span>
       </div>
       <div className="flex flex-col gap-1.5">
         {SHOP_ORDER.map((item) => (

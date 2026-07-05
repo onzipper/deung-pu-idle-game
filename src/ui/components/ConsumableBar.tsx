@@ -54,7 +54,7 @@ export function ConsumableBar() {
 
   return (
     <div className="flex items-center gap-1.5" data-onboarding-anchor="consumables">
-      <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+      <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("quickUseLabel")}
       </span>
       <PotionButton item="hpPotion" icon="❤" />
