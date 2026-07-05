@@ -154,7 +154,11 @@ describe("aggro belt density ramps toward the boss room (M6)", () => {
     // Later maps are more dangerous (no town offset: last farm = zoneIdx 4).
     expect(frac("map2", 4)).toBeGreaterThan(frac("map1", 5)); // map2 last farm > map1 last farm
     expect(frac("map3", 4)).toBeGreaterThan(frac("map2", 4));
-    expect(frac("map3", 4)).toBeGreaterThanOrEqual(0.5); // ~50-60% at the last frontier farm
+    // M6 hunt-density retune: aggro FRACTIONS were cut when maxAlive rose ~2.5×
+    // (0.15-0.25 on map3), so the ABSOLUTE aggressive-mob count per zone still rose
+    // vs the old 6-8-cap field without turning the belt into a meat grinder.
+    expect(frac("map3", 4)).toBeGreaterThanOrEqual(0.25); // ~25% at the last frontier farm
+
   });
 });
 
@@ -216,11 +220,20 @@ describe("anti-stall (M6)", () => {
     // livelocked (ping-pong, unreachable mob, respawn starvation) kills would flatline.
     const s = initGameState(9, soloSave("swordsman", 1));
     s.autoCast = true;
+    // Defaults ON (like real play): death -> town -> auto-return keeps the farm loop
+    // alive. In the M6-density field an unsustained level-1 melee can go down, and
+    // arriveAtZone resets s.kills, so tally kill EVENTS (as the long-run test does)
+    // to prove hunting keeps PRODUCING kills — the real anti-livelock signal.
+    s.autoReturn = true;
+    let total = 0;
     let last = 0;
     for (let seg = 0; seg < 8; seg++) {
-      for (let i = 0; i < 1200; i++) step(s, {}); // ~20s/segment
-      expect(s.kills).toBeGreaterThan(last);
-      last = s.kills;
+      for (let i = 0; i < 1200; i++) {
+        step(s, {}); // ~20s/segment
+        for (const e of s.events) if (e.type === "kill") total++;
+      }
+      expect(total).toBeGreaterThan(last);
+      last = total;
     }
   });
 

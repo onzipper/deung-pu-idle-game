@@ -253,3 +253,120 @@ at **stage 5 (5/5)** for every class, unchanged.
 - **Autopilot never stalls.** All 15 seeds×3 classes reach map3/s15 in 2400 s; mobs are
   always reachable (spawn band ⊂ hero clamp), the id tie-break prevents hunt ping-pong,
   and respawn keeps the field fed — verified by the long-sim + pure-farm anti-stall tests.
+
+---
+
+## M6 task 4 — "ALIVE FIELD" density retune (owner request 2026-07-06)
+
+The owner asked the fields to feel **ALIVE**: raise concurrent mobs per zone from the
+task-3 baseline of **6-8** to **15-20**, then retune pacing so the world is *busier,
+not trivially faster*. This is a **knobs-only** pass — no wave/combat system code
+changed (spawn placement, temperament, hunt AI untouched).
+
+### The density model (why the levers couple)
+
+Two facts from the sim drive everything:
+1. **`respawnDelay` was the old throughput throttle**, not kill speed. A fast killer
+   emptied the 6-mob burst then waited ~1/respawnDelay for each refill, so raising
+   `maxAlive` alone barely helps (bigger burst, same steady-state trickle). To keep
+   the field genuinely FULL, `respawnDelay` was cut so refill ≥ kill rate — which
+   makes throughput **kill-limited** and ~1.6× higher (early/mid clears ~halved).
+2. **Level/gold-per-ZONE = killGoal × per-kill reward**, and level-at-stage is what
+   sets the class-change beat + the map3 power wall. Leveling is tied to the QUOTA
+   (kills-to-clear), not to time.
+
+So the retune is one coherent lever set: raise `maxAlive` (alive field) + cut
+`respawnDelay` (keep it full) → throughput ~1.6× → raise `killGoal` **×1.6** to
+restore the clear-time ballpark → divide `xpPerKill` **and** `goldPerKill` by the same
+1.6 so per-zone XP/gold (hence leveling, the wall, and the potion-sink %s) are
+**preserved**. The aggressive-mob COUNT = aggroFraction × maxAlive, so aggro
+FRACTIONS were cut in step to stop the belt becoming a meat grinder.
+
+### Knob table (was → now)
+
+| knob | map1 | map2 | map3 |
+|---|---|---|---|
+| `maxAlive` | 6 → **15** | 7 → **17** | 8 → **18** |
+| `respawnDelay` | 1.7 → **0.75** | 1.5 → **0.65** | 1.35 → **0.60** |
+| `aggroStart→End` | 0.00-0.15 → **0.00-0.10** | 0.18-0.40 → **0.09-0.18** | 0.35-0.60 → **0.15-0.25** |
+| `aggroRadius` | 130 → **125** | 150 → **145** | 175 → **145** |
+
+Shared `hunt` band widened **0.30-0.96 → 0.22-0.98** of `fieldWidth` (spread the
+fuller field over a longer stretch). Curves (functions of stage n):
+
+| curve | was | now | per-zone effect |
+|---|---|---|---|
+| `killGoal` | 10 + 5n | **16 + 8n** (×1.6) | kills-to-clear ×1.6 (the pacing lever) |
+| `xpPerKill` | 10 + 3n | **6 + 2n** (≈ ÷1.6) | XP/zone ≈ unchanged (product 0.98-1.05×) |
+| `goldPerKill` | (5+2n)·1.05ⁿ⁻¹ | **(3.125+1.25n)·1.05ⁿ⁻¹** (÷1.6) | gold/zone unchanged → sink %s hold |
+
+`xpPerBossKill` / `goldPerBoss` / the M5 combat curves are **untouched** (per-zone-clear
+and per-boss counts are unchanged).
+
+### Sim results (`pnpm sim`, `SIM_SECONDS=2400`, 5 seeds — final knobs)
+
+Farm-zone clear time per stage (mean s), new vs the task-3 baseline:
+
+| stage | sword (new/base) | archer (new/base) | mage (new/base) |
+|---:|---|---|---|
+| 1  | 19 / 17 | 26 / 18 | 26 / 21 |
+| 2  | 28 / 27 | 38 / 29 | 41 / 34 |
+| 3  | 30 / 34 | 32 / 34 | 42 / 37 |
+| 4  | 38 / 42 | 50 / 43 | 45 / 44 |
+| 5  | 64 / 51 | 60 / 52 | 59 / 55 |
+| 6  | 39 / 51 | 53 / 52 | 57 / 56 |
+| 7  | 52 / 59 | 65 / 62 | 65 / 60 |
+| 8  | 51 / 66 | 66 / 77 | 79 / 69 |
+| 9  | 87 / 75 | 94 / 86 | 99 / 77 |
+| 10 | 71 / 114 | 173 / 121 | 167 / 103 |
+| 11 | 96 / 110 | 456 / 111 | 143 / 110 |
+| 12 | 148 / 91 | 610 / 161 | 159 / 147 |
+| 13 | 387 / 125 | wall / 232 | 364 / 165 |
+| 14 | 584 / 199 | wall / 525 | 484 / 174 |
+| 15 | wall / 393 | wall / 563 | wall / 462 |
+
+- **Leveling trajectory preserved.** Level-at-clear is byte-close to baseline: s1=7,
+  s2=13, s3=17, s5=24, s10=37, final 47-51 (baseline 49-51) — the ÷1.6 xp
+  compensation held.
+- **Class-change lands at stage 5** for all classes on all seeds. Its **kill-60
+  objective fills FASTER now** (denser field) but the beat is **boss-gated** (needs
+  1 boss defeat; the first boss is the map1 boss at stage 5), so **60 was NOT raised
+  — the beat holds structurally.**
+- **map1 + map2: every class clears in full, 0 wipes.** Those maps are all/mostly
+  passive (aggro ≤ 0.18) so the denser field stays safe.
+- **map3 s15 wall INTACT** — no class clears the s15 frontier; the soft-wall holds
+  (respawn keeps banking XP; final levels 47-51). Deaths concentrate exactly in the
+  map3 aggressive belt + the frontier (map1/map2 ≈ 0-6 deaths/zone; map3 s12-s15 heavy).
+- **Sword survivability fine.** The tank reaches the s15 frontier (5/5 through s14);
+  its potion sink relocates to the frontier where the HP pressure now lives.
+- **Early ranged clears run ~+25-40 % vs baseline** (e.g. archer s1 26 vs 18). The
+  shared ×1.6 quota over-corrects for the ranged classes, whose raw throughput only
+  rose ~1.35× (vs the sword's ~1.8×); a single quota can't split per class. This errs
+  **slow, not fast** — the correct side of "busier, not trivially faster."
+
+### Flagged (systemic / for follow-up)
+
+- **Archer frontier wall shifted s15 → s13.** The squishy archer **self-aggros the
+  passive field via its AoE arrow-rain** (passives retaliate once hit) and, in an
+  15-20-mob field, its kite has **no retreat room** → it gets swarmed at the frontier.
+  This is a **systemic interaction with density**, not a knob: cutting aggro fractions
+  barely helped (the swarm is self-inflicted), and `maxAlive` had to drop to ~16 just
+  to spare the archer *one* clean frontier zone (s11) — which departs from the owner's
+  "map3 ~20" and still walls it at s13. Held map3 at **18** to honour the density +
+  monotonic-ramp intent; the true fix is engine-side (owner: `game-engine-specialist`):
+  a **gradual re-entry fill** instead of the full `spawnBurst` (the burst re-swarms the
+  hero the instant it respawns back into a farmed zone), and/or a temperament/ AoE-aggro
+  rule so a single AoE doesn't wake the whole cluster.
+- **Spawn placement is uncollided uniform random**, so a 15-18-mob field **will visually
+  overlap** at points (mobs can stack on a position). Acceptable for now; the band was
+  widened (0.22-0.98) to lower overlap density. A min-spacing/Poisson placement is an
+  engine follow-up if it reads badly.
+- **No pathological hero behaviour** in-sim: the id tie-break still prevents hunt
+  ping-pong across the crowded field, respawn keeps it fed, and the long-run + pure-farm
+  anti-stall tests stay green. 15-18 enemy views/frame is a render-perf note (out of
+  scope here) — nothing in the sim suggests engine-side thrash.
+- **Tests updated honestly** for the new model: `hunt.test.ts` aggro-fraction threshold
+  (0.50 → 0.25, matching the cut) + the pure-farm anti-stall test now tallies kill
+  EVENTS (s.kills resets on the death→town trip an unsustained lvl-1 melee now takes in
+  a dense field); `archer-volley.test.ts` + `phase-b.test.ts` scenarios now set
+  `spawnPaused` to isolate their single hand-placed target from the denser/wider burst.

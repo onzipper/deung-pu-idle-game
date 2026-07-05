@@ -42,8 +42,12 @@ describe("skills", () => {
   it("auto-cast guard: never casts with no target in range", () => {
     const s = initGameState(42);
     s.autoCast = true;
-    // Enemies spawn ~0.5s in but at x~860; the sword's spin needs a foe within
-    // 95px, which won't happen this early. skillCd must stay 0 (no wasted cast).
+    // Pause the M6 spawn pool and place a single foe far outside the sword's 95px
+    // spin reach: over 60 steps (~1s) the hero closes only ~175px of the 400px gap,
+    // so no target ever enters whirl range and skillCd must stay 0 (no wasted cast).
+    s.spawnPaused = true;
+    s.heroes[0].x = 214;
+    s.enemies = [makeStubEnemy(1, 214 + 400, 1_000_000)];
     for (let i = 0; i < 60; i++) step(s, {});
     expect(s.enemies.length).toBeGreaterThan(0);
     expect(s.heroes[0].skillCds["sword_whirl"] ?? 0).toBe(0);

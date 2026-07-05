@@ -50,7 +50,7 @@ describe("hunt-field spawning (M6 สนามล่ามอน)", () => {
     expect(s.kills).toBeGreaterThan(0);
     expect(s.gold).toBeGreaterThan(0);
     // gold must be at least the sum of per-kill rewards for the current stage.
-    expect(s.gold).toBeGreaterThanOrEqual(s.kills); // goldPerKill(1) = 7 > 1
+    expect(s.gold).toBeGreaterThanOrEqual(s.kills); // goldPerKill(1) = 4 > 1
   });
 
   it("keeps the pool respawning as mobs are hunted down", () => {

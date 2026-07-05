@@ -59,19 +59,28 @@ export const CONFIG = {
   //    fraction across the map's farm zones (index 0 -> last farm before the boss),
   //    so aggression concentrates toward the boss room (GDD). `aggroRadius` is that
   //    map's aggressive aggro range (slightly larger in later maps).
+  //
+  // M6 "ALIVE FIELD" retune (2026-07-06): `maxAlive` was raised ~2.5× (6-8 -> 15/17/18)
+  // so a zone reads as a busy hunting ground, `respawnDelay` cut so the denser field
+  // stays populated. Because the aggressive-mob COUNT = aggroFraction × maxAlive, the
+  // aggro FRACTIONS were cut in step (map3 0.35-0.60 -> 0.15-0.25) so the belt's
+  // ABSOLUTE danger only rose modestly (no meat grinder) — danger toward the frontier
+  // now comes mostly from tougher + more-aggressive mobs, not raw body count. The
+  // clear-time ballpark is held by the ×1.6 killGoal (see the curve block); see
+  // docs/balance-m6.md task 4 for the sim table + the archer frontier caveat.
   world: {
     maps: [
       {
         id: "map1", zoneStageIds: [1, 2, 3, 4, 5], bossStageId: 5, fieldWidth: 900,
-        hunt: { maxAlive: 6, respawnDelay: 1.7, aggroStart: 0.0, aggroEnd: 0.15, aggroRadius: 130 },
+        hunt: { maxAlive: 15, respawnDelay: 0.75, aggroStart: 0.0, aggroEnd: 0.1, aggroRadius: 125 },
       },
       {
         id: "map2", zoneStageIds: [6, 7, 8, 9, 10], bossStageId: 10, fieldWidth: 900,
-        hunt: { maxAlive: 7, respawnDelay: 1.5, aggroStart: 0.18, aggroEnd: 0.4, aggroRadius: 150 },
+        hunt: { maxAlive: 17, respawnDelay: 0.65, aggroStart: 0.09, aggroEnd: 0.18, aggroRadius: 145 },
       },
       {
         id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15, fieldWidth: 900,
-        hunt: { maxAlive: 8, respawnDelay: 1.35, aggroStart: 0.35, aggroEnd: 0.6, aggroRadius: 175 },
+        hunt: { maxAlive: 18, respawnDelay: 0.6, aggroStart: 0.15, aggroEnd: 0.25, aggroRadius: 145 },
       },
     ],
     townMapId: "map1",
@@ -98,8 +107,12 @@ export const CONFIG = {
     /** Delay before the first spawn on zone entry (the field then bursts to full). */
     initialGap: 0.3,
     /** Spawn band as fractions of the zone `fieldWidth` (mobs placed in [min,max]). */
-    spawnMinXFrac: 0.3,
-    spawnMaxXFrac: 0.96,
+    // Widened (was 0.30-0.96) to spread 15-20 concurrent mobs over a longer stretch
+    // so a fuller field reads less clumped. Placement is still uncollided random
+    // uniform, so a fuller field WILL visually overlap at points (acceptable for now
+    // — flagged in docs/balance-m6.md); a wider band lowers the overlap density.
+    spawnMinXFrac: 0.22,
+    spawnMaxXFrac: 0.98,
     // Idle wander around the spawn point (deterministic; no RNG). Amplitude in px,
     // a gentle drift speed cap, and an id-hashed frequency spread so mobs desync.
     wanderAmp: 22,
@@ -303,8 +316,16 @@ export const CONFIG = {
     rangedChanceS3: 0.55, // stage >= 3
   },
 
-  // ---- curves (functions of stage n), verbatim from the POC ----
-  killGoal: (n: number): number => 10 + n * 5,
+  // ---- curves (functions of stage n) ----
+  // M6 hunt-density retune (2026-07-06): concurrent mobs per zone rose ~2.5×
+  // (maxAlive 6-8 -> 15-20) to make the field feel ALIVE. Measured raw throughput
+  // then rose ~1.6× (clear times ~halved), so the KILL QUOTA is the lever that
+  // restores the M6 clear-time ballpark ("busier, not trivially faster"): killGoal
+  // is scaled ×1.6 (10+5n -> 16+8n). Because level/gold-per-zone = quota × per-kill
+  // reward, xpPerKill + goldPerKill are divided by the SAME 1.6 below so the
+  // leveling trajectory, the map3 power wall, class-change-at-stage-5, and the
+  // potion-sink %s all stay on the M6 curve — only the field density changed.
+  killGoal: (n: number): number => 16 + n * 8,
   // M4 tune: HP scaling exponent 1.23 -> 1.20. `heroAtk` is ADDITIVE
   // (base*(1+per*level)) while enemy/boss HP is GEOMETRIC, so the atk level (and
   // its geometric cost) needed to keep pace grows super-linearly with stage — a
@@ -321,7 +342,10 @@ export const CONFIG = {
   // multiplier keeps stage 1-3 values effectively unchanged (7, 9, 12 vs 7, 9,
   // 11) but lets income track the cost curve deeper, converting the old stage-8
   // stall into a comfortable stage and pushing the hard stall out to stage 9.
-  goldPerKill: (n: number): number => Math.round((5 + n * 2) * Math.pow(1.05, n - 1)),
+  // M6 hunt-density retune: base coeffs are the old (5 + 2n) divided by the 1.6×
+  // killGoal factor (≈ 3.125 + 1.25n) so gold-per-ZONE = killGoal × goldPerKill is
+  // preserved — income trajectory and the depth-scaled potion-sink %s are unchanged.
+  goldPerKill: (n: number): number => Math.round((3.125 + n * 1.25) * Math.pow(1.05, n - 1)),
   goldPerBoss: (n: number): number => 50 + n * 20,
 
   // ---- spatial layout ----
@@ -439,7 +463,11 @@ export const CONFIG = {
     hpPerLevel: 0.09,
     // XP granted to the solo hero per NORMAL enemy kill; scales with stage so
     // deeper (tougher) kills are worth more and leveling keeps pace with HP.
-    xpPerKill: (n: number): number => 10 + n * 3,
+    // M6 hunt-density retune: ≈ old (10 + 3n) divided by the 1.6× killGoal factor
+    // so xp-per-ZONE = killGoal × xpPerKill is preserved — the leveling trajectory
+    // (level-at-stage, class-change beat, map3 power wall) is unchanged despite the
+    // ~2.5× denser field (which only made the same kills arrive faster).
+    xpPerKill: (n: number): number => 6 + n * 2,
     // XP granted per BOSS kill — a chunky milestone reward (a level or more).
     xpPerBossKill: (n: number): number => 80 + n * 25,
     // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
