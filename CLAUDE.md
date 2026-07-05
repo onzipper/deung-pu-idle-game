@@ -68,7 +68,8 @@ Each layer has a `README.md` with its contract; `render/README.md` carries the *
 4. **Windows 10 has no Unicode-13+ emoji glyphs** (🪙🪄…) — UI icons must be pre-2020 emoji or CSS-drawn.
 5. **Absolute-position caps rot**: POC-era constants like `midCap` silently broke formation spacing when the anchor design deepened — prefer anchor/spawn-relative bounds with config knobs.
 6. **New `ProjectileKind`/enum members need their render map entries in the same change** (`PROJECTILE_COLORS` etc.) or the client crashes at runtime ("Unable to convert color undefined") — grep for `Record<ProjectileKind` when extending engine unions.
-7. **Balance changes must run the sim** vs the latest table in `docs/balance-m4.md` (±15%, prestige-gate ~5× at stage 9, 0 wipes). Tune new knobs before touching M4-tuned curves.
+7. **Balance changes must run the sim** vs the latest table in `docs/balance-m5.md` (per-class solo, 0 permanent walls; balance-m4 is the superseded team-comp baseline). Tune new knobs before touching tuned curves.
+8. **Next 16: `cookies().set()` during a Server Component render throws** (`ReadonlyRequestCookiesError`) — cookie writes belong in Route Handlers / Server Actions only. Gate/redirect helpers in server components must be strictly read-only (see `src/app/characterGate.ts`).
 
 ## Orchestration workflow
 
