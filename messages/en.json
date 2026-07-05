@@ -29,7 +29,13 @@
     "autoSkillToggle": "✨ Auto Skill: {state, select, on {ON} other {OFF}}",
     "upgradesLabel": "Upgrades",
     "upgradeAriaLabel": "{name} Level {level}{costState, select, capped { (MAX)} other {, cost {cost} gold}}",
-    "autoUpgradeToggle": "💰 Auto Upgrade: {state, select, on {ON} other {OFF}}"
+    "autoUpgradeToggle": "💰 Auto Upgrade: {state, select, on {ON} other {OFF}}",
+    "evolveButton": "Evolve",
+    "evolveConfirmLabel": "Confirm?",
+    "evolveConfirmHint": "Tap again to confirm",
+    "evolveLockedHint": "Unlocks at Lv.{level} ({cost} gold)",
+    "evolveAriaLabel": "{heroName}: Evolve{state, select, locked { (unlocks at Lv.{level})} confirm { (tap again to confirm)} other {, cost {cost} gold}}",
+    "evolvedBadgeTitle": "{name} (Evolved)"
   },
   "settings": {
     "speedLabel": "Speed",
@@ -158,9 +164,9 @@
   },
   "content": {
     "classes": {
-      "swordsman": { "name": "Swordsman" },
-      "archer": { "name": "Archer" },
-      "mage": { "name": "Mage" }
+      "swordsman": { "name": "Swordsman", "evolvedName": "Knight" },
+      "archer": { "name": "Archer", "evolvedName": "Ranger" },
+      "mage": { "name": "Mage", "evolvedName": "Archmage" }
     },
     "skills": {
       "swordsman": {

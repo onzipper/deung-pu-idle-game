@@ -29,7 +29,13 @@
     "autoSkillToggle": "✨ Auto สกิล: {state, select, on {เปิด} other {ปิด}}",
     "upgradesLabel": "อัพเกรด",
     "upgradeAriaLabel": "{name} เลเวล {level}{costState, select, capped { สูงสุดแล้ว} other {, ราคา {cost} ทอง}}",
-    "autoUpgradeToggle": "💰 Auto อัป: {state, select, on {เปิด} other {ปิด}}"
+    "autoUpgradeToggle": "💰 Auto อัป: {state, select, on {เปิด} other {ปิด}}",
+    "evolveButton": "ปลดคลาส",
+    "evolveConfirmLabel": "ยืนยัน?",
+    "evolveConfirmHint": "แตะอีกครั้งเพื่อยืนยัน",
+    "evolveLockedHint": "ปลดคลาสได้ที่ Lv.{level} (ทอง {cost})",
+    "evolveAriaLabel": "{heroName}: ปลดคลาส{state, select, locked { (ปลดล็อกที่ Lv.{level})} confirm { (แตะอีกครั้งเพื่อยืนยัน)} other {, ราคา {cost} ทอง}}",
+    "evolvedBadgeTitle": "{name} (ปลดคลาสแล้ว)"
   },
   "settings": {
     "speedLabel": "ความเร็ว",
@@ -158,9 +164,9 @@
   },
   "content": {
     "classes": {
-      "swordsman": { "name": "นักดาบ" },
-      "archer": { "name": "นักธนู" },
-      "mage": { "name": "นักเวท" }
+      "swordsman": { "name": "นักดาบ", "evolvedName": "อัศวิน" },
+      "archer": { "name": "นักธนู", "evolvedName": "นายพราน" },
+      "mage": { "name": "นักเวท", "evolvedName": "จอมเวท" }
     },
     "skills": {
       "swordsman": { "name": "หมุนฟัน", "desc": "หมุนดาบฟันศัตรูรอบตัว" },

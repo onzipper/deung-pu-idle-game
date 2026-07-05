@@ -42,8 +42,10 @@ import {
   CONFIG,
   FIXED_DT,
   bossHint,
+  canEvolveHero,
   createAccumulator,
   drainAccumulator,
+  evolutionCost,
   initGameState,
   migrate,
   step,
@@ -140,6 +142,12 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       level: h.level,
       xpProgress,
       atLevelCap,
+      tier: h.tier,
+      // Pure display reads (M5 evolution) — the same rule/read-path
+      // `xpProgress` uses: engine helpers compute it, the store just carries
+      // the display-ready result.
+      canEvolve: canEvolveHero(state, h),
+      evolutionCost: evolutionCost(h.cls),
     };
   });
 
@@ -271,6 +279,7 @@ export function GameClient() {
         buyUpgrade: pending.buyUpgrade ?? undefined,
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
+        evolveHero: pending.evolveHero ?? undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of

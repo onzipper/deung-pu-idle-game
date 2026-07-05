@@ -15,11 +15,21 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { HeroClass } from "@/engine";
-import { SKILL_TYPES } from "@/engine";
+import { CONFIG, SKILL_TYPES } from "@/engine";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import type { HeroSummary } from "@/ui/store/gameStore";
 import { SKILL_ICONS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
+
+/** Below this level the evolve affordance isn't shown at all (don't tease the
+ * feature before it's remotely relevant) — from here to
+ * `CONFIG.evolution.levelRequired` it shows as a disabled "locked" hint. */
+const EVOLVE_HINT_LEVEL = 12;
+
+/** How long an armed (first-tap) evolve button stays armed before it resets —
+ * a stray tap minutes later should never silently fire the second half of a
+ * two-tap confirm. */
+const EVOLVE_ARM_TIMEOUT_MS = 3000;
 
 /** Presentational-only per-class accent (mirrors src/render/theme.ts
  * HERO_COLORS so a hero's skill button reads as "the same character" as
@@ -46,6 +56,134 @@ function useCastKey(skillCd: number): number {
   return castKey;
 }
 
+/**
+ * Class-advancement (M5 evolution) affordance, rendered next to the level
+ * badge (`SkillButton`'s top row). Three states:
+ *  - hidden entirely below `EVOLVE_HINT_LEVEL` (don't tease the feature too
+ *    early),
+ *  - a disabled "locked" hint pill from `EVOLVE_HINT_LEVEL` up to
+ *    `CONFIG.evolution.levelRequired` (shows the level/gold requirement, so
+ *    the player knows it's coming and what it costs),
+ *  - once the level gate is met: a real button. This is a big one-way
+ *    purchase (permanent tier flip), so it needs a confirm — the codebase has
+ *    no existing purchase-confirm pattern to match (upgrades/skills are cheap
+ *    and instantly repeatable), so this uses a 2-tap "tap again to confirm"
+ *    arm/fire pattern local to the button, auto-disarming after
+ *    `EVOLVE_ARM_TIMEOUT_MS` so a stray tap minutes later can't silently fire
+ *    the confirm half.
+ * Tier-2 heroes get a static evolved-identity badge instead (no more
+ * evolutions in M5 — see `engine/systems/evolution.ts`'s single-path note).
+ */
+function EvolveAffordance({
+  hero,
+  slot,
+  heroName,
+  accent,
+}: {
+  hero: HeroSummary;
+  slot: number;
+  heroName: string;
+  accent: { solid: string; soft: string };
+}) {
+  const evolveHero = useGameStore((s) => s.evolveHero);
+  const tPanels = useTranslations("panels");
+  const [armed, setArmed] = useState(false);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (armTimer.current) clearTimeout(armTimer.current);
+    },
+    [],
+  );
+
+  if (hero.tier === 2) {
+    return (
+      <span
+        title={tPanels("evolvedBadgeTitle", { name: heroName })}
+        className="rounded-full border border-ddp-gold/60 bg-ddp-gold/10 px-1.5 text-[8px] font-bold text-ddp-gold-bright"
+      >
+        {heroName}
+      </span>
+    );
+  }
+
+  if (hero.level < EVOLVE_HINT_LEVEL) return null;
+
+  const levelGateMet = hero.level >= CONFIG.evolution.levelRequired;
+  if (!levelGateMet) {
+    return (
+      <span
+        title={tPanels("evolveLockedHint", {
+          level: CONFIG.evolution.levelRequired,
+          cost: hero.evolutionCost.toLocaleString(),
+        })}
+        aria-label={tPanels("evolveAriaLabel", {
+          heroName,
+          state: "locked",
+          level: CONFIG.evolution.levelRequired,
+          cost: hero.evolutionCost.toLocaleString(),
+        })}
+        className="cursor-default rounded-full border border-ddp-border bg-black/40 px-1.5 text-[8px] font-bold text-ddp-ink-muted"
+      >
+        🔒 Lv.{CONFIG.evolution.levelRequired}
+      </span>
+    );
+  }
+
+  const affordable = hero.canEvolve;
+
+  function handleClick(): void {
+    if (!affordable) return;
+    if (!armed) {
+      setArmed(true);
+      armTimer.current = setTimeout(() => setArmed(false), EVOLVE_ARM_TIMEOUT_MS);
+      return;
+    }
+    if (armTimer.current) clearTimeout(armTimer.current);
+    armTimer.current = null;
+    setArmed(false);
+    evolveHero(slot);
+  }
+
+  function disarm(): void {
+    if (armTimer.current) clearTimeout(armTimer.current);
+    armTimer.current = null;
+    setArmed(false);
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={!affordable}
+      onClick={handleClick}
+      onBlur={disarm}
+      onMouseLeave={() => armed && disarm()}
+      title={armed ? tPanels("evolveConfirmHint") : undefined}
+      style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
+      aria-label={tPanels("evolveAriaLabel", {
+        heroName,
+        // The level gate is already met here (the "locked" ICU branch above
+        // is only for the separate below-level-gate hint pill); an
+        // unaffordable-but-level-met button just reads its cost, same
+        // convention as `UpgradePanel.tsx`'s `upgradeAriaLabel`.
+        state: armed ? "confirm" : "normal",
+        level: CONFIG.evolution.levelRequired,
+        cost: hero.evolutionCost.toLocaleString(),
+      })}
+      className={`relative rounded-full border px-1.5 text-[8px] font-bold whitespace-nowrap transition-all duration-100 active:scale-95 ${
+        armed
+          ? "animate-buy-pulse border-ddp-gold bg-ddp-gold text-ddp-panel-strong"
+          : affordable
+            ? "border-(--accent-soft) bg-ddp-panel-strong text-ddp-gold-bright before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-['']"
+            : "cursor-not-allowed border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted grayscale"
+      }`}
+    >
+      {armed ? tPanels("evolveConfirmLabel") : tPanels("evolveButton")}
+    </button>
+  );
+}
+
 function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const castSkill = useGameStore((s) => s.castSkill);
   const maxCd = SKILL_TYPES[hero.cls].cd;
@@ -53,7 +191,10 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const tPanels = useTranslations("panels");
   const tCommon = useTranslations("common");
   const skillName = tContent(`skills.${hero.cls}.name`);
-  const heroName = tContent(`classes.${hero.cls}.name`);
+  // Tier-2 (evolved) heroes read as their evolved class identity everywhere
+  // this string is used (badge tooltip, aria-label) — same source of truth
+  // as the `HeroSummary.tier` snapshot field (M5 evolution).
+  const heroName = tContent(`classes.${hero.cls}.${hero.tier === 2 ? "evolvedName" : "name"}`);
   const skillIcon = SKILL_ICONS[hero.cls];
   const castKey = useCastKey(hero.skillCd);
   const accent = HERO_ACCENT[hero.cls];
@@ -72,14 +213,17 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
 
   return (
     <div className="flex flex-col items-center gap-1">
-      <span
-        title={heroName}
-        className={`rounded-full border border-ddp-border-soft bg-black/60 px-1.5 text-[9px] font-bold tabular-nums ${
-          hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
-        } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
-      >
-        {hero.atLevelCap ? tCommon("maxLabel") : tCommon("levelBadge", { level: hero.level })}
-      </span>
+      <div className="flex items-center gap-1">
+        <span
+          title={heroName}
+          className={`rounded-full border border-ddp-border-soft bg-black/60 px-1.5 text-[9px] font-bold tabular-nums ${
+            hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
+          } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
+        >
+          {hero.atLevelCap ? tCommon("maxLabel") : tCommon("levelBadge", { level: hero.level })}
+        </span>
+        <EvolveAffordance hero={hero} slot={slot} heroName={heroName} accent={accent} />
+      </div>
       <div
         className="h-1.5 w-14 overflow-hidden rounded-full bg-black/50"
         title={heroName}

@@ -43,6 +43,15 @@ export interface HeroSummary {
    * ships the cap number itself, just this precomputed flag (same "no raw
    * curve math in the store" rule as `xpProgress`). */
   atLevelCap: boolean;
+  /** Class-advancement tier (M5 evolution). 1 = base, 2 = evolved. */
+  tier: 1 | 2;
+  /** Precomputed `canEvolveHero(state, hero)` read (tier 1, level gate met,
+   * gold affordable) — the store never runs engine logic itself, just carries
+   * this one-way display flag (same pattern as `atLevelCap`). */
+  canEvolve: boolean;
+  /** Gold cost of evolving this hero (`evolutionCost(hero.cls)`), for the
+   * evolve affordance's cost label/tooltip — irrelevant once `tier === 2`. */
+  evolutionCost: number;
 }
 
 /** Gold cost of the next level of each upgrade line, at the current levels. */
@@ -69,10 +78,20 @@ export interface PendingInput {
   buyUpgrade: keyof Upgrades | null;
   challengeBoss: boolean;
   advanceStage: boolean;
+  /** Hero slot index to evolve (M5), or `null` (last-wins per frame, same as
+   * `buyUpgrade` — a big one-way purchase never needs to queue more than one
+   * per frame). */
+  evolveHero: number | null;
 }
 
 function emptyPendingInput(): PendingInput {
-  return { castSkills: [], buyUpgrade: null, challengeBoss: false, advanceStage: false };
+  return {
+    castSkills: [],
+    buyUpgrade: null,
+    challengeBoss: false,
+    advanceStage: false,
+    evolveHero: null,
+  };
 }
 
 /** localStorage key for the sound preference. This is a CLIENT PREFERENCE,
@@ -257,6 +276,9 @@ export interface HudState {
   buyUpgrade: (stat: keyof Upgrades) => void;
   challengeBoss: () => void;
   advanceStage: () => void;
+  /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
+   * `buyUpgrade`) — the engine no-ops it if requirements aren't met. */
+  evolveHero: (slot: number) => void;
 
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
@@ -326,6 +348,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   advanceStage: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, advanceStage: true } })),
+
+  evolveHero: (slot) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, evolveHero: slot } })),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;

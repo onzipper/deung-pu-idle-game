@@ -22,6 +22,7 @@ import {
   playBossRetreat,
   playBossSlamLand,
   playBossSlamTelegraph,
+  playEvolve,
   playHeroDown,
   playHeroRevived,
   playHit,
@@ -124,6 +125,11 @@ export class AudioController {
         case "levelUp":
           if (this.engine.allow("levelUp", SFX_MIN_INTERVAL_MS.levelUp)) {
             playLevelUp(this.engine);
+          }
+          break;
+        case "evolve":
+          if (this.engine.allow("evolve", SFX_MIN_INTERVAL_MS.evolve)) {
+            playEvolve(this.engine);
           }
           break;
         case "upgradeBought":

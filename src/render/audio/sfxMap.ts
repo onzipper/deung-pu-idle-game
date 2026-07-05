@@ -91,6 +91,23 @@ export const SFX_PARAMS = {
     noteDecay: 0.18,
     noteGain: 0.16,
   },
+  evolve: {
+    // G4 B4 D5 G5 — a 4-note ascending arpeggio, distinct from levelUp's
+    // 2-note chime, stageAdvanced's 3-note fanfare, AND bossDefeated's C-major
+    // arpeggio (different scale degrees/register) — a mid-tier goal-ladder
+    // moment needs its own unmistakable "big triumphant" identity.
+    notes: [392.0, 493.88, 587.33, 783.99],
+    noteGap: 0.1,
+    noteDecay: 0.24,
+    noteGain: 0.2,
+    // A shimmering rising-filter noise tail layered under the arpeggio —
+    // the "triumphant sparkle" that gives evolve more weight than levelUp's
+    // plain chime without borrowing bossDefeated's coin-shower texture.
+    shimmerFreqFrom: 1800,
+    shimmerFreqTo: 3000,
+    shimmerDuration: 0.5,
+    shimmerGain: 0.12,
+  },
   upgradeBought: {
     clickDuration: 0.02,
     clickFilterFreq: 2400,
@@ -120,6 +137,7 @@ export const SFX_MIN_INTERVAL_MS = {
   bossRetreat: 250,
   stageAdvanced: 500,
   levelUp: 200,
+  evolve: 400,
   upgradeBought: 40,
 } as const;
 
@@ -323,6 +341,33 @@ export function playLevelUp(engine: AudioEngine): void {
       gain: p.noteGain,
       delay: i * p.noteGap,
     });
+  });
+}
+
+/** Hero class-advancement / evolution (M5): a triumphant 4-note ascending
+ * arpeggio + a shimmering rising-filter noise tail — deliberately grander and
+ * distinct from both `playLevelUp` (short 2-note chime) and `playBossDefeated`
+ * (different scale/register, no coin-shower texture) since this is a rarer,
+ * bigger goal-ladder moment (at most once per hero for the whole M5 run). */
+export function playEvolve(engine: AudioEngine): void {
+  const p = SFX_PARAMS.evolve;
+  p.notes.forEach((freq, i) => {
+    engine.tone(freq, {
+      shape: "triangle",
+      attack: 0.004,
+      decay: p.noteDecay,
+      gain: p.noteGain,
+      delay: i * p.noteGap,
+    });
+  });
+  engine.noise({
+    duration: p.shimmerDuration,
+    filterType: "bandpass",
+    filterFreq: p.shimmerFreqFrom,
+    filterFreqEnd: p.shimmerFreqTo,
+    filterQ: 1.4,
+    gain: p.shimmerGain,
+    delay: p.notes.length * p.noteGap * 0.5,
   });
 }
 
