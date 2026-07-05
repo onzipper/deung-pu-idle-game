@@ -26,8 +26,9 @@ interface Slot {
   r0: number;
   color: number;
   startAlpha: number;
-  /** 0 = circle dot, 1 = thin upward "tongue"/teardrop shape (flame tier). */
-  shape: 0 | 1;
+  /** 0 = circle dot, 1 = thin upward "tongue"/teardrop shape (flame tier),
+   * 2 = 4-point star glint (armor sparkle pop). */
+  shape: 0 | 1 | 2;
 }
 
 export interface SpawnOptions {
@@ -41,7 +42,7 @@ export interface SpawnOptions {
   gravity?: number;
   drag?: number;
   alpha?: number;
-  shape?: 0 | 1;
+  shape?: 0 | 1 | 2;
 }
 
 export class ParticlePool {
@@ -126,6 +127,18 @@ export class ParticlePool {
         slot.g
           .poly([0, -h, r * 0.6, 0, -r * 0.6, 0])
           .fill({ color: slot.color, alpha });
+      } else if (slot.shape === 2) {
+        // Flat-alpha 4-point star glint (armor sparkle pop) — sampled poly,
+        // never a gradient/blur, alternating outer/inner radius per point.
+        const outer = r * 1.8;
+        const inner = r * 0.5;
+        const pts: number[] = [];
+        for (let i = 0; i < 8; i++) {
+          const a = (Math.PI / 4) * i;
+          const rr = i % 2 === 0 ? outer : inner;
+          pts.push(Math.cos(a) * rr, Math.sin(a) * rr);
+        }
+        slot.g.poly(pts).fill({ color: slot.color, alpha });
       } else {
         slot.g.circle(0, 0, r).fill({ color: slot.color, alpha });
       }

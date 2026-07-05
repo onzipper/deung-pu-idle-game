@@ -1,47 +1,55 @@
 "use client";
 
 /**
- * M6.5 art-direction prototype — a throwaway, self-contained demo page. Owns
- * its own tiny Pixi `Application` (never imports `src/render` — that layer is
- * mid-surgery by other agents right now) so this can be deleted wholesale
- * once the owner has made a decision without touching the shipped renderer.
+ * M6.5 art-direction prototype ROUND 2 — the paper-doll gear decision demo.
+ * Owns its own tiny Pixi `Application` (never imports `src/render` — that
+ * layer is mid-surgery by other agents right now) so this can be deleted
+ * wholesale once the owner has made a decision without touching the shipped
+ * renderer.
  *
- * The decision aid is the "Pixel mode" toggle:
- *  - Pixel mode ON: the whole 480x270 logical scene is rendered into a
- *    low-res `RenderTexture` (nearest-neighbor `scaleMode`, pixi.js 8.19's
- *    `TextureSourceOptions.scaleMode: "nearest"`) and that texture is
- *    upscaled via a `Sprite` to fill the container — blocky, MMX3-faithful.
- *  - Pixel mode OFF: the SAME scene graph is instead scaled up directly and
- *    drawn straight to the screen at native/device resolution — smooth
- *    vector edges, no pixelation. Comparing the two IS the point.
+ * Round 1's pixel-mode pipeline is GONE (owner decision, `docs/GDD.md` "Art
+ * Direction": smooth vector rendering only, pixel rejected). This round's
+ * decision points are the CHARACTER (anime/RO-proportioned swordsman, not
+ * the old MMX3 chibi rig) and the GEAR (3-tier paper-doll — same body,
+ * swapped armor/weapon layers — with the tier-3 "ระดับเทพ" weapon aura as
+ * the wow beat). The passed background composition is reused unchanged.
  *
- * Per-frame animation state (poses, particles, aura, parallax, screenshake,
+ * Per-frame animation state (poses, walk/chase AI, particles, screenshake,
  * hitstop) lives entirely in plain closures driven by the Pixi ticker — NOT
- * React state (`CLAUDE.md`'s no-per-frame-state-in-React rule). The four
- * buttons only flip low-frequency UI toggles, applied directly to the Pixi
+ * React state (`CLAUDE.md`'s no-per-frame-state-in-React rule). The gear-tier
+ * buttons only flip a low-frequency UI toggle, applied directly to the Pixi
  * scene via a small imperative API stashed in a ref (no polling).
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Application, Container, RenderTexture, Sprite } from "pixi.js";
+import { Application, Container } from "pixi.js";
 import { buildBackground, PROTO_WORLD } from "./scene/background";
-import { buildHero, SWING_SEQUENCE, SWING_IMPACT_POSE, HERO_HEIGHT } from "./scene/hero";
+import {
+  buildHero,
+  SWING_SEQUENCE,
+  SWING_IMPACT_POSE,
+  WALK_SEQUENCE,
+  HERO_HEIGHT,
+  type GearTier,
+} from "./scene/hero";
 import { buildEnemy } from "./scene/enemy";
-import { buildAura, type AuraTier } from "./scene/aura";
 import { buildHud } from "./scene/hud";
 import { ParticlePool, burst } from "./scene/particlePool";
 import { PROTO_PALETTE as P } from "./scene/palette";
 
 const { WORLD_W, WORLD_H, GROUND_Y } = PROTO_WORLD;
-const HERO_X = 150;
-const ENEMY_CENTER_X = 245;
-const ENEMY_RANGE = 55;
-const SWORD_REACH = 130;
+const HERO_START_X = 90;
+const ENEMY_CENTER_X = 280;
+const ENEMY_RANGE = 90;
+const HIT_DIST = 72;
+const ARRIVE_DIST = 36;
+const WALK_SPEED = 60;
 
 const IDLE_HOLD = 0.26;
+const WALK_HOLD = 0.12;
 const SWING_HOLD = 0.09;
-const SWING_COOLDOWN_MIN = 1.5;
-const SWING_COOLDOWN_MAX = 2.1;
+const SWING_COOLDOWN_MIN = 0.35;
+const SWING_COOLDOWN_MAX = 0.7;
 /** Real-time clamp so a tab-away/debugger stall never dumps a huge dt burst. */
 const MAX_FRAME_SECONDS = 0.1;
 
@@ -59,8 +67,7 @@ function computeFit(screenW: number, screenH: number): Fit {
 }
 
 interface SceneApi {
-  setPixelMode(pixel: boolean): void;
-  setAuraTier(tier: AuraTier): void;
+  setGearTier(tier: GearTier): void;
 }
 
 /** Mirrors `src/render/GameRenderer.ts`'s pre-init probe (reimplemented
@@ -106,7 +113,6 @@ interface DiagSnapshot {
   tickerStarted: boolean;
   frames: number;
   lastError: string | null;
-  fallback: string | null;
   /** `performance.now()` at mount — 0 means "not mounted yet". */
   mountedAt: number;
   /** `performance.now()` as of the last snapshot copy (NOT read during
@@ -124,16 +130,20 @@ const DIAG_DEFAULT: DiagSnapshot = {
   tickerStarted: false,
   frames: 0,
   lastError: null,
-  fallback: null,
   mountedAt: 0,
   now: 0,
 };
 
+const GEAR_TIERS: Array<{ tier: GearTier; label: string; accent: string }> = [
+  { tier: 1, label: "ธรรมดา", accent: "border-white/25 bg-[#151a30] text-white" },
+  { tier: 2, label: "หายาก", accent: "border-[#3a6fd8] bg-[#3a6fd8] text-white" },
+  { tier: 3, label: "ระดับเทพ", accent: "border-[#f2b134] bg-[#f2b134] text-black" },
+];
+
 export function ProtoScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneApiRef = useRef<SceneApi | null>(null);
-  const [pixelMode, setPixelModeState] = useState(true);
-  const [auraTier, setAuraTierState] = useState<AuraTier>(2);
+  const [gearTier, setGearTierState] = useState<GearTier>(3);
   const [initError, setInitError] = useState<string | null>(null);
   const [diag, setDiag] = useState<DiagSnapshot>(DIAG_DEFAULT);
 
@@ -195,13 +205,9 @@ export function ProtoScene() {
         // the drawing buffer is just 1:1 with the CSS pixels we resize() to.
         resolution: 1,
         autoDensity: false,
-        // Force WebGL explicitly — iOS Safari can auto-pick WebGPU (Pixi 8's
-        // default preference order tries it first when the device reports
-        // support), and a `RenderTexture` created with a `scaleMode`/
-        // `antialias` combo has been observed to throw on that backend
-        // there. WebGL is the well-exercised path (same as the shipped
-        // `GameRenderer`) and is what this whole prototype was built/tested
-        // against.
+        // Force WebGL explicitly — same well-exercised path as the shipped
+        // `GameRenderer`, and what this whole prototype was built/tested
+        // against (iOS Safari has been observed auto-picking WebGPU otherwise).
         preference: "webgl",
       });
       if (destroyed) {
@@ -223,75 +229,26 @@ export function ProtoScene() {
       app.canvas.style.height = "100%";
       app.canvas.style.display = "block";
 
-      // ---- scene graph (built once, logical 480x270 space) ----
+      // ---- scene graph (built once, logical 480x270 space), drawn straight
+      // to the screen at native resolution — smooth vector edges, no pixel
+      // pipeline (round 1's RenderTexture/nearest-neighbor path is gone). ----
       const world = new Container();
       const background = buildBackground();
       const enemy = buildEnemy(ENEMY_CENTER_X, GROUND_Y, ENEMY_RANGE);
       const hero = buildHero();
-      hero.container.position.set(HERO_X, GROUND_Y);
-      const aura = buildAura();
+      hero.container.position.set(HERO_START_X, GROUND_Y);
       const hitFxLayer = new Container();
       const hud = buildHud();
 
-      world.addChild(
-        background.container,
-        aura.container,
-        enemy.container,
-        hero.container,
-        hitFxLayer,
-        hud.container,
-      );
+      world.addChild(background.container, enemy.container, hero.container, hitFxLayer, hud.container);
+      app.stage.addChild(world);
 
       const hitSparks = new ParticlePool(hitFxLayer, 16);
 
-      // ---- pixel-mode pipeline: render `world` into a low-res RenderTexture,
-      // upscaled nearest-neighbor via a Sprite. `scaleMode: "nearest"` on the
-      // texture SOURCE (pixi.js 8.19's `TextureSourceOptions`, itself layering
-      // `TextureStyleOptions`) is the exact mechanism — a plain Sprite scaled
-      // up then samples it with point filtering, i.e. blocky/crisp instead of
-      // smoothed. ----
-      const pixelRT = RenderTexture.create({
-        width: WORLD_W,
-        height: WORLD_H,
-        resolution: 1,
-        scaleMode: "nearest",
-        antialias: false,
-      });
-      const pixelSprite = new Sprite(pixelRT);
-      app.stage.addChild(pixelSprite);
-
-      let pixelModeOn = true;
-      let worldAttached = false;
-
-      function setPixelMode(pixel: boolean): void {
-        pixelModeOn = pixel;
-        if (pixel) {
-          if (worldAttached) {
-            app.stage.removeChild(world);
-            worldAttached = false;
-          }
-          world.scale.set(1);
-          world.position.set(0, 0);
-          pixelSprite.visible = true;
-        } else {
-          if (!worldAttached) {
-            app.stage.addChildAt(world, 0);
-            worldAttached = true;
-          }
-          pixelSprite.visible = false;
-        }
-        applyFit();
-      }
-
       function applyFit(): void {
         const fit = computeFit(app.screen.width, app.screen.height);
-        if (pixelModeOn) {
-          pixelSprite.scale.set(fit.scale);
-          pixelSprite.position.set(fit.x, fit.y);
-        } else {
-          world.scale.set(fit.scale);
-          world.position.set(fit.x, fit.y);
-        }
+        world.scale.set(fit.scale);
+        world.position.set(fit.x, fit.y);
       }
 
       function handleResize(): void {
@@ -307,14 +264,19 @@ export function ProtoScene() {
 
       const resizeObserver = new ResizeObserver(handleResize);
       resizeObserver.observe(mount);
-      setPixelMode(pixelMode);
       handleResize();
 
-      // ---- hero animation state machine (idle breathing <-> sword swing) ----
-      type AnimState = "idle" | "swing";
+      // ---- hero AI: idle-breathe <-> walk-to-mob <-> two-handed swing.
+      // This is the "hunt model" teaser the brief calls for: the hero walks
+      // over to the wandering mob and swings, rather than standing still. ----
+      type AnimState = "idle" | "walk" | "swing";
       let animState: AnimState = "idle";
+      let heroX = HERO_START_X;
+      let facing = 1;
       let idleFrame: 0 | 1 = 0;
       let idleTimer = 0;
+      let walkIndex = 0;
+      let walkTimer = 0;
       let swingIndex = 0;
       let swingHoldTimer = 0;
       let swingCooldown =
@@ -326,17 +288,18 @@ export function ProtoScene() {
       let shakeAmp = 0;
       let shakeAngle = 0;
       let hitStopTimer = 0;
-      let currentAuraTier: AuraTier = auraTier;
+      let currentGearTier: GearTier = gearTier;
+      hero.setGearTier(currentGearTier);
 
       function triggerImpact(): void {
-        const dist = Math.abs(enemy.x - HERO_X);
-        if (dist > SWORD_REACH) return; // swing missed — still looks alive
-        const fromLeft = HERO_X < enemy.x;
+        const dist = Math.abs(enemy.x - heroX);
+        if (dist > HIT_DIST) return; // swing missed — still looks alive
+        const fromLeft = heroX < enemy.x;
         enemy.takeHit(fromLeft);
-        const hitX = HERO_X + (fromLeft ? SWORD_REACH * 0.55 : -SWORD_REACH * 0.55);
+        const hitX = heroX + (fromLeft ? HIT_DIST * 0.6 : -HIT_DIST * 0.6);
         const hitY = GROUND_Y - HERO_HEIGHT * 0.55;
-        burst(hitSparks, hitX, hitY, 10, P.hitSpark, { speed: 130, life: 0.22, radius: 2 });
-        burst(hitSparks, hitX, hitY, 6, P.hitSparkGold, { speed: 90, life: 0.3, radius: 2.2 });
+        burst(hitSparks, hitX, hitY, 10, P.hitSpark, { speed: 150, life: 0.22, radius: 2.4 });
+        burst(hitSparks, hitX, hitY, 6, P.hitSparkGold, { speed: 100, life: 0.3, radius: 2.6 });
         hitStopTimer = 0.05;
         shakeAmp = 3;
         shakeAngle = Math.random() * Math.PI * 2;
@@ -348,8 +311,8 @@ export function ProtoScene() {
         const rawDt = Math.min(ticker.deltaMS / 1000, MAX_FRAME_SECONDS);
 
         // Hit-stop shapes ONLY the hero/enemy pose-progression clock — fx
-        // (particles/aura/background) stay real-time so a freeze still reads
-        // as "impact", not "the whole game paused".
+        // (particles/weapon aura/background) stay real-time so a freeze
+        // still reads as "impact," not "the whole game paused."
         let logicDt = rawDt;
         if (hitStopTimer > 0) {
           hitStopTimer -= rawDt;
@@ -359,7 +322,15 @@ export function ProtoScene() {
         background.update(rawDt);
         enemy.update(logicDt);
 
-        // ---- hero pose stepping ----
+        // ---- facing: always face the mob, except mid-swing (frozen so the
+        // chop doesn't flip halfway through). ----
+        const dx = enemy.x - heroX;
+        if (animState !== "swing" && Math.abs(dx) > 0.5) {
+          facing = dx > 0 ? 1 : -1;
+        }
+        hero.container.scale.x = facing;
+
+        // ---- hero state machine ----
         if (animState === "idle") {
           idleTimer += logicDt;
           if (idleTimer >= IDLE_HOLD) {
@@ -367,12 +338,35 @@ export function ProtoScene() {
             idleFrame = idleFrame === 0 ? 1 : 0;
             hero.setPose(idleFrame === 0 ? "idleA" : "idleB");
           }
-          swingCooldown -= rawDt;
-          if (swingCooldown <= 0) {
-            animState = "swing";
-            swingIndex = 0;
-            swingHoldTimer = 0;
-            hero.setPose(SWING_SEQUENCE[0]);
+          if (Math.abs(dx) > ARRIVE_DIST) {
+            animState = "walk";
+            walkIndex = 0;
+            walkTimer = 0;
+            hero.setPose(WALK_SEQUENCE[0]);
+          } else {
+            swingCooldown -= logicDt;
+            if (swingCooldown <= 0) {
+              animState = "swing";
+              swingIndex = 0;
+              swingHoldTimer = 0;
+              hero.setPose(SWING_SEQUENCE[0]);
+            }
+          }
+        } else if (animState === "walk") {
+          heroX += Math.sign(dx || facing) * WALK_SPEED * logicDt;
+          walkTimer += logicDt;
+          if (walkTimer >= WALK_HOLD) {
+            walkTimer = 0;
+            walkIndex = (walkIndex + 1) % WALK_SEQUENCE.length;
+            hero.setPose(WALK_SEQUENCE[walkIndex]);
+          }
+          if (Math.abs(enemy.x - heroX) <= ARRIVE_DIST) {
+            animState = "idle";
+            idleFrame = 0;
+            idleTimer = 0;
+            hero.setPose("idleA");
+            swingCooldown =
+              SWING_COOLDOWN_MIN + Math.random() * (SWING_COOLDOWN_MAX - SWING_COOLDOWN_MIN) * 0.6;
           }
         } else {
           swingHoldTimer += logicDt;
@@ -394,9 +388,10 @@ export function ProtoScene() {
           }
         }
 
-        // ---- aura (real-time, follows hero's feet) ----
-        aura.setTier(currentAuraTier);
-        aura.update(rawDt, HERO_X, GROUND_Y);
+        hero.container.position.x = heroX;
+        // Continuous gear fx (sheen/flicker/sparkle/flame) always advance in
+        // real time, independent of the pose state machine above.
+        hero.update(rawDt);
         hitSparks.update(rawDt);
 
         // ---- screenshake decay, composed on top of the current fit ----
@@ -405,43 +400,22 @@ export function ProtoScene() {
         const shakeX = Math.cos(shakeAngle) * shakeAmp;
         const shakeY = Math.sin(shakeAngle * 1.3) * shakeAmp;
         const fit = computeFit(app.screen.width, app.screen.height);
-        if (pixelModeOn) {
-          pixelSprite.position.set(fit.x + shakeX, fit.y + shakeY);
-        } else {
-          world.position.set(fit.x + shakeX, fit.y + shakeY);
-        }
+        world.position.set(fit.x + shakeX, fit.y + shakeY);
 
         // ---- HUD mock (static-ish HP, a slow idle-game gold trickle) ----
         gold.value += rawDt * 6;
         hud.update(0.78, gold.value);
 
-        // ---- pixel-mode pipeline: one extra render pass into the low-res
-        // texture (skipped entirely in native mode — perf is part of the
-        // aesthetic). Guarded: if this throws on a given device, fall back to
-        // native mode automatically rather than staying blank forever. ----
-        if (pixelModeOn) {
-          try {
-            app.renderer.render({ container: world, target: pixelRT });
-          } catch (err) {
-            diagState.lastError = err instanceof Error ? err.message : String(err);
-            diagState.fallback = "native (RT render threw)";
-            setPixelMode(false);
-            setPixelModeState(false);
-          }
-        }
-
         diagState.frames += 1;
       });
 
-      // One-shot content check ~1.2s in: if pixel mode is still on and the
-      // RenderTexture it's been rendering into reads back as a single flat
-      // color (no sky-band/cloud/hill variance at all), something rendered
-      // "successfully" (no throw) but drew nothing — fall back to native and
-      // say so, instead of leaving the owner staring at a blank box forever.
+      // One-shot content check ~1.2s in: if the stage still reads back as a
+      // single flat color (no sky-band/cloud/hill variance at all),
+      // something rendered "successfully" (no throw) but drew nothing.
       const contentCheckTimer = setTimeout(() => {
-        if (destroyed || !pixelModeOn) return;
+        if (destroyed) return;
         try {
-          const { pixels } = app.renderer.extract.pixels({ target: pixelRT });
+          const { pixels } = app.renderer.extract.pixels({ target: app.stage });
           const r0 = pixels[0];
           const g0 = pixels[1];
           const b0 = pixels[2];
@@ -450,9 +424,7 @@ export function ProtoScene() {
             variance += Math.abs(pixels[i] - r0) + Math.abs(pixels[i + 1] - g0) + Math.abs(pixels[i + 2] - b0);
           }
           if (variance < 40) {
-            diagState.fallback = "native (RT read back as flat/blank)";
-            setPixelMode(false);
-            setPixelModeState(false);
+            diagState.lastError = "content-check: stage read back as flat/blank";
           }
         } catch (err) {
           diagState.lastError = `content-check: ${err instanceof Error ? err.message : String(err)}`;
@@ -465,11 +437,9 @@ export function ProtoScene() {
       }, 300);
 
       sceneApiRef.current = {
-        setPixelMode(pixel: boolean) {
-          setPixelMode(pixel);
-        },
-        setAuraTier(tier: AuraTier) {
-          currentAuraTier = tier;
+        setGearTier(tier: GearTier) {
+          currentGearTier = tier;
+          hero.setGearTier(tier);
         },
       };
 
@@ -487,9 +457,9 @@ export function ProtoScene() {
       destroyed = true;
       for (const fn of cleanupFns) fn();
     };
-    // Mount-once: the ticker reads pixel-mode/aura-tier state via
-    // `sceneApiRef`'s imperative setters (wired to the buttons below), never
-    // through this effect's own closure, so it never needs to re-run.
+    // Mount-once: the ticker reads gear-tier state via `sceneApiRef`'s
+    // imperative setter (wired to the buttons below), never through this
+    // effect's own closure, so it never needs to re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -510,7 +480,7 @@ export function ProtoScene() {
             ทุ่งหญ้าเริ่มต้น
           </div>
           <div className="proto-kanit text-[11px] leading-tight text-white/80">
-            หนุ่ม ๆ ต้องว้าว เสียเวลาเพื่อให้ได้มัน — M6.5 art-direction prototype
+            paper-doll gear demo — สวมชุด/อาวุธจริงบนตัวละครเดียวกัน
           </div>
         </div>
 
@@ -518,7 +488,7 @@ export function ProtoScene() {
             bundle, not a stale cached one, when reporting bugs. Bump the
             string on any meaningful change to this prototype. */}
         <div className="pointer-events-none absolute bottom-1 right-1.5 select-none text-[9px] font-mono text-white/30">
-          proto v3
+          proto v4
         </div>
       </div>
 
@@ -541,40 +511,16 @@ export function ProtoScene() {
       <DiagStrip diag={diag} />
 
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <button
-          type="button"
-          onClick={() => {
-            setPixelModeState((v) => {
-              const next = !v;
-              sceneApiRef.current?.setPixelMode(next);
-              return next;
-            });
-          }}
-          className="rounded-md border border-white/20 bg-[#151a30] px-3 py-1.5 text-sm font-semibold text-white active:scale-95"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Pixel mode: {pixelMode ? "ON" : "OFF"}
-        </button>
-        <div className="mx-1 h-6 w-px bg-white/20" />
-        {(
-          [
-            { tier: 0 as AuraTier, label: "ไม่มีออร่า" },
-            { tier: 1 as AuraTier, label: "Tier 1" },
-            { tier: 2 as AuraTier, label: "Tier 2" },
-            { tier: 3 as AuraTier, label: "Tier 3" },
-          ]
-        ).map(({ tier, label }) => (
+        {GEAR_TIERS.map(({ tier, label, accent }) => (
           <button
             key={tier}
             type="button"
             onClick={() => {
-              setAuraTierState(tier);
-              sceneApiRef.current?.setAuraTier(tier);
+              setGearTierState(tier);
+              sceneApiRef.current?.setGearTier(tier);
             }}
             className={`rounded-md border px-3 py-1.5 text-sm font-semibold active:scale-95 ${
-              auraTier === tier
-                ? "border-[#f2b134] bg-[#f2b134] text-black"
-                : "border-white/20 bg-[#151a30] text-white"
+              gearTier === tier ? accent : "border-white/20 bg-[#151a30] text-white"
             }`}
             style={{ fontFamily: "var(--font-display)" }}
           >
@@ -583,8 +529,8 @@ export function ProtoScene() {
         ))}
       </div>
       <p className="proto-kanit max-w-xl text-center text-xs text-white/60">
-        เปรียบเทียบ Pixel mode ON/OFF เพื่อดูว่าโหมดพิกเซลต่ำ + ขยายแบบ nearest-neighbor
-        ให้ความรู้สึกแบบ Mega Man X3 มากกว่าการเรนเดอร์ตรงแบบเรียบ (native) หรือไม่
+        ชุดเดียวกัน ตัวละครเดียวกัน — สลับ 3 ระดับของสวมใส่: ธรรมดา (ผ้า/เหล็กเรียบ) → หายาก
+        (ชุดเกราะ + ดาบใหญ่ขึ้น) → ระดับเทพ (เกราะระยิบระยับ + ดาบใหญ่ + ออร่าลุกโชนแบบซุปเปอร์ไซย่า)
       </p>
     </div>
   );
@@ -605,7 +551,6 @@ function DiagStrip({ diag }: { diag: DiagSnapshot }) {
     >
       renderer={diag.rendererType} buffer={diag.bufferW}x{diag.bufferH} css={diag.cssW}x
       {diag.cssH} ticker={diag.tickerStarted ? "started" : "STOPPED"} frames={diag.frames}
-      {diag.fallback ? ` fallback=${diag.fallback}` : ""}
       {diag.lastError ? ` lastError=${diag.lastError}` : ""}
       {stalled ? " — STALLED (0 frames after 2s)" : ""}
     </div>

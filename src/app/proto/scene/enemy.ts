@@ -31,8 +31,8 @@ export function buildEnemy(centerX: number, groundY: number, range: number): Ene
     body.clear();
     const stretch = 1 + squash * 0.35;
     const squashY = 1 - squash * 0.25;
-    const w = 11 * stretch;
-    const h = 9 * squashY;
+    const w = 15 * stretch;
+    const h = 12.5 * squashY;
     const y = groundY - h * 0.7 + Math.sin(bob) * 0.6;
     const flashMix = flash;
     const bodyColor = flashMix > 0.5 ? 0xffffff : P.enemyBody;
@@ -44,11 +44,11 @@ export function buildEnemy(centerX: number, groundY: number, range: number): Ene
     body.stroke({ color: 0x2a1240, width: 1.6, alpha: 1 - flashMix * 0.6 });
 
     if (flashMix < 0.6) {
-      const eyeDx = dir * 2.5;
-      body.circle(-3 + eyeDx, y - 1, safeRadius(1.6)).fill({ color: P.enemyEye });
-      body.circle(3 + eyeDx, y - 1, safeRadius(1.6)).fill({ color: P.enemyEye });
-      body.circle(-3 + eyeDx, y - 1, safeRadius(0.7)).fill({ color: 0x2a1240 });
-      body.circle(3 + eyeDx, y - 1, safeRadius(0.7)).fill({ color: 0x2a1240 });
+      const eyeDx = dir * 3.2;
+      body.circle(-4 + eyeDx, y - 1, safeRadius(2.1)).fill({ color: P.enemyEye });
+      body.circle(4 + eyeDx, y - 1, safeRadius(2.1)).fill({ color: P.enemyEye });
+      body.circle(-4 + eyeDx, y - 1, safeRadius(0.9)).fill({ color: 0x2a1240 });
+      body.circle(4 + eyeDx, y - 1, safeRadius(0.9)).fill({ color: 0x2a1240 });
     }
   }
 
