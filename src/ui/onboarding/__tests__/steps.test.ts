@@ -14,7 +14,19 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     kills: 0,
     phase: "battle",
     autoCast: false,
-    heroes: [{ skillCd: 0, dead: false }],
+    autoAllocate: false,
+    heroes: [
+      {
+        skillCd: 0,
+        dead: false,
+        statsSum: 0,
+        statPoints: 0,
+        unlockedSlots: 1,
+        autoSlotsFilled: 0,
+        questOffered: false,
+        questComplete: false,
+      },
+    ],
     ...overrides,
   };
 }
@@ -57,46 +69,55 @@ describe("resolveNextStepIndex", () => {
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 1, prev, gotOne, false)).toBe(2);
   });
 
-  it("watchGrow (auto-kind) advances the instant kills >= 3 (XP/level beat)", () => {
-    expect(idOf(2)).toBe("watchGrow");
-    const prev = snapshot({ kills: 1 });
-    const notYet = snapshot({ kills: 2 });
-    const grown = snapshot({ kills: 3 });
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 2, prev, notYet, false)).toBe(2);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 2, prev, grown, false)).toBe(3);
+  it("allocateStats (action-kind) advances the instant a stat point is spent", () => {
+    expect(idOf(2)).toBe("allocateStats");
+    const prev = snapshot({ heroes: [{ ...snapshot().heroes[0], statsSum: 5 }] });
+    const untouched = snapshot({ heroes: [{ ...snapshot().heroes[0], statsSum: 5 }] });
+    const spent = snapshot({ heroes: [{ ...snapshot().heroes[0], statsSum: 6 }] });
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 2, prev, untouched, false)).toBe(2);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 2, prev, spent, false)).toBe(3);
   });
 
   it("castSkill (action-kind) advances on a cooldown jump, ignores natural decay", () => {
     expect(idOf(3)).toBe("castSkill");
-    const prev = snapshot({ heroes: [{ skillCd: 4, dead: false }] });
-    const decayed = snapshot({ heroes: [{ skillCd: 3.9, dead: false }] });
-    const cast = snapshot({ heroes: [{ skillCd: 8, dead: false }] });
+    const prev = snapshot({ heroes: [{ ...snapshot().heroes[0], skillCd: 4 }] });
+    const decayed = snapshot({ heroes: [{ ...snapshot().heroes[0], skillCd: 3.9 }] });
+    const cast = snapshot({ heroes: [{ ...snapshot().heroes[0], skillCd: 8 }] });
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 3, prev, decayed, false)).toBe(3);
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 3, prev, cast, false)).toBe(4);
   });
 
+  it("slotAutoSkill (action-kind) advances the instant a skill fills an auto slot", () => {
+    expect(idOf(4)).toBe("slotAutoSkill");
+    const prev = snapshot({ heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 1 }] });
+    const unchanged = snapshot({ heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 1 }] });
+    const slotted = snapshot({ heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 2 }] });
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, unchanged, false)).toBe(4);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, slotted, false)).toBe(5);
+  });
+
   it("bossChallenge (action-kind) advances on the battle -> boss phase transition", () => {
-    expect(idOf(4)).toBe("bossChallenge");
+    expect(idOf(5)).toBe("bossChallenge");
     const prev = snapshot({ phase: "battle" });
     const stillBattle = snapshot({ phase: "battle" });
     const engaged = snapshot({ phase: "boss" });
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, stillBattle, false)).toBe(4);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, engaged, false)).toBe(5);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, prev, stillBattle, false)).toBe(5);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, prev, engaged, false)).toBe(6);
   });
 
   it("settingsTour and outro (next-kind) require an explicit tap each", () => {
-    expect(idOf(5)).toBe("settingsTour");
-    expect(idOf(6)).toBe("outro");
+    expect(idOf(6)).toBe("settingsTour");
+    expect(idOf(7)).toBe("outro");
     const s = snapshot();
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, s, s, false)).toBe(5);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, s, s, true)).toBe(6);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 6, s, s, false)).toBe(6);
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 6, s, s, true)).toBe(7);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 7, s, s, true)).toBe(8);
   });
 
   it("is a no-op once already complete or before started", () => {
     const s = snapshot();
     expect(resolveNextStepIndex(ONBOARDING_STEPS, -1, s, s, true)).toBe(-1);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 7, s, s, true)).toBe(7);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 8, s, s, true)).toBe(8);
   });
 });
 

@@ -19,7 +19,13 @@
 
 import type { HeroClass } from "@/engine";
 
-export type CodexCategoryId = "coreLoop" | "heroes" | "boss" | "controls" | "offlineIdle";
+export type CodexCategoryId =
+  | "coreLoop"
+  | "character"
+  | "heroes"
+  | "boss"
+  | "controls"
+  | "offlineIdle";
 
 export interface CodexCategoryDef {
   id: CodexCategoryId;
@@ -42,6 +48,7 @@ export interface CodexEntryDef {
 
 export const CODEX_CATEGORIES: readonly CodexCategoryDef[] = [
   { id: "coreLoop" },
+  { id: "character" },
   { id: "heroes" },
   { id: "boss" },
   { id: "controls" },
@@ -51,6 +58,14 @@ export const CODEX_CATEGORIES: readonly CodexCategoryDef[] = [
 export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   { id: "coreLoop", category: "coreLoop" },
 
+  // "character" (M5 Character Pivot): the single-hero systems that replaced
+  // the old team + upgrade lines — creation slots, base stats, mana/skills +
+  // auto slots, and the class-change quest.
+  { id: "characterSlots", category: "character" },
+  { id: "baseStats", category: "character" },
+  { id: "manaSkills", category: "character" },
+  { id: "classQuest", category: "character" },
+
   { id: "hero-swordsman", category: "heroes", contentRef: { kind: "heroClass", id: "swordsman" } },
   { id: "hero-archer", category: "heroes", contentRef: { kind: "heroClass", id: "archer" } },
   { id: "hero-mage", category: "heroes", contentRef: { kind: "heroClass", id: "mage" } },
@@ -59,6 +74,7 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
 
   { id: "gameSpeed", category: "controls" },
   { id: "autoCast", category: "controls" },
+  { id: "autoAllocate", category: "controls" },
 
   { id: "offlineIdle", category: "offlineIdle" },
 ];

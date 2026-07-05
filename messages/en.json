@@ -1,7 +1,7 @@
 {
   "common": {
     "appTitle": "ดึ๋งปุ๊ Idle Game",
-    "appDescription": "An idle adventure with 3 hero classes — clear waves, challenge bosses, and keep upgrading.",
+    "appDescription": "A solo-character idle MMORPG-lite — level up, allocate stats, cast skills, challenge bosses, and change classes to keep growing stronger.",
     "levelBadge": "Lv.{level}",
     "maxLabel": "MAX",
     "fatalError": "Could not start the game: {reason}"
@@ -33,9 +33,6 @@
     "autoSlotAssigned": "Auto {slot}",
     "autoSlotToggleHint": "Toggle this skill into a free auto-cast slot",
     "autoSlotNextUnlock": "More auto slots at Lv.{level}",
-    "upgradesLabel": "Upgrades",
-    "upgradeAriaLabel": "{name} Level {level}{costState, select, capped { (MAX)} other {, cost {cost} gold}}",
-    "autoUpgradeToggle": "💰 Auto Upgrade: {state, select, on {ON} other {OFF}}",
     "evolvedBadgeTitle": "{name} (Evolved)",
     "classQuest": {
       "lockedHint": "Class-change quest unlocks at Lv.{level}",
@@ -89,54 +86,70 @@
     "stepProgress": "{current} / {total}",
     "steps": {
       "welcome": {
-        "title": "Welcome to ดึ๋งปุ๊!",
-        "body": "Your hero team charges through enemy waves automatically. Your job is to keep upgrading them so they grow stronger. Let's take a look!"
+        "title": "Welcome, {className}!",
+        "body": "Your character just picked the {className} class. It charges through enemy waves automatically — your job is to spend stat points, cast skills, and take it to the boss to keep growing stronger. Let's take a look!"
       },
       "watchFight": {
-        "title": "Let your heroes fight",
-        "body": "Heroes attack enemies on their own. Every kill banks gold, and the bar below fills up toward the boss."
+        "title": "Let your hero fight",
+        "body": "Your hero attacks enemies on its own. Every kill banks gold, and the bar below fills up toward the boss."
       },
-      "watchGrow": {
-        "title": "Grow stronger with every kill",
-        "body": "Each enemy you defeat gives your hero XP. Keep clearing waves to level up — your hero gets stronger automatically!"
+      "allocateStats": {
+        "title": "Spend stat points on level-up",
+        "body": "Every level-up grants 3 stat points to allocate yourself (STR/DEX/INT/VIT). Tap the + button on a stat here to spend one, or flip on \"Auto Stat\" to let the system allocate for you."
       },
       "castSkill": {
-        "title": "Cast a skill to help out",
-        "body": "Each hero has their own special skill. Tap a skill button when it's ready (no cooldown left) for a big burst of damage!"
+        "title": "Cast a skill yourself",
+        "body": "Each skill costs mana plus a cooldown. Tap a skill button once you have enough mana and its cooldown is up for a big burst of damage!"
+      },
+      "slotAutoSkill": {
+        "title": "Slot a skill into auto-cast",
+        "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (up to 3, unlocked by level). Skills outside a slot still need a manual tap."
       },
       "bossChallenge": {
         "title": "Challenge the stage boss",
-        "body": "Once your team's power is ready, the Challenge Boss button lights up. Tap it to fight the boss and unlock the next stage!"
+        "body": "Once your power is ready, the Challenge Boss button lights up. Tap it to fight the boss and unlock the next stage!"
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Speed up the game, mute/unmute sound, or switch between Thai/English anytime from this row."
+        "body": "Speed up the game, mute/unmute sound, switch languages, or tap \"📖 Guide\" to reopen the game guide anytime from this row."
       },
       "outro": {
         "title": "You're ready!",
-        "body": "That's the whole core loop: kill → bank gold → upgrade → grow stronger, on repeat. Enjoy the adventure!"
+        "body": "That's the whole core loop: kill → bank XP/gold → spend stats & skills → challenge the boss → grow stronger, on repeat. Enjoy the adventure!"
       }
     },
     "tips": {
       "heroDeathRespawn": {
         "title": "Don't worry when a hero goes down!",
-        "body": "A downed hero auto-revives after a short timer — no button to tap, just wait for the team to get back up and keep fighting."
-      },
-      "autoUpgradeAvailable": {
-        "title": "Let auto-upgrade handle it",
-        "body": "You've got enough gold for an upgrade now. Try flipping on \"Auto upgrade\" — it buys the next level the instant you can afford it, no more manual tapping."
+        "body": "A downed hero auto-revives after a short timer — no button to tap, just wait for them to get back up and keep fighting."
       },
       "autoCastAvailable": {
         "title": "Try auto-cast for your skills",
-        "body": "A hero's skill is ready. Flip on \"Auto skill\" and heroes will cast automatically the instant their cooldown ends."
+        "body": "A skill is ready. Slot it into an auto-cast slot (tap \"+ Auto\") and flip on \"Auto Skill\" — your hero will cast slotted skills automatically the instant they're ready."
+      },
+      "questOffered": {
+        "title": "Class-change quest available!",
+        "body": "Your hero hit the level gate for the class-change quest. Tap \"Accept quest\" next to the level badge to start it."
+      },
+      "questComplete": {
+        "title": "Quest complete!",
+        "body": "Objectives done. Tap \"Change class!\" (tap again to confirm) to advance to the next class tier with a new skill."
+      },
+      "autoSlotUnlocked": {
+        "title": "New auto-cast slot unlocked!",
+        "body": "Your hero unlocked another auto-cast slot. Tap \"+ Auto\" under a skill to fill the new slot."
+      },
+      "statPointsPiling": {
+        "title": "Stat points are piling up",
+        "body": "You've got several unspent stat points saved up. Tap + to allocate them, or flip on \"Auto Stat\" to let the system spend them for you."
       },
       "stageClear": {
         "title": "Boss down! Stage cleared.",
-        "body": "Tap \"Next stage\" to unlock a new hero slot and push into a tougher stage."
+        "body": "Tap \"Next stage\" to push into a tougher stage and keep leveling up."
       },
       "bossWipe": {
-        "title": "The team got wiped — but it's not over!",
-        "body": "Your heroes revive and go back to normal waves. Grind a bit more power, then challenge the boss again."
+        "title": "Your hero got wiped — but it's not over!",
+        "body": "Your hero revives with no penalty and goes back to normal waves. Spend a few more stat points or grind a bit more, then challenge the boss again."
       }
     }
   },
@@ -147,6 +160,7 @@
     "replayTutorialButton": "▶ Replay tutorial",
     "categories": {
       "coreLoop": "Core Loop",
+      "character": "Character",
       "heroes": "Heroes",
       "boss": "Boss",
       "controls": "Controls",
@@ -154,21 +168,37 @@
     },
     "entries": {
       "coreLoop": {
-        "title": "Kill → bank gold → upgrade → boss",
-        "body": "Your hero team charges through enemy waves on its own, all the time. Every kill banks gold and pushes the kill counter closer to the stage's boss. Spend that gold on upgrades to make your team stronger, then challenge the boss to unlock the next stage. Then it loops again."
+        "title": "Kill → bank XP/gold → grow stronger → boss",
+        "body": "Your hero charges through enemy waves on its own, all the time. Every kill banks XP (level-ups + stat points) and gold, and pushes the kill counter closer to the stage's boss. Use skills to help clear faster, then challenge the boss to unlock the next stage. Then it loops again."
+      },
+      "characterSlots": {
+        "title": "Characters & 3 slots",
+        "body": "Each account can create up to 3 characters, each locked to a starting class (Sword/Bow/Magic) chosen at creation. Switch between them anytime from the characters page (the \"Switch character\" button in the settings row)."
+      },
+      "baseStats": {
+        "title": "Base stats (STR/DEX/INT/VIT)",
+        "body": "Every level-up grants 3 stat points to spend yourself — STR boosts melee attack, DEX boosts ranged attack + attack speed, INT boosts magic attack and mana, VIT boosts max HP. Turn on \"Auto Stat\" to let the system allocate for you. There's no gold-bought upgrade line anymore — a hero's power comes purely from level + stats + class/skills."
+      },
+      "manaSkills": {
+        "title": "Mana, skills & auto slots",
+        "body": "Skills cost mana (fed by INT) plus a cooldown. Each class tier learns 2-3 skills, unlocked by level. Tap a skill to cast it yourself, or drop it into an auto-cast slot with \"+ Auto\" (up to 3 slots, unlocked at Lv 1/15/30) — skills left outside a slot still need a manual tap."
+      },
+      "classQuest": {
+        "title": "Class-change quest",
+        "body": "At Lv.15 the game auto-offers a class-change quest — accept it, then defeat 60 enemies and 1 boss. Once complete, tap \"Change class!\" (tap again to confirm) to advance to the next class tier with a new skill and a permanent power boost."
       },
       "hero-swordsman": {
-        "body": "The Swordsman is your melee frontliner — auto-attacks whatever's directly in front, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
+        "body": "The Swordsman is your melee frontliner — auto-attacks whatever's directly in front, and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
       },
       "hero-archer": {
-        "body": "The Archer attacks at range with arrows, great for hitting enemies from behind the rest of the team, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
+        "body": "The Archer attacks at range with arrows — fast and precise — and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
       },
       "hero-mage": {
-        "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
+        "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
       },
       "boss": {
         "title": "Challenging the stage boss",
-        "body": "The panel below the arena shows the boss's HP, attack power, recommended team power, and your team's current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your whole team dies, the boss retreats, your team is fully revived, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
+        "body": "The panel below the arena shows the boss's HP, attack power, recommended power, and your current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your hero dies, the boss retreats, your hero fully revives with no penalty, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
       },
       "gameSpeed": {
         "title": "⚡ Game speed",
@@ -176,7 +206,11 @@
       },
       "autoCast": {
         "title": "✨ Auto Skill",
-        "body": "When on, each hero casts their own skill automatically the instant its cooldown is ready — no need to tap the skill buttons yourself."
+        "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. Up to 3 slots unlock by level (Lv 1/15/30) — no need to tap the skill buttons yourself."
+      },
+      "autoAllocate": {
+        "title": "🎯 Auto Stat",
+        "body": "When on, the system spends stat points from level-ups for you automatically (favoring your class's main stat) — no need to tap + yourself."
       },
       "offlineIdle": {
         "title": "Offline gold",
@@ -278,7 +312,7 @@
         },
         "archer": {
           "tagline": "Ranged marksman",
-          "playstyle": "Fires arrows from behind the team — fast and precise."
+          "playstyle": "Fires arrows from range — fast and precise."
         },
         "mage": {
           "tagline": "Area-of-effect destroyer",

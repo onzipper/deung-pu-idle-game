@@ -12,16 +12,25 @@
  *
  * A "skip all" button is always rendered, independent of the current step's
  * dismiss rule (spec requirement — never trap a player in the flow).
+ *
+ * The `welcome` step's copy is class-aware (M5 Character Pivot): the player
+ * arrives here having ALREADY created a character and picked a class on
+ * `/characters`, so the greeting names it back — `className` is passed as an
+ * ICU variable to EVERY step's `t()` call (harmless no-op for steps whose
+ * message doesn't reference it).
  */
 
 import { useTranslations } from "next-intl";
 import { ONBOARDING_STEPS } from "@/ui/onboarding/steps";
 import { TutorialOverlayShell } from "@/ui/onboarding/TutorialOverlayShell";
 import { useOnboardingController } from "@/ui/onboarding/useOnboardingController";
+import { useGameStore } from "@/ui/store/gameStore";
 
 export function OnboardingOverlay() {
   const { stepIndex, tapNext, skip } = useOnboardingController();
   const t = useTranslations("onboarding");
+  const tContent = useTranslations("content");
+  const heroes = useGameStore((s) => s.heroes);
 
   const step = stepIndex >= 0 ? ONBOARDING_STEPS[stepIndex] : undefined;
   if (!step) return null;
@@ -29,13 +38,14 @@ export function OnboardingOverlay() {
   const current = stepIndex + 1;
   const total = ONBOARDING_STEPS.length;
   const showNext = step.advance.kind === "next";
-  const title = t(`steps.${step.id}.title`);
+  const className = heroes[0] ? tContent(`classes.${heroes[0].cls}.name`) : "";
+  const title = t(`steps.${step.id}.title`, { className });
 
   return (
     <TutorialOverlayShell
       anchor={step.anchor}
       title={title}
-      body={t(`steps.${step.id}.body`)}
+      body={t(`steps.${step.id}.body`, { className })}
       mood={step.mood}
       ariaLabel={title}
       topRight={<span>{t("stepProgress", { current, total })}</span>}

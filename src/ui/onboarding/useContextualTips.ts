@@ -48,6 +48,7 @@ export function useContextualTips(): ContextualTipController {
   const kills = useGameStore((s) => s.kills);
   const phase = useGameStore((s) => s.phase);
   const autoCast = useGameStore((s) => s.autoCast);
+  const autoAllocate = useGameStore((s) => s.autoAllocate);
   const heroes = useGameStore((s) => s.heroes);
 
   const snapshot = toOnboardingSnapshot({
@@ -56,6 +57,7 @@ export function useContextualTips(): ContextualTipController {
     kills,
     phase,
     autoCast,
+    autoAllocate,
     heroes,
   });
   const prevSnapshotRef = useRef<OnboardingSnapshot>(snapshot);
@@ -89,6 +91,7 @@ export function useContextualTips(): ContextualTipController {
     kills,
     phase,
     autoCast,
+    autoAllocate,
     heroes,
     hasSyncedOnce,
     ftueCompleted,

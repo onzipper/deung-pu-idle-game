@@ -46,6 +46,7 @@ export function useOnboardingController(): OnboardingController {
   const kills = useGameStore((s) => s.kills);
   const phase = useGameStore((s) => s.phase);
   const autoCast = useGameStore((s) => s.autoCast);
+  const autoAllocate = useGameStore((s) => s.autoAllocate);
   const heroes = useGameStore((s) => s.heroes);
   const startOnboarding = useGameStore((s) => s.startOnboarding);
   const setOnboardingStepIndex = useGameStore((s) => s.setOnboardingStepIndex);
@@ -58,6 +59,7 @@ export function useOnboardingController(): OnboardingController {
     kills,
     phase,
     autoCast,
+    autoAllocate,
     heroes,
   });
   const prevSnapshotRef = useRef<OnboardingSnapshot>(snapshot);
@@ -105,7 +107,7 @@ export function useOnboardingController(): OnboardingController {
     if (nextIndex >= ONBOARDING_STEPS.length) completeOnboarding();
     else setOnboardingStepIndex(nextIndex);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot fields are the intended deps; functions are stable store actions
-  }, [gold, stage, kills, phase, autoCast, heroes, stepIndex]);
+  }, [gold, stage, kills, phase, autoCast, autoAllocate, heroes, stepIndex]);
 
   function tapNext(): void {
     if (stepIndex < 0) return;
