@@ -19,12 +19,13 @@ import { SFX_MIN_INTERVAL_MS } from "@/render/audio/sfxMap";
 import {
   playBossDefeated,
   playBossEnraged,
-  playBossRetreat,
+  playBossRoomEntered,
   playBossSlamLand,
   playBossSlamTelegraph,
   playEvolve,
   playHeroDown,
   playHeroRevived,
+  playHeroWalkHome,
   playHit,
   playKill,
   playLevelUp,
@@ -73,6 +74,10 @@ export class AudioController {
         case "heroDown":
           if (this.engine.allow("heroDown", SFX_MIN_INTERVAL_MS.heroDown)) {
             playHeroDown(this.engine);
+            // M6 "World & Town": always chase the sting with the somber
+            // "walking home" tail (see `sfxMap.ts`'s `playHeroWalkHome` doc
+            // comment) — solo play means every heroDown is a full wipe today.
+            playHeroWalkHome(this.engine);
           }
           break;
         case "heroRevived":
@@ -111,9 +116,9 @@ export class AudioController {
             playBossDefeated(this.engine);
           }
           break;
-        case "bossRetreat":
-          if (this.engine.allow("bossRetreat", SFX_MIN_INTERVAL_MS.bossRetreat)) {
-            playBossRetreat(this.engine);
+        case "bossRoomEntered":
+          if (this.engine.allow("bossRoomEntered", SFX_MIN_INTERVAL_MS.bossRoomEntered)) {
+            playBossRoomEntered(this.engine);
           }
           break;
         case "stageAdvanced":
@@ -132,7 +137,12 @@ export class AudioController {
           }
           break;
         default:
-          break; // waveSpawn / projectileSpawn / stageCleared: silent by design (see sfxMap.ts)
+          break; // waveSpawn / projectileSpawn / stageCleared / zoneEntered /
+          // zoneUnlocked / mapUnlocked: silent by design — the same
+          // high-frequency-event fatigue reasoning as waveSpawn (zoneEntered
+          // fires every zone-to-zone hop), and zoneUnlocked/mapUnlocked
+          // already get their moment via FxController's visual-only sparkle
+          // (see sfxMap.ts's module doc comment for the general policy).
       }
     }
   }

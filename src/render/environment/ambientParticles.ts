@@ -92,6 +92,19 @@ const PROFILES: Record<AmbientKind, KindProfile> = {
     alphaMin: 0.5,
     alphaMax: 0.9,
   },
+  /** Town hearth smoke wisps (M6): slow rise, lazy wide sway, no flicker —
+   * reads as calm chimney/campfire smoke rather than embers or dust. */
+  smoke: {
+    driftX: 2,
+    driftY: -10,
+    swayAmp: 18,
+    swayFreq: 0.35,
+    flicker: false,
+    sizeMin: 2.5,
+    sizeMax: 4.5,
+    alphaMin: 0.1,
+    alphaMax: 0.28,
+  },
 };
 
 export class AmbientField {

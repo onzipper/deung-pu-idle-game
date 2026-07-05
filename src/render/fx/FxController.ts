@@ -228,6 +228,35 @@ const EVOLVE_FLASH_ALPHA = 0.26;
 const EVOLVE_TEXT_DURATION = 1.1;
 const EVOLVE_TEXT_RISE = 50;
 
+// ---- M6 "World & Town" zone/map navigation beats -------------------------
+// Zone whoosh (`zoneEntered`, farm/town arrivals): a handful of quick, faint
+// full-width horizontal streaks + the softest camera punch in the palette —
+// sells "you just walked somewhere" without a screen-filling effect, and
+// stays legible since it plays over `Environment`'s own ~1s biome crossfade
+// (now triggered by every zone change, not just every ~5 stages).
+const ZONE_WHOOSH_STREAK_COUNT = 5;
+const ZONE_WHOOSH_STREAK_GAP = 22;
+const ZONE_WHOOSH_STREAK_LIFE = 0.22;
+
+// Boss-room entrance (`bossRoomEntered`): a dedicated, weightier beat — the
+// room itself is already visually distinct all fight (see `bossArena.ts` +
+// each map's dedicated `*_BOSS` biome in `environment/biomes.ts`); this is
+// just the one-shot "you just walked through the gate" punctuation.
+const BOSS_ROOM_ENTER_SHAKE = 5;
+const BOSS_ROOM_ENTER_FLASH_ALPHA = 0.24;
+const BOSS_ROOM_ENTER_RING_R0 = 140;
+const BOSS_ROOM_ENTER_RING_R1 = 30;
+const BOSS_ROOM_ENTER_RING_DURATION = 0.55;
+
+// Zone/map unlocked (`zoneUnlocked`/`mapUnlocked`): a small congratulatory
+// sparkle at the hero's own position — `mapUnlocked` is the rarer, bigger
+// milestone (crossing into a whole new map's theme) so it gets the brighter,
+// bigger-radius version of the same beat.
+const ZONE_UNLOCK_PARTICLE_COUNT = 8;
+const MAP_UNLOCK_PARTICLE_COUNT = 16;
+const ZONE_UNLOCK_RING_R1 = 40;
+const MAP_UNLOCK_RING_R1 = 64;
+
 // ---- boss entrance (state.boss null -> object): dust + dark tint + shake --
 const BOSS_ENTRANCE_DUST_COUNT = 16;
 const BOSS_ENTRANCE_DUST_SPEED = 90;
@@ -488,7 +517,7 @@ export class FxController {
         case "heroDown":
           this.shake.trigger(3); // mild
           this.impactFilters.triggerRgbSplit();
-          this.onHeroDown(ev);
+          this.onHeroDown(ev, state);
           break;
         case "heroRevived":
           this.onHeroRevived(ev);
@@ -538,17 +567,6 @@ export class FxController {
         case "bossDefeated":
           this.onBossDefeated(ev);
           break;
-        case "bossRetreat":
-          burst(this.particles, ev.x, BOSS_CY, 10, PALETTE.muted, {
-            speed: 70,
-            life: 0.4,
-            radius: 3,
-          });
-          // `state.boss` is already null by the time this event is seen (the
-          // live BossView is destroyed this same frame) — the turn-away
-          // slide-out plays on this one-shot echo instead (see bossEcho.ts).
-          this.bossEcho.trigger("retreat", ev.x, BOSS_CY);
-          break;
         case "waveSpawn":
           burst(this.particles, CONFIG.spawnX, GROUND_Y - 16, 6, PALETTE.muted, {
             speed: 40,
@@ -561,6 +579,21 @@ export class FxController {
           break;
         case "projectileSpawn":
           this.onProjectileSpawn(ev);
+          break;
+        case "zoneEntered":
+          // Boss-room arrivals get their own grander beat (`bossRoomEntered`,
+          // fired the SAME step) — skip the generic whoosh so the two never
+          // double up. Zone display names are locale text; render has no
+          // i18n hookup (see art-direction rule elsewhere in this file), so
+          // that's a UI-layer toast's job — this stays purely visual.
+          if (ev.kind !== "boss") this.onZoneEntered();
+          break;
+        case "bossRoomEntered":
+          this.onBossRoomEntered();
+          break;
+        case "zoneUnlocked":
+        case "mapUnlocked":
+          this.onProgressUnlocked(ev.type, state);
           break;
         default:
           break; // stageCleared / upgradeBought: no fx-layer reaction
@@ -791,8 +824,15 @@ export class FxController {
 
   /** Hero death v2 (item 3): a class-colored soul wisp + a dim ring that
    * CONTRACTS around the body (kept alongside the existing fall — see
-   * `heroView.ts`'s `DEATH_FALL_*`, untouched). */
-  private onHeroDown(ev: Extract<GameEvent, { type: "heroDown" }>): void {
+   * `heroView.ts`'s `DEATH_FALL_*`, untouched). M6 "World & Town": a FULL
+   * wipe (every hero dead) is what now triggers `world.respawnToTown`'s
+   * walk-home — repurposing the old (dormant) `bossRetreat` beat into a
+   * one-shot "somber" dim pulse layered on top of the per-hero beat above,
+   * instead of the boss "turning away and sliding out" it used to play (see
+   * `bossEcho.ts`'s cleanup note). Solo play means every `heroDown` IS a
+   * wipe today, but the `state.heroes.every` check keeps this correct once
+   * M8 party makes a partial-down non-wipe possible. */
+  private onHeroDown(ev: Extract<GameEvent, { type: "heroDown" }>, state: GameState): void {
     const colors = HERO_COLORS[ev.cls];
     this.soulWisps.spawn({
       x: ev.x,
@@ -811,6 +851,14 @@ export class FxController {
       width: 3,
       color: PALETTE.deadHero,
     });
+
+    const wiped = state.heroes.length > 0 && state.heroes.every((h) => h.dead);
+    if (wiped) {
+      // Deliberately muted/desaturated (not another red "ouch" flash) — this
+      // is a setback beat, not more combat feedback; kept within the
+      // README's "~0.2-0.3 peak alpha, never strobing" rule.
+      this.flash.trigger(PALETTE.deadHero, 0.18);
+    }
   }
 
   /** Hero revive v2 (item 4): a light pillar dropping from above + a radial
@@ -1159,6 +1207,76 @@ export class FxController {
     }
   }
 
+  /** Zone whoosh (M6): full-width, faint, quick — see the `ZONE_WHOOSH_*`
+   * knobs above. No world position on `zoneEntered` (nor does one make sense
+   * for a full-width beat), so this takes no event payload. */
+  private onZoneEntered(): void {
+    this.punch.trigger("zoneWhoosh");
+    const midY = HERO_TOP_Y;
+    const span = (ZONE_WHOOSH_STREAK_COUNT - 1) * ZONE_WHOOSH_STREAK_GAP;
+    for (let i = 0; i < ZONE_WHOOSH_STREAK_COUNT; i++) {
+      const y = midY - span / 2 + i * ZONE_WHOOSH_STREAK_GAP;
+      this.flashLines.spawn({
+        x1: -20,
+        y1: y,
+        x2: WORLD_WIDTH + 20,
+        y2: y,
+        color: PALETTE.ivory,
+        width: 1.4,
+        life: ZONE_WHOOSH_STREAK_LIFE,
+        alpha: 0.16,
+      });
+    }
+  }
+
+  /** Boss-room entrance (M6): shake + a subtle warm flash + a ring CLOSING in
+   * (r0 > r1, same "contract" trick `HERO_DEATH_RING_*` uses) toward the
+   * arena center — reads as "the gate shutting behind you". The room's own
+   * dedicated dark biome + `bossArena.ts` framing (already active by the
+   * time this fires — `arriveAtZone` sets `state.location` before pushing
+   * this event) carries the rest of "this is a place" for the whole fight. */
+  private onBossRoomEntered(): void {
+    const cx = WORLD_WIDTH / 2;
+    this.punch.trigger("bossRoomEntered");
+    this.shake.trigger(BOSS_ROOM_ENTER_SHAKE);
+    this.flash.trigger(PALETTE.enrageAura, BOSS_ROOM_ENTER_FLASH_ALPHA);
+    this.rings.spawn({
+      x: cx,
+      y: GROUND_Y - 40,
+      r0: BOSS_ROOM_ENTER_RING_R0,
+      r1: BOSS_ROOM_ENTER_RING_R1,
+      duration: BOSS_ROOM_ENTER_RING_DURATION,
+      width: 4,
+      color: PALETTE.boss,
+    });
+  }
+
+  /** Zone/map unlocked (M6): a small congratulatory sparkle at the (solo)
+   * hero's own current position — `mapUnlocked` (crossing into a whole new
+   * map) gets the bigger of the two, `zoneUnlocked` (next farm zone/boss room
+   * opened up) the smaller. Skipped outright if no hero exists to anchor on. */
+  private onProgressUnlocked(kind: "zoneUnlocked" | "mapUnlocked", state: GameState): void {
+    const hero = state.heroes[0];
+    if (!hero) return;
+    const big = kind === "mapUnlocked";
+    burst(this.particles, hero.x, HERO_TOP_Y, big ? MAP_UNLOCK_PARTICLE_COUNT : ZONE_UNLOCK_PARTICLE_COUNT, PALETTE.gold, {
+      speed: 90,
+      life: 0.45,
+      radius: 2.5,
+      gravity: -25,
+      drag: 0.3,
+    });
+    this.rings.spawn({
+      x: hero.x,
+      y: HERO_TOP_Y,
+      r0: 8,
+      r1: big ? MAP_UNLOCK_RING_R1 : ZONE_UNLOCK_RING_R1,
+      duration: 0.45,
+      width: 3,
+      color: PALETTE.gold,
+    });
+  }
+
   /** Detect "a NEW swordsman swing started THIS frame" via `peekSwordSwing()`'s
    * monotonic `seq` (item 2) — continuous read of the live rig, not an event. */
   private detectSwordSwingStart(state: GameState): { comboIndex: number } | null {
@@ -1395,7 +1513,7 @@ export class FxController {
     // `state.boss` is already null by the time this event is seen (the live
     // BossView is destroyed this same frame) — the collapse-forward plays on
     // this one-shot echo instead (see bossEcho.ts).
-    this.bossEcho.trigger("defeat", ev.x, BOSS_CY);
+    this.bossEcho.trigger(ev.x, BOSS_CY);
   }
 
   /** Enemy spawn v2 (item 2): render-side mirror of `Pool`'s own "first

@@ -1,12 +1,15 @@
 /**
  * Biome/background orchestrator — the `background` layer's sole owner.
  * Replaces the old static sky/ground fill with a live parallax scene that
- * crossfades to a new `BiomeScene` whenever `state.stage` moves into a new
- * biome slot (`biomes.ts` `biomeForStage`).
+ * crossfades to a new `BiomeScene` whenever the current ZONE (`zoneAt(
+ * state.location)`, M6 "World & Town") resolves to a new biome slot
+ * (`biomes.ts` `biomeForZone`) — town/farm-escalation/boss-room are each their
+ * own themed biome per map, so walking to a new zone (or into the boss room)
+ * naturally crossfades the whole scene, not just a raw stage-number change.
  *
- * Stage-change detection is a plain key comparison each `update()` (robust to
- * both the `stageAdvanced` event AND any other way `state.stage` could jump,
- * e.g. a fresh load) rather than depending on `frameEvents` alone.
+ * Zone-change detection is a plain key comparison each `update()` (robust to
+ * `zoneEntered`/`bossRoomEntered` AND any other way `state.location` could
+ * jump, e.g. a fresh load) rather than depending on `frameEvents` alone.
  *
  * Motion here is real-seconds-based throughout (see `BiomeScene`/`ParallaxLayer`/
  * `AmbientField`) so the 1x/2x/3x game-speed multiplier never fast-forwards
@@ -16,7 +19,8 @@
 
 import type { Container } from "pixi.js";
 import type { GameState } from "@/engine/state";
-import { biomeForStage, type ResolvedBiome } from "@/render/environment/biomes";
+import { zoneAt } from "@/engine";
+import { biomeForZone, type ResolvedBiome } from "@/render/environment/biomes";
 import { BiomeScene } from "@/render/environment/BiomeScene";
 
 /** Seconds for an old->new biome crossfade. */
@@ -53,7 +57,7 @@ export class Environment {
 
   /** Advance scenery by `dt` REAL seconds and react to the live `state`. */
   update(dt: number, state: GameState): void {
-    const resolved = biomeForStage(state.stage);
+    const resolved = biomeForZone(zoneAt(state.location));
 
     if (!this.current) {
       this.current = this.spawn(resolved);

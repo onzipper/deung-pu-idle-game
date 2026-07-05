@@ -1,8 +1,9 @@
 /**
  * A fully self-contained visual for ONE resolved biome: sky + horizon glow +
  * clouds (fixed/calm) -> far silhouette parallax -> ground band + near prop
- * parallax -> ambient particles -> optional weather tint. `Environment` owns
- * up to two of these at once (current + incoming) so it can crossfade by
+ * parallax -> ambient particles -> optional weather tint -> (boss rooms only)
+ * fixed gate-pillar/lintel framing + vignette, see `bossArena.ts`. `Environment`
+ * owns up to two of these at once (current + incoming) so it can crossfade by
  * alpha alone on a biome change.
  */
 
@@ -10,6 +11,7 @@ import { Container } from "pixi.js";
 import type { ResolvedBiome } from "@/render/environment/biomes";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { AmbientField } from "@/render/environment/ambientParticles";
+import { buildBossArenaFraming } from "@/render/environment/bossArena";
 import { buildGroundBand } from "@/render/environment/groundBand";
 import { buildGroundPropsChunk } from "@/render/environment/groundProps";
 import { CloudField } from "@/render/environment/clouds";
@@ -87,10 +89,19 @@ export class BiomeScene {
       biome.particle.color,
       biome.particle.density,
       WORLD_WIDTH,
-      biome.particle.kind === "ember" ? GROUND_Y - 160 : 10,
-      biome.particle.kind === "ember" ? GROUND_Y - 10 : GROUND_Y - 6,
+      biome.particle.kind === "ember" || biome.particle.kind === "smoke" ? GROUND_Y - 160 : 10,
+      biome.particle.kind === "ember" || biome.particle.kind === "smoke" ? GROUND_Y - 10 : GROUND_Y - 6,
     );
     this.view.addChild(this.ambient.view);
+
+    // Boss-room-only arena framing (M6 task 2): fixed-position gate pillars +
+    // lintel + a stepped-alpha vignette, added ON TOP of the biome's own
+    // (already darker/more-intense) scenery — "a place, not an effect spam".
+    if (biome.special === "bossRoom") {
+      for (const g of buildBossArenaFraming(biome, WORLD_WIDTH, WORLD_HEIGHT, GROUND_Y)) {
+        this.view.addChild(g);
+      }
+    }
   }
 
   /** `speedMul` scales the far/near "world travel" scroll only — clouds and

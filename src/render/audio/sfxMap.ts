@@ -20,6 +20,12 @@
  *    `engine/systems/boss.ts`), which already carries the "big moment" fanfare;
  *    a second overlapping sting here would just be noise.
  *  - `goldOffline` — not a real-time event a player is present to hear.
+ *  - `zoneEntered` (M6 "World & Town") — fires on every zone-to-zone walk hop,
+ *    same "too frequent for a discrete sound" reasoning as `waveSpawn`; the
+ *    visual whoosh (`FxController.onZoneEntered`) carries this beat alone.
+ *  - `zoneUnlocked`/`mapUnlocked` (M6) — visual-only sparkle in `FxController`
+ *    is enough for these; kept unpaired with a sound rather than adding two
+ *    more one-off stings to an already dense palette.
  */
 
 import type { GameEvent } from "@/engine";
@@ -54,6 +60,11 @@ export const SFX_PARAMS = {
     mage: { freqFrom: 90, freqTo: 55, duration: 0.4, gain: 0.22 },
   },
   heroDown: { freqFrom: 320, freqTo: 110, duration: 0.5, gain: 0.22 },
+  /** Somber "walking home" tail, layered right after `heroDown`'s own sting
+   * (M6 "World & Town": a full wipe now walks home to town via
+   * `world.respawnToTown` instead of the old in-place boss retreat — this
+   * repurposes what used to be `bossRetreat`'s quiet, non-punishing whiff). */
+  heroWalkHome: { freqFrom: 260, freqTo: 130, duration: 0.4, gain: 0.1, delay: 0.15 },
   heroRevived: { freqFrom: 420, freqTo: 720, duration: 0.3, gain: 0.18 },
   bossSlamTelegraph: { freqFrom: 90, freqTo: 260, duration: 0.6, gain: 0.16 },
   bossSlamLand: {
@@ -78,7 +89,10 @@ export const SFX_PARAMS = {
     coinDuration: 0.09,
     coinGain: 0.14,
   },
-  bossRetreat: { freqFrom: 260, freqTo: 140, duration: 0.35, gain: 0.12 },
+  /** Boss-room entrance (M6): a low, ominous drone — distinct from
+   * `bossEnraged`'s growl and `bossSlamTelegraph`'s riser, since this fires
+   * once on arrival, not mid-fight. */
+  bossRoomEntered: { freq: 70, freqEnd: 45, decay: 0.5, gain: 0.2 },
   stageAdvanced: {
     notes: [440, 554.37, 659.25], // A4 C#5 E5
     noteGap: 0.07,
@@ -134,7 +148,7 @@ export const SFX_MIN_INTERVAL_MS = {
   bossSlamLand: 300,
   bossEnraged: 400,
   bossDefeated: 800,
-  bossRetreat: 250,
+  bossRoomEntered: 800,
   stageAdvanced: 500,
   levelUp: 200,
   evolve: 400,
@@ -221,6 +235,21 @@ export function playHeroDown(engine: AudioEngine): void {
   engine.sweep(p.freqFrom, p.freqTo, { shape: "sine", duration: p.duration, gain: p.gain });
 }
 
+/** Somber "walking home" tail (M6 "World & Town") — a quieter, slightly
+ * lower second downward sweep starting a beat after `playHeroDown`'s own
+ * sting, so a wipe reads as "down, then a long quiet walk home" rather than
+ * one more hit-taken cue. See `SFX_PARAMS.heroWalkHome`'s doc comment for the
+ * `bossRetreat` history this repurposes. */
+export function playHeroWalkHome(engine: AudioEngine): void {
+  const p = SFX_PARAMS.heroWalkHome;
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "sine",
+    duration: p.duration,
+    gain: p.gain,
+    delay: p.delay,
+  });
+}
+
 /** Hero revived: soft rising chime. */
 export function playHeroRevived(engine: AudioEngine): void {
   const p = SFX_PARAMS.heroRevived;
@@ -305,12 +334,18 @@ export function playBossDefeated(engine: AudioEngine): void {
   }
 }
 
-/** Boss retreat (team wiped, boss backs off): a quiet, non-punishing whiff —
- * distinct from `heroDown` so a full wipe doesn't just sound like one more
- * hero-down cue, but deliberately muted since this is already a setback. */
-export function playBossRetreat(engine: AudioEngine): void {
-  const p = SFX_PARAMS.bossRetreat;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "sine", duration: p.duration, gain: p.gain });
+/** Boss-room entrance: a low, ominous drone — one-shot on arrival, distinct
+ * from every mid-fight boss cue (`bossEnraged`'s growl, `bossSlamTelegraph`'s
+ * riser). */
+export function playBossRoomEntered(engine: AudioEngine): void {
+  const p = SFX_PARAMS.bossRoomEntered;
+  engine.tone(p.freq, {
+    shape: "sine",
+    attack: 0.01,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.freqEnd,
+  });
 }
 
 /** Stage advanced: a short 3-note ascending fanfare. */
