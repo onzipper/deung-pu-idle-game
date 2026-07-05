@@ -76,12 +76,66 @@ function isWebGL2Available(): boolean {
   }
 }
 
+/** Poll (via rAF) until `el` has a real laid-out size, or give up after ~0.5s
+ * and proceed anyway — a container that's still 0x0 on the very first tick
+ * (e.g. iOS Safari settling `aspect-ratio` layout after mount) shouldn't make
+ * `renderer.resize(0, 0)` the FIRST thing that happens to a fresh canvas. */
+function waitForLayout(el: HTMLElement): Promise<void> {
+  return new Promise((resolve) => {
+    let tries = 0;
+    function check(): void {
+      if ((el.clientWidth > 0 && el.clientHeight > 0) || tries++ > 30) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(check);
+    }
+    check();
+  });
+}
+
+/** Self-diagnosing HUD strip (dev tool, not part of the art-direction pitch)
+ * — surfaces exactly the facts needed to tell "silent iOS render failure"
+ * apart from "actually broken elsewhere" from a single screenshot. */
+interface DiagSnapshot {
+  rendererType: string;
+  bufferW: number;
+  bufferH: number;
+  cssW: number;
+  cssH: number;
+  tickerStarted: boolean;
+  frames: number;
+  lastError: string | null;
+  fallback: string | null;
+  /** `performance.now()` at mount — 0 means "not mounted yet". */
+  mountedAt: number;
+  /** `performance.now()` as of the last snapshot copy (NOT read during
+   * render — React's purity rules forbid that — this is stamped once per
+   * snapshot inside the low-frequency diag interval below instead). */
+  now: number;
+}
+
+const DIAG_DEFAULT: DiagSnapshot = {
+  rendererType: "?",
+  bufferW: 0,
+  bufferH: 0,
+  cssW: 0,
+  cssH: 0,
+  tickerStarted: false,
+  frames: 0,
+  lastError: null,
+  fallback: null,
+  mountedAt: 0,
+  now: 0,
+};
+
 export function ProtoScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneApiRef = useRef<SceneApi | null>(null);
   const [pixelMode, setPixelModeState] = useState(true);
   const [auraTier, setAuraTierState] = useState<AuraTier>(2);
   const [initError, setInitError] = useState<string | null>(null);
+  const [diag, setDiag] = useState<DiagSnapshot>(DIAG_DEFAULT);
 
   useEffect(() => {
     const mountCandidate = mountRef.current;
@@ -90,6 +144,13 @@ export function ProtoScene() {
     // `HTMLDivElement | null`, and TS's control-flow narrowing above doesn't
     // carry into the async IIFE's nested closures below.
     const mount: HTMLDivElement = mountCandidate;
+
+    // Mutable diagnostics live in a plain object updated every tick (never
+    // React state per-frame — `CLAUDE.md`'s rule); a low-frequency interval
+    // below stamps `now`/copies snapshots into `diag` for display. Reading
+    // `performance.now()` is only ever done here (effect/interval/ticker
+    // callbacks), never during render — React's purity rule.
+    const diagState: DiagSnapshot = { ...DIAG_DEFAULT, mountedAt: performance.now() };
 
     let destroyed = false;
     const cleanupFns: Array<() => void> = [];
@@ -102,7 +163,10 @@ export function ProtoScene() {
         if (!destroyed) {
           const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
           console.error("[proto] Pixi scene init failed:", err);
+          diagState.lastError = message;
+          diagState.now = performance.now();
           setInitError(message);
+          setDiag({ ...diagState });
         }
         app.destroy(true);
       }
@@ -114,11 +178,23 @@ export function ProtoScene() {
           "อุปกรณ์/เบราว์เซอร์นี้ไม่รองรับ WebGL2 — พรีวิวนี้ต้องใช้ WebGL2 (ลองเบราว์เซอร์อื่นหรืออุปกรณ์อื่น)",
         );
       }
+      // Don't let `renderer.resize()`'s FIRST call ever see a 0x0 container
+      // (iOS Safari has been seen to still be settling `aspect-ratio` layout
+      // the instant this effect runs).
+      await waitForLayout(mount);
+      if (destroyed) return;
+
       await app.init({
         backgroundColor: P.skyTop,
+        clearBeforeRender: true,
         antialias: true,
-        resolution: Math.min(window.devicePixelRatio || 1, 2),
-        autoDensity: true,
+        // Forced to 1 + autoDensity off for this prototype: on iOS (DPR=3)
+        // the resolution*autoDensity interplay has been implicated in blank
+        // canvases elsewhere in the pixi.js issue tracker. We manage the
+        // canvas's CSS size ourselves below instead (explicit 100%/100%), so
+        // the drawing buffer is just 1:1 with the CSS pixels we resize() to.
+        resolution: 1,
+        autoDensity: false,
         // Force WebGL explicitly — iOS Safari can auto-pick WebGPU (Pixi 8's
         // default preference order tries it first when the device reports
         // support), and a `RenderTexture` created with a `scaleMode`/
@@ -132,12 +208,17 @@ export function ProtoScene() {
         app.destroy(true);
         return;
       }
+      // `app.init()` auto-starts the ticker by default, but be explicit and
+      // record it — "ticker never started" is one of the diagnostic strip's
+      // load-bearing facts.
+      app.start();
+      diagState.tickerStarted = app.ticker.started;
+      diagState.rendererType =
+        app.renderer.type === 1 ? "webgl" : app.renderer.type === 2 ? "webgpu" : "canvas";
+
       mount.appendChild(app.canvas);
-      // iOS Safari note: `autoDensity` sets the canvas's CSS width/height from
-      // `renderer.resize()`, but that first call below can race the container's
-      // very first layout pass (e.g. right after `aspect-video` establishes
-      // height) — belt-and-suspenders CSS so the canvas element itself always
-      // fills its parent box even for the one frame before a resize lands.
+      // Belt-and-suspenders CSS so the canvas element itself always fills its
+      // parent box even for the one frame before the first resize() lands.
       app.canvas.style.width = "100%";
       app.canvas.style.height = "100%";
       app.canvas.style.display = "block";
@@ -218,6 +299,10 @@ export function ProtoScene() {
         const h = mount.clientHeight;
         if (w > 0 && h > 0) app.renderer.resize(w, h);
         applyFit();
+        diagState.bufferW = app.canvas.width;
+        diagState.bufferH = app.canvas.height;
+        diagState.cssW = mount.clientWidth;
+        diagState.cssH = mount.clientHeight;
       }
 
       const resizeObserver = new ResizeObserver(handleResize);
@@ -332,11 +417,52 @@ export function ProtoScene() {
 
         // ---- pixel-mode pipeline: one extra render pass into the low-res
         // texture (skipped entirely in native mode — perf is part of the
-        // aesthetic). ----
+        // aesthetic). Guarded: if this throws on a given device, fall back to
+        // native mode automatically rather than staying blank forever. ----
         if (pixelModeOn) {
-          app.renderer.render({ container: world, target: pixelRT });
+          try {
+            app.renderer.render({ container: world, target: pixelRT });
+          } catch (err) {
+            diagState.lastError = err instanceof Error ? err.message : String(err);
+            diagState.fallback = "native (RT render threw)";
+            setPixelMode(false);
+            setPixelModeState(false);
+          }
         }
+
+        diagState.frames += 1;
       });
+
+      // One-shot content check ~1.2s in: if pixel mode is still on and the
+      // RenderTexture it's been rendering into reads back as a single flat
+      // color (no sky-band/cloud/hill variance at all), something rendered
+      // "successfully" (no throw) but drew nothing — fall back to native and
+      // say so, instead of leaving the owner staring at a blank box forever.
+      const contentCheckTimer = setTimeout(() => {
+        if (destroyed || !pixelModeOn) return;
+        try {
+          const { pixels } = app.renderer.extract.pixels({ target: pixelRT });
+          const r0 = pixels[0];
+          const g0 = pixels[1];
+          const b0 = pixels[2];
+          let variance = 0;
+          for (let i = 0; i < pixels.length; i += 4 * 37) {
+            variance += Math.abs(pixels[i] - r0) + Math.abs(pixels[i + 1] - g0) + Math.abs(pixels[i + 2] - b0);
+          }
+          if (variance < 40) {
+            diagState.fallback = "native (RT read back as flat/blank)";
+            setPixelMode(false);
+            setPixelModeState(false);
+          }
+        } catch (err) {
+          diagState.lastError = `content-check: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      }, 1200);
+
+      const diagInterval = setInterval(() => {
+        diagState.now = performance.now();
+        setDiag({ ...diagState });
+      }, 300);
 
       sceneApiRef.current = {
         setPixelMode(pixel: boolean) {
@@ -349,6 +475,8 @@ export function ProtoScene() {
 
       cleanupFns.push(() => {
         sceneApiRef.current = null;
+        clearTimeout(contentCheckTimer);
+        clearInterval(diagInterval);
         resizeObserver.disconnect();
         hitSparks.destroy();
         app.destroy(true, { children: true, texture: true });
@@ -390,7 +518,7 @@ export function ProtoScene() {
             bundle, not a stale cached one, when reporting bugs. Bump the
             string on any meaningful change to this prototype. */}
         <div className="pointer-events-none absolute bottom-1 right-1.5 select-none text-[9px] font-mono text-white/30">
-          proto v2
+          proto v3
         </div>
       </div>
 
@@ -404,6 +532,13 @@ export function ProtoScene() {
           Pixi init error: {initError}
         </div>
       )}
+
+      {/* Self-diagnosing strip (dev tool) — a stalled `frames` counter (still
+          0 a couple seconds after mount, with no thrown init error) is
+          EXACTLY the "renders without throwing but nothing appears" failure
+          mode reported on iOS Safari; this turns the next screenshot into a
+          precise diagnosis instead of a guess. */}
+      <DiagStrip diag={diag} />
 
       <div className="flex flex-wrap items-center justify-center gap-2">
         <button
@@ -451,6 +586,28 @@ export function ProtoScene() {
         เปรียบเทียบ Pixel mode ON/OFF เพื่อดูว่าโหมดพิกเซลต่ำ + ขยายแบบ nearest-neighbor
         ให้ความรู้สึกแบบ Mega Man X3 มากกว่าการเรนเดอร์ตรงแบบเรียบ (native) หรือไม่
       </p>
+    </div>
+  );
+}
+
+/** Renders `diag` as one always-visible monospace line; turns red once
+ * `frames` has stayed at 0 for >2s past mount with no thrown init error —
+ * that combination is exactly "rendered without throwing but drew nothing". */
+function DiagStrip({ diag }: { diag: DiagSnapshot }) {
+  const stalled = diag.frames === 0 && diag.mountedAt > 0 && diag.now - diag.mountedAt > 2000;
+  return (
+    <div
+      className={`w-full max-w-3xl rounded-md border px-2 py-1 font-mono text-[10px] leading-tight ${
+        stalled
+          ? "border-red-500 bg-red-950/70 text-red-200"
+          : "border-white/15 bg-black/40 text-white/50"
+      }`}
+    >
+      renderer={diag.rendererType} buffer={diag.bufferW}x{diag.bufferH} css={diag.cssW}x
+      {diag.cssH} ticker={diag.tickerStarted ? "started" : "STOPPED"} frames={diag.frames}
+      {diag.fallback ? ` fallback=${diag.fallback}` : ""}
+      {diag.lastError ? ` lastError=${diag.lastError}` : ""}
+      {stalled ? " — STALLED (0 frames after 2s)" : ""}
     </div>
   );
 }
