@@ -47,9 +47,6 @@ export function useContextualTips(): ContextualTipController {
   const stage = useGameStore((s) => s.stage);
   const kills = useGameStore((s) => s.kills);
   const phase = useGameStore((s) => s.phase);
-  const upgrades = useGameStore((s) => s.upgrades);
-  const upgradeCosts = useGameStore((s) => s.upgradeCosts);
-  const autoUpgrade = useGameStore((s) => s.autoUpgrade);
   const autoCast = useGameStore((s) => s.autoCast);
   const heroes = useGameStore((s) => s.heroes);
 
@@ -58,9 +55,6 @@ export function useContextualTips(): ContextualTipController {
     stage,
     kills,
     phase,
-    upgrades,
-    upgradeCosts,
-    autoUpgrade,
     autoCast,
     heroes,
   });
@@ -94,9 +88,6 @@ export function useContextualTips(): ContextualTipController {
     stage,
     kills,
     phase,
-    upgrades,
-    upgradeCosts,
-    autoUpgrade,
     autoCast,
     heroes,
     hasSyncedOnce,

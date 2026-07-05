@@ -1,5 +1,13 @@
 # M4 Balance Pass — ดึ๋งปุ๊ Idle Game
 
+> ⚠️ **SUPERSEDED for team composition (M5 Character Pivot, 2026-07-05).** This
+> table is the 3-hero-TEAM baseline with the purchasable atk/speed/hp upgrade
+> lines — both of which are GONE in M5. It no longer describes the live game.
+> The current solo (single-character) baseline is **[balance-m5.md](./balance-m5.md)**.
+> Kept for historical reference: the enemy/boss HP+atk curves, wave composition,
+> and formation/free-hit knobs it tuned are still in force and were re-validated
+> against solo play in M5.
+
 ClickUp: 86d3jvcxz · Branch: `develop`
 
 All numbers below come from the headless balance harness

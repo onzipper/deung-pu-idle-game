@@ -13,27 +13,22 @@
  * in this file's shape should need to change. See `src/ui/README.md`.
  */
 
-import type { Phase, Upgrades } from "@/engine";
+import type { Phase } from "@/engine";
 import type { MascotMood } from "@/ui/onboarding/mascotMood";
 
 /** Narrow, engine-decoupled view of the throttled HUD snapshot — just the
  * fields any onboarding trigger/advance predicate might need. Deliberately
- * NOT `EngineSnapshot` itself so this module has zero store/engine coupling
- * beyond the two shared type aliases above.
+ * NOT `EngineSnapshot` itself so this module has zero store/engine coupling.
  *
- * Also the SHARED snapshot type for the contextual-tips registry (`./tips.ts`,
- * M4.8 card A) — per that task's "extend the type, don't fork it" rule,
- * `upgradeCosts`/`autoUpgrade`/`autoCast`/`heroes[].dead` were added here
- * (rather than a second, parallel snapshot type) purely for tip predicates;
- * the FTUE steps below simply ignore them. */
+ * Also the SHARED snapshot type for the contextual-tips registry (`./tips.ts`).
+ * M5 Character Pivot: the upgrade lines are gone, so `upgrades`/`upgradeCosts`/
+ * `autoUpgrade` were dropped from this shape (a fuller FTUE/codex rework is a
+ * later M5 task). */
 export interface OnboardingSnapshot {
   gold: number;
   stage: number;
   kills: number;
   phase: Phase;
-  upgrades: Upgrades;
-  upgradeCosts: Upgrades;
-  autoUpgrade: boolean;
   autoCast: boolean;
   heroes: { skillCd: number; dead: boolean }[];
 }
@@ -48,9 +43,6 @@ export function toOnboardingSnapshot(s: {
   stage: number;
   kills: number;
   phase: Phase;
-  upgrades: Upgrades;
-  upgradeCosts: Upgrades;
-  autoUpgrade: boolean;
   autoCast: boolean;
   heroes: { skillCd: number; dead: boolean }[];
 }): OnboardingSnapshot {
@@ -59,9 +51,6 @@ export function toOnboardingSnapshot(s: {
     stage: s.stage,
     kills: s.kills,
     phase: s.phase,
-    upgrades: s.upgrades,
-    upgradeCosts: s.upgradeCosts,
-    autoUpgrade: s.autoUpgrade,
     autoCast: s.autoCast,
     heroes: s.heroes.map((h) => ({ skillCd: h.skillCd, dead: h.dead })),
   };
@@ -70,11 +59,11 @@ export function toOnboardingSnapshot(s: {
 /** CSS selector target (`data-onboarding-anchor="<value>"`) a step spotlights.
  * Omitted for steps that aren't anchored to a control (welcome/outro). */
 export type OnboardingAnchor =
-  "kill-progress" | "upgrade-panel" | "skill-bar" | "boss-panel" | "settings-row";
+  "kill-progress" | "skill-bar" | "boss-panel" | "settings-row";
 
 /** Player intents the "action" advance rule can detect via a snapshot diff.
  * Add a case here + in `didActionOccur` when a later step needs a new one. */
-export type OnboardingActionKind = "buyUpgrade" | "castSkill" | "challengeBoss";
+export type OnboardingActionKind = "castSkill" | "challengeBoss";
 
 /** Dismiss rule for a step:
  * - `next`   — explicit "Next" tap (welcome/outro/informational steps).
@@ -107,9 +96,12 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
     advance: { kind: "auto", predicate: (s) => s.kills >= 1 },
   },
   {
-    id: "buyUpgrade",
-    anchor: "upgrade-panel",
-    advance: { kind: "action", action: "buyUpgrade" },
+    // M5 pivot: the old "buyUpgrade" step's system is gone. Minimal replacement —
+    // a "watch your hero grow" beat that auto-advances as kills (and thus XP)
+    // accrue. Full FTUE/codex rework is a later M5 task.
+    id: "watchGrow",
+    anchor: "kill-progress",
+    advance: { kind: "auto", predicate: (s) => s.kills >= 3 },
   },
   {
     id: "castSkill",
@@ -130,14 +122,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
  * FTUE" gate — the other half is the persisted `ftueCompleted` flag, checked
  * by the caller). A save is "fresh" if nothing has happened yet at all. */
 export function isFreshSave(s: OnboardingSnapshot): boolean {
-  return (
-    s.gold === 0 &&
-    s.kills === 0 &&
-    s.stage === 1 &&
-    s.upgrades.atk === 0 &&
-    s.upgrades.speed === 0 &&
-    s.upgrades.hp === 0
-  );
+  return s.gold === 0 && s.kills === 0 && s.stage === 1;
 }
 
 /** A real skill cast jumps a hero's cooldown from ~0 straight to its max —
@@ -150,10 +135,6 @@ function didActionOccur(
   next: OnboardingSnapshot,
 ): boolean {
   switch (action) {
-    case "buyUpgrade": {
-      const total = (u: Upgrades) => u.atk + u.speed + u.hp;
-      return total(next.upgrades) > total(prev.upgrades);
-    }
     case "castSkill":
       return next.heroes.some((h, i) => {
         const prevCd = prev.heroes[i]?.skillCd ?? 0;

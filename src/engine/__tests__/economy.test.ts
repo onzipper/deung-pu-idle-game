@@ -1,131 +1,74 @@
 import { describe, it, expect } from "vitest";
-import {
-  initGameState,
-  step,
-  heroAtkSpeed,
-  upgradeCost,
-  UPGRADES,
-  SPEED_UPGRADE_CAP,
-  FIXED_DT,
-} from "@/engine";
-import { threeHeroSave } from "./helpers";
+import { initGameState, step, heroAtkSpeed, HERO_TYPES, CONFIG } from "@/engine";
+import { soloSave, runUntil } from "./helpers";
 
 /**
- * Deep economy regression coverage (Phase C handoff): the upgradeCost curve,
- * auto-upgrade tie-break stability, HP re-sync reaching dead heroes, and the
- * speed-line cap actually flattening attack interval. Builds on
- * phase-b.test.ts, which only smoke-tests one buy per line.
+ * M5 solo economy + anti-stall regression. The three purchasable upgrade lines
+ * are GONE — gold now only ACCUMULATES (sinks arrive in M6/M7), atk speed is fixed
+ * per class, and the lone hero's death is a respawn that must never lock the run.
  */
 
-describe("upgradeCost curve", () => {
-  it.each(["atk", "speed", "hp"] as const)(
-    "%s cost matches base * growth^level exactly, for several levels",
-    (stat) => {
-      const line = UPGRADES[stat];
-      for (let level = 0; level < 12; level++) {
-        expect(upgradeCost(stat, level)).toBe(
-          Math.round(line.base * Math.pow(line.growth, level)),
-        );
-      }
-    },
-  );
-
-  it.each(["atk", "speed", "hp"] as const)(
-    "%s cost strictly increases with level",
-    (stat) => {
-      for (let level = 0; level < 20; level++) {
-        expect(upgradeCost(stat, level + 1)).toBeGreaterThan(
-          upgradeCost(stat, level),
-        );
-      }
-    },
-  );
-});
-
-describe("auto-upgrade tie-break", () => {
-  it("stable-sorts equal-cost lines, preferring atk over hp (declared array order)", () => {
-    // The real cost curves never coincide at integer levels (checked by hand),
-    // so force an exact tie at level 0 by temporarily equalizing the bases —
-    // costs are `round(base * growth^level)`, and growth^0 === 1.
-    const savedAtkBase = UPGRADES.atk.base;
-    const savedHpBase = UPGRADES.hp.base;
-    try {
-      UPGRADES.atk.base = 50;
-      UPGRADES.hp.base = 50;
-
-      const s = initGameState(3);
-      s.autoUpgrade = true;
-      s.gold = 50;
-      s.upgrades.speed = SPEED_UPGRADE_CAP; // exclude the speed line entirely
-      s.autoUpgradeTimer = FIXED_DT / 2; // fire the auto-upgrade tick this step
-
+describe("gold accumulation (no upgrade sink)", () => {
+  it("gold only grows during idle play — nothing auto-spends it", () => {
+    const s = initGameState(3, soloSave("swordsman", 2));
+    s.autoCast = true;
+    let prev = s.gold;
+    let everDropped = false;
+    for (let i = 0; i < 4000; i++) {
       step(s, {});
-
-      // tryAutoUpgrade builds its options as [atk, hp, ...speed] and sorts by
-      // cost; Array#sort is stable, so an exact tie must resolve in that order.
-      expect(s.upgrades.atk).toBe(1);
-      expect(s.upgrades.hp).toBe(0);
-      expect(s.gold).toBe(0);
-    } finally {
-      UPGRADES.atk.base = savedAtkBase;
-      UPGRADES.hp.base = savedHpBase;
+      if (s.gold < prev) everDropped = true;
+      prev = s.gold;
     }
+    expect(everDropped).toBe(false);
+    expect(s.gold).toBeGreaterThan(0); // kills banked gold
   });
 });
 
-describe("HP upgrade re-sync", () => {
-  it("re-syncs maxHp and heals by the delta even for a currently-dead hero", () => {
-    const s = initGameState(3, threeHeroSave());
-    const dead = s.heroes[0];
-    dead.dead = true;
-    dead.hp = 0;
-    dead.reviveTimer = 999; // stays dead through this step
-    const maxBefore = dead.maxHp;
-    s.gold = 1_000_000;
-
-    step(s, { buyUpgrade: "hp" });
-
-    const delta = dead.maxHp - maxBefore;
-    expect(delta).toBeGreaterThan(0);
-    expect(dead.hp).toBe(delta); // healed by the delta despite being dead
-    expect(dead.dead).toBe(true); // still flagged dead — revive timer untouched
-  });
-
-  it("also re-syncs every living hero's maxHp/hp by the same delta", () => {
-    const s = initGameState(3, threeHeroSave());
-    const before = s.heroes.map((h) => ({ maxHp: h.maxHp, hp: h.hp }));
-    s.gold = 1_000_000;
-
-    step(s, { buyUpgrade: "hp" });
-
-    s.heroes.forEach((h, i) => {
-      const delta = h.maxHp - before[i].maxHp;
-      expect(delta).toBeGreaterThan(0);
-      expect(h.hp).toBe(before[i].hp + delta);
-    });
-  });
+describe("heroAtkSpeed is a fixed per-class base (no speed line)", () => {
+  it.each(["swordsman", "archer", "mage"] as const)(
+    "%s attack interval equals its HERO_TYPES base",
+    (cls) => {
+      expect(heroAtkSpeed(cls)).toBe(HERO_TYPES[cls].atkSpeed);
+    },
+  );
 });
 
-describe("speed upgrade cap", () => {
-  it("heroAtkSpeed stops improving past SPEED_UPGRADE_CAP", () => {
-    const atCap = heroAtkSpeed("archer", { atk: 0, speed: SPEED_UPGRADE_CAP, hp: 0 });
-    const beyondCap = heroAtkSpeed("archer", {
-      atk: 0,
-      speed: SPEED_UPGRADE_CAP + 50,
-      hp: 0,
-    });
-    const belowCap = heroAtkSpeed("archer", { atk: 0, speed: 0, hp: 0 });
-
-    expect(beyondCap).toBe(atCap); // clamped: no further improvement past the cap
-    expect(atCap).toBeLessThan(belowCap); // faster (smaller interval) than unupgraded
+describe("solo respawn (anti-stall)", () => {
+  it("clears the battlefield when the lone hero dies, then revives it at full HP", () => {
+    const s = initGameState(1, soloSave("mage", 3));
+    const hero = s.heroes[0];
+    // Spawn a wave, then kill the hero outright.
+    runUntil(s, (st) => st.enemies.length > 0, 2000);
+    hero.hp = 1;
+    hero.dead = false;
+    // One lethal enemy hit or our own force: force death directly.
+    hero.hp = 0;
+    hero.dead = true;
+    hero.reviveTimer = CONFIG.heroReviveTime;
+    step(s, {});
+    // Field cleared the instant it wiped (no pile-up to respawn into).
+    expect(s.enemies.length).toBe(0);
+    expect(s.projectiles.every((p) => p.team === "hero")).toBe(true);
+    // Revives at FULL HP after the timer (no death penalty).
+    const revived = runUntil(s, (st) => !st.heroes[0].dead, 1000);
+    expect(revived).toBe(true);
+    expect(s.heroes[0].hp).toBe(s.heroes[0].maxHp);
   });
 
-  it("buyUpgrade never lets the speed line exceed the cap during play", () => {
-    const s = initGameState(3);
-    s.gold = 10_000_000;
-    for (let i = 0; i < SPEED_UPGRADE_CAP + 10; i++) {
-      step(s, { buyUpgrade: "speed" });
+  it("a fresh solo hero left running unattended never permanently stalls", () => {
+    const s = initGameState(7, soloSave("archer", 1));
+    s.autoCast = true;
+    const startStage = s.stage;
+    let maxLevel = s.heroes[0].level;
+    for (let i = 0; i < 120_000; i++) {
+      step(s, {
+        challengeBoss: s.phase === "battle" && s.bossReady ? true : undefined,
+        advanceStage: s.phase === "victory" ? true : undefined,
+      });
+      maxLevel = Math.max(maxLevel, s.heroes[0].level);
     }
-    expect(s.upgrades.speed).toBe(SPEED_UPGRADE_CAP);
+    // Progress happened: it advanced stages AND kept leveling (never frozen).
+    expect(s.stage).toBeGreaterThan(startStage);
+    expect(maxLevel).toBeGreaterThan(1);
   });
 });

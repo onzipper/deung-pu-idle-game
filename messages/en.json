@@ -60,9 +60,9 @@
         "title": "Let your heroes fight",
         "body": "Heroes attack enemies on their own. Every kill banks gold, and the bar below fills up toward the boss."
       },
-      "buyUpgrade": {
-        "title": "Spend gold on upgrades",
-        "body": "Try buying one of the upgrades below. The stronger your team, the faster you'll clear the next wave."
+      "watchGrow": {
+        "title": "Grow stronger with every kill",
+        "body": "Each enemy you defeat gives your hero XP. Keep clearing waves to level up — your hero gets stronger automatically!"
       },
       "castSkill": {
         "title": "Cast a skill to help out",

@@ -211,8 +211,8 @@ export function updateHeroes(state: GameState): void {
             (nearestTarget(targets, h.x, 0, t.range) ??
             nearestWithin(targets, h.x, t.range));
       if (tgt) {
-        h.cd = heroAtkSpeed(h.cls, state.upgrades);
-        const dmg = heroAtk(h.cls, state.upgrades, h.level, h.tier);
+        h.cd = heroAtkSpeed(h.cls);
+        const dmg = heroAtk(h.cls, h.level, h.tier);
         if (t.attack === "melee") {
           applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {
@@ -393,5 +393,22 @@ export function resolveDeaths(state: GameState): void {
   // Team wiped during the boss fight -> boss retreats, back to normal waves.
   if (state.phase === "boss" && aliveHeroes(state).length === 0) {
     bossRetreat(state);
+  }
+
+  // Solo respawn (GDD: dead solo hero = respawn, no penalty). When the lone hero
+  // goes down mid-battle it auto-revives via decayHeroTimers after heroReviveTime;
+  // clear the battlefield NOW so it never respawns into the pile-up that killed it
+  // (the "waves reset sensibly" rule + the anti-permanent-stall guarantee). Kills
+  // banked toward the boss are kept (no progress penalty). Fires once — after the
+  // clear `enemies.length` is 0, and `updateWaveSpawns` holds new waves until a
+  // hero is alive again. Boss phase is handled above (bossRetreat).
+  if (
+    state.phase === "battle" &&
+    state.enemies.length > 0 &&
+    aliveHeroes(state).length === 0
+  ) {
+    state.enemies = [];
+    state.projectiles = state.projectiles.filter((p) => p.team === "hero");
+    state.waveGap = CONFIG.bossRetreatWaveGap;
   }
 }

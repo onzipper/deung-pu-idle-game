@@ -50,7 +50,6 @@ import {
   migrate,
   step,
   toSaveData,
-  upgradeCost,
   type FrameInput,
   type GameEvent,
   type GameState,
@@ -161,12 +160,6 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     bossReady: state.bossReady,
     bossHint: bossHint(state),
     heroes,
-    upgrades: { ...state.upgrades },
-    upgradeCosts: {
-      atk: upgradeCost("atk", state.upgrades.atk),
-      speed: upgradeCost("speed", state.upgrades.speed),
-      hp: upgradeCost("hp", state.upgrades.hp),
-    },
   };
 }
 
@@ -264,7 +257,6 @@ export function GameClient() {
       const store = useGameStore.getState();
 
       // UI-owned flags the engine reads directly (not part of FrameInput).
-      state.autoUpgrade = store.autoUpgrade;
       state.autoCast = store.autoCast;
       // UI-owned sound preference — applied to the audio module every frame,
       // same pattern (never queued through FrameInput; it isn't sim state).
@@ -276,7 +268,6 @@ export function GameClient() {
       const pending = store.drainPendingInput();
       const firstInput: FrameInput = {
         castSkills: pending.castSkills.length ? pending.castSkills : undefined,
-        buyUpgrade: pending.buyUpgrade ?? undefined,
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
         evolveHero: pending.evolveHero ?? undefined,

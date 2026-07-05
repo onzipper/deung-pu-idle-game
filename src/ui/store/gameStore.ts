@@ -22,7 +22,7 @@
  */
 
 import { create } from "zustand";
-import type { BossHint, HeroClass, Phase, SpeedMultiplier, Upgrades } from "@/engine";
+import type { BossHint, HeroClass, Phase, SpeedMultiplier } from "@/engine";
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
 export interface HeroSummary {
@@ -54,9 +54,6 @@ export interface HeroSummary {
   evolutionCost: number;
 }
 
-/** Gold cost of the next level of each upgrade line, at the current levels. */
-export type UpgradeCosts = Upgrades;
-
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
   gold: number;
@@ -68,26 +65,21 @@ export interface EngineSnapshot {
   bossReady: boolean;
   bossHint: BossHint;
   heroes: HeroSummary[];
-  upgrades: Upgrades;
-  upgradeCosts: UpgradeCosts;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
 export interface PendingInput {
   castSkills: number[];
-  buyUpgrade: keyof Upgrades | null;
   challengeBoss: boolean;
   advanceStage: boolean;
-  /** Hero slot index to evolve (M5), or `null` (last-wins per frame, same as
-   * `buyUpgrade` — a big one-way purchase never needs to queue more than one
-   * per frame). */
+  /** Hero slot index to evolve (M5), or `null` (last-wins per frame — a big
+   * one-way purchase never needs to queue more than one per frame). */
   evolveHero: number | null;
 }
 
 function emptyPendingInput(): PendingInput {
   return {
     castSkills: [],
-    buyUpgrade: null,
     challengeBoss: false,
     advanceStage: false,
     evolveHero: null,
@@ -210,12 +202,9 @@ export interface HudState {
   bossReady: boolean;
   bossHint: BossHint;
   heroes: HeroSummary[];
-  upgrades: Upgrades;
-  upgradeCosts: UpgradeCosts;
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   speed: SpeedMultiplier;
-  autoUpgrade: boolean;
   autoCast: boolean;
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
@@ -247,7 +236,6 @@ export interface HudState {
   syncFromEngine: (snapshot: EngineSnapshot) => void;
 
   setSpeed: (speed: SpeedMultiplier) => void;
-  toggleAutoUpgrade: () => void;
   toggleAutoCast: () => void;
   toggleSound: () => void;
   /** Mount-effect-only: apply the persisted preference once, post-hydration
@@ -272,8 +260,6 @@ export interface HudState {
 
   /** Queue a skill cast for hero slot `i` (deduped; consumed on next drain). */
   castSkill: (slot: number) => void;
-  /** Queue a purchase attempt for one upgrade line (last-wins per frame). */
-  buyUpgrade: (stat: keyof Upgrades) => void;
   challengeBoss: () => void;
   advanceStage: () => void;
   /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
@@ -294,11 +280,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   bossReady: false,
   bossHint: emptyBossHint,
   heroes: [],
-  upgrades: { atk: 0, speed: 0, hp: 0 },
-  upgradeCosts: { atk: 0, speed: 0, hp: 0 },
 
   speed: 1,
-  autoUpgrade: false,
   autoCast: false,
   soundMuted: false,
 
@@ -311,7 +294,6 @@ export const useGameStore = create<HudState>((set, get) => ({
   syncFromEngine: (snapshot) => set({ ...snapshot, hasSyncedOnce: true }),
 
   setSpeed: (speed) => set({ speed }),
-  toggleAutoUpgrade: () => set((s) => ({ autoUpgrade: !s.autoUpgrade })),
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
   toggleSound: () =>
     set((s) => {
@@ -339,9 +321,6 @@ export const useGameStore = create<HudState>((set, get) => ({
         ? s.pendingInput
         : { ...s.pendingInput, castSkills: [...s.pendingInput.castSkills, slot] },
     })),
-
-  buyUpgrade: (stat) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, buyUpgrade: stat } })),
 
   challengeBoss: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, challengeBoss: true } })),

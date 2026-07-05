@@ -52,7 +52,7 @@ export function evolveHero(state: GameState, index: number): boolean {
   state.gold -= evolutionCost(hero.cls);
   hero.tier = 2;
 
-  const newMax = heroMaxHp(state.upgrades, hero.level, hero.tier);
+  const newMax = heroMaxHp(hero.cls, hero.level, hero.tier);
   hero.hp += newMax - hero.maxHp;
   hero.maxHp = newMax;
 

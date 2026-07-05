@@ -9,6 +9,14 @@
 
 import type { HeroClass, EnemyKind, AttackKind, EnemyBehavior } from "@/engine/entities";
 
+// M5 Character Pivot (docs/GDD.md v2): the 3-hero team became a SINGLE player
+// character. The formation / targeting / multi-hero combat engine is KEPT intact
+// (it becomes the M8 party engine) but gameplay spawns exactly ONE hero of the
+// chosen class. The three purchasable upgrade lines (atk/speed/hp) are REMOVED —
+// power now = level + tier (+ base stats/gear later). Balance is rebaselined for
+// solo play (docs/balance-m5.md); the old docs/balance-m4.md team table is
+// superseded and kept only for reference.
+
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
   /** Speed multipliers the player can toggle. */
@@ -18,13 +26,19 @@ export const CONFIG = {
   /** Throttle for engine -> UI (Zustand) state sync, in Hz. */
   uiSyncHz: 10,
 
-  // ---- team / hero base ----
+  // ---- party / hero base ----
+  // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
+  // multi-actor engine is retained for M8, so this stays as the formation cap.
   maxHeroes: 3,
   heroBaseAtk: 10,
   heroBaseHp: 150,
+  // Solo RESPAWN (GDD: dead solo hero = respawn, town doesn't exist until M6).
+  // The lone hero going down auto-respawns after this many seconds; the
+  // battlefield is cleared so it never respawns into a pile-up death spiral
+  // (see combat.resolveDeaths). No penalty — respawn at FULL HP.
   heroReviveTime: 4,
-  /** Revived heroes come back at this fraction of max HP. */
-  reviveHpFraction: 0.5,
+  /** Respawn HP fraction (1.0 = full, no death penalty per GDD). */
+  reviveHpFraction: 1.0,
 
   // ---- formation / movement ----
   baseAnchor: 180,
@@ -256,82 +270,59 @@ export const CONFIG = {
   },
 
   // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
-  // Per-hero level is a SECOND power axis layered on top of the three global
-  // upgrade lines. Kills feed XP to every ALIVE hero (dead heroes earn nothing);
-  // enough XP levels the hero, which grants a small per-level atk/hp bonus that
-  // COMPOUNDS MULTIPLICATIVELY with the upgrade lines (see systems/stats.ts).
-  // These knobs are deliberately conservative: levels must give "constant small
-  // wins" (the 30-second goal tier) WITHOUT re-tuning the M4 curves — the balance
-  // sim has to stay within ±15% of the docs/balance-m4.md table per stage, keep
-  // the ~5x stage-9 prestige gate, and 0 wipes. NO RNG is drawn here (kills are
-  // deterministic); the seeded stream stays wave-composition-only.
+  // With the upgrade lines REMOVED (M5 Character Pivot), per-hero LEVEL is the
+  // PRIMARY interim power axis (base-stat allocation is a later task). The solo
+  // hero banks ALL kill XP (no team split); each level grants an atk/hp bonus that
+  // must keep pace with the GEOMETRIC enemy/boss HP curve (25 * 1.2^(n-1)), so
+  // these are far more generous than the pre-pivot team knobs. NO RNG is drawn
+  // here (kills are deterministic); the seeded stream stays wave-composition-only.
+  // Sim-rebaselined per class solo — see docs/balance-m5.md.
   leveling: {
-    // Generous cap; the evolution card keys off level thresholds below this.
-    levelCap: 50,
-    // Per-level stat multipliers, compounded MULTIPLICATIVELY onto the upgrade-line
-    // multiplier (systems/stats). The split is deliberately ASYMMETRIC and was
-    // forced by the sim: team ATTACK is what gates the boss, and the stage-9 wall
-    // is a structural knife-edge where team power ≈ the recommended floor, so even
-    // a +0.15%/level atk bonus (≈+4% by S9, where heroes reach ~level 26) COLLAPSED
-    // the ~5x prestige gate from 628s to 418s (-33%) — outside the ±15% budget and
-    // it would require retuning the M4 atk/HP curves (forbidden). atk is therefore
-    // held to a token +0.1%/level (S9 stays 633s / 4.9x gate, +1% — sim-verified),
-    // and HP carries the felt "small win": +1.5%/level survivability, which does
-    // NOT speed clears (waves are DPS-gated, 0 wipes) so it is pacing-neutral. See
-    // the M5 section in docs/balance-m4.md for the sweep.
-    atkPerLevel: 0.001,
-    hpPerLevel: 0.015,
-    // XP granted to each alive hero per NORMAL enemy kill; scales gently with
-    // stage so deeper (tougher) kills are worth a touch more.
-    xpPerKill: (n: number): number => 4 + n,
-    // XP granted per BOSS kill — a chunky milestone reward (a level or two).
-    xpPerBossKill: (n: number): number => 30 + n * 10,
-    // XP needed to advance FROM `level` TO `level+1`. Strictly increasing so early
-    // levels pop fast (small wins) and later ones slow down. round() of a geometric
-    // curve: L1->2 = 20, doubling roughly every ~4-5 levels.
-    xpToLevel: (level: number): number => Math.round(20 * Math.pow(1.15, level - 1)),
+    // Level cap; the evolution gate keys off a threshold below this.
+    levelCap: 60,
+    // Per-level ADDITIVE multipliers (compound with the tier multiplier). atk
+    // now carries real growth so a solo hero's DPS tracks the geometric HP curve
+    // across S1->S10 (a stuck hero out-levels a wall from the kills it does land
+    // before dying — the anti-permanent-stall guarantee). hp gives survivability
+    // so a class can tank a wave solo without a front-line team-mate.
+    atkPerLevel: 0.1,
+    hpPerLevel: 0.09,
+    // XP granted to the solo hero per NORMAL enemy kill; scales with stage so
+    // deeper (tougher) kills are worth more and leveling keeps pace with HP.
+    xpPerKill: (n: number): number => 10 + n * 3,
+    // XP granted per BOSS kill — a chunky milestone reward (a level or more).
+    xpPerBossKill: (n: number): number => 80 + n * 25,
+    // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
+    // geometric growth so the hero keeps leveling deep into the run (reaching
+    // ~L40+ by S10) rather than stalling at a hard cap mid-game.
+    xpToLevel: (level: number): number => Math.round(30 * Math.pow(1.12, level - 1)),
   },
 
   // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----
-  // A THIRD power axis on top of upgrades + levels: the player pays gold to evolve
-  // a hero to tier 2, granting a PERMANENT atk/hp multiplier that compounds
-  // MULTIPLICATIVELY with both (systems/stats tierAtkMult/tierHpMult). It is
-  // PLAYER-TRIGGERED (evolveHero intent), not automatic. Requirements: hero
-  // level >= levelRequired AND gold >= cost(classIndex). Rejected (no-op) if unmet
-  // or the hero is already tier 2. Single evolution path per class in M5 (branches
-  // are the M7 card). NO RNG (deterministic); the seeded stream stays
-  // wave-composition-only.
+  // A second power axis on top of levels: the player pays gold to evolve the hero
+  // to tier 2, granting a PERMANENT atk/hp multiplier (systems/stats
+  // tierAtkMult/tierHpMult). PLAYER-TRIGGERED (evolveHero intent). Requirements:
+  // hero level >= levelRequired AND gold >= cost(classIndex). Rejected (no-op) if
+  // unmet or already tier 2. Single path in M5; class-change QUESTS replace the
+  // trigger in a later task. With the upgrade-line gold sink gone, gold now
+  // accumulates freely, so the gold gate is met quickly and the LEVEL gate times
+  // evolution. NO RNG (deterministic).
   evolution: {
-    // Level gate. Sized so evolution is a late-mid milestone: the auto-pilot's
-    // heroes clear L15 well before S9, so the LEVEL gate is met early and the GOLD
-    // gate (below) is what actually times the evolution — landing all three heroes
-    // at tier 2 by ~S8, right before the S9 prestige wall ("evolve to break it").
+    // Level gate — a mid-run milestone ("evolve to power through the next wall").
     levelRequired: 15,
-    // Gold gate, scaling by SLOT_ORDER index (swordsman 0 / archer 1 / mage 2) so
-    // later-unlocked heroes cost more — ONE clear knob (base * (index+1)). At 800
-    // the auto-upgrade drain still lets each hero evolve on a gold burst by ~S7-S8
-    // in the sim, WITHOUT starving the atk upgrades that gate the boss.
-    cost: (classIndex: number): number => Math.round(800 * (classIndex + 1)),
-    // Permanent tier-2 multipliers, compounding MULTIPLICATIVELY on upgrades +
-    // levels. atk is held at EXACTLY 1.0 (no offense) on purpose: the S9 wall is an
-    // atk knife-edge — the pre-M5 baseline already sits at team power == the boss
-    // floor (66 == rec 66) at ~633s, so ANY atk that rounds a single hero up by 1
-    // tips the boss-challenge one expensive upgrade-level early and drops S9 ~20%
-    // (out of the ±15% budget) — even +1% did in the sim. The felt "big evolution"
-    // power therefore lives ENTIRELY in hpMult: +50% survivability, which is
-    // pacing-neutral for wave clears (DPS-gated, 0 wipes) and only gently softens
-    // the S9 boss fight (gate 4.92x -> 4.73x, still ~5x). The atkMult knob stays
-    // wired for the prestige half of M5 / the M7 branch card, where the relaxed
-    // gate can afford real offense. Sim-tuned — see docs/balance-m4.md (M5 evolution).
-    atkMult: 1.0,
+    // Gold cost by class index in SLOT_ORDER (swordsman 0 / archer 1 / mage 2).
+    cost: (classIndex: number): number => Math.round(600 * (classIndex + 1)),
+    // Permanent tier-2 multipliers. With the ±15% M4 budget gone (full rebaseline),
+    // evolution can carry REAL offense again: a meaningful atk + hp jump that helps
+    // the solo hero break the boss gate. Sim-tuned per class — see docs/balance-m5.md.
+    atkMult: 1.35,
     hpMult: 1.5,
   },
 
   // ---- flow / progression ----
   bossHintPowerDivisor: 26, // recommendedPower = round(bossHp / this)
-  bossRetreatWaveGap: 1.0, // waveGap after a boss retreat (team wipe)
+  bossRetreatWaveGap: 1.0, // waveGap after a boss retreat / solo respawn
   nextStageWaveGap: 0.8, // waveGap at the start of a new stage
-  autoUpgradeInterval: 0.15, // seconds between auto-upgrade attempts (POC 150ms tick)
 
   // ---- boss (movement + slam/enrage tuning) ----
   boss: {
@@ -383,6 +374,12 @@ export interface HeroType {
   /** Seconds between attacks at base (lower = faster). */
   atkSpeed: number;
   dmgMult: number;
+  /**
+   * Per-class max-HP multiplier on `heroBaseHp` (M5 solo survivability knob):
+   * the melee swordsman tanks a wave alone, the squishier ranged classes lean on
+   * kiting + AoE. A precursor to full base-stat allocation (a later task).
+   */
+  hpMult: number;
   /** Projectile travel speed (ranged classes only; 0 for melee). */
   projSpeed: number;
   /** AoE radius for `aoe` attackers (0 otherwise). */
@@ -396,6 +393,7 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     range: 96,
     atkSpeed: 0.5,
     dmgMult: 1.0,
+    hpMult: 1.5,
     projSpeed: 0,
     aoe: 0,
   },
@@ -404,22 +402,33 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     attack: "arrow",
     range: 350,
     atkSpeed: 0.72,
-    dmgMult: 0.55,
+    // Solo rebaseline: bumped from the team-era 0.55 — a lone archer needs real
+    // single-target DPS (esp. vs the boss, where its arrow-rain AoE barely lands).
+    dmgMult: 0.9,
+    hpMult: 1.0,
     projSpeed: 660,
     aoe: 0,
   },
   mage: {
     offset: -74,
     attack: "aoe",
+    // Solo rebaseline: faster cadence (1.35 -> 1.15) + more base (0.85 -> 1.0) so a
+    // lone mage isn't helpless between meteors / on small early waves & the boss.
     range: 330,
-    atkSpeed: 1.35,
-    dmgMult: 0.85,
+    atkSpeed: 1.15,
+    dmgMult: 1.0,
+    hpMult: 0.95,
     projSpeed: 360,
     aoe: 46,
   },
 };
 
-/** Heroes are unlocked (and slotted) in this order as stages are cleared. */
+/**
+ * Canonical class list. Pre-pivot this was the stage-by-stage hero UNLOCK order;
+ * post-pivot the player picks ONE base class at creation (hero-unlock progression
+ * removed). Retained as the authoritative ordered class list — the server's
+ * known-classes enum and the evolution cost index both key off it.
+ */
 export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage"];
 
 export interface EnemyType {
@@ -491,44 +500,22 @@ export interface SkillType {
   projSpeed: number;
 }
 
-/** Per-class skill tuning. */
+/**
+ * Per-class skill tuning. Skills stay COOLDOWN-ONLY in this task (mana is a later
+ * task). For a SOLO hero the skill is a large slice of its effective DPS, so the
+ * multipliers are rebaselined per class alongside the leveling curve — see
+ * docs/balance-m5.md.
+ */
 export const SKILL_TYPES: Record<HeroClass, SkillType> = {
   swordsman: { cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0 },
   // ARROW RAIN (86d3k2t18): `targets` drops fall over the cluster, each a `radius`
-  // splash for `mult` * heroAtk. Unlike the OLD nearest-3 spread (3 * 1.35 = 4.05
-  // heroAtk onto exactly 3 foes) the rain reliably BLANKETS every enemy in its zone
-  // every cooldown (whole-field arc range, see skills.arrowRainRange), so per-drop
-  // `mult` is tuned WELL below the old per-hit value — 9 * 0.29 = 2.61 nominal — to
-  // land the same EFFECTIVE DPS. Sim-tuned to keep S1–S9 time-to-clear within ±15%
-  // of the pre-change table (0 wipes). Was { radius:0, mult:1.35, targets:3 }.
-  archer: { cd: 7, radius: 44, mult: 0.29, targets: 9, projSpeed: 900 },
-  mage: { cd: 12, radius: 90, mult: 3.2, targets: 0, projSpeed: 560 },
+  // splash for `mult` * heroAtk. Blankets every enemy in its zone every cooldown
+  // (whole-field arc range, see skills.arrowRainRange), so per-drop `mult` is tuned
+  // well below a single-hit value to land the intended effective DPS.
+  archer: { cd: 7, radius: 44, mult: 0.5, targets: 9, projSpeed: 900 },
+  // Solo rebaseline: the meteor is the mage's single-target BURST — its only real
+  // answer to a lone boss (its AoE basic is wasted on one target). Bumped cd 12->10
+  // and mult 3.2->5.5 so a solo mage isn't walled at late-stage bosses (keeps S10
+  // within ~2x of sword/archer — sim-tuned, docs/balance-m5.md).
+  mage: { cd: 10, radius: 90, mult: 5.5, targets: 0, projSpeed: 560 },
 };
-
-export interface UpgradeLineDef {
-  base: number;
-  growth: number;
-  /** Per-level effect (e.g. +12% atk per level). */
-  per: number;
-}
-
-/** The three upgrade lines. `speed` alone is capped (see `speedCap`). */
-export const UPGRADES: {
-  atk: UpgradeLineDef;
-  speed: UpgradeLineDef;
-  hp: UpgradeLineDef;
-} = {
-  // M4 tune: atk growth 1.45 -> 1.38. atk is the boss-gating stat (team power =
-  // sum of heroAtk), so its high-level cost is what builds the wall. 1.38 barely
-  // moves L0-3 costs (25/35/48/66 vs 25/36/53/76) but roughly halves L12+ costs,
-  // softening the stage-9 wall (~7.5x -> ~4.9x) and shaving stage 1. It also makes
-  // atk the cheapest-GROWTH line, so the cheapest-first auto-buy funnels a bit
-  // more into the stat that actually advances the boss gate — without starving hp
-  // /speed (final mix stays ~atk 40% / hp 33% / speed 27%, no dominant line).
-  atk: { base: 25, growth: 1.38, per: 0.12 },
-  speed: { base: 32, growth: 1.55, per: 0.06 },
-  hp: { base: 22, growth: 1.48, per: 0.15 },
-};
-
-/** Speed-line level cap (POC UP.speed.cap). */
-export const SPEED_UPGRADE_CAP = 18;

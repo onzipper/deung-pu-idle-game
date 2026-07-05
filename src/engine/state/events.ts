@@ -15,16 +15,12 @@
  */
 
 import type { EnemyKind, HeroClass, ProjectileKind } from "@/engine/entities";
-import type { Upgrades } from "@/engine/systems/stats";
 
 /** Which side of the board a damaged target belongs to. */
 export type HitTargetKind = "hero" | "enemy" | "boss";
 
 /** What dealt a hit — lets render pick a flavour (weapon vs spell vs slam). */
 export type HitSource = "attack" | "skill" | "slam" | "bolt";
-
-/** Upgrade line key (mirrors `keyof Upgrades`). */
-export type UpgradeLine = keyof Upgrades;
 
 /**
  * Discriminated union of everything a frame's render/audio layer may want to
@@ -57,5 +53,4 @@ export type GameEvent =
   | { type: "bossRetreat"; x: number; y: number }
   | { type: "waveSpawn"; wave: number }
   | { type: "stageCleared"; stage: number }
-  | { type: "stageAdvanced"; stage: number }
-  | { type: "upgradeBought"; line: UpgradeLine; level: number };
+  | { type: "stageAdvanced"; stage: number };

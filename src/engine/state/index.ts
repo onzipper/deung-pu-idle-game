@@ -5,13 +5,17 @@
  * cursor). `SaveData` is the persisted subset (progress + economy) written to
  * MySQL. They are intentionally different: transient runtime arrays (heroes,
  * enemies, projectiles) are never saved — they are rebuilt from progress on load.
+ *
+ * M5 Character Pivot: the persisted model is a SINGLE character (chosen class +
+ * level/xp/tier); the purchasable upgrade lines are gone. The live `heroes` array
+ * is KEPT (it becomes the M8 party engine) but holds exactly one hero.
  */
 
-import { CONFIG, SLOT_ORDER } from "@/engine/config";
+import { CONFIG } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
 import { makeHero } from "@/engine/entities";
-import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
-import { heroMaxHp, type Upgrades } from "@/engine/systems/stats";
+import type { Hero, Enemy, Boss, Projectile, HeroClass } from "@/engine/entities";
+import { heroMaxHp } from "@/engine/systems/stats";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
 
@@ -29,14 +33,13 @@ export interface GameState {
   wave: number;
   kills: number;
   gold: number;
-  /** Upgrade levels per stat line — the modifier path into `systems/stats`. */
-  upgrades: Upgrades;
-  autoUpgrade: boolean;
+  /** The player's chosen base class (M5). Drives which hero is spawned. */
+  heroClass: HeroClass;
   autoCast: boolean;
-  /** Countdown driving the auto-upgrade cadence (POC ticked every 150ms). */
-  autoUpgradeTimer: number;
-  /** Number of hero slots currently unlocked (1..maxHeroes). */
-  heroSlots: number;
+  /**
+   * Live heroes. Solo gameplay keeps exactly one here (the chosen class); the
+   * array + formation machinery is retained for the M8 party of up to `maxHeroes`.
+   */
   heroes: Hero[];
   enemies: Enemy[];
   boss: Boss | null;
@@ -63,11 +66,13 @@ export interface GameState {
  * Persisted save shape. Keep this small and JSON-serialisable — it goes into
  * `save_states.data`. Anything derivable from these fields is NOT stored.
  */
-/** Per-hero progression (M5). Aligned by slot index with `unlocked`. */
-export interface HeroProgress {
+/** The single active character's progression (M5). */
+export interface CharacterSave {
+  /** Chosen base class. */
+  cls: HeroClass;
   level: number;
   xp: number;
-  /** Class-advancement tier (1 = base, 2 = evolved). Defaults to 1 pre-v3. */
+  /** Class-advancement tier (1 = base, 2 = evolved). */
   tier: 1 | 2;
 }
 
@@ -75,52 +80,39 @@ export interface SaveData {
   version: number;
   stage: number;
   gold: number;
-  /** Unlocked hero classes (its length drives how many slots init). */
-  unlocked: string[];
-  /** Upgrade levels per stat line. */
-  upgrades: Upgrades;
-  /** Per-hero level/xp, index-aligned with `unlocked` (M5). */
-  heroes: HeroProgress[];
+  /** The single active character (M5 — replaces the team's `unlocked`/`heroes`). */
+  hero: CharacterSave;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
 
 /**
- * Build a fresh set of heroes for the currently unlocked slots. Per-hero level/xp
- * /tier (M5) is PRESERVED across a rebuild: a hero at slot `i` keeps the
- * progression of whoever occupied slot `i` before (slots are class-stable via
- * `SLOT_ORDER`), so `nextStage`'s battlefield reset no longer wipes levels or
- * evolution. A newly unlocked slot starts fresh at level 1, tier 1.
+ * (Re)build the live hero(es) for the current `heroClass`, PRESERVING per-hero
+ * level/xp/tier across a battlefield reset (a stage advance never wipes
+ * progression). Solo: rebuilds the single chosen-class hero. The loop is written
+ * to scale back up to a party (M8) — a slot keeps whoever occupied it before.
  */
 export function initHeroes(state: GameState): void {
-  const prev = state.heroes;
-  state.heroes = [];
-  for (let i = 0; i < state.heroSlots; i++) {
-    const p = prev[i];
-    state.heroes.push(
-      makeHero(
-        state.nextId++,
-        SLOT_ORDER[i],
-        state.upgrades,
-        p?.level ?? 1,
-        p?.xp ?? 0,
-        p?.tier ?? 1,
-      ),
-    );
-  }
+  const prev = state.heroes[0];
+  state.heroes = [
+    makeHero(
+      state.nextId++,
+      state.heroClass,
+      prev?.level ?? 1,
+      prev?.xp ?? 0,
+      prev?.tier ?? 1,
+    ),
+  ];
 }
 
 /**
  * Construct a live `GameState` from a seed and (optionally) a loaded save.
- * A save restores stage / gold / upgrades / unlocked-slot count; the battlefield
- * always starts fresh at wave 0 of the saved stage.
+ * A save restores stage / gold / chosen class / character progression; the
+ * battlefield always starts fresh at wave 0 of the saved stage.
  */
 export function initGameState(seed: number, save?: SaveData): GameState {
   const stage = save?.stage ?? 1;
-  const upgrades: Upgrades = save
-    ? { ...save.upgrades }
-    : { atk: 0, speed: 0, hp: 0 };
-  const heroSlots = clamp(save ? save.unlocked.length : 1, 1, CONFIG.maxHeroes);
+  const heroClass: HeroClass = save?.hero.cls ?? "swordsman";
 
   const state: GameState = {
     time: 0,
@@ -129,11 +121,8 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     wave: 0,
     kills: 0,
     gold: save?.gold ?? 0,
-    upgrades,
-    autoUpgrade: false,
+    heroClass,
     autoCast: false,
-    autoUpgradeTimer: CONFIG.autoUpgradeInterval,
-    heroSlots,
     heroes: [],
     enemies: [],
     boss: null,
@@ -146,40 +135,32 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     events: [],
   };
   initHeroes(state);
-  // Restore per-hero level/xp from the save (M5). `initHeroes` built level-1
-  // heroes; overlay the saved progression and re-derive max HP for the level.
-  if (save?.heroes) {
-    for (let i = 0; i < state.heroes.length; i++) {
-      const p = save.heroes[i];
-      if (!p) continue;
-      const h = state.heroes[i];
-      h.level = clamp(p.level, 1, CONFIG.leveling.levelCap);
-      h.xp = Math.max(0, p.xp);
-      h.tier = p.tier === 2 ? 2 : 1;
-      h.maxHp = heroMaxHp(state.upgrades, h.level, h.tier);
-      h.hp = h.maxHp;
-    }
+  // Restore per-character level/xp/tier from the save (M5). `initHeroes` built a
+  // level-1 hero; overlay the saved progression and re-derive max HP.
+  if (save) {
+    const h = state.heroes[0];
+    h.level = clamp(save.hero.level, 1, CONFIG.leveling.levelCap);
+    h.xp = Math.max(0, save.hero.xp);
+    h.tier = save.hero.tier === 2 ? 2 : 1;
+    h.maxHp = heroMaxHp(h.cls, h.level, h.tier);
+    h.hp = h.maxHp;
   }
   return state;
 }
 
 /**
- * Serialise a live `GameState` down to the persisted `SaveData` subset.
- *
- * The inverse of `initGameState(seed, save)`: only progress + economy are kept
- * (transient battlefield arrays are rebuilt on load). `unlocked` is derived from
- * the number of unlocked slots via `SLOT_ORDER`. `lastSeen` is a server-owned
- * field — the client cannot be trusted to stamp wall-clock time (offline-idle
- * anti-cheat), so it is emitted as 0 and the server overwrites it on persist.
+ * Serialise a live `GameState` down to the persisted `SaveData` subset — the
+ * inverse of `initGameState(seed, save)`. Only progress + economy are kept
+ * (transient battlefield arrays rebuild on load). `lastSeen` is server-owned
+ * (offline-idle anti-cheat), so it is emitted as 0 for the server to overwrite.
  */
 export function toSaveData(state: GameState): SaveData {
+  const h = state.heroes[0];
   return {
     version: SAVE_VERSION,
     stage: state.stage,
     gold: state.gold,
-    unlocked: SLOT_ORDER.slice(0, state.heroSlots),
-    upgrades: { ...state.upgrades },
-    heroes: state.heroes.map((h) => ({ level: h.level, xp: h.xp, tier: h.tier })),
+    hero: { cls: h.cls, level: h.level, xp: h.xp, tier: h.tier },
     lastSeen: 0,
   };
 }

@@ -30,7 +30,6 @@ import {
   playLevelUp,
   playSkillCast,
   playStageAdvanced,
-  playUpgradeBought,
 } from "@/render/audio/sfxMap";
 
 export class AudioController {
@@ -130,11 +129,6 @@ export class AudioController {
         case "evolve":
           if (this.engine.allow("evolve", SFX_MIN_INTERVAL_MS.evolve)) {
             playEvolve(this.engine);
-          }
-          break;
-        case "upgradeBought":
-          if (this.engine.allow("upgradeBought", SFX_MIN_INTERVAL_MS.upgradeBought)) {
-            playUpgradeBought(this.engine);
           }
           break;
         default:

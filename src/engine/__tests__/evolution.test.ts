@@ -102,23 +102,24 @@ describe("evolveHero intent", () => {
 });
 
 describe("evolution stat multipliers", () => {
-  it("tier 2 raises atk and maxHp by the configured multipliers, compounding with level/upgrades", () => {
+  it("tier 2 raises atk and maxHp by the configured multipliers, compounding with level", () => {
     const s = initGameState(1);
-    s.upgrades = { atk: 8, speed: 0, hp: 8 };
     const h = s.heroes[0];
     h.level = EV.levelRequired;
-    h.maxHp = heroMaxHp(s.upgrades, h.level, 1);
-    const atkBefore = heroAtk(h.cls, s.upgrades, h.level, 1);
-    const maxHpBefore = heroMaxHp(s.upgrades, h.level, 1);
+    h.maxHp = heroMaxHp(h.cls, h.level, 1);
+    const atkBefore = heroAtk(h.cls, h.level, 1);
+    const maxHpBefore = heroMaxHp(h.cls, h.level, 1);
 
     s.gold = evolutionCost(h.cls);
     step(s, { evolveHero: 0 });
 
-    const atkAfter = heroAtk(h.cls, s.upgrades, h.level, h.tier);
+    const atkAfter = heroAtk(h.cls, h.level, h.tier);
     expect(atkAfter).toBe(Math.round(atkBefore * EV.atkMult));
-    expect(h.maxHp).toBe(Math.round(maxHpBefore * EV.hpMult));
-    // maxHp actually grew (hpMult > 1) and the hero was healed by the headroom.
+    // maxHp equals the engine's single-round tier-2 value (not a double-round of
+    // the pre-value), and it grew by ~the hp multiplier.
+    expect(h.maxHp).toBe(heroMaxHp(h.cls, h.level, 2));
     expect(h.maxHp).toBeGreaterThan(maxHpBefore);
+    expect(h.maxHp / maxHpBefore).toBeCloseTo(EV.hpMult, 2);
   });
 
   it("heals by the added HP headroom on evolve", () => {
@@ -164,12 +165,12 @@ describe("evolution persistence", () => {
     expect(s.heroes[0].tier).toBe(2);
 
     const save = toSaveData(s);
-    expect(save.heroes[0].tier).toBe(2);
+    expect(save.hero.tier).toBe(2);
 
     const restored = initGameState(42, save);
     expect(restored.heroes[0].tier).toBe(2);
     expect(restored.heroes[0].maxHp).toBe(
-      heroMaxHp(restored.upgrades, restored.heroes[0].level, 2),
+      heroMaxHp(restored.heroes[0].cls, restored.heroes[0].level, 2),
     );
   });
 
@@ -183,8 +184,8 @@ describe("evolution persistence", () => {
   });
 });
 
-describe("migrate v2 -> v3", () => {
-  it("defaults tier 1 for a v2 save that has heroes but no tier", () => {
+describe("migrate pre-v4 tier handling", () => {
+  it("carries the adopted hero's tier through the v2-team -> v4 collapse (no tier defaults to 1)", () => {
     const v2 = {
       version: 2,
       stage: 4,
@@ -192,24 +193,25 @@ describe("migrate v2 -> v3", () => {
       unlocked: ["swordsman", "archer"],
       upgrades: { atk: 2, speed: 1, hp: 0 },
       heroes: [
-        { level: 3, xp: 7 },
-        { level: 5, xp: 1 },
+        { level: 3, xp: 7 }, // no tier -> defaults to 1
+        { level: 5, xp: 1 }, // highest level -> adopted
       ],
       lastSeen: 0,
     };
-    const v3 = migrate(v2);
-    expect(v3.version).toBe(SAVE_VERSION);
-    expect(v3.heroes).toEqual([
-      { level: 3, xp: 7, tier: 1 },
-      { level: 5, xp: 1, tier: 1 },
-    ]);
+    const v4 = migrate(v2);
+    expect(v4.version).toBe(SAVE_VERSION);
+    expect(v4.hero).toEqual({ cls: "archer", level: 5, xp: 1, tier: 1 });
   });
 
-  it("preserves an existing tier 2 (idempotent for v3)", () => {
-    const heroes = [{ level: 9, xp: 2, tier: 2 as const }];
-    const once = migrate({ version: SAVE_VERSION, unlocked: ["swordsman"], heroes });
-    expect(once.heroes).toEqual(heroes);
-    expect(migrate(once)).toEqual(once);
+  it("preserves an existing tier 2 on the adopted hero", () => {
+    const v3 = {
+      version: 3,
+      unlocked: ["swordsman"],
+      heroes: [{ level: 9, xp: 2, tier: 2 as const }],
+    };
+    const v4 = migrate(v3);
+    expect(v4.hero).toEqual({ cls: "swordsman", level: 9, xp: 2, tier: 2 });
+    expect(migrate(v4)).toEqual(v4);
   });
 });
 

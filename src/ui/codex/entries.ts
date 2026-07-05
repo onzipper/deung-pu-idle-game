@@ -17,7 +17,12 @@
  * no other file's shape should need to change. See `src/ui/README.md`.
  */
 
-import type { HeroClass, Upgrades } from "@/engine";
+import type { HeroClass } from "@/engine";
+
+/** The (now-removed) upgrade-stat ids the codex still documents as a reference
+ * entry. M5 pivot dropped the buyable lines from the engine; the codex copy is
+ * reworked in a later M5 task, so the ids are kept locally for now. */
+type UpgradeStatId = "atk" | "speed" | "hp";
 
 export type CodexCategoryId =
   | "coreLoop"
@@ -37,7 +42,7 @@ export interface CodexCategoryDef {
  * task brief. The entry's BODY is always fresh codex copy regardless. */
 export type CodexContentRef =
   | { kind: "heroClass"; id: HeroClass }
-  | { kind: "upgradeStat"; id: keyof Upgrades };
+  | { kind: "upgradeStat"; id: UpgradeStatId };
 
 export interface CodexEntryDef {
   id: string;

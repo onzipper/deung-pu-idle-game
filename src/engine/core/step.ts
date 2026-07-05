@@ -17,7 +17,6 @@ import type { GameState } from "@/engine/state";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
 import { processSkills } from "@/engine/systems/skills";
-import { buyUpgrade, processAutoUpgrade } from "@/engine/systems/upgrades";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
 import { nextStage } from "@/engine/systems/flow";
@@ -33,8 +32,6 @@ import {
 export interface FrameInput {
   /** Hero-slot indices to cast a skill this step (subject to the range guard). */
   castSkills?: number[];
-  /** Upgrade line to purchase this step, if affordable / uncapped. */
-  buyUpgrade?: "atk" | "speed" | "hp";
   /** Begin the boss fight (only honoured when bossReady && phase "battle"). */
   challengeBoss?: boolean;
   /** Advance to the next stage (only honoured when phase "victory"). */
@@ -55,7 +52,6 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   state.events.length = 0;
 
   // --- discrete player actions (valid across phases) ---
-  if (input.buyUpgrade) buyUpgrade(state, input.buyUpgrade);
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
   if (input.advanceStage && state.phase === "victory") nextStage(state);
   if (input.challengeBoss && state.bossReady && state.phase === "battle") {
@@ -77,7 +73,6 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   if (state.phase === "boss") updateBoss(state);
   updateHeroes(state);
   updateProjectiles(state);
-  processAutoUpgrade(state);
   resolveDeaths(state); // enemy kills / boss kill / boss retreat / bossReady
 
   state.time += FIXED_DT;

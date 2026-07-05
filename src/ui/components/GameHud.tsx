@@ -18,7 +18,6 @@ import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
 import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
-import { UpgradePanel } from "@/ui/components/UpgradePanel";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 
@@ -80,8 +79,6 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
             <LocaleSwitch />
           </div>
         </div>
-        <div className="h-px bg-ddp-border-soft" />
-        <UpgradePanel />
       </div>
     </div>
   );

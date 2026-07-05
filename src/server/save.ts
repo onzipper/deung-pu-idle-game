@@ -23,7 +23,6 @@ import {
   CONFIG,
   SAVE_VERSION,
   SLOT_ORDER,
-  SPEED_UPGRADE_CAP,
   migrate,
   type HeroClass,
   type SaveData,
@@ -36,8 +35,10 @@ import { computeOfflineTime, type OfflineResult } from "@/server/offline";
 const KNOWN_CLASSES = [...SLOT_ORDER] as [HeroClass, ...HeroClass[]];
 
 /**
- * The accepted incoming-save contract. Anything that fails this is a 400 — a
- * well-behaved client (see `toSaveData`) always produces a conforming shape.
+ * The accepted incoming-save contract (M5 v4 single character). Anything that
+ * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
+ * a conforming shape. NOTE: the account -> characters(≤3) multi-slot model is a
+ * later DB/backend task; the engine save payload stays one-state here.
  */
 export const saveDataSchema = z
   .object({
@@ -48,38 +49,16 @@ export const saveDataSchema = z
     // Gold is a non-negative finite amount (engine keeps it integral, but we
     // don't hard-require int() so rounding never spuriously 400s a real save).
     gold: z.number().min(0).finite(),
-    unlocked: z
-      .array(z.enum(KNOWN_CLASSES))
-      .min(1)
-      .max(CONFIG.maxHeroes)
-      // Unique — `heroSlots` is derived from `unlocked.length`, so duplicates
-      // would forge extra slots.
-      .refine((xs) => new Set(xs).size === xs.length, {
-        message: "unlocked must not contain duplicates",
-      }),
-    upgrades: z
+    // The single active character (M5): chosen class + level/xp/tier. `tier` is
+    // the class-advancement tier (1 = base, 2 = evolved).
+    hero: z
       .object({
-        atk: z.number().int().min(0),
-        // Only the speed line is capped in the engine; enforce it here too.
-        speed: z.number().int().min(0).max(SPEED_UPGRADE_CAP),
-        hp: z.number().int().min(0),
+        cls: z.enum(KNOWN_CLASSES),
+        level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
+        xp: z.number().min(0).finite(),
+        tier: z.number().int().min(1).max(2),
       })
       .strict(),
-    // Per-hero level/xp/tier (M5). Index-aligned with `unlocked`, so at most one
-    // entry per hero slot. Level is bounded by the engine cap; xp is a non-negative
-    // finite amount (engine keeps it integral but we don't hard-require int()).
-    // `tier` is the class-advancement tier (1 = base, 2 = evolved).
-    heroes: z
-      .array(
-        z
-          .object({
-            level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
-            xp: z.number().min(0).finite(),
-            tier: z.number().int().min(1).max(2),
-          })
-          .strict(),
-      )
-      .max(CONFIG.maxHeroes),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

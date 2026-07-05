@@ -135,7 +135,7 @@ export function bossHint(state: GameState): BossHint {
   const bossAtk = CONFIG.bossAtk(state.stage);
   const recommendedPower = Math.round(bossHp / CONFIG.bossHintPowerDivisor);
   const teamPower = state.heroes.reduce(
-    (sum, h) => sum + heroAtk(h.cls, state.upgrades, h.level, h.tier),
+    (sum, h) => sum + heroAtk(h.cls, h.level, h.tier),
     0,
   );
   return {

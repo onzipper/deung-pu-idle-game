@@ -3,19 +3,32 @@
  * (no `.test.ts` suffix), so Vitest's `include` glob skips it.
  */
 
-import { step } from "@/engine";
-import type { Enemy, GameState, SaveData } from "@/engine";
+import { SAVE_VERSION, initGameState, makeHero, step } from "@/engine";
+import type { Enemy, GameState, HeroClass, SaveData } from "@/engine";
 
-/** A save with all 3 hero classes unlocked, no upgrades, at the given stage. */
-export const threeHeroSave = (stage = 3): SaveData => ({
-  version: 1,
+/** A fresh single-character save of class `cls` at the given stage (M5). */
+export const soloSave = (cls: HeroClass = "swordsman", stage = 3): SaveData => ({
+  version: SAVE_VERSION,
   stage,
   gold: 0,
-  unlocked: ["swordsman", "archer", "mage"],
-  upgrades: { atk: 0, speed: 0, hp: 0 },
-  heroes: [],
+  hero: { cls, level: 1, xp: 0, tier: 1 },
   lastSeen: 0,
 });
+
+/**
+ * Seat a synthetic swordsman/archer/mage PARTY into an otherwise-solo state.
+ *
+ * Gameplay spawns one hero (M5 pivot), but the multi-actor combat engine is
+ * RETAINED for the M8 party. Tests that must exercise per-hero targeting /
+ * formation / skill independence use this to stand up a 3-hero party, which also
+ * guards that the party engine still works.
+ */
+export function makeParty(seed = 7, stage = 3): GameState {
+  const s = initGameState(seed, soloSave("swordsman", stage));
+  s.heroes = [makeHero(1, "swordsman"), makeHero(2, "archer"), makeHero(3, "mage")];
+  s.nextId = 4;
+  return s;
+}
 
 /** Step until `pred` holds (or `cap` steps elapse); returns whether it was reached. */
 export function runUntil(

@@ -8,7 +8,7 @@ import {
   type GameEvent,
   type SaveData,
 } from "@/engine";
-import { threeHeroSave, runUntil, makeStubEnemy } from "./helpers";
+import { soloSave, makeParty, runUntil, makeStubEnemy } from "./helpers";
 
 /**
  * Per-step EVENT BUFFER (M4 render/audio juice feed). Verifies events are
@@ -19,18 +19,14 @@ import { threeHeroSave, runUntil, makeStubEnemy } from "./helpers";
  * assert an event was emitted during a multi-step run, we collect across steps.
  */
 
+/** A solo hero strong enough (by level) to win the stage-1 boss while still being
+ * observed alive inside its enrage band — level 30 lands the damage per hit low
+ * enough to cross the 0.3-HP threshold rather than leap it. */
 const strongSave = (): SaveData => ({
-  version: 1,
+  version: 4,
   stage: 1,
   gold: 0,
-  unlocked: ["swordsman"],
-  // atk 60 (was 100): decisively wins the fight, but small enough per-hit that the
-  // boss is observed ALIVE inside its enrage band (< 0.3 HP) instead of being
-  // one-shot straight through it. The M5 per-level atk bonus nudged the old atk-100
-  // fixture's damage so the killing blow leapt the threshold in a single step,
-  // skipping the enrage event this test asserts — a knife's-edge that 60 removes.
-  upgrades: { atk: 60, speed: 0, hp: 20 },
-  heroes: [],
+  hero: { cls: "swordsman", level: 30, xp: 0, tier: 1 },
   lastSeen: 0,
 });
 
@@ -101,8 +97,8 @@ describe("combat events", () => {
 
   it("emits projectileSpawn + hit for a ranged team, and kill on a death", () => {
     const s = initGameState(7, strongSave());
-    // Strong single swordsman is melee; use a 3-hero team for projectiles.
-    const three = initGameState(7, threeHeroSave());
+    // Strong single swordsman is melee; use a synthetic party for projectiles.
+    const three = makeParty(7);
     const evs = collectEvents(three, 1200);
     const t = typesOf(evs);
     expect(t.has("projectileSpawn")).toBe(true);
@@ -130,7 +126,7 @@ describe("combat events", () => {
   });
 
   it("emits skillCast (with slot) + rainArrow spawns when the archer casts", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     // Arrow rain needs a foe within archer range (guard).
     s.enemies = [makeStubEnemy(1, s.heroes[1].x + 220)];
     step(s, { castSkills: [1] }); // archer arrow rain
@@ -164,9 +160,14 @@ describe("combat events", () => {
 
 describe("boss lifecycle events", () => {
   it("emits telegraph, slam land, and slam-sourced hits during the fight", () => {
-    const s = initGameState(11); // weak team survives long enough to see slams
+    const s = initGameState(11);
     runUntil(s, (st) => st.bossReady, 30000);
     step(s, { challengeBoss: true });
+    // Make the solo hero fragile (but not one-shot): it survives long enough to
+    // eat slams, then wipes -> the boss retreats. Deterministic regardless of the
+    // hero's own DPS (which is now tanky enough to sometimes out-race the boss).
+    s.heroes[0].maxHp = 120;
+    s.heroes[0].hp = 120;
     const evs = collectUntil(s, (st) => st.phase !== "boss", 6000);
     const t = typesOf(evs);
     expect(t.has("bossSlamTelegraph")).toBe(true);
@@ -197,44 +198,22 @@ describe("boss lifecycle events", () => {
   });
 });
 
-describe("upgrade events", () => {
-  it("emits upgradeBought for manual and auto-upgrade buys", () => {
-    const s = initGameState(3);
-    s.gold = 1000;
-    step(s, { buyUpgrade: "atk" });
-    expect(s.events.find((e) => e.type === "upgradeBought")).toMatchObject({
-      type: "upgradeBought",
-      line: "atk",
-      level: 1,
-    });
-
-    // Auto-upgrade path also emits (buyUpgrade is the shared choke point).
-    const a = initGameState(3);
-    a.autoUpgrade = true;
-    a.gold = 1000;
-    const evs = collectEvents(a, 30);
-    expect(evs.some((e) => e.type === "upgradeBought")).toBe(true);
-  });
-});
-
 describe("determinism", () => {
   function scriptedInput(i: number): Parameters<typeof step>[1] {
     const input: Parameters<typeof step>[1] = {};
     if (i % 53 === 3) input.castSkills = [0];
-    if (i % 89 === 5) input.castSkills = [...(input.castSkills ?? []), 1, 2];
-    if (i % 137 === 7) input.buyUpgrade = "atk";
     if (i % 601 === 23) input.challengeBoss = true;
     if (i % 601 === 400) input.advanceStage = true;
+    if (i % 337 === 11) input.evolveHero = 0;
     return input;
   }
 
   function runStream(seed: number, steps: number): GameEvent[] {
-    const s = initGameState(seed, threeHeroSave(1));
+    const s = initGameState(seed, soloSave("swordsman", 1));
     s.gold = 100_000;
     const out: GameEvent[] = [];
     for (let i = 0; i < steps; i++) {
       if (i === 500) s.autoCast = true;
-      if (i === 1500) s.autoUpgrade = true;
       step(s, scriptedInput(i));
       out.push(...s.events);
     }
@@ -257,24 +236,13 @@ describe("determinism", () => {
 
 describe("events are transient (never persisted)", () => {
   it("toSaveData excludes the events buffer entirely", () => {
-    const s = initGameState(7, threeHeroSave());
-    // Populate the buffer with a real event this step.
-    runUntil(s, (st) => st.events.length > 0 || st.enemies.length > 0, 3000);
-    step(s, { buyUpgrade: "atk" });
-    s.gold = 1000;
-    step(s, { buyUpgrade: "atk" });
+    const s = initGameState(7, soloSave("swordsman", 3));
+    // Populate the buffer with a real event (a spawned wave emits waveSpawn).
+    runUntil(s, (st) => st.events.length > 0, 3000);
     expect(s.events.length).toBeGreaterThan(0);
 
     const save = toSaveData(s);
     expect(save).not.toHaveProperty("events");
-    expect(Object.keys(save)).toEqual([
-      "version",
-      "stage",
-      "gold",
-      "unlocked",
-      "upgrades",
-      "heroes",
-      "lastSeen",
-    ]);
+    expect(Object.keys(save)).toEqual(["version", "stage", "gold", "hero", "lastSeen"]);
   });
 });

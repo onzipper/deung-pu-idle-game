@@ -34,7 +34,7 @@ export function grantHeroXp(state: GameState, hero: Hero, amount: number): void 
     hero.xp -= LV.xpToLevel(hero.level);
     hero.level++;
     // Recompute max HP at the new level and heal by the added headroom.
-    const newMax = heroMaxHp(state.upgrades, hero.level, hero.tier);
+    const newMax = heroMaxHp(hero.cls, hero.level, hero.tier);
     hero.hp += newMax - hero.maxHp;
     hero.maxHp = newMax;
     state.events.push({

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { initGameState, step, CONFIG, HERO_TYPES, heroAtkSpeed } from "@/engine";
 import type { Enemy, GameState } from "@/engine";
 import { updateEnemies, updateHeroes, updateProjectiles } from "@/engine/systems/combat";
-import { makeStubEnemy, threeHeroSave } from "./helpers";
+import { makeStubEnemy, makeParty } from "./helpers";
 
 // The swordsman stops `meleeApproachGap` short and his home slot rides ahead, so
 // allow generous slack when asserting he "reached" the enemy line.
@@ -139,7 +139,7 @@ describe("formation + engagement follow-up (86d3k2nhm)", () => {
     // including the deepest (battleMaxAnchor) where the old midCap(400) collapsed
     // archer(484) and mage(436) both onto 400.
     for (const enemyX of [500, 650, 800, CONFIG.spawnX]) {
-      const s = initGameState(1, threeHeroSave(3)); // all 3 classes unlocked
+      const s = makeParty(1, 3); // all 3 classes unlocked
       s.waveGap = 100000; // no new waves; a single held enemy pushes the anchor
       s.enemies.push(makeStubEnemy(999, enemyX, 100000));
 
@@ -263,7 +263,7 @@ describe("swordsman free-hit fix (มอนตีดาบฟรี)", () => {
     // ...and is NEVER idle: he lands roughly one swing per attack cooldown across
     // the whole window (the old blind spot would have produced ZERO — nothing was
     // targetable on his back side, i.e. free hits).
-    const expected = (dur * CONFIG.speeds[0]) / 60 / heroAtkSpeed("swordsman", s.upgrades);
+    const expected = (dur * CONFIG.speeds[0]) / 60 / heroAtkSpeed("swordsman");
     expect(swings).toBeGreaterThanOrEqual(Math.floor(expected) - 1);
   });
 
@@ -322,7 +322,7 @@ describe("ranged-enemy free-hit fix (มอนตีดาบฟรี — shoot
   };
 
   it("BUG 1: a shooter beyond every hero's reach never lands a free hit — it holds fire and creeps in until answerable", () => {
-    const s = initGameState(1, threeHeroSave(3));
+    const s = makeParty(1, 3);
     const { sword } = walled(s);
     s.projectiles = [];
     // Ranged shooter past ALL reach edges: > 866 (sword+96), > 834 (archer+350),
@@ -365,7 +365,7 @@ describe("ranged-enemy free-hit fix (มอนตีดาบฟรี — shoot
   });
 
   it("BUG 1 (integration): under a full sim the swordsman is never free-hit by an unreachable shooter", () => {
-    const s = initGameState(1, threeHeroSave(3));
+    const s = makeParty(1, 3);
     s.waveGap = 1e9;
     // A wall of tanky melee grunts pins the swordsman forward at chargeHardCap, and a
     // tanky shooter trails behind them at the spawn edge — the live-play setup.
@@ -408,7 +408,7 @@ describe("ranged-enemy free-hit fix (มอนตีดาบฟรี — shoot
   });
 
   it("BUG 2: ranged heroes engage an in-range attacker on their flank instead of idling", () => {
-    const s = initGameState(1, threeHeroSave(3));
+    const s = makeParty(1, 3);
     walled(s);
     // Reposition the backline shallow so a flank foe is inside their range; keep the
     // swordsman forward (charged). A foe BEHIND both ranged heroes but within both

@@ -1,17 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { initGameState, step, heroAtk, SKILL_TYPES, HERO_TYPES, CONFIG } from "@/engine";
-import { threeHeroSave, makeStubEnemy } from "./helpers";
+import { step, heroAtk, SKILL_TYPES, HERO_TYPES, CONFIG } from "@/engine";
+import { makeParty, makeStubEnemy } from "./helpers";
 
 /**
  * Deep skill-system regression coverage (Phase C handoff): the archer's ARROW
  * RAIN ("ฝนลูกธนู", 86d3k2t18), mage meteor AOE + its range guard, per-class
- * cooldown independence, and full-team auto-cast. Builds on phase-b.test.ts,
- * which only smoke-tests the swordsman spin and a generic archer cast.
+ * cooldown independence, and full-team auto-cast.
+ *
+ * M5 solo pivot: gameplay spawns ONE hero, but the multi-actor combat engine is
+ * RETAINED (it becomes the M8 party engine). These tests seat a synthetic 3-hero
+ * party (`makeParty`) to keep exercising per-hero skill independence / auto-cast
+ * — i.e. they also guard that the party engine still works, ready for M8.
  */
 
 describe("archer arrow-rain skill", () => {
   it("drops arrowRainCount falling arrows centred on the in-range cluster centroid, then starts cooldown", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const archer = s.heroes[1];
     expect(archer.cls).toBe("archer");
     archer.cd = 999; // suppress the normal volley so only the skill's drops show up
@@ -43,7 +47,7 @@ describe("archer arrow-rain skill", () => {
   });
 
   it("the drops FALL and resolve as AoE damage (not stranded mid-air) — the meteor-never-explodes guard, for rain", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const archer = s.heroes[1];
     archer.cd = 999;
     archer.skillCd = 0;
@@ -72,12 +76,12 @@ describe("archer arrow-rain skill", () => {
     const dealt = hpBefore - hpAfter;
     // Total potential ≈ count * per-drop (each of the `targets` drops splashes at
     // least one enemy in the packed wall); matches the design total heroAtk.
-    const perDrop = Math.round(heroAtk("archer", s.upgrades) * SKILL_TYPES.archer.mult);
+    const perDrop = Math.round(heroAtk("archer", s.heroes[1].level) * SKILL_TYPES.archer.mult);
     expect(dealt).toBeGreaterThanOrEqual(SKILL_TYPES.archer.targets * perDrop);
   });
 
   it("range guard: never casts (no cooldown, no drops) with nothing within rain range", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const archer = s.heroes[1];
     archer.skillCd = 0;
     s.enemies = [makeStubEnemy(1, archer.x + CONFIG.skills.arrowRainRange + 80)]; // out of rain range
@@ -91,7 +95,7 @@ describe("archer arrow-rain skill", () => {
 
 describe("mage meteor skill", () => {
   it("resolves as an AOE that hits every enemy inside the blast radius and none outside", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const mage = s.heroes[2];
     expect(mage.cls).toBe("mage");
     mage.cd = 999; // suppress the normal orb attack
@@ -130,7 +134,7 @@ describe("mage meteor skill", () => {
   });
 
   it("range guard: never casts (no cooldown, no meteor) with nothing within mage range", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const mage = s.heroes[2];
     mage.skillCd = 0;
     s.enemies = [makeStubEnemy(1, mage.x + HERO_TYPES.mage.range + 50)];
@@ -144,7 +148,7 @@ describe("mage meteor skill", () => {
 
 describe("per-class skill cooldowns are independent", () => {
   it("casting the swordsman's skill does not touch the archer's or mage's cooldown", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const [sword, archer, mage] = s.heroes;
     s.enemies = [makeStubEnemy(1, sword.x + 20)]; // within the swordsman's spin radius
 
@@ -156,7 +160,7 @@ describe("per-class skill cooldowns are independent", () => {
   });
 
   it("casting archer + mage in the same step leaves the swordsman's cooldown untouched", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     const [sword, archer, mage] = s.heroes;
     s.enemies = [makeStubEnemy(1, mage.x + 20)]; // within mage range; archer has no range guard
 
@@ -170,7 +174,7 @@ describe("per-class skill cooldowns are independent", () => {
 
 describe("auto-cast across a full 3-hero team", () => {
   it("casts every hero's skill in the same step once each guard passes", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     s.autoCast = true;
     const sword = s.heroes[0];
     // One enemy inside the swordsman's spin radius also satisfies the mage
@@ -185,7 +189,7 @@ describe("auto-cast across a full 3-hero team", () => {
   });
 
   it("auto-cast guard still holds for the full team: no target -> no casts, no cooldowns", () => {
-    const s = initGameState(7, threeHeroSave());
+    const s = makeParty(7);
     s.autoCast = true;
     s.enemies = []; // nothing to hit anywhere
 

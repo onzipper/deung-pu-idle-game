@@ -4,18 +4,18 @@ import {
   step,
   bossHint,
   heroAtk,
-  upgradeCost,
   SKILL_TYPES,
-  SPEED_UPGRADE_CAP,
+  SAVE_VERSION,
   CONFIG,
   type GameState,
   type SaveData,
 } from "@/engine";
-import { makeStubEnemy } from "./helpers";
+import { makeStubEnemy, makeParty, soloSave } from "./helpers";
 
 /**
- * Phase B smoke tests: skills, upgrades, auto systems, boss flow. Deterministic
- * (seeded). Deep regression coverage is the qa-test-engineer's phase.
+ * Phase B smoke tests: skills, auto-cast, boss flow, boss hint. Deterministic
+ * (seeded). Deep regression coverage is the qa-test-engineer's phase. M5 pivot:
+ * the purchasable upgrade lines are gone — power is level + tier now.
  */
 
 const clone = (s: GameState): GameState => JSON.parse(JSON.stringify(s));
@@ -33,23 +33,12 @@ function runUntil(
   return pred(s);
 }
 
+/** A high-level solo hero that out-damages a stage-1 boss (levels are the power axis). */
 const strongSave = (): SaveData => ({
-  version: 1,
+  version: SAVE_VERSION,
   stage: 1,
   gold: 0,
-  unlocked: ["swordsman"],
-  upgrades: { atk: 100, speed: 0, hp: 20 },
-  heroes: [],
-  lastSeen: 0,
-});
-
-const threeHeroSave = (): SaveData => ({
-  version: 1,
-  stage: 3,
-  gold: 0,
-  unlocked: ["swordsman", "archer", "mage"],
-  upgrades: { atk: 0, speed: 0, hp: 0 },
-  heroes: [],
+  hero: { cls: "swordsman", level: 45, xp: 0, tier: 1 },
   lastSeen: 0,
 });
 
@@ -65,8 +54,6 @@ describe("skills", () => {
   });
 
   it("swordsman spin damages an in-range target and starts its cooldown", () => {
-    // Default (weak) team so the boss is a stable target that survives the step
-    // in both the cast and no-cast branches — isolating the spin's extra damage.
     const s = initGameState(1);
     runUntil(s, (st) => st.bossReady, 30000);
     step(s, { challengeBoss: true });
@@ -86,14 +73,12 @@ describe("skills", () => {
     step(cast, { castSkills: [0] });
     step(noCast, {});
 
-    // Cooldown started, and the spin dealt extra damage to the boss this step.
     expect(cast.heroes[0].skillCd).toBe(SKILL_TYPES.swordsman.cd);
     expect(cast.boss!.hp).toBeLessThan(noCast.boss!.hp);
   });
 
   it("archer arrow rain drops falling arrows and starts its cooldown", () => {
-    const s = initGameState(7, threeHeroSave());
-    // Arrow rain needs a foe within archer range (guard); put a cluster in range.
+    const s = makeParty(7); // synthetic party: exercises the archer in slot 1
     const archer = s.heroes[1];
     s.enemies = [
       makeStubEnemy(1, archer.x + 220),
@@ -106,52 +91,9 @@ describe("skills", () => {
     step(noCast, {});
 
     expect(cast.heroes[1].skillCd).toBe(SKILL_TYPES.archer.cd);
-    // Rain spawns `targets` falling drops in the one cast step.
     const drops = cast.projectiles.filter((p) => p.kind === "rainArrow");
     expect(drops.length).toBe(SKILL_TYPES.archer.targets);
     expect(cast.projectiles.length).toBeGreaterThan(noCast.projectiles.length);
-  });
-});
-
-describe("upgrades", () => {
-  it("buying atk spends gold and raises derived attack", () => {
-    const s = initGameState(3);
-    s.gold = 1000;
-    const atkBefore = heroAtk("swordsman", s.upgrades);
-    const cost = upgradeCost("atk", 0);
-    step(s, { buyUpgrade: "atk" });
-    expect(s.upgrades.atk).toBe(1);
-    expect(s.gold).toBe(1000 - cost); // no kills happen this early
-    expect(heroAtk("swordsman", s.upgrades)).toBeGreaterThan(atkBefore);
-  });
-
-  it("buying hp raises maxHp and heals by the delta", () => {
-    const s = initGameState(3);
-    s.gold = 1000;
-    const maxBefore = s.heroes[0].maxHp;
-    const hpBefore = s.heroes[0].hp;
-    step(s, { buyUpgrade: "hp" });
-    expect(s.heroes[0].maxHp).toBeGreaterThan(maxBefore);
-    expect(s.heroes[0].hp).toBe(hpBefore + (s.heroes[0].maxHp - maxBefore));
-  });
-
-  it("speed line respects its cap", () => {
-    const s = initGameState(3);
-    s.gold = 1_000_000;
-    s.upgrades.speed = SPEED_UPGRADE_CAP;
-    step(s, { buyUpgrade: "speed" });
-    expect(s.upgrades.speed).toBe(SPEED_UPGRADE_CAP);
-    expect(s.gold).toBe(1_000_000); // capped => no spend
-  });
-
-  it("auto-upgrade buys the cheapest affordable line on its cadence", () => {
-    const s = initGameState(3);
-    s.autoUpgrade = true;
-    s.gold = 1000;
-    // hp is the cheapest base (22 < atk 25 < speed 32) -> bought first.
-    for (let i = 0; i < 20; i++) step(s, {});
-    expect(s.gold).toBeLessThan(1000);
-    expect(s.upgrades.hp).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -166,29 +108,33 @@ describe("boss flow", () => {
     expect(s.enemies.length).toBe(0);
   });
 
-  it("boss kill -> victory -> advanceStage unlocks the second hero", () => {
+  it("boss kill -> victory -> advanceStage keeps the single character", () => {
     const s = initGameState(5, strongSave());
     expect(runUntil(s, (st) => st.bossReady, 30000)).toBe(true);
     step(s, { challengeBoss: true });
-    // Strong team out-damages the boss well before it can wipe them.
+    // Strong (high-level) hero out-damages the boss well before it can wipe.
     expect(runUntil(s, (st) => st.phase === "victory", 5000)).toBe(true);
     expect(s.gold).toBeGreaterThan(0);
 
     step(s, { advanceStage: true });
     expect(s.phase).toBe("battle");
     expect(s.stage).toBe(2);
-    expect(s.heroSlots).toBe(2);
-    expect(s.heroes.length).toBe(2);
-    expect(s.heroes[1].cls).toBe("archer");
+    expect(s.heroes).toHaveLength(1);
+    expect(s.heroes[0].cls).toBe("swordsman");
   });
 
-  it("team wipe -> boss retreats back to battle (retry allowed)", () => {
-    const s = initGameState(11); // default (weak) team
+  it("solo hero wipe -> boss retreats back to battle (retry allowed)", () => {
+    const s = initGameState(11);
     expect(runUntil(s, (st) => st.bossReady, 30000)).toBe(true);
     step(s, { challengeBoss: true });
     expect(s.phase).toBe("boss");
-    // A single base swordsman cannot out-damage the stage boss -> retreat.
-    expect(runUntil(s, (st) => st.phase !== "boss", 6000)).toBe(true);
+    // Force the wipe deterministically (a base hero may or may not out-DPS the
+    // boss depending on seed — the retreat MECHANIC is what this test pins).
+    const h = s.heroes[0];
+    h.dead = true;
+    h.hp = 0;
+    h.reviveTimer = 999;
+    step(s, {});
     expect(s.phase).toBe("battle");
     expect(s.boss).toBeNull();
     expect(s.bossReady).toBe(true); // still challengeable
@@ -197,8 +143,8 @@ describe("boss flow", () => {
 });
 
 describe("boss hint", () => {
-  it("reports boss stats and team readiness for the UI", () => {
-    const s = initGameState(1);
+  it("reports boss stats and readiness for the UI (solo hero power)", () => {
+    const s = initGameState(1, soloSave("swordsman", 1));
     const hint = bossHint(s);
     expect(hint.stage).toBe(1);
     expect(hint.bossHp).toBe(CONFIG.bossHp(1));
@@ -206,7 +152,8 @@ describe("boss hint", () => {
     expect(hint.recommendedPower).toBe(
       Math.round(CONFIG.bossHp(1) / CONFIG.bossHintPowerDivisor),
     );
-    expect(hint.teamPower).toBe(heroAtk("swordsman", s.upgrades));
+    // teamPower now = the single hero's atk at its level/tier.
+    expect(hint.teamPower).toBe(heroAtk("swordsman", s.heroes[0].level, s.heroes[0].tier));
     expect(hint.ready).toBe(hint.teamPower >= hint.recommendedPower);
   });
 });

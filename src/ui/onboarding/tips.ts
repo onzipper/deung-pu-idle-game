@@ -42,10 +42,6 @@ export interface ContextualTipDef {
   trigger: ContextualTipTrigger;
 }
 
-function cheapestUpgradeCost(s: OnboardingSnapshot): number {
-  return Math.min(s.upgradeCosts.atk, s.upgradeCosts.speed, s.upgradeCosts.hp);
-}
-
 function anyHeroReady(s: OnboardingSnapshot): boolean {
   return s.heroes.some((h) => !h.dead && h.skillCd <= 0);
 }
@@ -56,11 +52,10 @@ function anyHeroReady(s: OnboardingSnapshot): boolean {
  * would trigger on the same tick; `resolveTriggeredTip` picks the first
  * not-yet-seen match):
  *  - `heroDeathRespawn`: a hero has gone down for the first time — explains
- *    the auto-revive timer (the "dead" skill-bar badge) rather than the
+ *    the auto-respawn timer (the "dead" skill-bar badge) rather than the
  *    player assuming it's permanent.
- *  - `autoUpgradeAvailable` / `autoCastAvailable`: the moment an upgrade
- *    first becomes affordable / a skill first comes off cooldown while its
- *    respective auto-toggle is still off — nudges toward automating it.
+ *  - `autoCastAvailable`: the moment a skill first comes off cooldown while
+ *    auto-cast is still off — nudges toward automating it.
  *  - `stageClear`: the boss just went down for the first time — points at
  *    the victory panel's "next stage" button.
  *  - `bossWipe`: the whole team just got wiped by a boss (a phase
@@ -73,12 +68,6 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
     anchor: "skill-bar",
     mood: "warning",
     trigger: (_prev, next) => next.heroes.some((h) => h.dead),
-  },
-  {
-    id: "autoUpgradeAvailable",
-    anchor: "upgrade-panel",
-    mood: "excited",
-    trigger: (_prev, next) => !next.autoUpgrade && next.gold >= cheapestUpgradeCost(next),
   },
   {
     id: "autoCastAvailable",

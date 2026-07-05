@@ -7,7 +7,7 @@
  * `src/ui/README.md`'s "Content i18n pattern" section.
  */
 
-import type { HeroClass, Upgrades } from "@/engine";
+import type { HeroClass } from "@/engine";
 
 export const HERO_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F5E1}️", // 🗡️
@@ -21,7 +21,10 @@ export const SKILL_ICONS: Record<HeroClass, string> = {
   mage: "☄️",
 };
 
-export const UPGRADE_ICONS: Record<keyof Upgrades, string> = {
+// M5 pivot: the buyable upgrade lines are gone from the engine, but the codex
+// still documents them as reference entries (reworked in a later M5 task), so
+// these cosmetic icons stay keyed by the local stat ids.
+export const UPGRADE_ICONS: Record<"atk" | "speed" | "hp", string> = {
   atk: "⚔️",
   speed: "⚡",
   hp: "❤️",

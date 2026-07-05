@@ -16,18 +16,11 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     stage: 1,
     kills: 0,
     phase: "battle",
-    upgrades: { atk: 0, speed: 0, hp: 0 },
-    upgradeCosts: { atk: 100, speed: 100, hp: 100 },
-    autoUpgrade: false,
     autoCast: false,
-    // Non-zero cooldowns so a bare `snapshot()` is a true "nothing to report"
-    // baseline (autoCastAvailable's trigger is a level check on "any hero
-    // ready", which a bare `skillCd: 0` would satisfy by default).
-    heroes: [
-      { skillCd: 1, dead: false },
-      { skillCd: 1, dead: false },
-      { skillCd: 1, dead: false },
-    ],
+    // Non-zero cooldown so a bare `snapshot()` is a true "nothing to report"
+    // baseline (autoCastAvailable's trigger checks "any hero ready", which a
+    // bare `skillCd: 0` would satisfy by default).
+    heroes: [{ skillCd: 1, dead: false }],
     ...overrides,
   };
 }
@@ -85,52 +78,19 @@ describe("individual tip triggers", () => {
     const tip = idOf("heroDeathRespawn");
     const prev = snapshot();
     const alive = snapshot();
-    const oneDead = snapshot({
-      heroes: [
-        { skillCd: 0, dead: true },
-        { skillCd: 0, dead: false },
-        { skillCd: 0, dead: false },
-      ],
-    });
+    const oneDead = snapshot({ heroes: [{ skillCd: 0, dead: true }] });
     expect(tip.trigger(prev, alive)).toBe(false);
     expect(tip.trigger(prev, oneDead)).toBe(true);
-  });
-
-  it("autoUpgradeAvailable fires once gold covers the cheapest line, only while autoUpgrade is off", () => {
-    const tip = idOf("autoUpgradeAvailable");
-    const prev = snapshot();
-    const poor = snapshot({ gold: 10 });
-    const rich = snapshot({ gold: 500 });
-    const richButAutomated = snapshot({ gold: 500, autoUpgrade: true });
-    expect(tip.trigger(prev, poor)).toBe(false);
-    expect(tip.trigger(prev, rich)).toBe(true);
-    expect(tip.trigger(prev, richButAutomated)).toBe(false);
   });
 
   it("autoCastAvailable fires once a hero is off cooldown, only while autoCast is off", () => {
     const tip = idOf("autoCastAvailable");
     const prev = snapshot();
-    const onCooldown = snapshot({
-      heroes: [
-        { skillCd: 4, dead: false },
-        { skillCd: 4, dead: false },
-        { skillCd: 4, dead: false },
-      ],
-    });
-    const ready = snapshot({
-      heroes: [
-        { skillCd: 0, dead: false },
-        { skillCd: 4, dead: false },
-        { skillCd: 4, dead: false },
-      ],
-    });
+    const onCooldown = snapshot({ heroes: [{ skillCd: 4, dead: false }] });
+    const ready = snapshot({ heroes: [{ skillCd: 0, dead: false }] });
     const readyButAutomated = snapshot({
       autoCast: true,
-      heroes: [
-        { skillCd: 0, dead: false },
-        { skillCd: 4, dead: false },
-        { skillCd: 4, dead: false },
-      ],
+      heroes: [{ skillCd: 0, dead: false }],
     });
     expect(tip.trigger(prev, onCooldown)).toBe(false);
     expect(tip.trigger(prev, ready)).toBe(true);
@@ -165,14 +125,12 @@ describe("resolveTriggeredTip", () => {
   });
 
   it("returns the first not-yet-seen tip whose trigger fires (registry-order priority)", () => {
-    // Both heroDeathRespawn and autoUpgradeAvailable can be true at once;
-    // heroDeathRespawn is earlier in the registry, so it wins.
+    // A party where one hero is dead AND another is skill-ready fires BOTH
+    // heroDeathRespawn and autoCastAvailable; heroDeathRespawn is earlier, so it wins.
     const prev = snapshot();
     const next = snapshot({
-      gold: 500,
       heroes: [
         { skillCd: 0, dead: true },
-        { skillCd: 0, dead: false },
         { skillCd: 0, dead: false },
       ],
     });
@@ -183,13 +141,7 @@ describe("resolveTriggeredTip", () => {
 
   it("never re-returns an id already marked seen (once-only)", () => {
     const prev = snapshot();
-    const next = snapshot({
-      heroes: [
-        { skillCd: 1, dead: true },
-        { skillCd: 1, dead: false },
-        { skillCd: 1, dead: false },
-      ],
-    });
+    const next = snapshot({ heroes: [{ skillCd: 1, dead: true }] });
     const seen = new Set(["heroDeathRespawn"]);
     expect(resolveTriggeredTip(CONTEXTUAL_TIPS, seen, prev, next)).toBeNull();
   });
@@ -197,16 +149,14 @@ describe("resolveTriggeredTip", () => {
   it("falls through to the next eligible tip once an earlier one is seen", () => {
     const prev = snapshot();
     const next = snapshot({
-      gold: 500,
       heroes: [
         { skillCd: 0, dead: true },
-        { skillCd: 0, dead: false },
         { skillCd: 0, dead: false },
       ],
     });
     const seen = new Set(["heroDeathRespawn"]);
     expect(resolveTriggeredTip(CONTEXTUAL_TIPS, seen, prev, next)).toBe(
-      "autoUpgradeAvailable",
+      "autoCastAvailable",
     );
   });
 });
