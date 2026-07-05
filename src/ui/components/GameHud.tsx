@@ -12,6 +12,7 @@
 
 import { forwardRef, type ReactNode } from "react";
 import { BossPanel } from "@/ui/components/BossPanel";
+import { CodexButton } from "@/ui/components/CodexButton";
 import { HudBar } from "@/ui/components/HudBar";
 import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
 import { SkillBar } from "@/ui/components/SkillBar";
@@ -70,6 +71,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         >
           <SpeedSelector />
           <div className="flex items-center gap-3">
+            <CodexButton />
             <SoundToggle />
             <LocaleSwitch />
           </div>

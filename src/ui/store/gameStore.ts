@@ -198,6 +198,11 @@ export interface HudState {
   completeOnboarding: () => void;
   /** Mount-effect-only sync of the persisted flag (see `ftueCompleted` doc). */
   setFtueCompleted: (completed: boolean) => void;
+  /** Codex-only ("ดูบทช่วยสอนอีกครั้ง"): un-persists completion and jumps
+   * straight to step 0 — unlike `startOnboarding`, this bypasses
+   * `useOnboardingController`'s one-shot gate (which only fires once per
+   * mount) since the overlay renders directly off `onboardingStepIndex`. */
+  resetOnboarding: () => void;
 
   /** Queue a skill cast for hero slot `i` (deduped; consumed on next drain). */
   castSkill: (slot: number) => void;
@@ -254,6 +259,10 @@ export const useGameStore = create<HudState>((set, get) => ({
     set({ onboardingStepIndex: -1, ftueCompleted: true });
   },
   setFtueCompleted: (ftueCompleted) => set({ ftueCompleted }),
+  resetOnboarding: () => {
+    writeFtueCompleted(false);
+    set({ ftueCompleted: false, onboardingStepIndex: 0 });
+  },
 
   castSkill: (slot) =>
     set((s) => ({

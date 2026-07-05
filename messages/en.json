@@ -74,6 +74,64 @@
       }
     }
   },
+  "codex": {
+    "openButton": "📖 Guide",
+    "title": "Game Guide",
+    "closeButton": "Close",
+    "replayTutorialButton": "▶ Replay tutorial",
+    "categories": {
+      "coreLoop": "Core Loop",
+      "heroes": "Heroes",
+      "upgrades": "Upgrades",
+      "boss": "Boss",
+      "controls": "Controls",
+      "offlineIdle": "Offline Gold"
+    },
+    "entries": {
+      "coreLoop": {
+        "title": "Kill → bank gold → upgrade → boss",
+        "body": "Your hero team charges through enemy waves on its own, all the time. Every kill banks gold and pushes the kill counter closer to the stage's boss. Spend that gold on upgrades to make your team stronger, then challenge the boss to unlock the next stage. Then it loops again."
+      },
+      "hero-swordsman": {
+        "body": "The Swordsman is your melee frontliner — auto-attacks whatever's directly in front, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
+      },
+      "hero-archer": {
+        "body": "The Archer attacks at range with arrows, great for hitting enemies from behind the rest of the team, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
+      },
+      "hero-mage": {
+        "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
+      },
+      "upgrade-atk": {
+        "body": "Increases every hero's attack power — more damage per hit, helping both wave clears and boss fights."
+      },
+      "upgrade-speed": {
+        "body": "Increases attack speed (attacks land more often). This line has a maximum cap; once reached, the button shows MAX."
+      },
+      "upgrade-hp": {
+        "body": "Increases every hero's max HP. A tankier team survives longer both clearing waves and dueling the boss."
+      },
+      "autoUpgrade": {
+        "title": "💰 Auto Upgrade",
+        "body": "When on, the game automatically spends gold on the cheapest available upgrade the instant you can afford it — no manual buying needed."
+      },
+      "boss": {
+        "title": "Challenging the stage boss",
+        "body": "The panel below the arena shows the boss's HP, attack power, recommended team power, and your team's current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your whole team dies, the boss retreats, your team is fully revived, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
+      },
+      "gameSpeed": {
+        "title": "⚡ Game speed",
+        "body": "Switch between 1×/2×/3× anytime from the settings row. The simulation stays exactly as accurate — it simply runs faster."
+      },
+      "autoCast": {
+        "title": "✨ Auto Skill",
+        "body": "When on, each hero casts their own skill automatically the instant its cooldown is ready — no need to tap the skill buttons yourself."
+      },
+      "offlineIdle": {
+        "title": "Offline gold",
+        "body": "Close the game and come back later — it automatically calculates the progress you would have made while away (capped at 8 hours per session) and hands you the banked gold as soon as you return."
+      }
+    }
+  },
   "content": {
     "classes": {
       "swordsman": { "name": "Swordsman" },
