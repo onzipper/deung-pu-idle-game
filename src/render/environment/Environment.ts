@@ -30,20 +30,14 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-/** Scroll-pace multiplier per high-level phase — battle pushes forward
- * fastest (the team advancing on the wave), boss is a calmer standoff,
- * victory eases off entirely. */
-function speedMulForPhase(phase: GameState["phase"]): number {
-  switch (phase) {
-    case "battle":
-      return 1.15;
-    case "boss":
-      return 0.55;
-    case "victory":
-      return 0.8;
-    default:
-      return 1;
-  }
+/** Scroll-pace multiplier. Since the zone-hunting rework the camera is FIXED
+ * inside a zone — the field must stand still while the hero runs around it
+ * (a scrolling ground under a stationary fight read as "the floor is moving",
+ * owner-reported 2026-07-06). The world-travel scroll now plays ONLY while
+ * `state.traveling` is set (walking between zones), selling the journey;
+ * clouds/ambient drift are unaffected (they're weather, not travel). */
+function speedMulFor(state: GameState): number {
+  return state.traveling ? 1.15 : 0;
 }
 
 export class Environment {
@@ -68,7 +62,7 @@ export class Environment {
       this.transitionT = 0;
     }
 
-    const speedMul = speedMulForPhase(state.phase);
+    const speedMul = speedMulFor(state);
     this.current.update(dt, speedMul);
 
     if (this.incoming) {
