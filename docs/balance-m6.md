@@ -1,0 +1,94 @@
+# M6 World & Town — zone rebaseline
+
+ClickUp: 86d3jv7m3 · Branch: `develop` · Builds on [balance-m5.md](./balance-m5.md)
+(the M5 solo curves are unchanged — M6 only REGROUPS them into a walkable world).
+
+## What changed (M6 task 1 — the zone/world engine)
+
+The per-stage content was **regrouped**, not rebalanced. The world is now a set of
+ordered **maps** (`CONFIG.world.maps`), each a left-to-right run of walkable
+**zones**: farm zones (one existing stage each) + a single **boss room**, plus a
+**town** at the left edge of map1. Combat inside a zone is byte-for-byte the old
+stage combat (driven by `state.stage` = the zone's stage), so every M5 knob
+(enemy/boss curves, formation/free-hit, leveling, mana, evolution, quest) is
+**untouched**.
+
+### Zone regrouping (map : zones)
+
+| map | name | farm zones (stage) | boss room |
+|---|---|---|---|
+| map1 | โลกมนุษย์ (Human World) | 1, 2, 3, 4, 5 + **town** (left edge) | stage 5 |
+| map2 | แดนอสูร (Demon Realm) | 6, 7, 8, 9, 10 | stage 10 |
+| map3 | พรมแดนเถื่อน (Wild Frontier) | 11, 12, 13, 14, 15 | stage 15 |
+
+- **Farm zone** unlock: reach the zone's kill quota (`killGoal(stage)`) → the next
+  zone unlocks. Clearing a farm zone grants the **same xp/gold the old per-stage
+  boss gave** (`xpPerBossKill`/`goldPerBoss` are REUSED — no new curve), so the
+  leveling trajectory is preserved WITHOUT a per-zone boss.
+- **Boss room** unlock: after the last farm zone of the map. Beating it unlocks the
+  next map's first zone. Entering a boss room starts the boss encounter (existing
+  boss mechanics — enrage/slam/telegraph — unchanged).
+- **Death** → respawn in **town** (GDD, no penalty), then (toggle `autoReturn`, on
+  by default) auto-walk back to the last farmed zone. The town-return reuses the old
+  `heroReviveTime` (4 s) as its walk-home time, so the **death cost is unchanged**.
+- **Transit** between adjacent zones is a deterministic `world.transitSeconds`
+  (0.6 s) fixed-dt timer — negligible in the totals. No RNG in the world layer.
+
+## Method
+
+Rewritten harness `src/engine/__tests__/balance-sim.ts` (`pnpm sim`) — the autopilot
+now WALKS the world (walk forward on unlock, enter the boss room, advance to the
+next map on a boss-room victory; accept/evolve the class-change quest as before).
+Death → town → auto-return is engine behaviour. `SIM_SECONDS=2400`, 5 seeds
+(`1,2,3,42,1337`), auto-cast + auto-allocate + auto-return on.
+
+## Results — per-zone clear time (mean s, 5 seeds)
+
+`meanDur` = time from entering a zone to clearing it (farm = quota met; boss room =
+boss beaten). Farm-zone clear time per stage:
+
+| stage | swordsman | archer | mage |
+|------:|----------:|-------:|-----:|
+| 1  | 21  | 21  | 32  |
+| 2  | 43  | 34  | 42  |
+| 3  | 73  | 31  | 49  |
+| 4  | 86  | 43  | 57  |
+| 5  | 83  | 52  | 69  |
+| 6  | 91  | 52  | 71  |
+| 7  | 102 | 62  | 83  |
+| 8  | 76  | 77  | 91  |
+| 9  | 79  | 86  | 95  |
+| 10 | 116 | 99  | 106 |
+| 11 | 289 | 124 | 125 |
+| 12 | **1219** | 132 | 136 |
+| 13 | — | 158 | 156 |
+| 14 | — | 195 | 174 |
+| 15 | — | 563 | 310 |
+
+Boss rooms (mean s to beat):
+
+| boss room | swordsman | archer | mage | wipes (all seeds) |
+|---|---|---|---|---|
+| map1 (stage 5)  | 10 | 12 | 15 | 0 / 0 / 0 |
+| map2 (stage 10) | 12 | 16 | 15 | 0 / 0 / 0 |
+| map3 (stage 15) | not reached | 0/5 | 0/5 | — / 11 / 18 |
+
+## Targets — met
+
+- **No new walls.** Every class clears **map1 and map2 in full (through the stage-5
+  and stage-10 boss rooms) on every seed, 0 boss wipes** — i.e. the whole M5-viable
+  range (S1–S10) is clean. Class change still lands at **stage 5 (5/5, all classes)**.
+- **Frontier preserved (map3 = 11+ soft-wall).** The old M5 content ceiling (S12–S14)
+  reappears as the map3 frontier: the swordsman soft-walls at the s11→s12 farm grind
+  (s12 clears 2/5), archer/mage push through the farm zones and reach the **stage-15
+  boss room but can't beat it (0/5)** — the intended soft-wall, extended by later M6/M7
+  content, never a permanent freeze (respawn + auto-return keep banking XP; final
+  levels 47–49).
+- **Transit negligible.** Boss rooms resolve in ~10–16 s; farm-zone times dominate
+  the totals. A 0.6 s hop per zone and the (unchanged) 4 s death cost are lost in the
+  noise.
+- **Pacing.** Per-farm-zone times run ~30–40 % faster than the M5 per-STAGE times
+  because a farm zone no longer bundles a boss fight — the boss beats now live only
+  at the three map gates. Total map-to-map progression and the leveling curve
+  (level-at-clear tracks the M5 table) are preserved; this per-zone table is the new
+  M6 baseline. No M5 curve was retuned.

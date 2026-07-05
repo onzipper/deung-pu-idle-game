@@ -14,7 +14,13 @@
  * single plain-object allocation per game moment.
  */
 
-import type { EnemyKind, HeroClass, ProjectileKind, StatKey } from "@/engine/entities";
+import type {
+  EnemyKind,
+  HeroClass,
+  ProjectileKind,
+  StatKey,
+  ZoneKind,
+} from "@/engine/entities";
 
 /** Which side of the board a damaged target belongs to. */
 export type HitTargetKind = "hero" | "enemy" | "boss";
@@ -69,4 +75,10 @@ export type GameEvent =
       /** The objective's target count (for a "n/N" readout). */
       count: number;
     }
-  | { type: "questCompleted"; id: number; questId: string };
+  | { type: "questCompleted"; id: number; questId: string }
+  // World navigation lifecycle (M6 "World & Town" — for UI + future render juice).
+  // One-way like every event; the engine never reads them back.
+  | { type: "zoneEntered"; mapId: string; zoneIdx: number; kind: ZoneKind; stage: number }
+  | { type: "zoneUnlocked"; mapId: string; zoneIdx: number }
+  | { type: "mapUnlocked"; mapId: string }
+  | { type: "bossRoomEntered"; mapId: string; stage: number };

@@ -23,10 +23,10 @@
 
 ## M6 — World & Town
 
-- [ ] Zone system: map → zones เดินถึงกัน (แตะขอบ/ลูกศร) + เงื่อนไขปลด zone + ย้อนฟาร์มอิสระ
-- [ ] ห้องบอสพิเศษท้าย map (ฉาก/การนำเสนอพิเศษ)
-- [ ] เมืองหลัก + NPC shops: ยาเลือด/ยามานา/ยันกลับเมือง (+ ของวาปปาร์ตี้ เปิดใช้ตอน M8)
-- [ ] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง)
+- [x] Zone system: map → zones เดินถึงกัน (แตะขอบ/ลูกศร) + เงื่อนไขปลด zone + ย้อนฟาร์มอิสระ — engine zone/world layer (SAVE v8: location/unlockedZones/lastFarmZone), walk transit, unlock progression, town respawn + auto-return, boss-room gate; sim rebaselined per map/zone (docs/balance-m6.md); functional walk-controls UI. NPC shops = next task (zone kind "town" hook left)
+- [ ] ห้องบอสพิเศษท้าย map (ฉาก/การนำเสนอพิเศษ) — engine ROOM framing + zoneEntered/bossRoomEntered/mapUnlocked events done; special render/presentation is the render task
+- [ ] เมืองหลัก + NPC shops: ยาเลือด/ยามานา/ยันกลับเมือง (+ ของวาปปาร์ตี้ เปิดใช้ตอน M8) — town zone (kind "town") + respawn hook exists; shops build on it
+- [ ] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง) — store field + engine honor wired (minimal toggle); settings UI task expands it
 - [ ] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม)
 - [ ] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …)
 

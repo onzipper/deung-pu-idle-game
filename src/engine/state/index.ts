@@ -23,9 +23,17 @@ import type {
   HeroStats,
   HeroQuest,
   SkillId,
+  WorldLocation,
 } from "@/engine/entities";
 import { classChangeQuestFor } from "@/engine/systems/quests";
 import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
+import {
+  firstFarmLocation,
+  farmLocationForStage,
+  unlockUpTo,
+  zoneAt,
+  type TravelState,
+} from "@/engine/systems/world";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
 
@@ -52,6 +60,34 @@ export interface GameState {
    * the store onto state each frame; never part of `FrameInput`, never persisted.
    */
   autoAllocate: boolean;
+  /**
+   * UI-owned toggle (M6, mirrors `autoCast`): after a death respawn in town,
+   * auto-walk back to the last farmed zone ("auto กลับไปฟาร์ม"). When off the
+   * hero waits in town ("รอที่เมือง"). Read off the store onto state each frame;
+   * never part of `FrameInput`, never persisted. Defaults ON (and the offline
+   * replay forces it on) so idle never stalls.
+   */
+  autoReturn: boolean;
+  /**
+   * Current world position (M6 "World & Town"): which map + zone the hero is in.
+   * The zone's KIND + content stage are derived from CONFIG.world
+   * (systems/world.ts `zoneAt`). `state.stage` mirrors the current zone's stage.
+   */
+  location: WorldLocation;
+  /**
+   * Per-map count of unlocked zones (M6): a zone is unlocked iff
+   * `zoneIdx < unlockedZones[mapId]`. Persisted (SAVE v8).
+   */
+  unlockedZones: Record<string, number>;
+  /**
+   * The last FARM zone occupied (M6) — the death auto-return target. Persisted.
+   */
+  lastFarmZone: WorldLocation;
+  /**
+   * In-flight walk between zones (M6), or null. Transient (a fixed-dt timer);
+   * NEVER persisted — a reload resumes standing in `location`.
+   */
+  traveling: TravelState | null;
   /**
    * Live heroes. Solo gameplay keeps exactly one here (the chosen class); the
    * array + formation machinery is retained for the M8 party of up to `maxHeroes`.
@@ -112,10 +148,17 @@ export interface CharacterSave {
 
 export interface SaveData {
   version: number;
+  /** Content stage of the current zone (M6: mirrors `zoneAt(location).stage`). */
   stage: number;
   gold: number;
   /** The single active character (M5 — replaces the team's `unlocked`/`heroes`). */
   hero: CharacterSave;
+  /** Current world position (M6 "World & Town", SAVE v8). */
+  location: WorldLocation;
+  /** Per-map unlocked-zone counts (M6, SAVE v8). */
+  unlockedZones: Record<string, number>;
+  /** Death auto-return target — the last farmed zone (M6, SAVE v8). */
+  lastFarmZone: WorldLocation;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -159,8 +202,19 @@ function cloneQuest(q: HeroQuest | null): HeroQuest | null {
  * battlefield always starts fresh at wave 0 of the saved stage.
  */
 export function initGameState(seed: number, save?: SaveData): GameState {
-  const stage = save?.stage ?? 1;
   const heroClass: HeroClass = save?.hero.cls ?? "swordsman";
+
+  // World position (M6). A save restores its location; a fresh start begins in the
+  // first farm zone (map1, stage 1). `state.stage` is DERIVED from the location's
+  // zone, so combat scaling always matches the zone the hero stands in.
+  const location: WorldLocation = save?.location ?? firstFarmLocation();
+  const stage = zoneAt(location).stage;
+  const lastFarmZone: WorldLocation =
+    save?.lastFarmZone ??
+    (zoneAt(location).kind === "farm" ? location : farmLocationForStage(stage));
+  const unlockedZones: Record<string, number> = save?.unlockedZones
+    ? { ...save.unlockedZones }
+    : unlockUpTo(location);
 
   const state: GameState = {
     time: 0,
@@ -172,6 +226,13 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     heroClass,
     autoCast: false,
     autoAllocate: false,
+    // Defaults ON (design: "auto กลับไปฟาร์ม" on by default); GameClient mirrors
+    // the store toggle onto this each frame, and the offline replay forces it on.
+    autoReturn: true,
+    location: { mapId: location.mapId, zoneIdx: location.zoneIdx },
+    unlockedZones,
+    lastFarmZone: { mapId: lastFarmZone.mapId, zoneIdx: lastFarmZone.zoneIdx },
+    traveling: null,
     heroes: [],
     enemies: [],
     boss: null,
@@ -269,6 +330,11 @@ export function toSaveData(state: GameState): SaveData {
     version: SAVE_VERSION,
     stage: state.stage,
     gold: state.gold,
+    // World position (M6, SAVE v8). `traveling` is transient — a reload resumes
+    // standing in `location` (mid-walk is not persisted).
+    location: { mapId: state.location.mapId, zoneIdx: state.location.zoneIdx },
+    unlockedZones: { ...state.unlockedZones },
+    lastFarmZone: { mapId: state.lastFarmZone.mapId, zoneIdx: state.lastFarmZone.zoneIdx },
     hero: {
       cls: h.cls,
       level: h.level,

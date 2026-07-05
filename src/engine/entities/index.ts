@@ -69,6 +69,24 @@ export interface Vec2 {
 }
 
 /**
+ * World zone kinds (M6 "World & Town"):
+ *  - "town": the safe hub + respawn point (no spawns). NPC shops hook here later.
+ *  - "farm": a stage's wave content, farmed to its kill quota to unlock the next.
+ *  - "boss": the map's special BOSS ROOM (entering starts the boss encounter).
+ */
+export type ZoneKind = "town" | "farm" | "boss";
+
+/**
+ * A hero's world position: which map + which zone index within it (M6). Zone
+ * content/kind is DERIVED from CONFIG.world (see systems/world.ts `zoneAt`), so
+ * only the address is stored/persisted. Persisted (SAVE v8).
+ */
+export interface WorldLocation {
+  mapId: string;
+  zoneIdx: number;
+}
+
+/**
  * Quest framework v1 (M5 "เปลี่ยนคลาสผ่านเควส", ROADMAP task 5). Deliberately
  * LEAN — exactly what the class-change quest needs — but forward-compatible with
  * the full quest system in M8.

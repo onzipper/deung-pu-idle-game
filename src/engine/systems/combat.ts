@@ -25,7 +25,8 @@ import {
 import { applyDamage, isHero } from "@/engine/systems/damage";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
-import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
+import { onBossKilled } from "@/engine/systems/boss";
+import { respawnToTown } from "@/engine/systems/world";
 import {
   aliveHeroes,
   anyHeroCanRetaliate,
@@ -51,8 +52,13 @@ const L = CONFIG.layout;
  * cast, so a freshly-regenerated point can fund a cast the same step.
  */
 export function decayHeroTimers(state: GameState): void {
+  // M6: a TOTAL wipe (solo hero down, or a whole party down) revives via the WORLD
+  // respawn (dead hero walks home to town -> revives there; see combat.resolveDeaths
+  // -> world.respawnToTown). Only a PARTIAL party loss (some heroes still up — the
+  // M8 party case) revives IN PLACE here on the per-hero revive timer.
+  const totalWipe = aliveHeroes(state).length === 0;
   for (const h of state.heroes) {
-    if (h.dead) {
+    if (h.dead && !totalWipe) {
       h.reviveTimer -= FIXED_DT;
       if (h.reviveTimer <= 0) {
         h.dead = false;
@@ -418,25 +424,15 @@ export function resolveDeaths(state: GameState): void {
     state.bossReady = true;
   }
 
-  // Team wiped during the boss fight -> boss retreats, back to normal waves.
-  if (state.phase === "boss" && aliveHeroes(state).length === 0) {
-    bossRetreat(state);
-  }
-
-  // Solo respawn (GDD: dead solo hero = respawn, no penalty). When the lone hero
-  // goes down mid-battle it auto-revives via decayHeroTimers after heroReviveTime;
-  // clear the battlefield NOW so it never respawns into the pile-up that killed it
-  // (the "waves reset sensibly" rule + the anti-permanent-stall guarantee). Kills
-  // banked toward the boss are kept (no progress penalty). Fires once — after the
-  // clear `enemies.length` is 0, and `updateWaveSpawns` holds new waves until a
-  // hero is alive again. Boss phase is handled above (bossRetreat).
-  if (
-    state.phase === "battle" &&
-    state.enemies.length > 0 &&
-    aliveHeroes(state).length === 0
-  ) {
-    state.enemies = [];
-    state.projectiles = state.projectiles.filter((p) => p.team === "hero");
-    state.waveGap = CONFIG.bossRetreatWaveGap;
+  // Death -> respawn in TOWN (M6 "World & Town"; GDD: dead hero = respawn in town,
+  // no penalty). Covers BOTH a farm-zone wipe and a boss-room wipe (replacing the
+  // old in-place solo revive AND the boss retreat): the field is cleared, the dead
+  // hero walks home to town over `heroReviveTime` (unchanged death cost), revives
+  // there, then (toggle-gated) auto-returns to the last farm zone — see
+  // world.respawnToTown / arriveAtZone. `!state.traveling` makes this fire ONCE
+  // (respawnToTown sets `traveling`, and the next steps only tick the walk). Kills
+  // banked toward a zone/quest are kept (no progress penalty).
+  if (aliveHeroes(state).length === 0 && !state.traveling) {
+    respawnToTown(state);
   }
 }

@@ -22,7 +22,16 @@
  */
 
 import { create } from "zustand";
-import type { BossHint, HeroClass, HeroStats, Phase, SpeedMultiplier, StatKey } from "@/engine";
+import type {
+  BossHint,
+  HeroClass,
+  HeroStats,
+  Phase,
+  SpeedMultiplier,
+  StatKey,
+  WorldLocation,
+  ZoneKind,
+} from "@/engine";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -118,6 +127,29 @@ export interface HeroSummary {
   combatPower: number;
 }
 
+/** One adjacent zone's walk-arrow state (M6 "World & Town"). */
+export interface NavNeighborSummary {
+  mapId: string;
+  zoneIdx: number;
+  kind: ZoneKind;
+  /** Unlocked (walkable) — a locked neighbor shows a lock + reason. */
+  unlocked: boolean;
+}
+
+/** Current-location + walk-arrow affordances for the HUD (M6). Precomputed by the
+ * snapshot builder from the engine's `worldNav` read (no engine logic in React). */
+export interface WorldNavSummary {
+  mapId: string;
+  zoneIdx: number;
+  kind: ZoneKind;
+  /** Content stage of the current zone (for the "stage N" readout). */
+  stage: number;
+  /** Walking between zones — arrows disabled, current-zone label reads "traveling". */
+  traveling: boolean;
+  left: NavNeighborSummary | null;
+  right: NavNeighborSummary | null;
+}
+
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
   gold: number;
@@ -129,6 +161,8 @@ export interface EngineSnapshot {
   bossReady: boolean;
   bossHint: BossHint;
   heroes: HeroSummary[];
+  /** World position + walk-arrow state (M6 "World & Town"). */
+  world: WorldNavSummary;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -139,6 +173,9 @@ export interface PendingInput {
   setAutoSlots: { slot: number; skillId: string | null }[];
   challengeBoss: boolean;
   advanceStage: boolean;
+  /** Walk to an adjacent unlocked zone (M6), or `null` (last-wins per frame — a
+   * single arrow tap starts exactly one walk). */
+  walkToZone: WorldLocation | null;
   /** Hero slot index to evolve (M5), or `null` (last-wins per frame — a big
    * one-way purchase never needs to queue more than one per frame). */
   evolveHero: number | null;
@@ -156,6 +193,7 @@ function emptyPendingInput(): PendingInput {
     setAutoSlots: [],
     challengeBoss: false,
     advanceStage: false,
+    walkToZone: null,
     evolveHero: null,
     acceptQuest: null,
     allocateStat: null,
@@ -278,6 +316,8 @@ export interface HudState {
   bossReady: boolean;
   bossHint: BossHint;
   heroes: HeroSummary[];
+  /** World position + walk-arrow state (M6 "World & Town"). */
+  world: WorldNavSummary;
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   speed: SpeedMultiplier;
@@ -286,6 +326,11 @@ export interface HudState {
    * stats"). UI-owned like `autoCast`: the loop copies it onto `state.autoAllocate`
    * every frame; not part of `FrameInput`, never persisted. */
   autoAllocate: boolean;
+  /** Auto-walk back to the last farmed zone after a death respawn ("auto กลับไป
+   * ฟาร์ม", M6). UI-owned like `autoCast`: the loop copies it onto
+   * `state.autoReturn` every frame; not part of `FrameInput`, never persisted.
+   * Defaults ON (design). */
+  autoReturn: boolean;
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
    * every frame and applies it to the `AudioController`, same pattern as
@@ -318,6 +363,8 @@ export interface HudState {
   setSpeed: (speed: SpeedMultiplier) => void;
   toggleAutoCast: () => void;
   toggleAutoAllocate: () => void;
+  /** Toggle death auto-return (M6 "auto กลับไปฟาร์ม" / "รอที่เมือง"). */
+  toggleAutoReturn: () => void;
   toggleSound: () => void;
   /** Mount-effect-only: apply the persisted preference once, post-hydration
    * (see `soundMuted`'s doc comment). Does NOT re-persist (avoids a
@@ -346,6 +393,9 @@ export interface HudState {
   setAutoSlot: (slot: number, skillId: string | null) => void;
   challengeBoss: () => void;
   advanceStage: () => void;
+  /** Queue a walk to an adjacent unlocked zone (M6, last-wins per frame) — the
+   * engine no-ops it if the target isn't adjacent + unlocked or the hero is busy. */
+  walkToZone: (target: WorldLocation) => void;
   /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
    * `buyUpgrade`) — the engine no-ops it if requirements aren't met. */
   evolveHero: (slot: number) => void;
@@ -370,10 +420,20 @@ export const useGameStore = create<HudState>((set, get) => ({
   bossReady: false,
   bossHint: emptyBossHint,
   heroes: [],
+  world: {
+    mapId: "map1",
+    zoneIdx: 1,
+    kind: "farm",
+    stage: 1,
+    traveling: false,
+    left: null,
+    right: null,
+  },
 
   speed: 1,
   autoCast: false,
   autoAllocate: false,
+  autoReturn: true,
   soundMuted: false,
 
   hasSyncedOnce: false,
@@ -387,6 +447,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   setSpeed: (speed) => set({ speed }),
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
   toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
+  toggleAutoReturn: () => set((s) => ({ autoReturn: !s.autoReturn })),
   toggleSound: () =>
     set((s) => {
       const soundMuted = !s.soundMuted;
@@ -434,6 +495,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   advanceStage: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, advanceStage: true } })),
+
+  walkToZone: (target) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, walkToZone: target } })),
 
   evolveHero: (slot) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, evolveHero: slot } })),

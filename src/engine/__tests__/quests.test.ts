@@ -14,7 +14,7 @@ import {
   type GameState,
   type Hero,
 } from "@/engine";
-import { soloSave, makeStubEnemy, clone } from "./helpers";
+import { soloSave, makeStubEnemy, clone, forceBoss } from "./helpers";
 
 /**
  * M5 task 5 — class-change quest v1 ("เปลี่ยนคลาสผ่านเควส").
@@ -138,8 +138,7 @@ describe("objective counting", () => {
 
     // Meet the kill goal directly, then trigger the boss defeat via the real path.
     h.quest!.progress[objIndices(h).kill] = CONFIG.quest.classChange.kills;
-    s.bossReady = true;
-    step(s, { challengeBoss: true }); // -> phase "boss", boss spawned
+    forceBoss(s); // M6: enter a boss fight without the world walk
     expect(s.phase).toBe("boss");
     s.boss!.hp = 0;
     step(s, {}); // resolveDeaths -> onBossKilled -> killBoss objective++

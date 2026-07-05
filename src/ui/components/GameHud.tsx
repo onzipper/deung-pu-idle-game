@@ -19,7 +19,9 @@ import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { StatPanel } from "@/ui/components/StatPanel";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
+import { AutoReturnToggle } from "@/ui/components/AutoReturnToggle";
 import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
+import { WalkControls } from "@/ui/components/WalkControls";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 
@@ -65,6 +67,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         />
       </div>
 
+      {/* M6 "World & Town": zone/map label + walk arrows (functional; theming +
+          goal-ladder polish are later tasks). */}
+      <WalkControls />
+
       <BossPanel />
 
       <div className="flex flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
@@ -78,6 +84,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         >
           <SpeedSelector />
           <div className="flex items-center gap-3">
+            <AutoReturnToggle />
             <SwitchCharacterLink />
             <CodexButton />
             <SoundToggle />

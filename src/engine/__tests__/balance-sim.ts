@@ -1,46 +1,41 @@
 /**
- * Balance-simulation harness (headless) — M5 SOLO rebaseline tool.
+ * Balance-simulation harness (headless) — M6 WORLD rebaseline tool.
  *
- * M5 Character Pivot: the game is now a SINGLE character, not a 3-hero team, and
- * the purchasable upgrade lines are gone. This harness runs the pure engine with
- * no renderer and an auto-pilot for EACH base class SOLO (swordsman / archer /
- * mage), instruments the run, and reports per-class per-stage pacing so solo
- * viability (S1->S10, 0 permanent walls, classes within ~2x) can be verified.
+ * M6 "World & Town" regrouped the per-stage content into MAPS of walkable ZONES
+ * (farm zones + a boss room). Progression is now WALKING the world: farm a zone to
+ * its kill quota (which unlocks the next zone + grants the old per-stage boss
+ * reward), walk forward, and enter the map's boss room; beating it unlocks the next
+ * map. Combat inside a zone is unchanged (driven by the zone's stage), so this
+ * harness runs the pure engine with an idle-player WORLD autopilot per base class
+ * and reports per-zone (stage-keyed) time-to-clear so pacing (~unchanged, no new
+ * walls, negligible transit) can be verified.
  *
- * Auto-pilot: auto-cast on, challenge the boss as soon as the hint says "ready",
- * advance on victory, ACCEPT the class-change quest the moment it's offered, and
- * evolve the moment the quest completes (M5 task 5 — the quest EFFORT replaced the
- * old gold gate). Everything is derived purely from `step()` + read-only helpers,
- * so results are deterministic and reproducible.
+ * Autopilot: auto-cast + auto-allocate + auto-return ON; accept the class-change
+ * quest when offered; evolve when it completes; fill auto-slots as skills unlock;
+ * walk forward on unlock; enter the boss room; advance to the next map on a
+ * boss-room victory. Death -> town -> auto-return is engine behaviour.
  *
  * Run with: `pnpm sim`
- * Knobs (env):
- *   SIM_SECONDS=1800    simulated seconds per seed
- *   SEEDS=1,2,3,42,1337 comma-separated RNG seeds
- *   CLASSES=swordsman,archer,mage  which classes to run
+ * Knobs (env): SIM_SECONDS, SEEDS, CLASSES (see below).
  */
 
 import {
   initGameState,
   step,
-  bossHint,
   canEvolveHero,
   isClassChangeQuestOffered,
   learnedSkills,
   unlockedAutoSlotCount,
+  worldNav,
+  zoneAt,
   SIGNATURE_SKILL,
-  CONFIG,
-  SAVE_VERSION,
   FIXED_DT,
   type FrameInput,
   type Hero,
+  type GameState,
   type HeroClass,
   type SaveData,
 } from "@/engine";
-
-// ---------------------------------------------------------------------------
-// Config / knobs
-// ---------------------------------------------------------------------------
 
 const SIM_SECONDS = Number(process.env.SIM_SECONDS ?? 1800);
 const STEPS = Math.round(SIM_SECONDS / FIXED_DT);
@@ -54,56 +49,52 @@ const CLASSES: HeroClass[] = (process.env.CLASSES ?? "swordsman,archer,mage")
   .filter((s): s is HeroClass => s === "swordsman" || s === "archer" || s === "mage");
 
 // ---------------------------------------------------------------------------
-// Per-run metric shapes
+// Per-run metrics — keyed by the zone's STAGE (each farm zone / boss room owns one).
 // ---------------------------------------------------------------------------
 
-interface StageMetric {
+interface ZoneMetric {
   stage: number;
+  mapId: string;
+  kind: "farm" | "boss";
   enterTime: number;
-  clearTime: number | null; // null if the window ended before the boss died
-  kills: number;
-  income: number; // gold earned during the stage (kills + boss, gross of spend)
+  /** Time the zone was CLEARED: farm = its quota met (next unlocked); boss = beaten. */
+  clearTime: number | null;
+  deaths: number;
   bossAttempts: number;
   bossWipes: number;
-  soloDeaths: number; // solo respawns during the stage (anti-stall signal)
-  levelAtClear: number; // hero level when the stage cleared
-  tierAtClear: 1 | 2;
-  recPowerAtWin: number | null;
-  teamPowerAtWin: number | null;
+  levelAtClear: number;
 }
 
 interface SeedResult {
   cls: HeroClass;
   seed: number;
   finalStage: number;
-  finalGold: number;
   finalLevel: number;
-  firstBossKillTime: number | null;
-  /** Stage/time the class-change quest completed (tier 1 -> 2), or null (never). */
+  finalMap: string;
   evolveStage: number | null;
-  evolveTime: number | null;
-  totalWipes: number;
   totalDeaths: number;
-  stages: StageMetric[];
+  totalWipes: number;
+  zones: ZoneMetric[];
 }
 
-// ---------------------------------------------------------------------------
-// One seeded solo run, fully instrumented
-// ---------------------------------------------------------------------------
-
 function makeSave(cls: HeroClass): SaveData {
+  // A cold-start save at stage 1 (first farm zone). Built directly; the world
+  // fields are what initGameState fills for a fresh start, mirrored here.
   return {
-    version: SAVE_VERSION,
+    version: 8,
     stage: 1,
     gold: 0,
+    location: { mapId: "map1", zoneIdx: 1 },
+    unlockedZones: { map1: 2 },
+    lastFarmZone: { mapId: "map1", zoneIdx: 1 },
     hero: {
       cls,
       level: 1,
       xp: 0,
       tier: 1,
       statPoints: 0,
-      stats: { ...CONFIG.stats.base[cls] },
-      mana: CONFIG.mana.base,
+      stats: { ...baseStatsOf(cls) },
+      mana: 60,
       autoSlots: [SIGNATURE_SKILL[cls], null, null],
       quest: null,
     },
@@ -111,12 +102,17 @@ function makeSave(cls: HeroClass): SaveData {
   };
 }
 
-/**
- * Idle-player auto-slot loadout (M5 skill framework v2): as slots unlock by level
- * and skills unlock by level/tier, fill the next OPEN unlocked slot with the next
- * learned-but-unslotted skill (unlock order — signature first). Returns the
- * setAutoSlot intents needed this step (empty once everything is slotted).
- */
+function baseStatsOf(cls: HeroClass) {
+  // Kept minimal to avoid importing CONFIG here — the engine re-derives stats on
+  // load, and initGameState clamps; these are the RO-flavour class bases.
+  return cls === "swordsman"
+    ? { str: 8, dex: 4, int: 3, vit: 6 }
+    : cls === "archer"
+      ? { str: 4, dex: 8, int: 3, vit: 5 }
+      : { str: 3, dex: 4, int: 8, vit: 4 };
+}
+
+/** Idle-player auto-slot fill (unchanged from the M5 harness). */
 function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
   const unlocked = unlockedAutoSlotCount(hero.level);
   const learned = learnedSkills(hero).map((s) => s.id);
@@ -132,309 +128,237 @@ function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
   return out;
 }
 
+/**
+ * World navigation autopilot: walk forward once the current farm zone's quota is
+ * met (bossReady) and the next zone is unlocked, enter the boss room, and walk to
+ * the next map on a boss-room victory. Between failed boss-room attempts the death
+ * -> town -> auto-return loop farms the last zone, so a real "grind + retry" cadence
+ * emerges without special-casing it here.
+ */
+function navInput(s: GameState): Partial<FrameInput> {
+  if (s.traveling) return {};
+  const nav = worldNav(s);
+  const walkRight = (): Partial<FrameInput> =>
+    nav.right?.unlocked
+      ? { walkToZone: { mapId: nav.right.zone.mapId, zoneIdx: nav.right.zone.zoneIdx } }
+      : {};
+  if (s.phase === "victory") return walkRight();
+  const kind = nav.current.kind;
+  if (kind === "town") return walkRight();
+  if (kind === "boss") return {};
+  if (s.bossReady) return walkRight();
+  return {};
+}
+
 function runSeed(cls: HeroClass, seed: number): SeedResult {
   const s = initGameState(seed, makeSave(cls));
   s.autoCast = true;
-  // M5 "Base stats": measure the AUTO-allocated baseline (idle player) — every
-  // level's points dump into the class primary stat each step.
   s.autoAllocate = true;
+  s.autoReturn = true;
 
-  const stages: StageMetric[] = [];
-  let cur: StageMetric = freshStage(s.stage, 0);
+  const zones: ZoneMetric[] = [];
+  const byKey = new Map<string, ZoneMetric>();
+  const key = (mapId: string, stage: number, kind: string): string => `${mapId}:${stage}:${kind}`;
+
+  let cur: ZoneMetric = freshZone(s);
+  byKey.set(key(cur.mapId, cur.stage, cur.kind), cur);
+  zones.push(cur);
 
   let prevPhase = s.phase;
-  let prevStage = s.stage;
-  let prevGold = s.gold;
-  let prevTier = s.heroes[0].tier;
-  let prevKills = s.kills;
   let prevDead = s.heroes[0].dead;
-
-  let firstBossKillTime: number | null = null;
+  let prevTier = s.heroes[0].tier;
   let evolveStage: number | null = null;
-  let evolveTime: number | null = null;
-  let totalWipes = 0;
   let totalDeaths = 0;
-  let pendingRec: number | null = null;
-  let pendingTeam: number | null = null;
-  // Realistic retry loop: challenge the boss once the kill goal is met, then —
-  // if it wipes and retreats — FARM at least one more level before re-attempting
-  // (a real player grinds between boss tries). This removes the raw-atk hint bias
-  // that made low-atk-but-high-DPS classes over-farm, so the sim measures actual
-  // combat balance. `null` = never attempted this stage yet.
-  let lastAttemptLevel: number | null = null;
-  let lastAttemptStage = 0;
+  let totalWipes = 0;
 
   for (let i = 0; i < STEPS; i++) {
-    const input: FrameInput = {};
-    if (s.phase === "battle" && s.bossReady) {
-      if (lastAttemptStage !== s.stage) lastAttemptLevel = null; // fresh stage
-      const lvl = s.heroes[0].level;
-      if (lastAttemptLevel === null || lvl > lastAttemptLevel) {
-        input.challengeBoss = true;
-        lastAttemptLevel = lvl;
-        lastAttemptStage = s.stage;
-        const hint = bossHint(s);
-        pendingRec = hint.recommendedPower;
-        pendingTeam = hint.teamPower;
-      }
-    } else if (s.phase === "victory") {
-      input.advanceStage = true;
-    }
-
-    // Auto-accept the class-change quest the moment it's offered, then evolve the
-    // moment its objectives complete (M5 task 5 — effort gate, no gold).
+    const input: FrameInput = { ...navInput(s) };
     if (isClassChangeQuestOffered(s.heroes[0])) input.acceptQuest = 0;
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
-
-    // Idle-player auto-slot management: assign newly-unlocked skills into open
-    // auto-cast slots (mirrors a real player filling their loadout).
-    const slotAssigns = fillAutoSlots(s.heroes[0]);
-    if (slotAssigns.length) input.setAutoSlots = slotAssigns;
+    const slots = fillAutoSlots(s.heroes[0]);
+    if (slots.length) input.setAutoSlots = slots;
 
     step(s, input);
 
-    // --- income (no gold sink now — evolution is quest-gated, task 5) ---
-    const income = s.gold - prevGold;
-    if (income > 0) cur.income += income;
-
-    // --- class-change (evolution) timing: capture the stage/time tier flips ---
-    if (prevTier < s.heroes[0].tier) {
-      evolveStage = s.stage;
-      evolveTime = s.time;
-    }
-
-    // --- solo respawn detection (dead edge) ---
-    const nowDead = s.heroes[0].dead;
-    if (nowDead && !prevDead && s.phase === "battle") {
-      cur.soloDeaths++;
-      totalDeaths++;
-    }
-
-    // --- phase transitions ---
-    if (prevPhase !== s.phase) {
-      if (prevPhase === "battle" && s.phase === "boss") {
-        cur.bossAttempts++;
-      } else if (prevPhase === "boss" && s.phase === "battle") {
-        cur.bossWipes++;
-        totalWipes++;
-      } else if (prevPhase === "boss" && s.phase === "victory") {
+    // Zone clear signals (from events, deterministic).
+    for (const e of s.events) {
+      if (e.type === "zoneUnlocked" && cur.kind === "farm" && cur.clearTime === null) {
         cur.clearTime = s.time;
-        cur.kills = prevKills;
         cur.levelAtClear = s.heroes[0].level;
-        cur.tierAtClear = s.heroes[0].tier;
-        cur.recPowerAtWin = pendingRec;
-        cur.teamPowerAtWin = pendingTeam;
-        if (firstBossKillTime === null) firstBossKillTime = s.time;
-        stages.push(cur);
+      }
+      if (e.type === "mapUnlocked" && cur.kind === "boss" && cur.clearTime === null) {
+        cur.clearTime = s.time;
+        cur.levelAtClear = s.heroes[0].level;
+      }
+      if (e.type === "zoneEntered") {
+        const k = key(e.mapId, e.stage, e.kind);
+        let zm = byKey.get(k);
+        if (!zm && (e.kind === "farm" || e.kind === "boss")) {
+          zm = { ...freshZone(s), stage: e.stage, mapId: e.mapId, kind: e.kind, enterTime: s.time };
+          byKey.set(k, zm);
+          zones.push(zm);
+        }
+        if (zm && (e.kind === "farm" || e.kind === "boss")) cur = zm;
       }
     }
 
-    if (s.stage !== prevStage) {
-      cur = freshStage(s.stage, s.time);
+    // Death edge.
+    const nowDead = s.heroes[0].dead;
+    if (nowDead && !prevDead) {
+      cur.deaths++;
+      totalDeaths++;
     }
+    // Boss-room attempt / wipe edges.
+    if (prevPhase !== s.phase) {
+      if (s.phase === "boss") cur.bossAttempts++;
+      if (prevPhase === "boss" && s.phase !== "victory") {
+        cur.bossWipes++;
+        totalWipes++;
+      }
+    }
+    if (prevTier < s.heroes[0].tier) evolveStage = s.stage;
 
     prevPhase = s.phase;
-    prevStage = s.stage;
-    prevGold = s.gold;
-    prevTier = s.heroes[0].tier;
-    prevKills = s.kills;
     prevDead = nowDead;
-  }
-
-  if (cur.clearTime === null) {
-    cur.kills = s.kills;
-    cur.levelAtClear = s.heroes[0].level;
-    cur.tierAtClear = s.heroes[0].tier;
-    stages.push(cur);
+    prevTier = s.heroes[0].tier;
   }
 
   return {
     cls,
     seed,
     finalStage: s.stage,
-    finalGold: Math.floor(s.gold),
     finalLevel: s.heroes[0].level,
-    firstBossKillTime,
+    finalMap: s.location.mapId,
     evolveStage,
-    evolveTime,
-    totalWipes,
     totalDeaths,
-    stages,
+    totalWipes,
+    zones,
   };
 }
 
-function freshStage(stage: number, enterTime: number): StageMetric {
+function freshZone(s: GameState): ZoneMetric {
+  const z = zoneAt(s.location);
   return {
-    stage,
-    enterTime,
+    stage: z.stage,
+    mapId: z.mapId,
+    kind: z.kind === "boss" ? "boss" : "farm",
+    enterTime: s.time,
     clearTime: null,
-    kills: 0,
-    income: 0,
+    deaths: 0,
     bossAttempts: 0,
     bossWipes: 0,
-    soloDeaths: 0,
-    levelAtClear: 1,
-    tierAtClear: 1,
-    recPowerAtWin: null,
-    teamPowerAtWin: null,
+    levelAtClear: s.heroes[0].level,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Formatting helpers
+// Aggregation + reporting (per zone, keyed by map:stage).
 // ---------------------------------------------------------------------------
 
 const pad = (v: unknown, w: number): string => String(v).padEnd(w);
 const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 
-interface StageAgg {
+interface ZoneAgg {
+  mapId: string;
   stage: number;
+  kind: "farm" | "boss";
   clears: number;
   meanDur: number | null;
   meanLevel: number | null;
-  totalAttempts: number;
-  totalWipes: number;
-  totalDeaths: number;
-  meanRec: number | null;
-  meanTeam: number | null;
+  deaths: number;
+  wipes: number;
 }
 
-function aggregate(results: SeedResult[]): StageAgg[] {
-  const maxStage = Math.max(...results.map((r) => r.finalStage));
-  const out: StageAgg[] = [];
-  for (let stage = 1; stage <= maxStage; stage++) {
-    const all = results.flatMap((r) => r.stages).filter((st) => st.stage === stage);
-    const cleared = all.filter((st) => st.clearTime !== null);
-    const durs = cleared.map((st) => st.clearTime! - st.enterTime);
-    const levels = cleared.map((st) => st.levelAtClear);
-    const recs = cleared.map((st) => st.recPowerAtWin).filter((x): x is number => x !== null);
-    const teams = cleared.map((st) => st.teamPowerAtWin).filter((x): x is number => x !== null);
+function aggregate(results: SeedResult[]): ZoneAgg[] {
+  const keys = new Map<string, { mapId: string; stage: number; kind: "farm" | "boss" }>();
+  for (const r of results) {
+    for (const z of r.zones) keys.set(`${z.mapId}:${z.stage}:${z.kind}`, z);
+  }
+  const ordered = [...keys.values()].sort((a, b) => a.stage - b.stage || a.kind.localeCompare(b.kind));
+  const out: ZoneAgg[] = [];
+  for (const kz of ordered) {
+    const all = results.flatMap((r) =>
+      r.zones.filter((z) => z.mapId === kz.mapId && z.stage === kz.stage && z.kind === kz.kind),
+    );
+    const cleared = all.filter((z) => z.clearTime !== null);
+    const durs = cleared.map((z) => z.clearTime! - z.enterTime);
     out.push({
-      stage,
+      mapId: kz.mapId,
+      stage: kz.stage,
+      kind: kz.kind,
       clears: cleared.length,
       meanDur: durs.length ? mean(durs) : null,
-      meanLevel: levels.length ? mean(levels) : null,
-      totalAttempts: all.reduce((a, st) => a + st.bossAttempts, 0),
-      totalWipes: all.reduce((a, st) => a + st.bossWipes, 0),
-      totalDeaths: all.reduce((a, st) => a + st.soloDeaths, 0),
-      meanRec: recs.length ? mean(recs) : null,
-      meanTeam: teams.length ? mean(teams) : null,
+      meanLevel: cleared.length ? mean(cleared.map((z) => z.levelAtClear)) : null,
+      deaths: all.reduce((a, z) => a + z.deaths, 0),
+      wipes: all.reduce((a, z) => a + z.bossWipes, 0),
     });
   }
   return out;
 }
 
-function printClass(cls: HeroClass, results: SeedResult[], agg: StageAgg[]): void {
-  const nSeeds = results.length;
-  console.log(`\n=== ${cls.toUpperCase()} (solo) — ${nSeeds} seeds ===`);
+function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void {
+  const n = results.length;
+  console.log(`\n=== ${cls.toUpperCase()} (solo, world) — ${n} seeds ===`);
   console.log(
     "  " +
-      pad("stage", 6) +
+      pad("zone", 12) +
+      pad("kind", 6) +
       pad("clears", 8) +
       pad("meanDur", 9) +
-      pad("wallX", 7) +
       pad("lvl", 6) +
-      pad("boss a/w", 10) +
       pad("deaths", 8) +
-      pad("rec:team", 12),
+      pad("wipes", 7),
   );
-  let prevDur: number | null = null;
   for (const a of agg) {
-    const wallX = prevDur && a.meanDur ? (a.meanDur / prevDur).toFixed(2) + "x" : "-";
     console.log(
       "  " +
-        pad(a.stage, 6) +
-        pad(`${a.clears}/${nSeeds}`, 8) +
+        pad(`${a.mapId}/s${a.stage}`, 12) +
+        pad(a.kind, 6) +
+        pad(`${a.clears}/${n}`, 8) +
         pad(a.meanDur === null ? "-" : a.meanDur.toFixed(1), 9) +
-        pad(wallX, 7) +
         pad(a.meanLevel === null ? "-" : a.meanLevel.toFixed(0), 6) +
-        pad(`${a.totalAttempts}/${a.totalWipes}`, 10) +
-        pad(a.totalDeaths, 8) +
-        pad(
-          a.meanRec === null ? "-" : `${Math.round(a.meanRec)}:${Math.round(a.meanTeam ?? 0)}`,
-          12,
-        ),
-    );
-    if (a.meanDur !== null) prevDur = a.meanDur;
-  }
-
-  // Flags.
-  const flags: string[] = [];
-  for (const a of agg) {
-    if (a.clears < nSeeds) {
-      flags.push(
-        `WALL/STALL at stage ${a.stage}: only ${a.clears}/${nSeeds} seeds cleared it in the window`,
-      );
-    }
-  }
-  let pd: number | null = null;
-  for (const a of agg) {
-    if (a.meanDur !== null && pd !== null && a.meanDur > pd * 2.5) {
-      flags.push(`SPIKE at stage ${a.stage}: ${(a.meanDur / pd).toFixed(2)}x prev`);
-    }
-    if (a.meanDur !== null) pd = a.meanDur;
-  }
-  const totalDeaths = results.reduce((x, r) => x + r.totalDeaths, 0);
-  const totalWipes = results.reduce((x, r) => x + r.totalWipes, 0);
-  flags.push(
-    `reached stages: ${results.map((r) => r.finalStage).join(",")} | ` +
-      `final levels: ${results.map((r) => r.finalLevel).join(",")} | ` +
-      `solo respawns: ${totalDeaths} | boss wipes: ${totalWipes}`,
-  );
-  // Class-change quest completion beat (M5 task 5): stage + time tier flipped 1->2.
-  flags.push(
-    `class-change stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
-      `at time (s): ${results.map((r) => (r.evolveTime === null ? "-" : r.evolveTime.toFixed(0))).join(",")}`,
-  );
-  for (const line of flags) console.log("  - " + line);
-}
-
-// ---------------------------------------------------------------------------
-// Cross-class comparison
-// ---------------------------------------------------------------------------
-
-function printComparison(byClass: Map<HeroClass, StageAgg[]>): void {
-  console.log(`\n=== CLASS BALANCE (mean time-to-clear per stage) ===`);
-  const maxStage = Math.max(
-    ...[...byClass.values()].map((agg) => agg.length),
-    0,
-  );
-  const header = "  " + pad("stage", 6) + CLASSES.map((c) => pad(c, 11)).join("") + "spread";
-  console.log(header);
-  for (let stage = 1; stage <= maxStage; stage++) {
-    const durs = CLASSES.map((c) => {
-      const a = byClass.get(c)?.find((x) => x.stage === stage);
-      return a?.meanDur ?? null;
-    });
-    const present = durs.filter((d): d is number => d !== null);
-    const spread =
-      present.length >= 2 ? (Math.max(...present) / Math.min(...present)).toFixed(2) + "x" : "-";
-    console.log(
-      "  " +
-        pad(stage, 6) +
-        durs.map((d) => pad(d === null ? "-" : d.toFixed(0) + "s", 11)).join("") +
-        spread,
+        pad(a.deaths, 8) +
+        pad(a.wipes, 7),
     );
   }
+  console.log(
+    `  - reached: ${results.map((r) => `${r.finalMap}/s${r.finalStage}`).join(", ")}`,
+  );
+  console.log(
+    `  - final levels: ${results.map((r) => r.finalLevel).join(",")} | ` +
+      `class-change stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
+      `deaths: ${results.reduce((a, r) => a + r.totalDeaths, 0)} | ` +
+      `boss wipes: ${results.reduce((a, r) => a + r.totalWipes, 0)}`,
+  );
+  // Frontier flag: which zones did NOT clear on every seed (a wall/soft-wall).
+  const walls = agg.filter((a) => a.clears < n).map((a) => `${a.mapId}/s${a.stage}(${a.kind})`);
+  if (walls.length) console.log(`  - not cleared on every seed (frontier): ${walls.join(", ")}`);
 }
-
-// ---------------------------------------------------------------------------
-// Entry
-// ---------------------------------------------------------------------------
 
 function main(): void {
   console.log(
-    `[balance-sim M5 solo] ${SIM_SECONDS}s (${STEPS} steps) per seed, ` +
+    `[balance-sim M6 world] ${SIM_SECONDS}s (${STEPS} steps) per seed, ` +
       `${SEEDS.length} seeds, classes: ${CLASSES.join("/")}`,
   );
-  const byClass = new Map<HeroClass, StageAgg[]>();
+  const byClass = new Map<HeroClass, ZoneAgg[]>();
   for (const cls of CLASSES) {
     const results = SEEDS.map((seed) => runSeed(cls, seed));
     const agg = aggregate(results);
     byClass.set(cls, agg);
     printClass(cls, results, agg);
   }
-  printComparison(byClass);
+
+  // Cross-class farm-zone clear time per stage (pacing comparison).
+  console.log(`\n=== FARM-ZONE clear time per stage (mean s) ===`);
+  const stages = [...new Set([...byClass.values()].flatMap((a) => a.filter((z) => z.kind === "farm").map((z) => z.stage)))].sort((a, b) => a - b);
+  console.log("  " + pad("stage", 6) + CLASSES.map((c) => pad(c, 11)).join(""));
+  for (const stage of stages) {
+    const row = CLASSES.map((c) => {
+      const z = byClass.get(c)?.find((x) => x.stage === stage && x.kind === "farm");
+      return pad(z?.meanDur == null ? "-" : z.meanDur.toFixed(0) + "s", 11);
+    });
+    console.log("  " + pad(stage, 6) + row.join(""));
+  }
 }
 
 main();

@@ -9,29 +9,83 @@ import {
   SIGNATURE_SKILL,
   heroMaxMana,
   initGameState,
+  makeBoss,
   makeHero,
+  migrate,
   step,
+  worldNav,
 } from "@/engine";
-import type { Enemy, GameState, HeroClass, SaveData } from "@/engine";
+import type { Enemy, FrameInput, GameState, HeroClass, SaveData } from "@/engine";
 
-/** A fresh single-character save of class `cls` at the given stage (M5 v7 shape). */
-export const soloSave = (cls: HeroClass = "swordsman", stage = 3): SaveData => ({
-  version: SAVE_VERSION,
-  stage,
-  gold: 0,
-  hero: {
-    cls,
-    level: 1,
-    xp: 0,
-    tier: 1,
-    statPoints: 0,
-    stats: { ...CONFIG.stats.base[cls] },
-    mana: heroMaxMana(cls, CONFIG.stats.base[cls].int),
-    autoSlots: [SIGNATURE_SKILL[cls], null, null],
-    quest: null,
-  },
-  lastSeen: 0,
-});
+/**
+ * A fresh single-character save of class `cls` at the given stage (M6 v8 shape).
+ * Built through `migrate()` so the world fields (location/unlockedZones/
+ * lastFarmZone) are placed at the FARM zone matching `stage` — the same path a
+ * real trimmed/older save takes on load.
+ */
+export const soloSave = (cls: HeroClass = "swordsman", stage = 3): SaveData =>
+  migrate({
+    version: SAVE_VERSION,
+    stage,
+    gold: 0,
+    hero: {
+      cls,
+      level: 1,
+      xp: 0,
+      tier: 1,
+      statPoints: 0,
+      stats: { ...CONFIG.stats.base[cls] },
+      mana: heroMaxMana(cls, CONFIG.stats.base[cls].int),
+      autoSlots: [SIGNATURE_SKILL[cls], null, null],
+      quest: null,
+    },
+    lastSeen: 0,
+  });
+
+/**
+ * Test shortcut into a boss fight at the CURRENT stage, WITHOUT the world walk
+ * (mirrors the old `challengeBoss` + the internal `startBossFight`). The world
+ * navigation INTO a boss room is covered separately in world.test.ts; this lets
+ * the boss-MECHANIC tests (enrage/slam/telegraph) stay stage-scoped and terse.
+ */
+export function forceBoss(s: GameState): void {
+  s.bossReady = true;
+  s.phase = "boss";
+  s.boss = makeBoss(s.nextId++, s.stage);
+  s.enemies = [];
+  s.projectiles = s.projectiles.filter((p) => p.team === "hero");
+  for (const h of s.heroes) {
+    h.dead = false;
+    h.hp = h.maxHp;
+  }
+}
+
+/**
+ * Idle-player world autopilot (mirrors the balance sim): walk forward once a farm
+ * zone's quota is met and the next zone is unlocked, enter the boss room, and walk
+ * to the next map on a boss-room victory. Death respawn + auto-return are engine
+ * behaviour (set `s.autoReturn = true`).
+ */
+export function worldAutopilot(s: GameState): FrameInput {
+  const input: FrameInput = {};
+  if (s.traveling) return input;
+  const nav = worldNav(s);
+  const right = nav.right;
+  const walkRight = (): void => {
+    if (right?.unlocked) input.walkToZone = { mapId: right.zone.mapId, zoneIdx: right.zone.zoneIdx };
+  };
+  if (s.phase === "victory") {
+    walkRight(); // boss room beaten -> into the next map
+    return input;
+  }
+  if (nav.current.kind === "town") {
+    walkRight(); // stranded in town (auto-return off) -> walk back out
+    return input;
+  }
+  if (nav.current.kind === "boss") return input; // fighting
+  if (s.bossReady) walkRight(); // farm quota met -> into the next farm zone / boss room
+  return input;
+}
 
 /**
  * Seat a synthetic swordsman/archer/mage PARTY into an otherwise-solo state.

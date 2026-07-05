@@ -57,6 +57,7 @@ import {
   step,
   toSaveData,
   unlockedAutoSlotCount,
+  worldNav,
   type FrameInput,
   type GameEvent,
   type GameState,
@@ -213,6 +214,13 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     };
   });
 
+  // World position + walk-arrow affordances (M6). Precompute the display-ready
+  // neighbor state here (the one place the engine `worldNav` read runs) so the
+  // throttled store carries only plain data.
+  const nav = worldNav(state);
+  const neighbor = (n: typeof nav.left) =>
+    n ? { mapId: n.zone.mapId, zoneIdx: n.zone.zoneIdx, kind: n.zone.kind, unlocked: n.unlocked } : null;
+
   return {
     gold: state.gold,
     stage: state.stage,
@@ -223,6 +231,15 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     bossReady: state.bossReady,
     bossHint: bossHint(state),
     heroes,
+    world: {
+      mapId: nav.current.mapId,
+      zoneIdx: nav.current.zoneIdx,
+      kind: nav.current.kind,
+      stage: nav.current.stage,
+      traveling: nav.traveling,
+      left: neighbor(nav.left),
+      right: neighbor(nav.right),
+    },
   };
 }
 
@@ -322,6 +339,7 @@ export function GameClient() {
       // UI-owned flags the engine reads directly (not part of FrameInput).
       state.autoCast = store.autoCast;
       state.autoAllocate = store.autoAllocate;
+      state.autoReturn = store.autoReturn;
       // UI-owned sound preference — applied to the audio module every frame,
       // same pattern (never queued through FrameInput; it isn't sim state).
       audio.setMuted(store.soundMuted);
@@ -335,6 +353,7 @@ export function GameClient() {
         setAutoSlots: pending.setAutoSlots.length ? pending.setAutoSlots : undefined,
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
+        walkToZone: pending.walkToZone ?? undefined,
         evolveHero: pending.evolveHero ?? undefined,
         acceptQuest: pending.acceptQuest ?? undefined,
         allocateStat: pending.allocateStat ?? undefined,
@@ -450,6 +469,10 @@ export function GameClient() {
       // the live loop uses, bounded by OFFLINE_SYNC_BUDGET_MS (see its comment).
       const totalOfflineSteps = Math.floor(offlineSeconds / FIXED_DT);
       if (totalOfflineSteps > 0) {
+        // Offline idle FORCES auto-return (M6): a hero dead at the snapshot must
+        // respawn + walk back to farm during the replay so idle earnings never
+        // stall in town (regardless of the live UI toggle).
+        state.autoReturn = true;
         const goldBefore = state.gold;
         const deadline = performance.now() + OFFLINE_SYNC_BUDGET_MS;
         let ran = 0;

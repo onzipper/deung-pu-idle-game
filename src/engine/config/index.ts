@@ -33,6 +33,35 @@ export const CONFIG = {
   /** Throttle for engine -> UI (Zustand) state sync, in Hz. */
   uiSyncHz: 10,
 
+  // ---- world / zones (M6 "World & Town", ROADMAP task 1) ----
+  // The world is a set of ordered MAPS (themes). Each map is a left-to-right run
+  // of walkable ZONES: farm zones (one existing STAGE each) + a single BOSS ROOM.
+  // The TOWN (safe hub + respawn point) is one zone at the LEFT edge of
+  // `townMapId`. This REGROUPS the existing stage content (stages 1-5 -> map1's
+  // five farm zones, 6-10 -> map2, 11+ -> map3 frontier) — per-zone enemy
+  // rosters/scaling are still driven by `state.stage` (= the zone's stage), so
+  // combat balance INSIDE a zone is UNCHANGED. Config-driven so M7/M8 add maps by
+  // data. Progression + navigation live in systems/world.ts.
+  //
+  // A farm zone unlocks the NEXT zone once its kill quota (killGoal(stage)) is met;
+  // clearing a farm zone grants the SAME xp/gold the old per-stage boss did
+  // (xpPerBossKill/goldPerBoss are REUSED, so the leveling curve is preserved
+  // WITHOUT a per-zone boss). The boss room unlocks after the last farm zone;
+  // beating it unlocks the next map. map3 is the soft-wall frontier (bossStageId 15
+  // sits past the current content ceiling — intended; extended by M7/M8 content).
+  world: {
+    maps: [
+      { id: "map1", zoneStageIds: [1, 2, 3, 4, 5], bossStageId: 5 },
+      { id: "map2", zoneStageIds: [6, 7, 8, 9, 10], bossStageId: 10 },
+      { id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15 },
+    ],
+    townMapId: "map1",
+    // Deterministic walk transit per hop (seconds). Negligible vs clear times;
+    // render animates the actual multi-zone walk (a later task). Death respawn
+    // reuses `heroReviveTime` as its walk-home time (unchanged death cost).
+    transitSeconds: 0.6,
+  },
+
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.

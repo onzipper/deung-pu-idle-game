@@ -14,7 +14,7 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
-import type { StatKey } from "@/engine/entities";
+import type { StatKey, WorldLocation } from "@/engine/entities";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
@@ -22,7 +22,14 @@ import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
 import { acceptQuest } from "@/engine/systems/quests";
 import { processStatAllocation } from "@/engine/systems/allocation";
-import { nextStage } from "@/engine/systems/flow";
+import {
+  advanceToNextMap,
+  checkZoneUnlock,
+  enterBossRoom,
+  updateTransit,
+  walkToZone,
+  zoneAt,
+} from "@/engine/systems/world";
 import {
   decayHeroTimers,
   updateEnemies,
@@ -57,9 +64,22 @@ export interface FrameInput {
    * no-op for a locked slot or an unlearned skill. Applied once per drained input.
    */
   setAutoSlots?: SetAutoSlotInput[];
-  /** Begin the boss fight (only honoured when bossReady && phase "battle"). */
+  /**
+   * Walk to an adjacent, unlocked zone (M6 "World & Town"). The primary
+   * navigation intent (walk arrows). No-op while traveling, mid boss fight, dead,
+   * or if the target isn't adjacent + unlocked. Applied once per drained input.
+   */
+  walkToZone?: WorldLocation;
+  /**
+   * Walk INTO the current map's boss room (M6 — the "เข้าห้องบอส" action). A
+   * convenience wrapper over `walkToZone` valid at the last farm zone once the
+   * boss room is unlocked. (Pre-M6 this began the boss fight directly.)
+   */
   challengeBoss?: boolean;
-  /** Advance to the next stage (only honoured when phase "victory"). */
+  /**
+   * From a boss-room VICTORY, walk into the next MAP's first zone (M6). A
+   * convenience wrapper over `walkToZone`. (Pre-M6 this advanced the stage.)
+   */
   advanceStage?: boolean;
   /**
    * Evolve the hero at this slot index (M5 class advancement). Honoured across
@@ -100,13 +120,34 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // player can spend points between stages (victory) and auto-allocate keeps up
   // with boss-kill level-ups; before the victory early-return below.
   processStatAllocation(state, input.allocateStat);
-  if (input.advanceStage && state.phase === "victory") nextStage(state);
-  if (input.challengeBoss && state.bossReady && state.phase === "battle") {
-    startBossFight(state);
+
+  // --- world navigation (M6 "World & Town") ---
+  if (input.walkToZone) walkToZone(state, input.walkToZone);
+  if (input.challengeBoss) enterBossRoom(state);
+  if (input.advanceStage) advanceToNextMap(state);
+
+  // While walking between zones the sim only ticks the transit (no combat/waves).
+  // On arrival at a BOSS ROOM, start the boss fight (world stays free of a boss
+  // import — see systems/world.ts header).
+  if (state.traveling) {
+    const arrived = updateTransit(state);
+    if (arrived?.kind === "boss") startBossFight(state);
+    state.time += FIXED_DT;
+    state.rngState = rng.state();
+    return state;
   }
 
-  // Victory pauses the sim (the POC loop skipped update() while victorious).
-  // An advanceStage above may already have flipped us back to "battle".
+  // Town is a safe hub: no spawns, no combat. Still tick timers (mana regen /
+  // buff decay) so a stop in town isn't a dead zone for the caster resource.
+  if (zoneAt(state.location).kind === "town") {
+    decayHeroTimers(state);
+    state.time += FIXED_DT;
+    state.rngState = rng.state();
+    return state;
+  }
+
+  // Victory pauses the sim (a boss-room win). Navigation above (advanceStage) may
+  // already have started a walk out of it.
   if (state.phase === "victory") {
     state.rngState = rng.state();
     return state;
@@ -120,7 +161,8 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   if (state.phase === "boss") updateBoss(state);
   updateHeroes(state);
   updateProjectiles(state);
-  resolveDeaths(state); // enemy kills / boss kill / boss retreat / bossReady
+  resolveDeaths(state); // enemy kills / boss kill / death->town respawn / bossReady
+  checkZoneUnlock(state); // farm-zone quota met -> unlock the next zone (M6)
 
   state.time += FIXED_DT;
   state.rngState = rng.state();

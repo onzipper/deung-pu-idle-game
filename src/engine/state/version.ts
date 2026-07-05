@@ -10,8 +10,21 @@
 import { CONFIG, SIGNATURE_SKILL } from "@/engine/config";
 import { heroMaxMana } from "@/engine/systems/stats";
 import { classChangeQuestFor } from "@/engine/systems/quests";
+import {
+  farmLocationForStage,
+  isValidLocation,
+  mapZoneCount,
+  unlockUpTo,
+  zoneAt,
+} from "@/engine/systems/world";
 import type { SaveData, CharacterSave } from "@/engine/state";
-import type { HeroClass, HeroStats, HeroQuest, SkillId } from "@/engine/entities";
+import type {
+  HeroClass,
+  HeroStats,
+  HeroQuest,
+  SkillId,
+  WorldLocation,
+} from "@/engine/entities";
 
 // v1 -> v2 (M5): added per-hero `heroes: {level,xp}[]` (Character XP + Level).
 // v2 -> v3 (M5): added per-hero `tier` (class advancement / evolution).
@@ -36,7 +49,15 @@ import type { HeroClass, HeroStats, HeroQuest, SkillId } from "@/engine/entities
 //   level >= the gate is simply RE-OFFERED the quest on load (progress starts
 //   empty when accepted). No gold is owed — the old evolve gold cost is gone
 //   (quest EFFORT replaced it; evolution stays a one-way flag).
-export const SAVE_VERSION = 7;
+// v7 -> v8 (M6 "World & Town", ROADMAP task 1): the save gains `location`
+//   (mapId + zoneIdx), `unlockedZones` (per-map unlocked count) and `lastFarmZone`.
+//   Migration PLACES an existing save at the FARM zone matching its current
+//   `stage` (clamped into the frontier), unlocks EVERY zone up to and including
+//   it ("all zones up to it"), and points auto-return at that same farm zone. A
+//   v8 save's own world fields are validated + preserved (idempotent for the
+//   server's migrate-on-every-save). `stage` is re-derived to the placed zone's
+//   stage so it can never drift from `location`.
+export const SAVE_VERSION = 8;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -44,12 +65,19 @@ type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
 /** A per-hero stat block from an unknown/older save (all fields optional). */
 type UnknownStats = { str?: number; dex?: number; int?: number; vit?: number };
 
+/** A world location from an unknown/older save (fields optional). */
+type UnknownLocation = { mapId?: unknown; zoneIdx?: unknown };
+
 /** A save of unknown/older version, before migration. */
 export interface UnknownSave {
   version?: number;
   stage?: number;
   gold?: number;
   lastSeen?: number;
+  // v8 world fields (M6). All optional so a pre-v8 save is backfilled from `stage`.
+  location?: UnknownLocation;
+  unlockedZones?: Record<string, unknown>;
+  lastFarmZone?: UnknownLocation;
   // v4/v5/v6/v7 single-character shape (v5 adds statPoints + stats; v6 adds mana +
   // autoSlots; v7 adds quest):
   hero?: Partial<CharacterSave> & {
@@ -144,6 +172,36 @@ function normalizeAutoSlots(
   return out;
 }
 
+/** A location is valid only if it addresses a real zone; else null. */
+function normalizeLocation(loc: UnknownLocation | undefined): WorldLocation | null {
+  if (!loc || typeof loc.mapId !== "string" || typeof loc.zoneIdx !== "number") return null;
+  if (!Number.isInteger(loc.zoneIdx) || loc.zoneIdx < 0) return null;
+  const candidate: WorldLocation = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+  return isValidLocation(candidate) ? candidate : null;
+}
+
+/**
+ * Merge a saved `unlockedZones` (clamped to each map's real zone count) with the
+ * baseline that guarantees `location` itself is reachable ("all zones up to it").
+ * A pre-v8 save has no saved counts, so it becomes exactly the baseline.
+ */
+function normalizeUnlocked(
+  saved: Record<string, unknown> | undefined,
+  base: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = { ...base };
+  if (saved) {
+    for (const [mapId, v] of Object.entries(saved)) {
+      const count = mapZoneCount(mapId);
+      if (count === 0) continue; // unknown map id — drop
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+        out[mapId] = Math.max(out[mapId] ?? 0, Math.min(Math.floor(v), count));
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Upgrade a possibly-old save to the current `SAVE_VERSION`.
  *
@@ -212,11 +270,31 @@ export function migrate(save: UnknownSave): SaveData {
     };
   }
 
+  // ---- world placement (M6, v8) ----
+  // Place the save at the FARM zone matching its `stage` (clamped) unless it
+  // already carries a valid v8 location. Unlock everything up to that zone; point
+  // auto-return at the placed farm zone. Re-derive `stage` from the placement so
+  // it can never drift from `location`.
+  const rawStage = save.stage ?? 1;
+  const location: WorldLocation =
+    normalizeLocation(save.location) ?? farmLocationForStage(rawStage);
+  const placedFarm =
+    normalizeLocation(save.lastFarmZone) &&
+    zoneAt(normalizeLocation(save.lastFarmZone)!).kind === "farm"
+      ? normalizeLocation(save.lastFarmZone)!
+      : zoneAt(location).kind === "farm"
+        ? location
+        : farmLocationForStage(rawStage);
+  const unlockedZones = normalizeUnlocked(save.unlockedZones, unlockUpTo(location));
+
   return {
     version: SAVE_VERSION,
-    stage: save.stage ?? 1,
+    stage: zoneAt(location).stage,
     gold: save.gold ?? 0,
     hero,
+    location,
+    unlockedZones,
+    lastFarmZone: placedFarm,
     lastSeen: save.lastSeen ?? 0,
   };
 }

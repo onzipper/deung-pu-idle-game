@@ -100,8 +100,9 @@ describe("save round-trip", () => {
     s.heroes[0].level = 8;
 
     const save: SaveData = {
-      version: SAVE_VERSION,
-      stage: s.stage,
+      // Start from a valid v8 save (correct world fields for stage 2), then swap
+      // in the specific hero progression + gold this round-trip asserts.
+      ...soloSave("mage", 2),
       gold: s.gold,
       hero: {
         cls: "mage",
@@ -148,6 +149,11 @@ describe("save round-trip", () => {
         autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
         quest: null,
       },
+      // M6 v8 world fields: placed at the first farm zone (map1, stage 1), with the
+      // town + that zone unlocked, auto-return pointed at the same zone.
+      location: { mapId: "map1", zoneIdx: 1 },
+      unlockedZones: { map1: 2 },
+      lastFarmZone: { mapId: "map1", zoneIdx: 1 },
       lastSeen: 0,
     });
   });

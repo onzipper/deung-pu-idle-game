@@ -56,7 +56,12 @@
     "autoAllocateToggle": "🎯 Auto Stat: {state, select, on {ON} other {OFF}}",
     "allocateAria": "Add 1 point to {stat}",
     "primaryTag": "main",
-    "names": { "str": "STR", "dex": "DEX", "int": "INT", "vit": "VIT" },
+    "names": {
+      "str": "STR",
+      "dex": "DEX",
+      "int": "INT",
+      "vit": "VIT"
+    },
     "full": {
       "str": "Strength",
       "dex": "Dexterity",
@@ -220,9 +225,18 @@
   },
   "content": {
     "classes": {
-      "swordsman": { "name": "Swordsman", "evolvedName": "Knight" },
-      "archer": { "name": "Archer", "evolvedName": "Ranger" },
-      "mage": { "name": "Mage", "evolvedName": "Archmage" }
+      "swordsman": {
+        "name": "Swordsman",
+        "evolvedName": "Knight"
+      },
+      "archer": {
+        "name": "Archer",
+        "evolvedName": "Ranger"
+      },
+      "mage": {
+        "name": "Mage",
+        "evolvedName": "Archmage"
+      }
     },
     "skills": {
       "swordsman": {
@@ -233,7 +247,10 @@
         "name": "Arrow Rain",
         "desc": "Rains arrows across the whole battlefield"
       },
-      "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "mage": {
+        "name": "Meteor",
+        "desc": "Calls down a meteor strike on the area"
+      },
       "sword_whirl": {
         "name": "Whirl Slash",
         "desc": "Spins the blade to hit every foe in range"
@@ -258,7 +275,10 @@
         "name": "Explosive Shot",
         "desc": "An explosive arrow that bursts over a cluster"
       },
-      "mage_meteor": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "mage_meteor": {
+        "name": "Meteor",
+        "desc": "Calls down a meteor strike on the area"
+      },
       "mage_frostnova": {
         "name": "Frost Nova",
         "desc": "A quick, cheap frost blast for clearing waves"
@@ -269,7 +289,18 @@
       }
     },
     "quests": {},
-    "items": {}
+    "items": {},
+    "maps": {
+      "map1": {
+        "name": "Human World"
+      },
+      "map2": {
+        "name": "Demon Realm"
+      },
+      "map3": {
+        "name": "Wild Frontier"
+      }
+    }
   },
   "characters": {
     "pageTitle": "Your Characters",
@@ -334,5 +365,17 @@
       "duplicateError": "That name is already taken — try another",
       "genericError": "Couldn't create the character — try again"
     }
+  },
+  "world": {
+    "zoneFarm": "Zone {stage}",
+    "zoneTown": "Town",
+    "zoneBoss": "Boss Room",
+    "traveling": "Traveling…",
+    "walkLeftAria": "Walk to the left zone",
+    "walkRightAria": "Walk to the right zone",
+    "lockedTooltip": "Locked — clear this zone’s quota first",
+    "enterBossRoom": "Enter Boss Room",
+    "autoReturnOn": "Auto: return to farming",
+    "autoReturnOff": "Auto: wait in town"
   }
 }

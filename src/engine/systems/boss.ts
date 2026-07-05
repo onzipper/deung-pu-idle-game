@@ -19,6 +19,7 @@ import { makeBoss } from "@/engine/entities";
 import { combatPower } from "@/engine/systems/stats";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
+import { onBossRoomCleared } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
@@ -101,6 +102,11 @@ export function onBossKilled(state: GameState): void {
   state.phase = "victory";
   state.events.push({ type: "bossDefeated", x: bx, y: by, goldGained });
   state.events.push({ type: "stageCleared", stage: state.stage });
+  // M6 "World & Town": a boss room is the map's gate — beating it unlocks the next
+  // MAP's first zone (emits mapUnlocked + zoneUnlocked). No-op for a non-boss-room
+  // boss (there are none in M6, but the guard keeps this safe). The player then
+  // walks out of the victory via `advanceStage` (-> next map) or backtracks.
+  onBossRoomCleared(state);
 }
 
 /** Team wiped: boss leaves, revive the team, resume normal waves (retry allowed). */

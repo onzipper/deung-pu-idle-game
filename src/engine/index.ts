@@ -42,6 +42,20 @@ export {
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";
 
+// World / zone read helpers (M6 "World & Town"): the UI derives the current
+// map/zone label + walk-arrow (adjacent/locked) affordances from these pure
+// reads. Navigation itself happens ONLY through `step()` intents
+// (`walkToZone` / `challengeBoss` / `advanceStage`), so the mutators stay internal.
+export {
+  zoneAt,
+  worldNav,
+  isZoneUnlocked,
+  firstFarmLocation,
+  type Zone,
+  type WorldNav,
+  type ZoneNeighbor,
+} from "@/engine/systems/world";
+
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure
 // reads. Casting / slot assignment happen ONLY through `step()` intents

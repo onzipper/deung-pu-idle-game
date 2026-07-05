@@ -30,6 +30,13 @@ export const statBlockSchema = z
   .object({ str: statAxis, dex: statAxis, int: statAxis, vit: statAxis })
   .strict();
 
+/** A world location (M6 "World & Town", SAVE v8): map id + zone index. Validity of
+ * the address (map exists, zone in range) is re-checked by `migrate` on load, so a
+ * loose shape here never needlessly 400s a stale-but-harmless location. */
+export const worldLocationSchema = z
+  .object({ mapId: z.string(), zoneIdx: z.number().int().min(0) })
+  .strict();
+
 /**
  * The accepted incoming-save contract (M5 v5 single character). Anything that
  * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
@@ -82,6 +89,13 @@ export const saveDataSchema = z
           .optional(),
       })
       .strict(),
+    // M6 "World & Town" world position (SAVE v8). All OPTIONAL so a pre-v8 (or
+    // trimmed) payload is backfilled by `migrate()` from `stage` — same resilience
+    // as the optional fields above. `unlockedZones` is a per-map count record;
+    // counts are clamped to each map's real zone count on load.
+    location: worldLocationSchema.optional(),
+    unlockedZones: z.record(z.string(), z.number().int().min(0)).optional(),
+    lastFarmZone: worldLocationSchema.optional(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),
