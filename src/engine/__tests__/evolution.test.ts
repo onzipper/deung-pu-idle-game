@@ -5,99 +5,101 @@ import {
   migrate,
   toSaveData,
   canEvolveHero,
-  evolutionCost,
+  classChangeQuestFor,
   heroAtk,
   heroMaxHp,
   CONFIG,
   SAVE_VERSION,
   SIGNATURE_SKILL,
   type GameState,
+  type Hero,
 } from "@/engine";
 import { clone } from "./helpers";
 
 /**
- * M5 "Class advancement / evolution (ปลดคลาสใหม่)" (86d3jv7m3).
- *
- * Player-triggered per-hero tier upgrade: level + gold gate, one-shot flip to
- * tier 2, permanent atk/hp multiplier that compounds with upgrades + levels, an
- * `evolve` event, and a v2->v3 save migration. All deterministic (no RNG).
+ * M5 "Class advancement / evolution (ปลดคลาสใหม่)" (86d3jv7m3), task-5 gate:
+ * the class change is now triggered by COMPLETING the class-change quest (the old
+ * gold cost is gone — quest EFFORT replaced it). This suite covers the evolve
+ * intent itself; the quest mechanics (offer/accept/counting) live in quests.test.ts.
  */
 
 const EV = CONFIG.evolution;
 
-/** Put a hero at/above the evolution level+gold requirement. */
-function readyHero(s: GameState, idx = 0): void {
-  s.heroes[idx].level = EV.levelRequired;
-  s.gold = evolutionCost(s.heroes[idx].cls) + 1;
+/** Seat a COMPLETED class-change quest on the hero (all objectives satisfied). */
+function completeQuest(hero: Hero): void {
+  const def = classChangeQuestFor(hero.cls);
+  hero.quest = { id: def.id, accepted: true, progress: def.objectives.map((o) => o.count) };
 }
 
-describe("evolution requirements", () => {
-  it("canEvolveHero is false until BOTH level and gold gates are met", () => {
+/** Put a hero at the class-change requirement (level gate + completed quest). */
+function readyHero(s: GameState, idx = 0): void {
+  s.heroes[idx].level = EV.levelRequired;
+  completeQuest(s.heroes[idx]);
+}
+
+describe("evolution requirements (quest-gated)", () => {
+  it("canEvolveHero is false until the class-change quest is complete", () => {
     const s = initGameState(1);
     const h = s.heroes[0];
-    // Fresh hero: level 1, no gold.
+    // Fresh hero: tier 1, no quest.
     expect(canEvolveHero(s, h)).toBe(false);
-    // Level met, gold short.
+    // Level met but no quest yet.
     h.level = EV.levelRequired;
-    s.gold = evolutionCost(h.cls) - 1;
     expect(canEvolveHero(s, h)).toBe(false);
-    // Gold met, level short.
-    h.level = EV.levelRequired - 1;
-    s.gold = evolutionCost(h.cls);
+    // Quest accepted but not yet complete.
+    const def = classChangeQuestFor(h.cls);
+    h.quest = { id: def.id, accepted: true, progress: def.objectives.map(() => 0) };
     expect(canEvolveHero(s, h)).toBe(false);
-    // Both met.
-    h.level = EV.levelRequired;
+    // Quest complete -> may evolve.
+    completeQuest(h);
     expect(canEvolveHero(s, h)).toBe(true);
   });
 
-  it("cost scales by class unlock index", () => {
-    expect(evolutionCost("archer")).toBeGreaterThan(evolutionCost("swordsman"));
-    expect(evolutionCost("mage")).toBeGreaterThan(evolutionCost("archer"));
+  it("does NOT require gold (the old gold gate is removed)", () => {
+    const s = initGameState(1);
+    readyHero(s);
+    s.gold = 0; // no gold at all
+    step(s, { evolveHero: 0 });
+    expect(s.heroes[0].tier).toBe(2);
+    expect(s.gold).toBe(0); // nothing spent
   });
 });
 
 describe("evolveHero intent", () => {
-  it("applies exactly once per click and spends the cost, flipping to tier 2", () => {
-    const s = initGameState(1);
-    readyHero(s);
-    const cost = evolutionCost(s.heroes[0].cls);
-    const goldBefore = s.gold;
-
-    step(s, { evolveHero: 0 });
-    expect(s.heroes[0].tier).toBe(2);
-    expect(s.gold).toBe(goldBefore - cost);
-  });
-
-  it("is a no-op when requirements are unmet (no gold spent, stays tier 1)", () => {
-    const s = initGameState(1);
-    // Level met but gold short.
-    s.heroes[0].level = EV.levelRequired;
-    s.gold = evolutionCost(s.heroes[0].cls) - 1;
-    const goldBefore = s.gold;
-    step(s, { evolveHero: 0 });
-    expect(s.heroes[0].tier).toBe(1);
-    expect(s.gold).toBe(goldBefore);
-  });
-
-  it("is a no-op for an already-evolved (tier 2) hero — no double spend", () => {
+  it("applies exactly once per click and flips to tier 2, consuming the quest", () => {
     const s = initGameState(1);
     readyHero(s);
     step(s, { evolveHero: 0 });
-    const goldAfterFirst = s.gold;
-    // Refund enough that a second evolve WOULD be affordable if it were allowed.
-    s.gold = evolutionCost(s.heroes[0].cls) + 100;
+    expect(s.heroes[0].tier).toBe(2);
+    expect(s.heroes[0].quest).toBeNull(); // consumed by the class change
+  });
+
+  it("is a no-op when the quest is incomplete (stays tier 1)", () => {
+    const s = initGameState(1);
+    const h = s.heroes[0];
+    h.level = EV.levelRequired;
+    const def = classChangeQuestFor(h.cls);
+    h.quest = { id: def.id, accepted: true, progress: def.objectives.map(() => 0) };
+    step(s, { evolveHero: 0 });
+    expect(h.tier).toBe(1);
+    expect(h.quest).not.toBeNull(); // quest untouched
+  });
+
+  it("is a no-op for an already-evolved (tier 2) hero — no re-trigger", () => {
+    const s = initGameState(1);
+    readyHero(s);
     step(s, { evolveHero: 0 });
     expect(s.heroes[0].tier).toBe(2);
-    expect(s.gold).toBe(evolutionCost(s.heroes[0].cls) + 100); // untouched
-    expect(goldAfterFirst).toBeGreaterThanOrEqual(0);
+    // Even if we (illegally) re-seat a completed quest, a tier-2 hero can't re-evolve.
+    completeQuest(s.heroes[0]);
+    step(s, { evolveHero: 0 });
+    expect(s.heroes[0].tier).toBe(2);
   });
 
   it("ignores an out-of-range slot index", () => {
     const s = initGameState(1);
     readyHero(s);
-    const goldBefore = s.gold;
     step(s, { evolveHero: 99 });
-    expect(s.gold).toBe(goldBefore);
     expect(s.heroes[0].tier).toBe(1);
   });
 });
@@ -111,17 +113,13 @@ describe("evolution stat multipliers", () => {
     const atkBefore = heroAtk(h.cls, h.level, 1);
     const maxHpBefore = heroMaxHp(h.cls, h.level, 1);
 
-    s.gold = evolutionCost(h.cls);
+    completeQuest(h);
     step(s, { evolveHero: 0 });
 
     const atkAfter = heroAtk(h.cls, h.level, h.tier);
-    // tier-2 atk is the engine's SINGLE-rounded value (base * level * atkMult);
-    // the ratio tracks EV.atkMult up to rounding on the small M5 base-stat scale.
     expect(atkAfter).toBe(heroAtk(h.cls, h.level, 2));
     expect(atkAfter).toBeGreaterThan(atkBefore);
     expect(atkAfter / atkBefore).toBeCloseTo(EV.atkMult, 1);
-    // maxHp equals the engine's single-round tier-2 value (not a double-round of
-    // the pre-value), and it grew by ~the hp multiplier.
     expect(h.maxHp).toBe(heroMaxHp(h.cls, h.level, 2));
     expect(h.maxHp).toBeGreaterThan(maxHpBefore);
     expect(h.maxHp / maxHpBefore).toBeCloseTo(EV.hpMult, 2);
@@ -133,7 +131,7 @@ describe("evolution stat multipliers", () => {
     h.level = EV.levelRequired;
     h.hp = h.maxHp; // full before
     const maxBefore = h.maxHp;
-    s.gold = evolutionCost(h.cls);
+    completeQuest(h);
     step(s, { evolveHero: 0 });
     const gained = h.maxHp - maxBefore;
     expect(gained).toBeGreaterThan(0);
@@ -157,13 +155,13 @@ describe("evolve event", () => {
 
   it("emits nothing on a rejected evolve", () => {
     const s = initGameState(1);
-    step(s, { evolveHero: 0 }); // fresh hero, unmet
+    step(s, { evolveHero: 0 }); // fresh hero, no quest
     expect(s.events.some((e) => e.type === "evolve")).toBe(false);
   });
 });
 
 describe("evolution persistence", () => {
-  it("round-trips tier through toSaveData -> initGameState with restored maxHp", () => {
+  it("round-trips tier through toSaveData -> initGameState with restored maxHp + null quest", () => {
     const s = initGameState(1);
     readyHero(s);
     step(s, { evolveHero: 0 });
@@ -171,9 +169,11 @@ describe("evolution persistence", () => {
 
     const save = toSaveData(s);
     expect(save.hero.tier).toBe(2);
+    expect(save.hero.quest).toBeNull();
 
     const restored = initGameState(42, save);
     expect(restored.heroes[0].tier).toBe(2);
+    expect(restored.heroes[0].quest).toBeNull();
     expect(restored.heroes[0].maxHp).toBe(
       heroMaxHp(restored.heroes[0].cls, restored.heroes[0].level, 2),
     );
@@ -190,7 +190,7 @@ describe("evolution persistence", () => {
 });
 
 describe("migrate pre-v4 tier handling", () => {
-  it("carries the adopted hero's tier through the v2-team -> v4 collapse (no tier defaults to 1)", () => {
+  it("carries the adopted hero's tier through the v2-team -> v7 collapse (quest null)", () => {
     const v2 = {
       version: 2,
       stage: 4,
@@ -203,10 +203,9 @@ describe("migrate pre-v4 tier handling", () => {
       ],
       lastSeen: 0,
     };
-    const v5 = migrate(v2);
-    expect(v5.version).toBe(SAVE_VERSION);
-    // v5: base stats granted (retro points = level * pointsPerLevel, base block).
-    expect(v5.hero).toEqual({
+    const v7 = migrate(v2);
+    expect(v7.version).toBe(SAVE_VERSION);
+    expect(v7.hero).toEqual({
       cls: "archer",
       level: 5,
       xp: 1,
@@ -215,17 +214,18 @@ describe("migrate pre-v4 tier handling", () => {
       stats: { ...CONFIG.stats.base.archer },
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.archer, null, null],
+      quest: null,
     });
   });
 
-  it("preserves an existing tier 2 on the adopted hero", () => {
+  it("preserves an existing tier 2 on the adopted hero (quest null)", () => {
     const v3 = {
       version: 3,
       unlocked: ["swordsman"],
       heroes: [{ level: 9, xp: 2, tier: 2 as const }],
     };
-    const v5 = migrate(v3);
-    expect(v5.hero).toEqual({
+    const v7 = migrate(v3);
+    expect(v7.hero).toEqual({
       cls: "swordsman",
       level: 9,
       xp: 2,
@@ -234,17 +234,17 @@ describe("migrate pre-v4 tier handling", () => {
       stats: { ...CONFIG.stats.base.swordsman },
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
+      quest: null,
     });
-    expect(migrate(v5)).toEqual(v5);
+    expect(migrate(v7)).toEqual(v7);
   });
 });
 
 describe("determinism with evolution in the run", () => {
   it("a byte-identical clone advances identically when evolution fires", () => {
     const a = initGameState(777);
-    // Bring the swordsman to the gate and evolve mid-run.
     a.heroes[0].level = EV.levelRequired;
-    a.gold = evolutionCost(a.heroes[0].cls) + 50;
+    completeQuest(a.heroes[0]);
     step(a, { evolveHero: 0 });
     expect(a.heroes[0].tier).toBe(2);
 

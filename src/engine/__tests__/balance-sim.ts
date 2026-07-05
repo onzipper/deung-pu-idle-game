@@ -8,9 +8,10 @@
  * viability (S1->S10, 0 permanent walls, classes within ~2x) can be verified.
  *
  * Auto-pilot: auto-cast on, challenge the boss as soon as the hint says "ready",
- * advance on victory, and auto-evolve the moment the level+gold gate is met (the
- * only gold sink left). Everything is derived purely from `step()` + read-only
- * helpers, so results are deterministic and reproducible.
+ * advance on victory, ACCEPT the class-change quest the moment it's offered, and
+ * evolve the moment the quest completes (M5 task 5 — the quest EFFORT replaced the
+ * old gold gate). Everything is derived purely from `step()` + read-only helpers,
+ * so results are deterministic and reproducible.
  *
  * Run with: `pnpm sim`
  * Knobs (env):
@@ -24,7 +25,7 @@ import {
   step,
   bossHint,
   canEvolveHero,
-  evolutionCost,
+  isClassChangeQuestOffered,
   learnedSkills,
   unlockedAutoSlotCount,
   SIGNATURE_SKILL,
@@ -78,6 +79,9 @@ interface SeedResult {
   finalGold: number;
   finalLevel: number;
   firstBossKillTime: number | null;
+  /** Stage/time the class-change quest completed (tier 1 -> 2), or null (never). */
+  evolveStage: number | null;
+  evolveTime: number | null;
   totalWipes: number;
   totalDeaths: number;
   stages: StageMetric[];
@@ -101,6 +105,7 @@ function makeSave(cls: HeroClass): SaveData {
       stats: { ...CONFIG.stats.base[cls] },
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL[cls], null, null],
+      quest: null,
     },
     lastSeen: 0,
   };
@@ -145,6 +150,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let prevDead = s.heroes[0].dead;
 
   let firstBossKillTime: number | null = null;
+  let evolveStage: number | null = null;
+  let evolveTime: number | null = null;
   let totalWipes = 0;
   let totalDeaths = 0;
   let pendingRec: number | null = null;
@@ -174,7 +181,9 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
       input.advanceStage = true;
     }
 
-    // Auto-evolve (M5): the player evolves as soon as the level+gold gate is met.
+    // Auto-accept the class-change quest the moment it's offered, then evolve the
+    // moment its objectives complete (M5 task 5 — effort gate, no gold).
+    if (isClassChangeQuestOffered(s.heroes[0])) input.acceptQuest = 0;
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
 
     // Idle-player auto-slot management: assign newly-unlocked skills into open
@@ -184,12 +193,15 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
 
     step(s, input);
 
-    // --- gold spend (evolution is the only sink now) ---
-    let spend = 0;
-    if (prevTier < s.heroes[0].tier) spend += evolutionCost(s.heroes[0].cls);
-
-    const income = s.gold - prevGold + spend;
+    // --- income (no gold sink now — evolution is quest-gated, task 5) ---
+    const income = s.gold - prevGold;
     if (income > 0) cur.income += income;
+
+    // --- class-change (evolution) timing: capture the stage/time tier flips ---
+    if (prevTier < s.heroes[0].tier) {
+      evolveStage = s.stage;
+      evolveTime = s.time;
+    }
 
     // --- solo respawn detection (dead edge) ---
     const nowDead = s.heroes[0].dead;
@@ -243,6 +255,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     finalGold: Math.floor(s.gold),
     finalLevel: s.heroes[0].level,
     firstBossKillTime,
+    evolveStage,
+    evolveTime,
     totalWipes,
     totalDeaths,
     stages,
@@ -366,6 +380,11 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: StageAgg[]): voi
     `reached stages: ${results.map((r) => r.finalStage).join(",")} | ` +
       `final levels: ${results.map((r) => r.finalLevel).join(",")} | ` +
       `solo respawns: ${totalDeaths} | boss wipes: ${totalWipes}`,
+  );
+  // Class-change quest completion beat (M5 task 5): stage + time tier flipped 1->2.
+  flags.push(
+    `class-change stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
+      `at time (s): ${results.map((r) => (r.evolveTime === null ? "-" : r.evolveTime.toFixed(0))).join(",")}`,
   );
   for (const line of flags) console.log("  - " + line);
 }

@@ -23,10 +23,20 @@ export * from "@/engine/state/saveSchema";
 export * from "@/engine/systems/stats";
 export * from "@/engine/systems/targeting";
 
-// Class-advancement (evolution) helpers: `canEvolveHero` / `evolutionCost` let the
-// UI derive a per-hero `canEvolve` flag for its snapshot; `evolveHero` is applied
-// only through `step()` via the `evolveHero` FrameInput intent.
-export { canEvolveHero, evolveHero, evolutionCost } from "@/engine/systems/evolution";
+// Class-advancement (evolution) helpers: `canEvolveHero` lets the UI derive a
+// per-hero `canEvolve` flag for its snapshot; `evolveHero` is applied only through
+// `step()` via the `evolveHero` FrameInput intent.
+export { canEvolveHero, evolveHero } from "@/engine/systems/evolution";
+
+// Class-change quest (M5 task 5) read helpers: the UI derives the quest affordance
+// (offer / accepted progress / complete) from these pure reads. `acceptQuest` is
+// applied only through `step()` via the `acceptQuest` FrameInput intent (internal).
+export {
+  classChangeQuestFor,
+  classChangeQuestId,
+  isClassChangeQuestOffered,
+  isQuestComplete,
+} from "@/engine/systems/quests";
 
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
 // through `step(state, input)`; systems are not part of the public surface.

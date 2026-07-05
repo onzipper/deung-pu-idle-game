@@ -44,11 +44,12 @@ import {
   SIGNATURE_SKILL,
   bossHint,
   canEvolveHero,
+  classChangeQuestFor,
   combatPower,
   createAccumulator,
   drainAccumulator,
-  evolutionCost,
   initGameState,
+  isClassChangeQuestOffered,
   learnedSkills,
   migrate,
   primaryStat,
@@ -68,6 +69,7 @@ import { GameHud } from "@/ui/components/GameHud";
 import {
   useGameStore,
   type EngineSnapshot,
+  type HeroQuestSummary,
   type HeroSummary,
   type SkillSummary,
 } from "@/ui/store/gameStore";
@@ -148,6 +150,29 @@ function buildSkillSummaries(h: Hero): SkillSummary[] {
   });
 }
 
+/**
+ * Precompute the class-change quest affordance state (M5 task 5). Returns null
+ * when there's nothing quest-related to show (tier 2, or below the level gate with
+ * no active quest — the bar shows the evolved badge / locked hint from tier/level).
+ */
+function buildQuestSummary(h: Hero): HeroQuestSummary | null {
+  if (h.tier === 2) return null;
+  const offered = isClassChangeQuestOffered(h);
+  const q = h.quest;
+  if (!offered && !q) return null; // below the level gate — no affordance yet
+  const def = classChangeQuestFor(h.cls);
+  const killIdx = def.objectives.findIndex((o) => o.type === "kill");
+  const bossIdx = def.objectives.findIndex((o) => o.type === "killBoss");
+  const kills = killIdx >= 0 ? (q?.progress[killIdx] ?? 0) : 0;
+  const killGoal = killIdx >= 0 ? def.objectives[killIdx].count : 0;
+  const bossDone =
+    bossIdx >= 0 && (q?.progress[bossIdx] ?? 0) >= def.objectives[bossIdx].count;
+  const accepted = q?.accepted ?? false;
+  const complete =
+    accepted && def.objectives.every((o, i) => (q?.progress[i] ?? 0) >= o.count);
+  return { offered, accepted, complete, kills, killGoal, bossDone };
+}
+
 function buildSnapshot(state: GameState): EngineSnapshot {
   const heroes: HeroSummary[] = state.heroes.map((h) => {
     const atLevelCap = h.level >= CONFIG.leveling.levelCap;
@@ -178,7 +203,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       // `xpProgress` uses: engine helpers compute it, the store just carries
       // the display-ready result.
       canEvolve: canEvolveHero(state, h),
-      evolutionCost: evolutionCost(h.cls),
+      quest: buildQuestSummary(h),
       // M5 "Base stats" — same one-way display read-path: engine helpers compute
       // it, the store just carries the display-ready result.
       statPoints: h.statPoints,
@@ -311,6 +336,7 @@ export function GameClient() {
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
         evolveHero: pending.evolveHero ?? undefined,
+        acceptQuest: pending.acceptQuest ?? undefined,
         allocateStat: pending.allocateStat ?? undefined,
       };
 

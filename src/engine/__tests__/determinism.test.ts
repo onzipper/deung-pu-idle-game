@@ -20,9 +20,10 @@ import { soloSave } from "./helpers";
  * dt), and save round-trip / migrate() shape-filling.
  *
  * engine.test.ts already proves plain idle-stepping is deterministic; this
- * file adds player *input* (casts, evolve, challenge/advance, toggles) into the
- * mix, which is where a hidden `Math.random()` or wall-clock read would most
- * plausibly sneak in. (M5: the buyUpgrade intent is gone.)
+ * file adds player *input* (casts, accept-quest, evolve, challenge/advance,
+ * toggles) into the mix, which is where a hidden `Math.random()` or wall-clock
+ * read would most plausibly sneak in. (M5: the buyUpgrade intent is gone; the
+ * evolve trigger is now the class-change quest, task 5.)
  */
 
 function scriptedInput(i: number): FrameInput {
@@ -30,13 +31,16 @@ function scriptedInput(i: number): FrameInput {
   if (i % 47 === 3) input.castSkills = [{ slot: 0, skillId: "sword_whirl" }];
   if (i % 599 === 23) input.challengeBoss = true;
   if (i % 599 === 400) input.advanceStage = true;
+  if (i % 811 === 5) input.acceptQuest = 0;
   if (i % 733 === 29) input.evolveHero = 0;
   return input;
 }
 
 function runScript(seed: number, steps: number): GameState {
   const s = initGameState(seed, soloSave("swordsman", 1));
-  s.gold = 100_000; // afford evolution so it deterministically fires
+  // At the level gate so the class-change quest is offerable (acceptQuest fires);
+  // whether it completes+evolves within the window, determinism must hold either way.
+  s.heroes[0].level = CONFIG.evolution.levelRequired;
   for (let i = 0; i < steps; i++) {
     if (i === 500) s.autoCast = true;
     step(s, scriptedInput(i));
@@ -108,6 +112,7 @@ describe("save round-trip", () => {
         stats: { ...CONFIG.stats.base.mage },
         mana: CONFIG.mana.base,
         autoSlots: [SIGNATURE_SKILL.mage, null, null],
+        quest: null,
       },
       lastSeen: 123456,
     };
@@ -141,6 +146,7 @@ describe("save round-trip", () => {
         stats: { ...CONFIG.stats.base.swordsman },
         mana: CONFIG.mana.base,
         autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
+        quest: null,
       },
       lastSeen: 0,
     });
@@ -180,6 +186,7 @@ describe("save round-trip", () => {
       stats: { ...CONFIG.stats.base.archer },
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.archer, null, null],
+      quest: null,
     });
     expect(migrated.stage).toBe(6);
     expect(migrated.gold).toBe(999);

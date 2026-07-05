@@ -33,6 +33,7 @@ describe("toSaveData (v4 single character)", () => {
       stats: { ...CONFIG.stats.base.swordsman },
       mana: heroMaxMana("swordsman", CONFIG.stats.base.swordsman.int),
       autoSlots: ["sword_whirl", null, null],
+      quest: null,
     });
   });
 
@@ -49,6 +50,8 @@ describe("toSaveData (v4 single character)", () => {
       // Mana (≤ the int-30 pool) + a fuller auto-slot loadout must round-trip.
       mana: 100,
       autoSlots: ["mage_meteor", "mage_frostnova", null],
+      // Tier 2 -> no active quest (consumed by the class change); must round-trip.
+      quest: null,
     };
 
     const restored = toSaveData(initGameState(9, original));

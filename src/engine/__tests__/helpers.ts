@@ -14,7 +14,7 @@ import {
 } from "@/engine";
 import type { Enemy, GameState, HeroClass, SaveData } from "@/engine";
 
-/** A fresh single-character save of class `cls` at the given stage (M5 v6 shape). */
+/** A fresh single-character save of class `cls` at the given stage (M5 v7 shape). */
 export const soloSave = (cls: HeroClass = "swordsman", stage = 3): SaveData => ({
   version: SAVE_VERSION,
   stage,
@@ -28,6 +28,7 @@ export const soloSave = (cls: HeroClass = "swordsman", stage = 3): SaveData => (
     stats: { ...CONFIG.stats.base[cls] },
     mana: heroMaxMana(cls, CONFIG.stats.base[cls].int),
     autoSlots: [SIGNATURE_SKILL[cls], null, null],
+    quest: null,
   },
   lastSeen: 0,
 });

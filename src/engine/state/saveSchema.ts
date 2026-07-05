@@ -66,6 +66,20 @@ export const saveDataSchema = z
         // array length + skill validity are re-normalised on load; unknown ids
         // are dropped, so a strict enum here would needlessly 400 a stale loadout.
         autoSlots: z.array(z.string().nullable()).optional(),
+        // M5 "class-change quest" (SAVE v7). OPTIONAL + nullable so a pre-v7 (or
+        // tier-2 / un-accepted) payload is backfilled to null by `migrate()`,
+        // same resilience as the fields above. Progress is re-validated against
+        // the current class def on load (`normalizeQuest`); a foreign id/shape is
+        // dropped there, so a loose object schema here never needlessly 400s.
+        quest: z
+          .object({
+            id: z.string(),
+            accepted: z.boolean(),
+            progress: z.array(z.number().min(0).finite()),
+          })
+          .strict()
+          .nullable()
+          .optional(),
       })
       .strict(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave

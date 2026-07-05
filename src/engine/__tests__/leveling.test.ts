@@ -190,6 +190,7 @@ describe("migrate pre-v5 team/single -> v5 base stats", () => {
       stats: { ...CONFIG.stats.base.archer },
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.archer, null, null],
+      quest: null,
     });
   });
 
@@ -217,6 +218,8 @@ describe("migrate pre-v5 team/single -> v5 base stats", () => {
       // v6: mana (≤ the int-20 pool) + auto-slot loadout round-trip unchanged.
       mana: 50,
       autoSlots: [SIGNATURE_SKILL.mage, null, null] as (string | null)[],
+      // v7: tier-2 hero -> no class-change quest.
+      quest: null,
     };
     const once = migrate({ version: SAVE_VERSION, hero });
     expect(migrate(once)).toEqual(once);

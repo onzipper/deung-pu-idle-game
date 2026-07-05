@@ -36,12 +36,20 @@
     "upgradesLabel": "อัพเกรด",
     "upgradeAriaLabel": "{name} เลเวล {level}{costState, select, capped { สูงสุดแล้ว} other {, ราคา {cost} ทอง}}",
     "autoUpgradeToggle": "💰 Auto อัป: {state, select, on {เปิด} other {ปิด}}",
-    "evolveButton": "ปลดคลาส",
-    "evolveConfirmLabel": "ยืนยัน?",
-    "evolveConfirmHint": "แตะอีกครั้งเพื่อยืนยัน",
-    "evolveLockedHint": "ปลดคลาสได้ที่ Lv.{level} (ทอง {cost})",
-    "evolveAriaLabel": "{heroName}: ปลดคลาส{state, select, locked { (ปลดล็อกที่ Lv.{level})} confirm { (แตะอีกครั้งเพื่อยืนยัน)} other {, ราคา {cost} ทอง}}",
-    "evolvedBadgeTitle": "{name} (ปลดคลาสแล้ว)"
+    "evolvedBadgeTitle": "{name} (ปลดคลาสแล้ว)",
+    "classQuest": {
+      "lockedHint": "รับเควสเปลี่ยนคลาสได้ที่ Lv.{level}",
+      "ariaLocked": "{heroName}: เปลี่ยนคลาส (ปลดล็อกเควสที่ Lv.{level})",
+      "acceptButton": "รับเควส",
+      "ariaAccept": "{heroName}: รับเควสเปลี่ยนคลาส",
+      "progress": "{kills}/{goal} · บอส {boss}",
+      "progressTitle": "ความคืบหน้าเควสเปลี่ยนคลาส",
+      "ariaProgress": "{heroName}: เควสเปลี่ยนคลาส — ฆ่า {kills}/{goal}, บอส {boss, select, done {สำเร็จ} other {ยังไม่สำเร็จ}}",
+      "changeButton": "เปลี่ยนคลาส!",
+      "confirmLabel": "ยืนยัน?",
+      "confirmHint": "แตะอีกครั้งเพื่อยืนยัน",
+      "ariaChange": "{heroName}: เปลี่ยนคลาส{state, select, confirm { (แตะอีกครั้งเพื่อยืนยัน)} other {}}"
+    }
   },
   "stats": {
     "title": "สเตตัส",

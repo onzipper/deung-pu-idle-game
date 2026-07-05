@@ -54,4 +54,19 @@ export type GameEvent =
   | { type: "bossRetreat"; x: number; y: number }
   | { type: "waveSpawn"; wave: number }
   | { type: "stageCleared"; stage: number }
-  | { type: "stageAdvanced"; stage: number };
+  | { type: "stageAdvanced"; stage: number }
+  // Class-change quest lifecycle (M5 task 5 — for UI + future juice). All carry
+  // the solo hero id + the quest id; progress fires ONLY on a real increment.
+  | { type: "questAccepted"; id: number; questId: string }
+  | {
+      type: "questObjectiveProgress";
+      id: number;
+      questId: string;
+      /** Which objective advanced (index into the quest def's objectives). */
+      objectiveIndex: number;
+      /** New progress count for that objective (post-increment). */
+      progress: number;
+      /** The objective's target count (for a "n/N" readout). */
+      count: number;
+    }
+  | { type: "questCompleted"; id: number; questId: string };

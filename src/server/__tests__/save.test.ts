@@ -44,6 +44,8 @@ describe("parseSaveData — accepts", () => {
         // the class default auto-slot loadout.
         mana: CONFIG.mana.base,
         autoSlots: [SIGNATURE_SKILL.archer, null, null],
+        // SAVE v7: tier-2 hero -> no class-change quest (consumed / none applicable).
+        quest: null,
       });
     }
   });

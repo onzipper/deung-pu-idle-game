@@ -4,6 +4,7 @@ import {
   SKILLS,
   SIGNATURE_SKILL,
   FIXED_DT,
+  SAVE_VERSION,
   initGameState,
   migrate,
   step,
@@ -208,7 +209,7 @@ describe("SAVE v5 -> v6 migration", () => {
       lastSeen: 0,
     };
     const v6 = migrate(v5);
-    expect(v6.version).toBe(6);
+    expect(v6.version).toBe(SAVE_VERSION);
     expect(v6.hero.mana).toBe(heroMaxMana("mage", 25)); // full pool
     expect(v6.hero.autoSlots).toEqual([SIGNATURE_SKILL.mage, null, null]);
   });

@@ -122,8 +122,9 @@ life → XP). Future milestones extend progression past here.
 - **Mana + skill framework v2 (task 4): DONE** — see "Mana + skill framework v2"
   at the bottom. Skills now cost mana AND keep per-skill cooldowns; each class has
   a 2–3 skill kit unlocked by level/tier, with up to 3 auto-cast slots.
-- **Class-change quests (task 5):** they replace the current player-triggered
-  `evolveHero` gold trigger; the tier-2 multipliers stay the power delta.
+- **Class-change quest (task 5): DONE** — see "Class-change quest timing" at the
+  bottom. The quest EFFORT gate replaced the `evolveHero` gold trigger; the tier-2
+  multipliers stay the power delta.
 - **Boss hint** (`bossHintPowerDivisor`, `teamPower`): **FIXED in task 3.**
   `teamPower` is now `sum(combatPower(hero))` — effective DPS (basic + skill) plus a
   survivability term — so it no longer under-reads the skill-heavy ranged classes.
@@ -319,3 +320,66 @@ INT-fed regen lifts it clear of the gate (caster identity). Tuned knobs vs the
 first pass: `baseRegen` 9→7, `regenPerIntPoint` 0.18→0.15, and the tier-1/2 extra
 skills' costs nudged up (powershot 22→28, quake 42→44, barrage 40→46, cataclysm
 52→58) to keep the extras gated and the mid-game inside ~2× spread.
+
+---
+
+## Class-change quest timing (task 5, ROADMAP)
+
+The tier-1 → tier-2 class change is now gated by a lean **quest** instead of gold
+(GDD: "เปลี่ยนคลาสผ่านเควส"). The gold cost (`evolution.cost`, ~600–1800) is
+**removed** — quest EFFORT is the gate. This leaves **no gold sink** until M6/M7
+(NPC potions, marketplace): gold accumulates freely by design, and the pacing the
+gold gate used to add is carried entirely by the quest objectives.
+
+### Framework & flow
+
+- Types (`entities`): `QuestObjective {type: "kill"|"killBoss", count}` → `QuestDef
+  {id, objectives}` (catalog) → `HeroQuest {id, accepted, progress[]}` (instance on
+  `Hero.quest`). Forward-compatible with the full M8 quest system (extension points
+  documented on `QuestObjective`), not overbuilt.
+- Auto-**offered** at `level >= evolution.levelRequired` (15) while tier 1 (derived,
+  no stored object). Player taps *รับเควส* (`acceptQuest` intent) → objectives count
+  from that moment. Completing them enables the *เปลี่ยนคลาส* action (the existing
+  `evolveHero` intent, gold cost removed) with the same tier-2 ceremony/fx.
+- Objectives count **deterministically** from the hero's own kills / boss defeats,
+  hooked at the combat emission sites (`systems/quests.advanceQuestObjective`, called
+  from `combat.resolveDeaths` / `boss.onBossKilled`) — no RNG, no wall-clock, and the
+  engine's one-way event rule stays intact (quest logic never READS `state.events`).
+- Events: `questAccepted` / `questObjectiveProgress` (on increments only) /
+  `questCompleted`, for UI + future juice.
+
+### Objective numbers (`CONFIG.quest.classChange`)
+
+| objective | value | note |
+|---|---|---|
+| `kills` | **60** | enemy kills banked after accepting (the grind portion) |
+| `bossKills` | **1** | one boss defeat (a stage-clear milestone) |
+
+Same numbers for every class in v1 (per-class quest **ids** let M8 diverge them).
+
+### Sim (auto-pilot accepts at the gate, evolves on completion) — `SIM_SECONDS=2400`, 5 seeds
+
+The class change now completes at **stage 5 on every seed, every class** — the same
+mid-game beat the old ~level-15 gold gate produced (the quest is offered at L15, then
+the 60-kill + 1-boss effort lands ~1–2 stages later):
+
+| class | class-change stage | at time (s) |
+|---|---|---|
+| swordsman | 5 (5/5) | ~290–325 |
+| archer | 5 (5/5) | ~205–221 |
+| mage | 5 (5/5) | ~264–301 |
+
+**Pacing preserved.** S1–S11 per-stage clear times are within ~±3s of the mana table
+above (evolution landing ~1–2 stages later than the old L15-gold beat costs a couple
+of seconds in S3–S5, well inside the ±15% budget). Every class clears **S1–S12 5/5**,
+**0 boss wipes through S11**, spread **≤1.82× through S11**. The content ceiling is
+**unchanged**: swordsman soft-walls at S13, archer/mage at S14 (intended — extended by
+M6/M7). No permanent stalls (respawn + retry loop keep banking XP).
+
+### SAVE v6 → v7
+
+`CharacterSave` gains `quest: HeroQuest | null`. Migrate sets it to **null for every
+pre-v7 hero**: a tier-2 hero has already class-changed (no quest), a tier-1 hero at
+the gate is simply **re-offered** on load (progress empty when accepted). An accepted,
+in-progress v7 quest is **preserved** through migrate (validated against the current
+class def) so the server's migrate-on-every-save never wipes quest progress.

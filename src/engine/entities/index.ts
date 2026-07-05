@@ -68,6 +68,43 @@ export interface Vec2 {
   y: number;
 }
 
+/**
+ * Quest framework v1 (M5 "เปลี่ยนคลาสผ่านเควส", ROADMAP task 5). Deliberately
+ * LEAN — exactly what the class-change quest needs — but forward-compatible with
+ * the full quest system in M8.
+ *
+ * EXTENSION POINTS (M8, documented not built): more objective types (`collect`,
+ * `reach`, `talk`, …) join the `QuestObjectiveType` union; a quest gains rewards /
+ * prerequisites / a chain id; a hero holds a LIST of active quests (a quest log)
+ * rather than the single `Hero.quest` slot v1 uses. The `{id, objectives}` def +
+ * `{id, accepted, progress[]}` instance split already anticipates all of that.
+ */
+export type QuestObjectiveType = "kill" | "killBoss";
+
+/** One objective line of a quest def: reach `count` of the counted event `type`. */
+export interface QuestObjective {
+  type: QuestObjectiveType;
+  count: number;
+}
+
+/** A static quest definition (catalog data — see systems/quests `classChangeQuestFor`). */
+export interface QuestDef {
+  id: string;
+  objectives: QuestObjective[];
+}
+
+/**
+ * A hero's active quest INSTANCE (v1: at most one, in `Hero.quest`). `progress`
+ * is a per-objective counter parallel to the def's `objectives`. `accepted` gates
+ * counting: an un-accepted (future "assigned but not taken") quest tracks nothing.
+ * Persisted per hero (SAVE v7).
+ */
+export interface HeroQuest {
+  id: string;
+  accepted: boolean;
+  progress: number[];
+}
+
 export interface Hero {
   id: number;
   cls: HeroClass;
@@ -122,11 +159,20 @@ export interface Hero {
   xp: number;
   /**
    * Class-advancement tier (M5 "ปลดคลาส evolution"). 1 = base, 2 = evolved. A
-   * PLAYER-TRIGGERED evolution flips this to 2 once the hero meets the level+gold
-   * requirement (see systems/evolution); it grants a permanent atk/hp multiplier
-   * that compounds with upgrades + levels. Persisted per hero. Single path in M5.
+   * PLAYER-TRIGGERED class change flips this to 2 once the hero COMPLETES its
+   * class-change quest (M5 task 5 — the quest EFFORT replaced the old gold gate;
+   * see systems/quests + systems/evolution). It grants a permanent atk/hp
+   * multiplier that compounds with levels + stats. Persisted per hero. Single path
+   * in M5.
    */
   tier: 1 | 2;
+  /**
+   * Active class-change quest instance (M5 task 5), or null. `null` while below the
+   * level gate, once evolved (tier 2, quest consumed), OR when the quest is
+   * OFFERED-but-not-yet-accepted (the offer is DERIVED — see
+   * systems/quests `isClassChangeQuestOffered` — so a fresh offer needs no stored
+   * object). Set to the accepted instance by the `acceptQuest` intent. Persisted. */
+  quest: HeroQuest | null;
   /**
    * Unspent base-stat points (M5 "Base stats"). Each level-up grants
    * `CONFIG.stats.pointsPerLevel`; the player allocates them via the

@@ -22,12 +22,13 @@ import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
 import { SKILL_ICONS_BY_ID } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
-/** Below this level the evolve affordance isn't shown at all (don't tease the
- * feature before it's remotely relevant) — from here to
- * `CONFIG.evolution.levelRequired` it shows as a disabled "locked" hint. */
-const EVOLVE_HINT_LEVEL = 12;
+/** Below this level the class-change affordance isn't shown at all (don't tease
+ * the feature before it's remotely relevant) — from here to
+ * `CONFIG.evolution.levelRequired` it shows as a disabled "locked" hint, at which
+ * point the quest becomes offerable. */
+const QUEST_HINT_LEVEL = 12;
 
-/** How long an armed (first-tap) evolve button stays armed before it resets. */
+/** How long an armed (first-tap) class-change button stays armed before it resets. */
 const EVOLVE_ARM_TIMEOUT_MS = 3000;
 
 /** Presentational-only per-class accent (mirrors src/render/theme.ts
@@ -51,10 +52,16 @@ function useCastKey(cd: number): number {
 }
 
 /**
- * Class-advancement (M5 evolution) affordance, rendered next to the level badge.
- * (Unchanged from the pre-v2 bar — see the two-tap confirm rationale inline.)
+ * Class-change QUEST affordance (M5 task 5), rendered next to the level badge. It
+ * replaces the old gold-cost evolve trigger with the quest flow:
+ *   tier 2                 → the evolved-name badge (class change done)
+ *   tier 1, below Lv gate  → a disabled "🔒 Lv.15" hint (from `QUEST_HINT_LEVEL`)
+ *   quest offered          → a "รับเควส" (accept) button
+ *   quest accepted (WIP)   → a compact "n/60 · boss ✓/✗" progress readout
+ *   quest complete         → the "เปลี่ยนคลาส!" button (2-tap confirm + ceremony)
+ * The 2-tap confirm on the final class change carries over from the pre-quest bar.
  */
-function EvolveAffordance({
+function ClassQuestAffordance({
   hero,
   slot,
   heroName,
@@ -66,7 +73,9 @@ function EvolveAffordance({
   accent: { solid: string; soft: string };
 }) {
   const evolveHero = useGameStore((s) => s.evolveHero);
+  const acceptQuest = useGameStore((s) => s.acceptQuest);
   const tPanels = useTranslations("panels");
+  const tq = useTranslations("panels.classQuest");
   const [armed, setArmed] = useState(false);
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -88,22 +97,15 @@ function EvolveAffordance({
     );
   }
 
-  if (hero.level < EVOLVE_HINT_LEVEL) return null;
+  const quest = hero.quest;
 
-  const levelGateMet = hero.level >= CONFIG.evolution.levelRequired;
-  if (!levelGateMet) {
+  // Below the level gate: nothing until QUEST_HINT_LEVEL, then a locked hint.
+  if (!quest) {
+    if (hero.level < QUEST_HINT_LEVEL) return null;
     return (
       <span
-        title={tPanels("evolveLockedHint", {
-          level: CONFIG.evolution.levelRequired,
-          cost: hero.evolutionCost.toLocaleString(),
-        })}
-        aria-label={tPanels("evolveAriaLabel", {
-          heroName,
-          state: "locked",
-          level: CONFIG.evolution.levelRequired,
-          cost: hero.evolutionCost.toLocaleString(),
-        })}
+        title={tq("lockedHint", { level: CONFIG.evolution.levelRequired })}
+        aria-label={tq("ariaLocked", { heroName, level: CONFIG.evolution.levelRequired })}
         className="cursor-default rounded-full border border-ddp-border bg-black/40 px-1.5 text-[8px] font-bold text-ddp-ink-muted"
       >
         🔒 Lv.{CONFIG.evolution.levelRequired}
@@ -111,10 +113,46 @@ function EvolveAffordance({
     );
   }
 
-  const affordable = hero.canEvolve;
+  // Offered (level gate met, not yet accepted): the "รับเควส" accept button.
+  if (quest.offered) {
+    return (
+      <button
+        type="button"
+        onClick={() => acceptQuest(slot)}
+        style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
+        aria-label={tq("ariaAccept", { heroName })}
+        className="relative rounded-full border border-(--accent-soft) bg-ddp-panel-strong px-1.5 text-[8px] font-bold whitespace-nowrap text-ddp-gold-bright transition-all duration-100 before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] active:scale-95"
+      >
+        {tq("acceptButton")}
+      </button>
+    );
+  }
 
+  // Accepted but not complete: a compact progress readout (n/N · boss ✓/✗).
+  if (!quest.complete) {
+    const progressLabel = tq("progress", {
+      kills: quest.kills,
+      goal: quest.killGoal,
+      boss: quest.bossDone ? "✓" : "✗",
+    });
+    return (
+      <span
+        title={tq("progressTitle")}
+        aria-label={tq("ariaProgress", {
+          heroName,
+          kills: quest.kills,
+          goal: quest.killGoal,
+          boss: quest.bossDone ? "done" : "pending",
+        })}
+        className="cursor-default rounded-full border border-ddp-border-soft bg-black/50 px-1.5 text-[8px] font-bold whitespace-nowrap tabular-nums text-ddp-ink-muted"
+      >
+        {progressLabel}
+      </span>
+    );
+  }
+
+  // Complete: the class-change button (2-tap confirm — same as the old evolve).
   function handleClick(): void {
-    if (!affordable) return;
     if (!armed) {
       setArmed(true);
       armTimer.current = setTimeout(() => setArmed(false), EVOLVE_ARM_TIMEOUT_MS);
@@ -135,27 +173,19 @@ function EvolveAffordance({
   return (
     <button
       type="button"
-      disabled={!affordable}
       onClick={handleClick}
       onBlur={disarm}
       onMouseLeave={() => armed && disarm()}
-      title={armed ? tPanels("evolveConfirmHint") : undefined}
+      title={armed ? tq("confirmHint") : undefined}
       style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
-      aria-label={tPanels("evolveAriaLabel", {
-        heroName,
-        state: armed ? "confirm" : "normal",
-        level: CONFIG.evolution.levelRequired,
-        cost: hero.evolutionCost.toLocaleString(),
-      })}
+      aria-label={tq("ariaChange", { heroName, state: armed ? "confirm" : "normal" })}
       className={`relative rounded-full border px-1.5 text-[8px] font-bold whitespace-nowrap transition-all duration-100 active:scale-95 ${
         armed
           ? "animate-buy-pulse border-ddp-gold bg-ddp-gold text-ddp-panel-strong"
-          : affordable
-            ? "border-(--accent-soft) bg-ddp-panel-strong text-ddp-gold-bright before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-['']"
-            : "cursor-not-allowed border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted grayscale"
+          : "border-(--accent-soft) bg-ddp-panel-strong text-ddp-gold-bright before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-['']"
       }`}
     >
-      {armed ? tPanels("evolveConfirmLabel") : tPanels("evolveButton")}
+      {armed ? tq("confirmLabel") : tq("changeButton")}
     </button>
   );
 }
@@ -290,7 +320,7 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
         >
           {hero.atLevelCap ? tCommon("maxLabel") : tCommon("levelBadge", { level: hero.level })}
         </span>
-        <EvolveAffordance hero={hero} slot={slot} heroName={heroName} accent={accent} />
+        <ClassQuestAffordance hero={hero} slot={slot} heroName={heroName} accent={accent} />
       </div>
 
       {/* HP bar */}

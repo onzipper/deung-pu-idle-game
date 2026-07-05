@@ -36,12 +36,20 @@
     "upgradesLabel": "Upgrades",
     "upgradeAriaLabel": "{name} Level {level}{costState, select, capped { (MAX)} other {, cost {cost} gold}}",
     "autoUpgradeToggle": "💰 Auto Upgrade: {state, select, on {ON} other {OFF}}",
-    "evolveButton": "Evolve",
-    "evolveConfirmLabel": "Confirm?",
-    "evolveConfirmHint": "Tap again to confirm",
-    "evolveLockedHint": "Unlocks at Lv.{level} ({cost} gold)",
-    "evolveAriaLabel": "{heroName}: Evolve{state, select, locked { (unlocks at Lv.{level})} confirm { (tap again to confirm)} other {, cost {cost} gold}}",
-    "evolvedBadgeTitle": "{name} (Evolved)"
+    "evolvedBadgeTitle": "{name} (Evolved)",
+    "classQuest": {
+      "lockedHint": "Class-change quest unlocks at Lv.{level}",
+      "ariaLocked": "{heroName}: class change (quest unlocks at Lv.{level})",
+      "acceptButton": "Accept quest",
+      "ariaAccept": "{heroName}: accept the class-change quest",
+      "progress": "{kills}/{goal} · boss {boss}",
+      "progressTitle": "Class-change quest progress",
+      "ariaProgress": "{heroName}: class-change quest — {kills}/{goal} kills, boss {boss, select, done {defeated} other {pending}}",
+      "changeButton": "Change class!",
+      "confirmLabel": "Confirm?",
+      "confirmHint": "Tap again to confirm",
+      "ariaChange": "{heroName}: change class{state, select, confirm { (tap again to confirm)} other {}}"
+    }
   },
   "stats": {
     "title": "Stats",

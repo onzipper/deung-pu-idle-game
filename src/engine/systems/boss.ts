@@ -18,6 +18,7 @@ import { FIXED_DT } from "@/engine/core/loop";
 import { makeBoss } from "@/engine/entities";
 import { combatPower } from "@/engine/systems/stats";
 import { grantKillXp } from "@/engine/systems/leveling";
+import { advanceQuestObjective } from "@/engine/systems/quests";
 import { applyDamage } from "@/engine/systems/damage";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
@@ -91,6 +92,9 @@ export function onBossKilled(state: GameState): void {
   // Boss kills grant a larger XP milestone to every alive hero (before payout /
   // phase flip, while the winning team is still on the field).
   grantKillXp(state, CONFIG.leveling.xpPerBossKill(state.stage));
+  // Count the boss defeat toward the solo hero's class-change quest (M5 task 5),
+  // while the winning hero is still on the field (before the phase flip).
+  advanceQuestObjective(state, "killBoss");
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;

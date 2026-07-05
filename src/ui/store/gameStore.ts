@@ -46,6 +46,26 @@ export interface SkillSummary {
   autoSlot: number | null;
 }
 
+/**
+ * Class-change quest state (M5 task 5) for the SkillBar quest flow. `null` when
+ * not applicable (tier 2, or the hero is below the level gate with no active
+ * quest — the bar shows the evolved badge / locked hint from `tier`/`level`
+ * instead). Precomputed by the snapshot builder (engine reads only).
+ */
+export interface HeroQuestSummary {
+  /** The quest is available to accept now (tier 1, level gate met, not yet taken). */
+  offered: boolean;
+  /** The quest has been accepted and is tracking objectives. */
+  accepted: boolean;
+  /** All objectives met — the class change is available (the evolve affordance). */
+  complete: boolean;
+  /** Enemy-kill objective progress + goal (compact "n/N" readout). */
+  kills: number;
+  killGoal: number;
+  /** Boss-defeat objective satisfied (✓/✗). */
+  bossDone: boolean;
+}
+
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
 export interface HeroSummary {
   cls: HeroClass;
@@ -80,13 +100,13 @@ export interface HeroSummary {
   atLevelCap: boolean;
   /** Class-advancement tier (M5 evolution). 1 = base, 2 = evolved. */
   tier: 1 | 2;
-  /** Precomputed `canEvolveHero(state, hero)` read (tier 1, level gate met,
-   * gold affordable) — the store never runs engine logic itself, just carries
-   * this one-way display flag (same pattern as `atLevelCap`). */
+  /** Precomputed `canEvolveHero(state, hero)` read (tier 1, class-change quest
+   * complete) — the store never runs engine logic itself, just carries this
+   * one-way display flag (same pattern as `atLevelCap`). */
   canEvolve: boolean;
-  /** Gold cost of evolving this hero (`evolutionCost(hero.cls)`), for the
-   * evolve affordance's cost label/tooltip — irrelevant once `tier === 2`. */
-  evolutionCost: number;
+  /** Class-change quest state (M5 task 5) driving the quest affordance, or null
+   * (tier 2 / below the level gate — see `HeroQuestSummary`). */
+  quest: HeroQuestSummary | null;
   /** Unspent base-stat points (M5 "Base stats") — drives the stat-panel badge. */
   statPoints: number;
   /** Allocated base-stat block (absolute values), for the +stat readouts. */
@@ -122,6 +142,9 @@ export interface PendingInput {
   /** Hero slot index to evolve (M5), or `null` (last-wins per frame — a big
    * one-way purchase never needs to queue more than one per frame). */
   evolveHero: number | null;
+  /** Hero slot index to accept the class-change quest for (M5 task 5), or `null`
+   * (last-wins per frame — a single tap accepts once). */
+  acceptQuest: number | null;
   /** Base-stat allocation for the solo hero (M5), or `null`. Last-wins per frame
    * (a click allocates once; the engine no-ops an invalid/over-cap amount). */
   allocateStat: { stat: StatKey; amount: number } | null;
@@ -134,6 +157,7 @@ function emptyPendingInput(): PendingInput {
     challengeBoss: false,
     advanceStage: false,
     evolveHero: null,
+    acceptQuest: null,
     allocateStat: null,
   };
 }
@@ -325,6 +349,9 @@ export interface HudState {
   /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
    * `buyUpgrade`) — the engine no-ops it if requirements aren't met. */
   evolveHero: (slot: number) => void;
+  /** Queue accepting the class-change quest for hero slot `i` (last-wins per
+   * frame) — the engine no-ops it unless the quest is offerable. */
+  acceptQuest: (slot: number) => void;
   /** Queue a base-stat allocation for the solo hero (last-wins per frame) — the
    * engine no-ops an invalid/over-cap/over-spend amount. */
   allocateStat: (stat: StatKey, amount: number) => void;
@@ -410,6 +437,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   evolveHero: (slot) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, evolveHero: slot } })),
+
+  acceptQuest: (slot) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, acceptQuest: slot } })),
 
   allocateStat: (stat, amount) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, allocateStat: { stat, amount } } })),

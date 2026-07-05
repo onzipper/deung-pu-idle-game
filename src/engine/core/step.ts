@@ -20,6 +20,7 @@ import { updateWaveSpawns } from "@/engine/systems/waves";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
+import { acceptQuest } from "@/engine/systems/quests";
 import { processStatAllocation } from "@/engine/systems/allocation";
 import { nextStage } from "@/engine/systems/flow";
 import {
@@ -62,10 +63,16 @@ export interface FrameInput {
   advanceStage?: boolean;
   /**
    * Evolve the hero at this slot index (M5 class advancement). Honoured across
-   * phases; a no-op if the hero is already tier 2 or the level/gold requirement
-   * is unmet. Applied once per drained input (a click evolves exactly once).
+   * phases; a no-op if the hero is already tier 2 or its class-change quest is not
+   * complete. Applied once per drained input (a click evolves exactly once).
    */
   evolveHero?: number;
+  /**
+   * Accept the class-change quest for the hero at this slot index (M5 task 5).
+   * Honoured across phases; a no-op unless the quest is offerable (tier 1, level
+   * gate met, none active). Applied once per drained input (a click accepts once).
+   */
+  acceptQuest?: number;
   /**
    * Allocate `amount` unspent base-stat points into `stat` for the solo hero (M5
    * "Base stats"). Honoured across phases; a no-op if the amount is invalid,
@@ -83,6 +90,7 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   state.events.length = 0;
 
   // --- discrete player actions (valid across phases) ---
+  if (input.acceptQuest !== undefined) acceptQuest(state, input.acceptQuest);
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
   // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
   if (input.setAutoSlots) {

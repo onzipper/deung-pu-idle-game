@@ -7,7 +7,16 @@
 import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL } from "@/engine/config";
 import type { Rng } from "@/engine/core/rng";
 import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
-import type { Hero, Enemy, Boss, HeroClass, HeroStats, EnemyKind, SkillId } from "@/engine/entities";
+import type {
+  Hero,
+  Enemy,
+  Boss,
+  HeroClass,
+  HeroStats,
+  HeroQuest,
+  EnemyKind,
+  SkillId,
+} from "@/engine/entities";
 
 /** The default auto-slot loadout: signature in slot 0, the rest empty. */
 export function defaultAutoSlots(cls: HeroClass): (SkillId | null)[] {
@@ -33,6 +42,7 @@ export function makeHero(
   stats: HeroStats = baseStats(cls),
   mana?: number,
   autoSlots: (SkillId | null)[] = defaultAutoSlots(cls),
+  quest: HeroQuest | null = null,
 ): Hero {
   const t = HERO_TYPES[cls];
   const maxHp = heroMaxHp(cls, level, tier, stats.vit);
@@ -60,6 +70,7 @@ export function makeHero(
     statPoints,
     stats,
     autoSlots,
+    quest,
   };
 }
 

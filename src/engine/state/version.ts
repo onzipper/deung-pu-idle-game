@@ -9,8 +9,9 @@
 
 import { CONFIG, SIGNATURE_SKILL } from "@/engine/config";
 import { heroMaxMana } from "@/engine/systems/stats";
+import { classChangeQuestFor } from "@/engine/systems/quests";
 import type { SaveData, CharacterSave } from "@/engine/state";
-import type { HeroClass, HeroStats, SkillId } from "@/engine/entities";
+import type { HeroClass, HeroStats, HeroQuest, SkillId } from "@/engine/entities";
 
 // v1 -> v2 (M5): added per-hero `heroes: {level,xp}[]` (Character XP + Level).
 // v2 -> v3 (M5): added per-hero `tier` (class advancement / evolution).
@@ -28,7 +29,14 @@ import type { HeroClass, HeroStats, SkillId } from "@/engine/entities";
 //   derived pool) + `autoSlots` (the auto-cast loadout). Learned skills are DERIVED
 //   from level/tier and NOT persisted. Older saves default mana to a FULL pool and
 //   the auto-slot loadout to the class default (signature in slot 0).
-export const SAVE_VERSION = 6;
+// v6 -> v7 (M5 "เปลี่ยนคลาสผ่านเควส" / class-change quest, ROADMAP task 5): the
+//   hero gains `quest` (the active class-change quest {id, accepted, progress[]},
+//   or null). Pre-v7 saves had no quests, so migration sets it to null for EVERY
+//   hero: a tier-2 hero has already class-changed (no quest), and a tier-1 hero at
+//   level >= the gate is simply RE-OFFERED the quest on load (progress starts
+//   empty when accepted). No gold is owed — the old evolve gold cost is gone
+//   (quest EFFORT replaced it; evolution stays a one-way flag).
+export const SAVE_VERSION = 7;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -42,13 +50,14 @@ export interface UnknownSave {
   stage?: number;
   gold?: number;
   lastSeen?: number;
-  // v4/v5/v6 single-character shape (v5 adds statPoints + stats; v6 adds mana +
-  // autoSlots):
+  // v4/v5/v6/v7 single-character shape (v5 adds statPoints + stats; v6 adds mana +
+  // autoSlots; v7 adds quest):
   hero?: Partial<CharacterSave> & {
     statPoints?: number;
     stats?: UnknownStats;
     mana?: number;
     autoSlots?: (SkillId | null)[];
+    quest?: HeroQuest | null;
   };
   // pre-v4 team shape:
   unlocked?: string[];
@@ -85,6 +94,28 @@ function normalizeStats(cls: HeroClass, stats: UnknownStats | undefined): HeroSt
     int: asStat(stats?.int, base.int),
     vit: asStat(stats?.vit, base.vit),
   };
+}
+
+/**
+ * Normalise a possibly-old/foreign class-change quest to the v7 shape. Pre-v7
+ * saves have no quest (-> null, re-offered). A v7 save's ACCEPTED quest is
+ * preserved (validated against the current class def + clamped progress) so the
+ * server's migrate-on-every-save never wipes in-progress quest state; a tier-2
+ * hero or an un-accepted/foreign entry normalises to null.
+ */
+function normalizeQuest(
+  cls: HeroClass,
+  tier: 1 | 2,
+  saved: HeroQuest | null | undefined,
+): HeroQuest | null {
+  if (tier === 2 || !saved || saved.accepted !== true) return null;
+  const def = classChangeQuestFor(cls);
+  if (saved.id !== def.id) return null;
+  const progress = def.objectives.map((_, i) => {
+    const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
+    return asStat(v, 0);
+  });
+  return { id: def.id, accepted: true, progress };
 }
 
 /** Default auto-slot loadout for a migrated save: signature in slot 0, rest empty. */
@@ -147,6 +178,8 @@ export function migrate(save: UnknownSave): SaveData {
       // v6 keeps the saved mana (clamped into the pool); a v5 save defaults to full.
       mana: clampMana(save.hero.mana, maxMana),
       autoSlots: normalizeAutoSlots(cls, save.hero.autoSlots),
+      // v7 keeps a saved accepted quest; a pre-v7 save (no quest) -> null (re-offer).
+      quest: normalizeQuest(cls, save.hero.tier === 2 ? 2 : 1, save.hero.quest),
     };
   } else {
     // Pre-v4 team save: adopt the highest-level unlocked hero, then grant stats.
@@ -174,6 +207,8 @@ export function migrate(save: UnknownSave): SaveData {
       stats,
       mana: heroMaxMana(cls, stats.int),
       autoSlots: defaultAutoSlotsFor(cls),
+      // Pre-v4 team saves predate quests entirely -> null (re-offered if eligible).
+      quest: null,
     };
   }
 

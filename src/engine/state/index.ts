@@ -21,8 +21,10 @@ import type {
   Projectile,
   HeroClass,
   HeroStats,
+  HeroQuest,
   SkillId,
 } from "@/engine/entities";
+import { classChangeQuestFor } from "@/engine/systems/quests";
 import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
@@ -100,6 +102,12 @@ export interface CharacterSave {
    * player's slot assignments are saved.
    */
   autoSlots: (SkillId | null)[];
+  /**
+   * Active class-change quest (M5 task 5, SAVE v7), or null. Only an ACCEPTED,
+   * unfinished quest is meaningful to persist; an un-accepted offer is derived
+   * (re-offered on load), and a tier-2 hero has consumed its quest (null).
+   */
+  quest: HeroQuest | null;
 }
 
 export interface SaveData {
@@ -133,8 +141,16 @@ export function initHeroes(state: GameState): void {
       // loadout (player config) is preserved across the reset.
       undefined,
       prev ? [...prev.autoSlots] : undefined,
+      // Quest progress MUST survive a stage reset — the boss-defeat objective
+      // completes as the stage clears, then nextStage rebuilds the hero.
+      prev ? cloneQuest(prev.quest) : null,
     ),
   ];
+}
+
+/** Deep-copy a hero quest (so a rebuilt hero never shares the progress array). */
+function cloneQuest(q: HeroQuest | null): HeroQuest | null {
+  return q ? { id: q.id, accepted: q.accepted, progress: [...q.progress] } : null;
 }
 
 /**
@@ -193,8 +209,33 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     h.maxMana = heroMaxManaOf(h);
     h.mana = clamp(save.hero.mana ?? h.maxMana, 0, h.maxMana);
     h.autoSlots = normalizeAutoSlots(h.cls, save.hero.autoSlots);
+    // Restore the class-change quest (M5 task 5, SAVE v7). A tier-2 hero has no
+    // quest; a saved accepted quest is validated against the current class def
+    // (unknown/foreign or un-accepted -> re-offer by leaving it null).
+    h.quest = normalizeHeroQuest(h.cls, h.tier, save.hero.quest);
   }
   return state;
+}
+
+/**
+ * Validate a saved class-change quest against the hero's current class def
+ * (SAVE v7). A tier-2 hero holds no quest; a foreign/unknown id or an
+ * un-accepted offer normalises to null (the UI re-offers a fresh quest); a valid
+ * accepted quest keeps its progress (clamped non-negative, per-objective length).
+ */
+function normalizeHeroQuest(
+  cls: HeroClass,
+  tier: 1 | 2,
+  saved: HeroQuest | null | undefined,
+): HeroQuest | null {
+  if (tier === 2 || !saved || saved.accepted !== true) return null;
+  const def = classChangeQuestFor(cls);
+  if (saved.id !== def.id) return null;
+  const progress = def.objectives.map((_, i) => {
+    const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
+    return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+  });
+  return { id: def.id, accepted: true, progress };
 }
 
 /**
@@ -239,6 +280,9 @@ export function toSaveData(state: GameState): SaveData {
       // (player config). Learned skills derive from level/tier — not persisted.
       mana: h.mana,
       autoSlots: [...h.autoSlots],
+      // Persist the class-change quest (M5 task 5) — only an accepted, unfinished
+      // quest is meaningful; null otherwise (offer is re-derived, tier 2 consumed).
+      quest: h.quest ? { id: h.quest.id, accepted: h.quest.accepted, progress: [...h.quest.progress] } : null,
     },
     lastSeen: 0,
   };

@@ -24,6 +24,7 @@ import {
 } from "@/engine/systems/stats";
 import { applyDamage, isHero } from "@/engine/systems/damage";
 import { grantKillXp } from "@/engine/systems/leveling";
+import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
 import {
   aliveHeroes,
@@ -399,6 +400,8 @@ export function resolveDeaths(state: GameState): void {
           y: e.y,
           goldGained,
         });
+        // Count the kill toward the solo hero's class-change quest (M5 task 5).
+        advanceQuestObjective(state, "kill");
         return false;
       }
       return true;

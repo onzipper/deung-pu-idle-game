@@ -406,24 +406,45 @@ export const CONFIG = {
   },
 
   // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----
-  // A second power axis on top of levels: the player pays gold to evolve the hero
-  // to tier 2, granting a PERMANENT atk/hp multiplier (systems/stats
-  // tierAtkMult/tierHpMult). PLAYER-TRIGGERED (evolveHero intent). Requirements:
-  // hero level >= levelRequired AND gold >= cost(classIndex). Rejected (no-op) if
-  // unmet or already tier 2. Single path in M5; class-change QUESTS replace the
-  // trigger in a later task. With the upgrade-line gold sink gone, gold now
-  // accumulates freely, so the gold gate is met quickly and the LEVEL gate times
-  // evolution. NO RNG (deterministic).
+  // A second power axis on top of levels: the player advances the hero to tier 2,
+  // granting a PERMANENT atk/hp multiplier (systems/stats tierAtkMult/tierHpMult).
+  // PLAYER-TRIGGERED (evolveHero intent) but the TRIGGER is now the class-change
+  // QUEST (M5 task 5, `quest` below): the old gold cost is GONE — quest EFFORT
+  // replaces it. Requirement: tier 1 AND the class-change quest is COMPLETE
+  // (systems/quests `isQuestComplete`); the quest is itself only offerable at
+  // `levelRequired`, so the level gate still times the beat. Rejected (no-op) if
+  // unmet or already tier 2. Single path in M5. NO RNG (deterministic).
+  //
+  // ECONOMY NOTE (task 5): removing the gold cost leaves NO gold sink until M6/M7
+  // (NPC potions, marketplace) — gold accumulates freely by design; the pacing
+  // that the gold gate used to add is now carried entirely by the quest objectives.
   evolution: {
-    // Level gate — a mid-run milestone ("evolve to power through the next wall").
+    // Level gate — the class-change quest is auto-offered here (mid-run milestone).
     levelRequired: 15,
-    // Gold cost by class index in SLOT_ORDER (swordsman 0 / archer 1 / mage 2).
-    cost: (classIndex: number): number => Math.round(600 * (classIndex + 1)),
     // Permanent tier-2 multipliers. With the ±15% M4 budget gone (full rebaseline),
-    // evolution can carry REAL offense again: a meaningful atk + hp jump that helps
-    // the solo hero break the boss gate. Sim-tuned per class — see docs/balance-m5.md.
+    // evolution can carry REAL offense: a meaningful atk + hp jump that helps the
+    // solo hero break the boss gate. Sim-tuned per class — see docs/balance-m5.md.
     atkMult: 1.35,
     hpMult: 1.5,
+  },
+
+  // ---- class-change quest (M5 "เปลี่ยนคลาสผ่านเควส" v1, ROADMAP task 5) ----
+  // The tier-1 -> tier-2 class change is gated by a lean QUEST instead of gold.
+  // Auto-offered at level >= evolution.levelRequired while tier 1; the player
+  // accepts (acceptQuest intent), objectives then count deterministically from the
+  // hero's own kills / boss defeats (systems/quests, driven by combat — NO RNG, no
+  // wall-clock), and completing them makes the class change available. Numbers are
+  // sim-tuned so completion lands on the same mid-game beat the old ~level-15 gold
+  // gate did (see docs/balance-m5.md "Class-change quest timing"). Same objective
+  // numbers for every class in v1; per-class quest IDS (systems/quests
+  // `classChangeQuestId`) let M8's full quest system diverge them later.
+  quest: {
+    classChange: {
+      // Enemy kills to bank after accepting (the grind portion of the effort gate).
+      kills: 60,
+      // Boss defeats required (a stage-clear milestone — proves real progress).
+      bossKills: 1,
+    },
   },
 
   // ---- flow / progression ----
