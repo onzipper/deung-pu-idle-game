@@ -128,6 +128,19 @@ export const CONFIG = {
   // 90 sits strictly inside the swordsman's 96 melee reach, so every enemy still
   // ALLOWED to attack from behind is one he can symmetrically swing back at.
   enemyBehindReach: 90,
+  // Free-hit fix (ranged counterpart of enemyBehindReach): a ranged enemy that
+  // has ended up beyond EVERY alive hero's reach (the swordsman walled at
+  // chargeHardCap becomes its nearest hero, so it parks at range 160 ≈ 930, past
+  // his 96 melee reach and the anchor-capped backline's ~834/766 forward reach)
+  // HOLDS FIRE and creeps forward at THIS speed until a hero can answer it (see
+  // combat.ts). Deliberately far slower than its own approach speed (32): the
+  // creep re-creates, as a FAIR fight, the ~10-35 s stall the un-killable shooter
+  // used to impose — the clear time the M4.6 table is tuned around — instead of
+  // deleting it (a straight pull-in ran S2-S6 25-45 % fast) or inflating it (a
+  // freeze ran +9..+97 % and broke the S9 gate). 4 px/s ≈ a ~15 s close over the
+  // typical overhang, which sim-lands every stage inside the ±15 % budget (worst
+  // S8 +13 %) with the S9 prestige gate (~5x) and 0 wipes preserved.
+  rangedReengageSpeed: 4,
 
   /** Stage-gated random thresholds for wave composition (POC rollWave). */
   waveComp: {

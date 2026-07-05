@@ -620,3 +620,64 @@ The stage-9 prestige wall is unchanged in absolute terms (608 vs 609 s); its
   close into range and damage the boss.
 - `charge.test.ts` — surrounded swordsman never idle (swings each cooldown while
   taking damage); a straggler beyond reach re-approaches instead of free-hitting.
+
+---
+
+## Follow-up 2 — ranged-enemy free hit + idle backline (live playtest)
+
+The swordsman **still** took free hits after the 7bbdf35 fixes, and while he did
+the archer + mage stood idle. Root cause found headlessly (not in a browser): a
+**ranged-behaviour enemy** anchors its 160 standoff to its *nearest* hero. When the
+swordsman is walled at `chargeHardCap` (770) he becomes that nearest hero, so the
+shooter parks at ~930 — past his 96 melee reach **and** past the anchor-capped
+backline's forward reach (archer ~834 / mage ~766). It plinked him with zero
+possible counter while all three heroes were out of range (both reported bugs). The
+7bbdf35 `chargeHardCap = spawnX − 90` math only guaranteed reach to a shooter at the
+spawn *edge* (860); a shooter that spawns further right (`spawnX + i·spawnGap`) and
+is already inside 160 of the walled swordsman never advances, so it rests *beyond*
+860.
+
+### Fix
+
+- **Engine (`combat.ts` ranged branch):** a shooter beyond **every** alive hero's
+  reach (`anyHeroCanRetaliate`, new in `targeting.ts`) **holds fire** and creeps in
+  at `rangedReengageSpeed` until a hero can answer it — the ranged counterpart of the
+  melee `enemyBehindReach` re-approach. No un-answerable damage is ever dealt, and it
+  is never an immortal wall.
+- **Engine (`combat.ts` hero branch):** ranged heroes fall back to the nearest
+  in-range foe on **either** side when they have no forward target, so they engage a
+  flanking attacker instead of idling (BUG 2). Pacing-neutral (fires only when
+  otherwise idle).
+
+### One new knob
+
+| Constant             | Value | Why                                                                                                                                                                                                                                                                                              |
+| -------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rangedReengageSpeed` | `4`   | Creep speed for a held-fire shooter, far below its own approach speed (32). The prior free-hit *stall* (10–35 s of un-killable plinking per shooter) was load-bearing clear-time the table is tuned on; a straight pull-in into melee deleted it (S2–S6 −25…−45 %), a freeze inflated it (+9…+97 %, S9 gate collapsed to 3.8x). A slow creep re-creates that stall as a **fair** fight (roughly stage-independent), landing every stage in budget. |
+
+### Pacing (aggregate, 5 seeds, 1800 s) — all stages within ±15 %, 0 wipes
+
+| Stage | Prior table | New   | Δ       |
+| ----- | ----------- | ----- | ------- |
+| 1     | 86.4        | 86.4  | 0 %     |
+| 2     | 58.5        | 51.8  | −11.5 % |
+| 3     | 78.8        | 71.1  | −9.8 %  |
+| 4     | 73.4        | 75.3  | +2.6 %  |
+| 5     | 86.9        | 89.8  | +3.3 %  |
+| 6     | 99.9        | 94.7  | −5.2 %  |
+| 7     | 98.7        | 108.8 | +10.2 % |
+| 8     | 112.0       | 126.5 | +12.9 % |
+| 9     | 608.2       | 627.8 | +3.2 %  |
+
+S9 prestige gate 4.96x (~5x), 0 wipes. Free-hit steps across seeds 1/2/3/42/1337 =
+**0** (a headless detector: a hero taking a hit while the firing shooter sits beyond
+all reach).
+
+### Tests (`charge.test.ts`)
+
+- BUG 1 (unit): a shooter past every reach edge never spawns a bolt while beyond
+  reach, creeps in, and ends inside the swordsman's melee range.
+- BUG 1 (integration): under a full sim with a melee wall + trailing shooter, no bolt
+  is ever fired from beyond all-hero reach, and the shooter is eventually damaged.
+- BUG 2: a foe behind both ranged heroes but inside their ranges draws an archer
+  volley **and** a mage orb (no idling) and takes damage.

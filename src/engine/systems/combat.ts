@@ -21,6 +21,7 @@ import { applyDamage, isHero } from "@/engine/systems/damage";
 import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
 import {
   aliveHeroes,
+  anyHeroCanRetaliate,
   frontHeroX,
   getTargets,
   nearestAliveHero,
@@ -72,6 +73,24 @@ export function updateEnemies(state: GameState): void {
       const dist = h ? Math.abs(e.x - h.x) : Infinity;
       if (dist > e.range) {
         e.x -= e.speed * FIXED_DT;
+      } else if (h && !anyHeroCanRetaliate(state, e.x)) {
+        // Free-hit fix ("มอนตีดาบฟรี"), ranged counterpart of the melee
+        // enemyBehindReach rule. Root cause of the surviving free hit: when the
+        // swordsman is walled at chargeHardCap (770) he becomes the shooter's nearest
+        // hero, so it parks at range 160 from him (~930) — past his 96 melee reach AND
+        // past the anchor-capped backline's forward reach (~834/766) — and plinked him
+        // with zero possible counter while the whole team stood unable to answer (both
+        // reported bugs). Here a shooter sitting beyond EVERY hero's reach HOLDS FIRE
+        // (no un-answerable damage) and CREEPS forward at rangedReengageSpeed until it
+        // enters a hero's reach, where it resumes firing and is answered (BUG 2). Two
+        // extremes were rejected by the sim: freezing it (pure hold-fire) turns shooters
+        // into passive walls the formation must grind to — S3-S9 ran +9..+97 % and the
+        // S9 prestige gate collapsed to 3.8x; snapping it straight to melee range made
+        // the swordsman one-shot it, deleting ~10-35 s of tuned clear time per shooter
+        // (S2-S6 −25..−45 %). The slow creep restores that flat, roughly
+        // stage-independent stall time AS A FAIR FIGHT, keeping pacing within budget and
+        // the gate intact (sim-tuned; see docs/balance-m4.md).
+        e.x -= CONFIG.rangedReengageSpeed * FIXED_DT;
       } else {
         e.cd -= FIXED_DT;
         if (e.cd <= 0 && h) {
@@ -181,7 +200,15 @@ export function updateHeroes(state: GameState): void {
       const tgt =
         t.attack === "melee"
           ? nearestWithin(targets, h.x, t.range)
-          : nearestTarget(targets, h.x, 0, t.range);
+          : // Ranged heroes fire FORWARD by default (nearestTarget, minD 0). But if
+            // NOTHING is forward-in-range they must not idle while an enemy is actively
+            // engaging the party from their flank/behind — fall back to the nearest foe
+            // within range on EITHER side so the whole team answers a live threat (BUG 2:
+            // "ranged heroes stand idle while the melee hero is free-hit"). Only the
+            // otherwise-idle case changes, so normal nearest-forward selection — and its
+            // balance pacing — is unchanged.
+            (nearestTarget(targets, h.x, 0, t.range) ??
+            nearestWithin(targets, h.x, t.range));
       if (tgt) {
         h.cd = heroAtkSpeed(h.cls, state.upgrades);
         const dmg = heroAtk(h.cls, state.upgrades);

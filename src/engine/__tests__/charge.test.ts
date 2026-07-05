@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { initGameState, step, CONFIG, HERO_TYPES, heroAtkSpeed } from "@/engine";
 import type { Enemy, GameState } from "@/engine";
+import { updateEnemies, updateHeroes, updateProjectiles } from "@/engine/systems/combat";
 import { makeStubEnemy, threeHeroSave } from "./helpers";
 
 // The swordsman stops `meleeApproachGap` short and his home slot rides ahead, so
@@ -289,5 +290,153 @@ describe("swordsman free-hit fix (มอนตีดาบฟรี)", () => {
     // ...and got back into the swordsman's reach so any hit it lands is retaliable.
     expect(reEngaged).toBe(true);
     expect(dealtDamage).toBe(true);
+  });
+});
+
+/**
+ * Follow-up free-hit bug (ClickUp — live playtest): the swordsman STILL took free
+ * hits despite 7bbdf35. Root cause found headlessly (see docs/balance-m4.md): a
+ * RANGED-behaviour enemy anchors its 160-standoff to its NEAREST hero. When the
+ * swordsman is walled at chargeHardCap (770) he becomes that nearest hero, so the
+ * shooter parks at ~930 — past his 96 melee reach AND past the anchor-capped
+ * backline's forward reach (archer ~834 / mage ~766) — plinking him with zero
+ * possible counter while all three heroes stand unable to answer (BUG 1 + BUG 2).
+ *
+ * Fix: a shooter beyond EVERY alive hero's reach HOLDS FIRE and creeps in
+ * (rangedReengageSpeed) until a hero can answer it; ranged heroes fall back to an
+ * either-side in-range target when they have nothing forward, so they engage a
+ * flanking attacker instead of idling.
+ */
+describe("ranged-enemy free-hit fix (มอนตีดาบฟรี — shooter beyond reach)", () => {
+  /** Reach edge of each class relative to a pinned formation (for readability). */
+  const walled = (s: GameState) => {
+    const sword = s.heroes.find((h) => h.cls === "swordsman")!;
+    const archer = s.heroes.find((h) => h.cls === "archer")!;
+    const mage = s.heroes.find((h) => h.cls === "mage")!;
+    // The exact walled formation the sim produces: swordsman deep at chargeHardCap,
+    // ranged heroes at their anchor-capped homes (anchor 510 + offsets).
+    sword.x = CONFIG.chargeHardCap; // 770
+    archer.x = 510 + HERO_TYPES.archer.offset; // 484
+    mage.x = 510 + HERO_TYPES.mage.offset; // 436
+    return { sword, archer, mage };
+  };
+
+  it("BUG 1: a shooter beyond every hero's reach never lands a free hit — it holds fire and creeps in until answerable", () => {
+    const s = initGameState(1, threeHeroSave(3));
+    const { sword } = walled(s);
+    s.projectiles = [];
+    // Ranged shooter past ALL reach edges: > 866 (sword+96), > 834 (archer+350),
+    // > 766 (mage+330). This is the exact configuration that free-hit the swordsman.
+    const shooter: Enemy = {
+      ...makeStubEnemy(999, 950, 1_000_000),
+      kind: "ranged",
+      behavior: "ranged",
+      range: 160,
+      speed: 32,
+      atk: 6,
+      cd: 0, // wants to fire immediately
+    };
+    s.enemies = [shooter];
+
+    const reachEdge = sword.x + HERO_TYPES.swordsman.range; // 866
+    let firedWhileBeyond = false;
+    let reached = false;
+    // Drive ONLY the enemy update so the heroes stay pinned in the walled formation
+    // (isolates the enemy rule from hero movement); this is the scenario in which the
+    // old code plinked forever.
+    for (let i = 0; i < 4000; i++) {
+      const prevX = shooter.x;
+      updateEnemies(s);
+      if (shooter.x > reachEdge) {
+        // Beyond reach: MUST hold fire (no bolt spawned) and creep inward.
+        if (s.projectiles.length > 0) firedWhileBeyond = true;
+        expect(shooter.x).toBeLessThan(prevX); // always closing, never plinking from afar
+      } else {
+        reached = true;
+        break;
+      }
+    }
+    // It never dealt an un-answerable hit...
+    expect(firedWhileBeyond).toBe(false);
+    // ...and it is NOT an immortal wall — it closes into a fair fight (the swordsman
+    // can now strike it symmetrically), so the wave still resolves.
+    expect(reached).toBe(true);
+    expect(Math.abs(shooter.x - sword.x)).toBeLessThanOrEqual(HERO_TYPES.swordsman.range);
+  });
+
+  it("BUG 1 (integration): under a full sim the swordsman is never free-hit by an unreachable shooter", () => {
+    const s = initGameState(1, threeHeroSave(3));
+    s.waveGap = 1e9;
+    // A wall of tanky melee grunts pins the swordsman forward at chargeHardCap, and a
+    // tanky shooter trails behind them at the spawn edge — the live-play setup.
+    for (let i = 0; i < 4; i++) {
+      s.enemies.push({ ...makeStubEnemy(10 + i, 840 + i * 20, 1_000_000), speed: 30, atk: 5, cd: 0.5 });
+    }
+    const shooter: Enemy = {
+      ...makeStubEnemy(999, 1000, 1_000_000),
+      kind: "ranged",
+      behavior: "ranged",
+      range: 160,
+      speed: 32,
+      atk: 8,
+      cd: 0,
+    };
+    s.enemies.push(shooter);
+
+    // Invariant: on no step may the shooter fire a bolt while it is beyond every
+    // hero's reach. We detect a fired bolt via the projectileSpawn event and check the
+    // geometry at that instant.
+    let freeBolt = false;
+    for (let i = 0; i < 1800; i++) {
+      step(s, {});
+      const alive = s.heroes.filter((h) => !h.dead);
+      const boltFired = s.events.some(
+        (e) => e.type === "projectileSpawn" && e.kind === "bolt",
+      );
+      if (boltFired) {
+        const canAnswer = alive.some((h) => {
+          const t = HERO_TYPES[h.cls];
+          const d = shooter.x - h.x;
+          return t.attack === "melee" ? Math.abs(d) <= t.range : d >= 0 && d <= t.range;
+        });
+        if (!canAnswer) freeBolt = true;
+      }
+    }
+    expect(freeBolt).toBe(false);
+    // The shooter is eventually answered (it took damage), proving it's not a stall.
+    expect(shooter.hp).toBeLessThan(shooter.maxHp);
+  });
+
+  it("BUG 2: ranged heroes engage an in-range attacker on their flank instead of idling", () => {
+    const s = initGameState(1, threeHeroSave(3));
+    walled(s);
+    // Reposition the backline shallow so a flank foe is inside their range; keep the
+    // swordsman forward (charged). A foe BEHIND both ranged heroes but within both
+    // ranges: forward-only targeting would leave archer & mage idle — the fallback
+    // makes them answer it.
+    const archer = s.heroes.find((h) => h.cls === "archer")!;
+    const mage = s.heroes.find((h) => h.cls === "mage")!;
+    archer.x = 484;
+    mage.x = 436;
+    const foe: Enemy = { ...makeStubEnemy(1, 300, 1_000_000) }; // behind both, within 350/330
+    expect(foe.x).toBeLessThan(mage.x); // genuinely behind the backline (not forward)
+    s.enemies = [foe];
+    s.projectiles = [];
+
+    // Ready every hero to attack this step, then run the hero update in isolation.
+    for (const h of s.heroes) h.cd = 0;
+    let sawArrow = false;
+    let sawOrb = false;
+    for (let i = 0; i < 200; i++) {
+      updateHeroes(s);
+      if (s.projectiles.some((p) => p.kind === "arrow")) sawArrow = true;
+      if (s.projectiles.some((p) => p.kind === "orb")) sawOrb = true;
+      updateProjectiles(s); // let the volley + orb travel and resolve onto the foe
+    }
+    // BOTH ranged heroes acquired the flank attacker (archer volley + mage orb)...
+    expect(sawArrow).toBe(true);
+    expect(sawOrb).toBe(true);
+    // ...and it is actually taking damage (answered, not ignored).
+    expect(foe.hp).toBeLessThan(foe.maxHp);
   });
 });
