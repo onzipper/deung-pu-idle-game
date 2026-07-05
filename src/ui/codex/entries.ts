@@ -7,7 +7,7 @@
  * is just a static reference the player can reopen from the settings row at
  * any point in the run. Body copy lives in `messages/*.json`'s `codex`
  * namespace; entries that document an existing engine-content id (hero
- * class, upgrade stat) resolve their TITLE + ICON from the shared `content`
+ * class) resolve their TITLE + ICON from the shared `content`
  * namespace / `labels.ts` icon maps instead of duplicating them here (see
  * `contentRef`) — only the codex-specific BODY explanation is new copy.
  *
@@ -19,18 +19,7 @@
 
 import type { HeroClass } from "@/engine";
 
-/** The (now-removed) upgrade-stat ids the codex still documents as a reference
- * entry. M5 pivot dropped the buyable lines from the engine; the codex copy is
- * reworked in a later M5 task, so the ids are kept locally for now. */
-type UpgradeStatId = "atk" | "speed" | "hp";
-
-export type CodexCategoryId =
-  | "coreLoop"
-  | "heroes"
-  | "upgrades"
-  | "boss"
-  | "controls"
-  | "offlineIdle";
+export type CodexCategoryId = "coreLoop" | "heroes" | "boss" | "controls" | "offlineIdle";
 
 export interface CodexCategoryDef {
   id: CodexCategoryId;
@@ -40,9 +29,7 @@ export interface CodexCategoryDef {
 /** Points an entry's TITLE + ICON at an existing content-id's display data
  * instead of re-declaring it — the "do NOT duplicate names" rule from the
  * task brief. The entry's BODY is always fresh codex copy regardless. */
-export type CodexContentRef =
-  | { kind: "heroClass"; id: HeroClass }
-  | { kind: "upgradeStat"; id: UpgradeStatId };
+export type CodexContentRef = { kind: "heroClass"; id: HeroClass };
 
 export interface CodexEntryDef {
   id: string;
@@ -56,7 +43,6 @@ export interface CodexEntryDef {
 export const CODEX_CATEGORIES: readonly CodexCategoryDef[] = [
   { id: "coreLoop" },
   { id: "heroes" },
-  { id: "upgrades" },
   { id: "boss" },
   { id: "controls" },
   { id: "offlineIdle" },
@@ -68,11 +54,6 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   { id: "hero-swordsman", category: "heroes", contentRef: { kind: "heroClass", id: "swordsman" } },
   { id: "hero-archer", category: "heroes", contentRef: { kind: "heroClass", id: "archer" } },
   { id: "hero-mage", category: "heroes", contentRef: { kind: "heroClass", id: "mage" } },
-
-  { id: "upgrade-atk", category: "upgrades", contentRef: { kind: "upgradeStat", id: "atk" } },
-  { id: "upgrade-speed", category: "upgrades", contentRef: { kind: "upgradeStat", id: "speed" } },
-  { id: "upgrade-hp", category: "upgrades", contentRef: { kind: "upgradeStat", id: "hp" } },
-  { id: "autoUpgrade", category: "upgrades" },
 
   { id: "boss", category: "boss" },
 

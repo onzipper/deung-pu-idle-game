@@ -86,14 +86,6 @@ describe("CODEX_ENTRIES", () => {
       expect(get(en.content, `classes.${entry.contentRef.id}.name`)).toBeTypeOf("string");
     }
   });
-
-  it("upgradeStat contentRef ids resolve against the shared `content.upgrades` namespace", () => {
-    for (const entry of CODEX_ENTRIES) {
-      if (entry.contentRef?.kind !== "upgradeStat") continue;
-      expect(get(th.content, `upgrades.${entry.contentRef.id}.name`)).toBeTypeOf("string");
-      expect(get(en.content, `upgrades.${entry.contentRef.id}.name`)).toBeTypeOf("string");
-    }
-  });
 });
 
 describe("codex panel chrome keys", () => {

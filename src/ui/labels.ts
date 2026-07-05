@@ -20,12 +20,3 @@ export const SKILL_ICONS: Record<HeroClass, string> = {
   archer: "\u{1F327}️", // 🌧️ arrow rain
   mage: "☄️",
 };
-
-// M5 pivot: the buyable upgrade lines are gone from the engine, but the codex
-// still documents them as reference entries (reworked in a later M5 task), so
-// these cosmetic icons stay keyed by the local stat ids.
-export const UPGRADE_ICONS: Record<"atk" | "speed" | "hp", string> = {
-  atk: "⚔️",
-  speed: "⚡",
-  hp: "❤️",
-};

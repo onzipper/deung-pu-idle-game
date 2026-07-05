@@ -21,7 +21,7 @@ import {
   codexEntriesByCategory,
   type CodexEntryDef,
 } from "@/ui/codex/entries";
-import { HERO_ICONS, UPGRADE_ICONS } from "@/ui/labels";
+import { HERO_ICONS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
 type Translator = ReturnType<typeof useTranslations>;
@@ -38,10 +38,6 @@ function resolveEntryHeading(
   if (entry.contentRef?.kind === "heroClass") {
     const cls = entry.contentRef.id;
     return { icon: HERO_ICONS[cls], title: tContent(`classes.${cls}.name`) };
-  }
-  if (entry.contentRef?.kind === "upgradeStat") {
-    const stat = entry.contentRef.id;
-    return { icon: UPGRADE_ICONS[stat], title: tContent(`upgrades.${stat}.name`) };
   }
   return { icon: undefined, title: tCodex(`entries.${entry.id}.title`) };
 }
