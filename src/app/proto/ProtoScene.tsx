@@ -63,11 +63,25 @@ interface SceneApi {
   setAuraTier(tier: AuraTier): void;
 }
 
+/** Mirrors `src/render/GameRenderer.ts`'s pre-init probe (reimplemented
+ * locally — this route may not import `src/render`): fail with a clear,
+ * catchable message instead of letting a bad `Application.init()` reject
+ * into an unhandled-promise silence (the iOS Safari bug this file fixes). */
+function isWebGL2Available(): boolean {
+  try {
+    const canvas = document.createElement("canvas");
+    return !!canvas.getContext("webgl2");
+  } catch {
+    return false;
+  }
+}
+
 export function ProtoScene() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneApiRef = useRef<SceneApi | null>(null);
   const [pixelMode, setPixelModeState] = useState(true);
   const [auraTier, setAuraTierState] = useState<AuraTier>(2);
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
     const mountCandidate = mountRef.current;
@@ -82,11 +96,36 @@ export function ProtoScene() {
     const app = new Application();
 
     (async () => {
+      try {
+        await initScene();
+      } catch (err) {
+        if (!destroyed) {
+          const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+          console.error("[proto] Pixi scene init failed:", err);
+          setInitError(message);
+        }
+        app.destroy(true);
+      }
+    })();
+
+    async function initScene(): Promise<void> {
+      if (!isWebGL2Available()) {
+        throw new Error(
+          "อุปกรณ์/เบราว์เซอร์นี้ไม่รองรับ WebGL2 — พรีวิวนี้ต้องใช้ WebGL2 (ลองเบราว์เซอร์อื่นหรืออุปกรณ์อื่น)",
+        );
+      }
       await app.init({
         backgroundColor: P.skyTop,
         antialias: true,
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         autoDensity: true,
+        // Force WebGL explicitly — iOS Safari can auto-pick WebGPU (Pixi 8's
+        // default preference order tries it first when the device reports
+        // support), and a `RenderTexture` created with a `scaleMode`/
+        // `antialias` combo has been observed to throw on that backend
+        // there. WebGL is the well-exercised path (same as the shipped
+        // `GameRenderer`) and is what this whole prototype was built/tested
+        // against.
         preference: "webgl",
       });
       if (destroyed) {
@@ -94,6 +133,14 @@ export function ProtoScene() {
         return;
       }
       mount.appendChild(app.canvas);
+      // iOS Safari note: `autoDensity` sets the canvas's CSS width/height from
+      // `renderer.resize()`, but that first call below can race the container's
+      // very first layout pass (e.g. right after `aspect-video` establishes
+      // height) — belt-and-suspenders CSS so the canvas element itself always
+      // fills its parent box even for the one frame before a resize lands.
+      app.canvas.style.width = "100%";
+      app.canvas.style.height = "100%";
+      app.canvas.style.display = "block";
 
       // ---- scene graph (built once, logical 480x270 space) ----
       const world = new Container();
@@ -306,7 +353,7 @@ export function ProtoScene() {
         hitSparks.destroy();
         app.destroy(true, { children: true, texture: true });
       });
-    })();
+    }
 
     return () => {
       destroyed = true;
@@ -338,7 +385,25 @@ export function ProtoScene() {
             หนุ่ม ๆ ต้องว้าว เสียเวลาเพื่อให้ได้มัน — M6.5 art-direction prototype
           </div>
         </div>
+
+        {/* Version marker — so the owner can confirm he's looking at a fresh
+            bundle, not a stale cached one, when reporting bugs. Bump the
+            string on any meaningful change to this prototype. */}
+        <div className="pointer-events-none absolute bottom-1 right-1.5 select-none text-[9px] font-mono text-white/30">
+          proto v2
+        </div>
       </div>
+
+      {/* Init failure — rendered VISIBLY instead of failing silently (the iOS
+          Safari bug this box exists to surface): `Application.init()` or any
+          synchronous scene-build step can throw, and an uncaught rejection
+          inside the mount effect's async IIFE would otherwise leave the
+          canvas area blank with zero diagnostics. */}
+      {initError && (
+        <div className="w-full max-w-3xl rounded-md border border-red-500 bg-red-950/80 p-2 font-mono text-xs text-red-200">
+          Pixi init error: {initError}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-center gap-2">
         <button
