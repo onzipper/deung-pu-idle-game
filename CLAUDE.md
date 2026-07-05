@@ -8,16 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**ดึ๋งปุ๊ Idle Game** — a competition-driven idle RPG for the web (levelled up from the original auto-battler POC). Players level heroes, unlock/evolve classes (sword/bow/magic), collect tradable gear, and quest across maps to get strong enough to rank on the Hall of Fame. A town hub (shops/quests/market) and **official trading** are core features.
+**ดึ๋งปุ๊ Idle Game** — a single-character idle MMORPG-lite for the web (Ragnarok × IdleOn feel). Players create a character (up to 3 per account), pick a base class (sword/bow/magic), auto-fight through walkable zones, allocate stat points, class-change via quests, collect weapon/armor drops (tradable item-instances), party up in real time (max 3, lockstep on the deterministic engine), and climb a multi-category Hall of Fame. Power = level + stats + class/skills + gear — there are NO purchasable upgrade lines (the old atk/speed/hp lines are being removed in the M5 pivot).
 
-**Vision source of truth:** ClickUp GDD doc [3huqe-536](https://app.clickup.com/3730158/docs/3huqe-536) (linked from main card [86d3jv7m3](https://app.clickup.com/t/86d3jv7m3)). If this file and the GDD conflict, the GDD wins.
+**Source of truth (in-repo, NOT ClickUp):** vision/direction = `docs/GDD.md` · roadmap + task checklists = `docs/ROADMAP.md`. Update checkboxes there as work lands; if anything conflicts, GDD.md wins. ClickUp is a legacy pointer only — do not fetch or update it in normal work.
 
-Status: **M1–M4.6 complete** (engine, Pixi render, React HUD, MySQL persistence, offline idle, balance pass, full juice/visual-polish). Roadmap (build order is deliberate — competition is the north star but ships LAST):
-- **M4.7** i18n th/en via next-intl · **M4.8** onboarding (FTUE/tutorial/codex/mascot) — cross-cutting, before content
-- **M5** Progression: XP/level, class evolution, **gear as server-authoritative item-instances ⭐** (unique ID + ownerId + audit; retrofit later is near-impossible; item dupe = existential), goal-ladder UI
-- **M6** World (maps/quests/town) · **M7** Collection (classes/sets/inventory/codex) · **M8** Meta (prestige/events) · **M9** Competition (economy/anti-dupe, leaderboard/Hall of Fame, PvP, marketplace/RMT)
-
-New ClickUp work items go in as top-level Tasks, not subtasks of the main card.
+Status: **M1–M4.8 complete** (deterministic engine, Pixi render, React HUD, MySQL persistence, offline idle, balance, juice/art, i18n th/en, onboarding/FTUE/codex/mascot) + per-hero XP/level and tier evolution (will be reworked in the pivot). Next: **M5 Character Pivot ⭐** (single character, char creation + 3 slots, base stats, mana + skill framework, class change v1, FTUE rework) → M6 World & Town → M7 Gear & Drops ⭐ → M8 Party → M9 Economy & Competition. PvP cut; prestige on hold.
 
 Git: `develop` = integration branch (work lands here per-task), `main` = stable (merged via PR at milestone boundaries).
 
