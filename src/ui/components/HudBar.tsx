@@ -57,7 +57,7 @@ export function HudBar() {
           </span>
         </div>
       </div>
-      <div className="flex flex-col gap-1">
+      <div data-onboarding-anchor="kill-progress" className="flex flex-col gap-1">
         <div className="flex items-center justify-between text-[11px] font-medium text-ddp-ink-muted">
           <span className="flex items-center gap-1">
             <span aria-hidden>💀</span> {t("killProgressLabel")}

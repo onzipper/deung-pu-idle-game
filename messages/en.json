@@ -39,6 +39,41 @@
     "localeTh": "ไทย",
     "localeEn": "EN"
   },
+  "onboarding": {
+    "nextButton": "Next →",
+    "skipAllButton": "Skip all",
+    "stepProgress": "{current} / {total}",
+    "steps": {
+      "welcome": {
+        "title": "Welcome to ดึ๋งปุ๊!",
+        "body": "Your hero team charges through enemy waves automatically. Your job is to keep upgrading them so they grow stronger. Let's take a look!"
+      },
+      "watchFight": {
+        "title": "Let your heroes fight",
+        "body": "Heroes attack enemies on their own. Every kill banks gold, and the bar below fills up toward the boss."
+      },
+      "buyUpgrade": {
+        "title": "Spend gold on upgrades",
+        "body": "Try buying one of the upgrades below. The stronger your team, the faster you'll clear the next wave."
+      },
+      "castSkill": {
+        "title": "Cast a skill to help out",
+        "body": "Each hero has their own special skill. Tap a skill button when it's ready (no cooldown left) for a big burst of damage!"
+      },
+      "bossChallenge": {
+        "title": "Challenge the stage boss",
+        "body": "Once your team's power is ready, the Challenge Boss button lights up. Tap it to fight the boss and unlock the next stage!"
+      },
+      "settingsTour": {
+        "title": "Tune your play here",
+        "body": "Speed up the game, mute/unmute sound, or switch between Thai/English anytime from this row."
+      },
+      "outro": {
+        "title": "You're ready!",
+        "body": "That's the whole core loop: kill → bank gold → upgrade → grow stronger, on repeat. Enjoy the adventure!"
+      }
+    }
+  },
   "content": {
     "classes": {
       "swordsman": { "name": "Swordsman" },

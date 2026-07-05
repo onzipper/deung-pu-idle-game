@@ -24,7 +24,10 @@ export function BossPanel() {
 
   if (phase === "victory") {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-(--ddp-radius-lg) border border-emerald-400/50 bg-emerald-950/60 px-4 py-3 shadow-(--ddp-shadow-panel)">
+      <div
+        data-onboarding-anchor="boss-panel"
+        className="flex items-center justify-between gap-3 rounded-(--ddp-radius-lg) border border-emerald-400/50 bg-emerald-950/60 px-4 py-3 shadow-(--ddp-shadow-panel)"
+      >
         <span className="text-sm font-bold text-emerald-300">
           {t("victoryTitle", { stage: bossHint.stage })}
         </span>
@@ -42,7 +45,10 @@ export function BossPanel() {
   const canChallenge = bossReady && phase === "battle";
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)">
+    <div
+      data-onboarding-anchor="boss-panel"
+      className="flex flex-wrap items-center gap-3 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)"
+    >
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ddp-ink-muted">
         <span>
           {t("bossHpLabel")}{" "}

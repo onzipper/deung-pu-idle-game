@@ -15,3 +15,7 @@ UI strings live in `messages/th.json` / `messages/en.json` (next-intl, cookie-ba
 1. The engine already exposes a stable id (e.g. `HeroClass`, `keyof Upgrades`) — never add a display string to `engine/config`.
 2. Add `content.<type>.<id>.name` (and `.desc` if needed) to BOTH message files.
 3. In the component, resolve it with `useTranslations("content")` + a template key: `t(\`classes.${cls}.name\`)`. Icons stay in `src/ui/labels.ts` (visual, not translatable).
+
+## Onboarding / FTUE (M4.8)
+
+`src/ui/onboarding/` is a data-driven framework: `steps.ts` exports `ONBOARDING_STEPS` (typed `id` + optional `anchor` (a `data-onboarding-anchor="<value>"` DOM target) + an `advance` dismiss rule — `next` (explicit tap), `action` (auto-advances on a detected player intent), or `auto` (auto-advances once a pure predicate over the throttled snapshot is true)) plus the pure, headlessly-tested `resolveNextStepIndex`/`isFreshSave`. Progress (`onboardingStepIndex`, `ftueCompleted`) is a plain UI-owned `gameStore.ts` slice, localStorage-persisted like `soundMuted` (`// M5+: fold into server save`). `useOnboardingController.ts` wires the pure resolver to store snapshots; `OnboardingOverlay.tsx` renders the spotlight/tooltip and is mounted once in `GameHud.tsx`. **Later milestones (contextual per-system hooks, guide/codex, mascot) add behaviour by appending `ONBOARDING_STEPS` entries + matching `messages/*.json` `onboarding.steps.<id>` keys** — no other file should need changes for a new step.

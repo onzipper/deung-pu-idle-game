@@ -78,7 +78,7 @@ export function UpgradePanel() {
   const t = useTranslations("panels");
 
   return (
-    <div className="flex flex-col gap-2">
+    <div data-onboarding-anchor="upgrade-panel" className="flex flex-col gap-2">
       <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("upgradesLabel")}
       </span>

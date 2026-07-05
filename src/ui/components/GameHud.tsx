@@ -18,6 +18,7 @@ import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
 import { UpgradePanel } from "@/ui/components/UpgradePanel";
+import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 
 export interface GameHudProps {
   /** Canvas content (e.g. a Pixi-mounting client component) for the arena slot. */
@@ -34,6 +35,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
     // coherent bottom panel rather than scattered floating boxes. Bottom
     // safe-area padding covers the phone home-indicator inset.
     <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
+      {/* FTUE overlay (M4.8): fixed/viewport-anchored, reads its own store
+          slice + `data-onboarding-anchor` DOM targets below — see
+          src/ui/onboarding/. Renders null once onboarding isn't active. */}
+      <OnboardingOverlay />
       <HudBar />
 
       <div
@@ -59,7 +64,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       <div className="flex flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
         <SkillBar />
         <div className="h-px bg-ddp-border-soft" />
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div
+          data-onboarding-anchor="settings-row"
+          className="flex flex-wrap items-center justify-between gap-3"
+        >
           <SpeedSelector />
           <div className="flex items-center gap-3">
             <SoundToggle />

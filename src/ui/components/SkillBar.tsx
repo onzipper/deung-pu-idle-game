@@ -125,7 +125,7 @@ export function SkillBar() {
   const t = useTranslations("panels");
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div data-onboarding-anchor="skill-bar" className="flex flex-wrap items-center gap-3">
       <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("skillsLabel")}
       </span>
