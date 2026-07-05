@@ -22,13 +22,14 @@ import {
   playBossRetreat,
   playBossSlamLand,
   playBossSlamTelegraph,
+  playEvolve,
   playHeroDown,
   playHeroRevived,
   playHit,
   playKill,
+  playLevelUp,
   playSkillCast,
   playStageAdvanced,
-  playUpgradeBought,
 } from "@/render/audio/sfxMap";
 
 export class AudioController {
@@ -120,9 +121,14 @@ export class AudioController {
             playStageAdvanced(this.engine);
           }
           break;
-        case "upgradeBought":
-          if (this.engine.allow("upgradeBought", SFX_MIN_INTERVAL_MS.upgradeBought)) {
-            playUpgradeBought(this.engine);
+        case "levelUp":
+          if (this.engine.allow("levelUp", SFX_MIN_INTERVAL_MS.levelUp)) {
+            playLevelUp(this.engine);
+          }
+          break;
+        case "evolve":
+          if (this.engine.allow("evolve", SFX_MIN_INTERVAL_MS.evolve)) {
+            playEvolve(this.engine);
           }
           break;
         default:

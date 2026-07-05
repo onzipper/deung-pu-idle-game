@@ -14,17 +14,13 @@
  * single plain-object allocation per game moment.
  */
 
-import type { EnemyKind, HeroClass, ProjectileKind } from "@/engine/entities";
-import type { Upgrades } from "@/engine/systems/stats";
+import type { EnemyKind, HeroClass, ProjectileKind, StatKey } from "@/engine/entities";
 
 /** Which side of the board a damaged target belongs to. */
 export type HitTargetKind = "hero" | "enemy" | "boss";
 
 /** What dealt a hit — lets render pick a flavour (weapon vs spell vs slam). */
 export type HitSource = "attack" | "skill" | "slam" | "bolt";
-
-/** Upgrade line key (mirrors `keyof Upgrades`). */
-export type UpgradeLine = keyof Upgrades;
 
 /**
  * Discriminated union of everything a frame's render/audio layer may want to
@@ -46,7 +42,10 @@ export type GameEvent =
   | { type: "kill"; kind: EnemyKind; x: number; y: number; goldGained: number }
   | { type: "heroDown"; id: number; cls: HeroClass; x: number; y: number }
   | { type: "heroRevived"; id: number; cls: HeroClass; x: number; y: number }
-  | { type: "skillCast"; heroClass: HeroClass; slot: number }
+  | { type: "levelUp"; id: number; cls: HeroClass; level: number }
+  | { type: "evolve"; id: number; cls: HeroClass; tier: number }
+  | { type: "statAllocated"; id: number; stat: StatKey; amount: number }
+  | { type: "skillCast"; heroClass: HeroClass; slot: number; skillId: string }
   | { type: "projectileSpawn"; kind: ProjectileKind; x: number; y: number }
   | { type: "bossSlamTelegraph"; x: number; y: number }
   | { type: "bossSlamLand"; x: number; y: number }
@@ -56,4 +55,18 @@ export type GameEvent =
   | { type: "waveSpawn"; wave: number }
   | { type: "stageCleared"; stage: number }
   | { type: "stageAdvanced"; stage: number }
-  | { type: "upgradeBought"; line: UpgradeLine; level: number };
+  // Class-change quest lifecycle (M5 task 5 — for UI + future juice). All carry
+  // the solo hero id + the quest id; progress fires ONLY on a real increment.
+  | { type: "questAccepted"; id: number; questId: string }
+  | {
+      type: "questObjectiveProgress";
+      id: number;
+      questId: string;
+      /** Which objective advanced (index into the quest def's objectives). */
+      objectiveIndex: number;
+      /** New progress count for that objective (post-increment). */
+      progress: number;
+      /** The objective's target count (for a "n/N" readout). */
+      count: number;
+    }
+  | { type: "questCompleted"; id: number; questId: string };

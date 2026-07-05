@@ -13,6 +13,7 @@ import { FIXED_DT } from "@/engine/core/loop";
 import type { Rng } from "@/engine/core/rng";
 import { makeEnemy } from "@/engine/entities";
 import type { EnemyKind } from "@/engine/entities";
+import { aliveHeroes } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
 
 /** Roll the kinds for one wave, stage-gated exactly like the POC. */
@@ -48,9 +49,17 @@ export function startWave(state: GameState, rng: Rng): void {
   state.events.push({ type: "waveSpawn", wave: state.wave });
 }
 
-/** Count down the inter-wave gap and spawn when the arena is clear. */
+/**
+ * Count down the inter-wave gap and spawn when the arena is clear. Holds fire
+ * while NO hero is alive (solo respawn window) so a dead hero never wakes up into
+ * a freshly-spawned wall — see combat.resolveDeaths' respawn field-clear.
+ */
 export function updateWaveSpawns(state: GameState, rng: Rng): void {
-  if (state.phase === "battle" && state.enemies.length === 0) {
+  if (
+    state.phase === "battle" &&
+    state.enemies.length === 0 &&
+    aliveHeroes(state).length > 0
+  ) {
     state.waveGap -= FIXED_DT;
     if (state.waveGap <= 0) startWave(state, rng);
   }

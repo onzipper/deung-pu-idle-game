@@ -143,3 +143,75 @@ body {
 .animate-buy-pulse {
   animation: buy-pulse 0.3s ease-out;
 }
+
+/* Onboarding/FTUE (M4.8) — the spotlighted control's "gentle pulse" ring:
+ * box-shadow-only (no layout thrash), reusing this same CSS-first vocabulary
+ * rather than pulling in Framer Motion/GSAP for a one-shot breathing glow. */
+@keyframes ddp-onboarding-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(242, 177, 52, 0.55),
+      0 0 22px 6px rgba(242, 177, 52, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(242, 177, 52, 0.9),
+      0 0 30px 10px rgba(242, 177, 52, 0.55);
+  }
+}
+
+/* Tooltip bubble entrance: a small fade+rise so each step feels placed, not
+ * popped-in. */
+@keyframes ddp-onboarding-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-onboarding-ring {
+  animation: ddp-onboarding-ring 1.8s ease-in-out infinite;
+}
+
+.animate-onboarding-in {
+  animation: ddp-onboarding-in 0.2s ease-out;
+}
+
+/* Mascot (M4.8 card B, `Mascot.tsx`) — idle bob + slow blink, the only two
+ * "alive" cues. Low-amplitude/slow by design (it presents, it doesn't
+ * distract): a few px of vertical drift and an occasional blink, nothing
+ * that competes with the tooltip text next to it. */
+@keyframes ddp-mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes ddp-mascot-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+.animate-mascot-bob {
+  animation: ddp-mascot-bob 2.4s ease-in-out infinite;
+}
+
+.animate-mascot-blink {
+  animation: ddp-mascot-blink 4.2s ease-in-out infinite;
+  transform-box: fill-box;
+}

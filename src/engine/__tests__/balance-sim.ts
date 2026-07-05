@@ -1,34 +1,41 @@
 /**
- * Balance-simulation harness (headless) — M4 measurement tool.
+ * Balance-simulation harness (headless) — M5 SOLO rebaseline tool.
  *
- * Runs the pure engine with no renderer and an auto-pilot (auto-upgrade +
- * auto-cast, challenge the boss as soon as the hint says "ready", advance on
- * victory) and instruments the run to produce pacing metrics:
+ * M5 Character Pivot: the game is now a SINGLE character, not a 3-hero team, and
+ * the purchasable upgrade lines are gone. This harness runs the pure engine with
+ * no renderer and an auto-pilot for EACH base class SOLO (swordsman / archer /
+ * mage), instruments the run, and reports per-class per-stage pacing so solo
+ * viability (S1->S10, 0 permanent walls, classes within ~2x) can be verified.
  *
- *   - time-to-clear per stage (enter-stage -> boss defeated)
- *   - gold income rate per stage (kills + boss payouts, net of upgrade spend)
- *   - boss attempts / wins / retreat-loops (wipes) per stage
- *   - upgrade levels (atk / speed / hp) at each stage clear
- *   - first-upgrade time and first-boss-kill time (early-game hook)
- *   - boss-hint accuracy: recommended vs actual team power at the winning attempt
- *
- * Everything is derived purely from `step()` + read-only helpers (`bossHint`,
- * `upgradeCost`, `CONFIG.*`), so results are deterministic and reproducible.
+ * Auto-pilot: auto-cast on, challenge the boss as soon as the hint says "ready",
+ * advance on victory, ACCEPT the class-change quest the moment it's offered, and
+ * evolve the moment the quest completes (M5 task 5 — the quest EFFORT replaced the
+ * old gold gate). Everything is derived purely from `step()` + read-only helpers,
+ * so results are deterministic and reproducible.
  *
  * Run with: `pnpm sim`
  * Knobs (env):
- *   SIM_SECONDS=1800   simulated seconds per seed
+ *   SIM_SECONDS=1800    simulated seconds per seed
  *   SEEDS=1,2,3,42,1337 comma-separated RNG seeds
+ *   CLASSES=swordsman,archer,mage  which classes to run
  */
 
 import {
   initGameState,
   step,
   bossHint,
-  upgradeCost,
+  canEvolveHero,
+  isClassChangeQuestOffered,
+  learnedSkills,
+  unlockedAutoSlotCount,
+  SIGNATURE_SKILL,
+  CONFIG,
+  SAVE_VERSION,
   FIXED_DT,
   type FrameInput,
-  type Upgrades,
+  type Hero,
+  type HeroClass,
+  type SaveData,
 } from "@/engine";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +48,10 @@ const SEEDS = (process.env.SEEDS ?? "1,2,3,42,1337")
   .split(",")
   .map((s) => Number(s.trim()))
   .filter((n) => Number.isFinite(n));
+const CLASSES: HeroClass[] = (process.env.CLASSES ?? "swordsman,archer,mage")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s): s is HeroClass => s === "swordsman" || s === "archer" || s === "mage");
 
 // ---------------------------------------------------------------------------
 // Per-run metric shapes
@@ -50,35 +61,83 @@ interface StageMetric {
   stage: number;
   enterTime: number;
   clearTime: number | null; // null if the window ended before the boss died
-  kills: number; // kills banked in the stage at clear (or at window end)
+  kills: number;
   income: number; // gold earned during the stage (kills + boss, gross of spend)
-  bossAttempts: number; // challenges started
-  bossWipes: number; // boss retreats (team wiped)
-  upAtClear: Upgrades; // upgrade levels when the stage cleared
-  // hint accuracy, captured at the WINNING challenge:
+  bossAttempts: number;
+  bossWipes: number;
+  soloDeaths: number; // solo respawns during the stage (anti-stall signal)
+  levelAtClear: number; // hero level when the stage cleared
+  tierAtClear: 1 | 2;
   recPowerAtWin: number | null;
   teamPowerAtWin: number | null;
 }
 
 interface SeedResult {
+  cls: HeroClass;
   seed: number;
   finalStage: number;
   finalGold: number;
-  firstUpgradeTime: number | null;
+  finalLevel: number;
   firstBossKillTime: number | null;
+  /** Stage/time the class-change quest completed (tier 1 -> 2), or null (never). */
+  evolveStage: number | null;
+  evolveTime: number | null;
   totalWipes: number;
+  totalDeaths: number;
   stages: StageMetric[];
-  finalUpgrades: Upgrades;
 }
 
 // ---------------------------------------------------------------------------
-// One seeded run, fully instrumented
+// One seeded solo run, fully instrumented
 // ---------------------------------------------------------------------------
 
-function runSeed(seed: number): SeedResult {
-  const s = initGameState(seed);
-  s.autoUpgrade = true;
+function makeSave(cls: HeroClass): SaveData {
+  return {
+    version: SAVE_VERSION,
+    stage: 1,
+    gold: 0,
+    hero: {
+      cls,
+      level: 1,
+      xp: 0,
+      tier: 1,
+      statPoints: 0,
+      stats: { ...CONFIG.stats.base[cls] },
+      mana: CONFIG.mana.base,
+      autoSlots: [SIGNATURE_SKILL[cls], null, null],
+      quest: null,
+    },
+    lastSeen: 0,
+  };
+}
+
+/**
+ * Idle-player auto-slot loadout (M5 skill framework v2): as slots unlock by level
+ * and skills unlock by level/tier, fill the next OPEN unlocked slot with the next
+ * learned-but-unslotted skill (unlock order — signature first). Returns the
+ * setAutoSlot intents needed this step (empty once everything is slotted).
+ */
+function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
+  const unlocked = unlockedAutoSlotCount(hero.level);
+  const learned = learnedSkills(hero).map((s) => s.id);
+  const slotted = new Set(hero.autoSlots.filter((id): id is string => id !== null));
+  const out: { slot: number; skillId: string | null }[] = [];
+  for (let i = 0; i < unlocked && i < hero.autoSlots.length; i++) {
+    if (hero.autoSlots[i]) continue;
+    const next = learned.find((id) => !slotted.has(id));
+    if (!next) break;
+    out.push({ slot: i, skillId: next });
+    slotted.add(next);
+  }
+  return out;
+}
+
+function runSeed(cls: HeroClass, seed: number): SeedResult {
+  const s = initGameState(seed, makeSave(cls));
   s.autoCast = true;
+  // M5 "Base stats": measure the AUTO-allocated baseline (idle player) — every
+  // level's points dump into the class primary stat each step.
+  s.autoAllocate = true;
 
   const stages: StageMetric[] = [];
   let cur: StageMetric = freshStage(s.stage, 0);
@@ -86,43 +145,70 @@ function runSeed(seed: number): SeedResult {
   let prevPhase = s.phase;
   let prevStage = s.stage;
   let prevGold = s.gold;
-  let prevUp: Upgrades = { ...s.upgrades };
+  let prevTier = s.heroes[0].tier;
   let prevKills = s.kills;
+  let prevDead = s.heroes[0].dead;
 
-  let firstUpgradeTime: number | null = null;
   let firstBossKillTime: number | null = null;
+  let evolveStage: number | null = null;
+  let evolveTime: number | null = null;
   let totalWipes = 0;
-  // hint captured at the moment we press "challenge" this attempt
+  let totalDeaths = 0;
   let pendingRec: number | null = null;
   let pendingTeam: number | null = null;
+  // Realistic retry loop: challenge the boss once the kill goal is met, then —
+  // if it wipes and retreats — FARM at least one more level before re-attempting
+  // (a real player grinds between boss tries). This removes the raw-atk hint bias
+  // that made low-atk-but-high-DPS classes over-farm, so the sim measures actual
+  // combat balance. `null` = never attempted this stage yet.
+  let lastAttemptLevel: number | null = null;
+  let lastAttemptStage = 0;
 
   for (let i = 0; i < STEPS; i++) {
     const input: FrameInput = {};
-    const hint = s.phase === "battle" && s.bossReady ? bossHint(s) : null;
-    if (hint && hint.ready) {
-      input.challengeBoss = true;
-      pendingRec = hint.recommendedPower;
-      pendingTeam = hint.teamPower;
+    if (s.phase === "battle" && s.bossReady) {
+      if (lastAttemptStage !== s.stage) lastAttemptLevel = null; // fresh stage
+      const lvl = s.heroes[0].level;
+      if (lastAttemptLevel === null || lvl > lastAttemptLevel) {
+        input.challengeBoss = true;
+        lastAttemptLevel = lvl;
+        lastAttemptStage = s.stage;
+        const hint = bossHint(s);
+        pendingRec = hint.recommendedPower;
+        pendingTeam = hint.teamPower;
+      }
     } else if (s.phase === "victory") {
       input.advanceStage = true;
     }
 
+    // Auto-accept the class-change quest the moment it's offered, then evolve the
+    // moment its objectives complete (M5 task 5 — effort gate, no gold).
+    if (isClassChangeQuestOffered(s.heroes[0])) input.acceptQuest = 0;
+    if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
+
+    // Idle-player auto-slot management: assign newly-unlocked skills into open
+    // auto-cast slots (mirrors a real player filling their loadout).
+    const slotAssigns = fillAutoSlots(s.heroes[0]);
+    if (slotAssigns.length) input.setAutoSlots = slotAssigns;
+
     step(s, input);
 
-    // --- upgrade spend + first-upgrade detection ---
-    let spend = 0;
-    for (const line of ["atk", "speed", "hp"] as const) {
-      const gained = s.upgrades[line] - prevUp[line];
-      for (let g = 0; g < gained; g++) {
-        spend += upgradeCost(line, prevUp[line] + g);
-      }
-      if (gained > 0 && firstUpgradeTime === null) firstUpgradeTime = s.time;
+    // --- income (no gold sink now — evolution is quest-gated, task 5) ---
+    const income = s.gold - prevGold;
+    if (income > 0) cur.income += income;
+
+    // --- class-change (evolution) timing: capture the stage/time tier flips ---
+    if (prevTier < s.heroes[0].tier) {
+      evolveStage = s.stage;
+      evolveTime = s.time;
     }
 
-    // --- income this step: gold_new = gold_old + income - spend  =>
-    //     income = (gold_new - gold_old) + spend  (exact, no double count) ---
-    const income = s.gold - prevGold + spend;
-    if (income > 0) cur.income += income;
+    // --- solo respawn detection (dead edge) ---
+    const nowDead = s.heroes[0].dead;
+    if (nowDead && !prevDead && s.phase === "battle") {
+      cur.soloDeaths++;
+      totalDeaths++;
+    }
 
     // --- phase transitions ---
     if (prevPhase !== s.phase) {
@@ -132,10 +218,10 @@ function runSeed(seed: number): SeedResult {
         cur.bossWipes++;
         totalWipes++;
       } else if (prevPhase === "boss" && s.phase === "victory") {
-        // boss defeated -> record the clear on the CURRENT stage
         cur.clearTime = s.time;
-        cur.kills = prevKills; // kills at the moment the boss died
-        cur.upAtClear = { ...s.upgrades };
+        cur.kills = prevKills;
+        cur.levelAtClear = s.heroes[0].level;
+        cur.tierAtClear = s.heroes[0].tier;
         cur.recPowerAtWin = pendingRec;
         cur.teamPowerAtWin = pendingTeam;
         if (firstBossKillTime === null) firstBossKillTime = s.time;
@@ -143,7 +229,6 @@ function runSeed(seed: number): SeedResult {
       }
     }
 
-    // --- stage advance (victory -> battle at stage+1) ---
     if (s.stage !== prevStage) {
       cur = freshStage(s.stage, s.time);
     }
@@ -151,26 +236,30 @@ function runSeed(seed: number): SeedResult {
     prevPhase = s.phase;
     prevStage = s.stage;
     prevGold = s.gold;
-    prevUp = { ...s.upgrades };
+    prevTier = s.heroes[0].tier;
     prevKills = s.kills;
+    prevDead = nowDead;
   }
 
-  // The stage in progress at window-end (never cleared) — record partial.
   if (cur.clearTime === null) {
     cur.kills = s.kills;
-    cur.upAtClear = { ...s.upgrades };
+    cur.levelAtClear = s.heroes[0].level;
+    cur.tierAtClear = s.heroes[0].tier;
     stages.push(cur);
   }
 
   return {
+    cls,
     seed,
     finalStage: s.stage,
     finalGold: Math.floor(s.gold),
-    firstUpgradeTime,
+    finalLevel: s.heroes[0].level,
     firstBossKillTime,
+    evolveStage,
+    evolveTime,
     totalWipes,
+    totalDeaths,
     stages,
-    finalUpgrades: { ...s.upgrades },
   };
 }
 
@@ -183,7 +272,9 @@ function freshStage(stage: number, enterTime: number): StageMetric {
     income: 0,
     bossAttempts: 0,
     bossWipes: 0,
-    upAtClear: { atk: 0, speed: 0, hp: 0 },
+    soloDeaths: 0,
+    levelAtClear: 1,
+    tierAtClear: 1,
     recPowerAtWin: null,
     teamPowerAtWin: null,
   };
@@ -193,61 +284,17 @@ function freshStage(stage: number, enterTime: number): StageMetric {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-const f1 = (n: number | null): string => (n === null ? "  -  " : n.toFixed(1));
 const pad = (v: unknown, w: number): string => String(v).padEnd(w);
-
-function printSeed(r: SeedResult): void {
-  console.log(
-    `\nseed ${r.seed}  ->  reached stage ${r.finalStage}, ${Math.floor(
-      r.finalGold,
-    )} gold, ${r.totalWipes} wipes` +
-      `  | first upgrade @ ${f1(r.firstUpgradeTime)}s, first boss kill @ ${f1(
-        r.firstBossKillTime,
-      )}s`,
-  );
-  console.log(
-    "  " +
-      pad("stage", 6) +
-      pad("clear@s", 9) +
-      pad("dur", 8) +
-      pad("gold/min", 9) +
-      pad("kills", 6) +
-      pad("atk/spd/hp", 12) +
-      pad("boss a/w", 9) +
-      pad("hint rec:team", 14),
-  );
-  for (const st of r.stages) {
-    const dur = st.clearTime === null ? null : st.clearTime - st.enterTime;
-    const gpm = dur && dur > 0 ? (st.income / dur) * 60 : null;
-    const wins = st.clearTime === null ? 0 : 1;
-    console.log(
-      "  " +
-        pad(st.stage, 6) +
-        pad(st.clearTime === null ? "(open)" : st.clearTime.toFixed(1), 9) +
-        pad(dur === null ? "-" : dur.toFixed(1), 8) +
-        pad(gpm === null ? "-" : Math.round(gpm), 9) +
-        pad(st.kills, 6) +
-        pad(`${st.upAtClear.atk}/${st.upAtClear.speed}/${st.upAtClear.hp}`, 12) +
-        pad(`${st.bossAttempts}/${wins}`, 9) +
-        pad(
-          st.recPowerAtWin === null ? "-" : `${st.recPowerAtWin}:${st.teamPowerAtWin}`,
-          14,
-        ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Aggregation across seeds
-// ---------------------------------------------------------------------------
+const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 interface StageAgg {
   stage: number;
-  clears: number; // how many seeds cleared this stage
-  meanDur: number | null; // mean time-to-clear (cleared seeds only)
-  meanGpm: number | null; // mean gold/min
+  clears: number;
+  meanDur: number | null;
+  meanLevel: number | null;
   totalAttempts: number;
   totalWipes: number;
+  totalDeaths: number;
   meanRec: number | null;
   meanTeam: number | null;
 }
@@ -256,30 +303,20 @@ function aggregate(results: SeedResult[]): StageAgg[] {
   const maxStage = Math.max(...results.map((r) => r.finalStage));
   const out: StageAgg[] = [];
   for (let stage = 1; stage <= maxStage; stage++) {
-    const cleared = results
-      .flatMap((r) => r.stages)
-      .filter((st) => st.stage === stage && st.clearTime !== null);
-    const attempted = results.flatMap((r) => r.stages).filter((st) => st.stage === stage);
+    const all = results.flatMap((r) => r.stages).filter((st) => st.stage === stage);
+    const cleared = all.filter((st) => st.clearTime !== null);
     const durs = cleared.map((st) => st.clearTime! - st.enterTime);
-    const gpms = cleared
-      .map((st) => {
-        const dur = st.clearTime! - st.enterTime;
-        return dur > 0 ? (st.income / dur) * 60 : 0;
-      })
-      .filter((x) => x > 0);
-    const recs = cleared
-      .map((st) => st.recPowerAtWin)
-      .filter((x): x is number => x !== null);
-    const teams = cleared
-      .map((st) => st.teamPowerAtWin)
-      .filter((x): x is number => x !== null);
+    const levels = cleared.map((st) => st.levelAtClear);
+    const recs = cleared.map((st) => st.recPowerAtWin).filter((x): x is number => x !== null);
+    const teams = cleared.map((st) => st.teamPowerAtWin).filter((x): x is number => x !== null);
     out.push({
       stage,
       clears: cleared.length,
       meanDur: durs.length ? mean(durs) : null,
-      meanGpm: gpms.length ? mean(gpms) : null,
-      totalAttempts: attempted.reduce((a, st) => a + st.bossAttempts, 0),
-      totalWipes: attempted.reduce((a, st) => a + st.bossWipes, 0),
+      meanLevel: levels.length ? mean(levels) : null,
+      totalAttempts: all.reduce((a, st) => a + st.bossAttempts, 0),
+      totalWipes: all.reduce((a, st) => a + st.bossWipes, 0),
+      totalDeaths: all.reduce((a, st) => a + st.soloDeaths, 0),
       meanRec: recs.length ? mean(recs) : null,
       meanTeam: teams.length ? mean(teams) : null,
     });
@@ -287,24 +324,22 @@ function aggregate(results: SeedResult[]): StageAgg[] {
   return out;
 }
 
-const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
-
-function printAggregate(agg: StageAgg[], nSeeds: number): void {
-  console.log(`\n=== AGGREGATE across ${nSeeds} seeds ===`);
+function printClass(cls: HeroClass, results: SeedResult[], agg: StageAgg[]): void {
+  const nSeeds = results.length;
+  console.log(`\n=== ${cls.toUpperCase()} (solo) — ${nSeeds} seeds ===`);
   console.log(
     "  " +
       pad("stage", 6) +
       pad("clears", 8) +
       pad("meanDur", 9) +
       pad("wallX", 7) +
-      pad("gold/min", 9) +
-      pad("attempts", 10) +
-      pad("wipes", 7) +
+      pad("lvl", 6) +
+      pad("boss a/w", 10) +
+      pad("deaths", 8) +
       pad("rec:team", 12),
   );
   let prevDur: number | null = null;
   for (const a of agg) {
-    // "wallX" = this stage's mean duration / previous stage's (a >2.5x is a wall)
     const wallX = prevDur && a.meanDur ? (a.meanDur / prevDur).toFixed(2) + "x" : "-";
     console.log(
       "  " +
@@ -312,144 +347,75 @@ function printAggregate(agg: StageAgg[], nSeeds: number): void {
         pad(`${a.clears}/${nSeeds}`, 8) +
         pad(a.meanDur === null ? "-" : a.meanDur.toFixed(1), 9) +
         pad(wallX, 7) +
-        pad(a.meanGpm === null ? "-" : Math.round(a.meanGpm), 9) +
-        pad(a.totalAttempts, 10) +
-        pad(a.totalWipes, 7) +
+        pad(a.meanLevel === null ? "-" : a.meanLevel.toFixed(0), 6) +
+        pad(`${a.totalAttempts}/${a.totalWipes}`, 10) +
+        pad(a.totalDeaths, 8) +
         pad(
-          a.meanRec === null
-            ? "-"
-            : `${Math.round(a.meanRec)}:${Math.round(a.meanTeam ?? 0)}`,
+          a.meanRec === null ? "-" : `${Math.round(a.meanRec)}:${Math.round(a.meanTeam ?? 0)}`,
           12,
         ),
     );
     if (a.meanDur !== null) prevDur = a.meanDur;
   }
-}
 
-// ---------------------------------------------------------------------------
-// Pacing analysis / flags
-// ---------------------------------------------------------------------------
-
-function analyse(results: SeedResult[], agg: StageAgg[]): void {
-  console.log(`\n=== PACING FLAGS ===`);
+  // Flags.
   const flags: string[] = [];
-
-  // Early hook: first upgrade < ~20s, first boss kill in ~120-240s.
-  const firstUps = results
-    .map((r) => r.firstUpgradeTime)
-    .filter((x): x is number => x !== null);
-  const firstBoss = results
-    .map((r) => r.firstBossKillTime)
-    .filter((x): x is number => x !== null);
-  if (firstUps.length) {
-    const mu = mean(firstUps);
-    flags.push(
-      `first upgrade: mean ${mu.toFixed(1)}s ` +
-        (mu <= 20 ? "OK (hooks fast)" : "SLOW (>20s target)"),
-    );
-  }
-  if (firstBoss.length) {
-    const mb = mean(firstBoss);
-    flags.push(
-      `first boss kill: mean ${mb.toFixed(1)}s ` +
-        (mb >= 120 && mb <= 240
-          ? "OK (~2-4 min target)"
-          : mb < 120
-            ? "FAST (<2 min, boss trivial?)"
-            : "SLOW (>4 min)"),
-    );
-  }
-
-  // Wall detection: first stage whose mean duration > 2.5x the previous.
-  let prevDur: number | null = null;
   for (const a of agg) {
-    if (a.meanDur !== null && prevDur !== null && a.meanDur > prevDur * 2.5) {
+    if (a.clears < nSeeds) {
       flags.push(
-        `WALL at stage ${a.stage}: ${a.meanDur.toFixed(1)}s vs ${prevDur.toFixed(
-          1,
-        )}s prev (${(a.meanDur / prevDur).toFixed(2)}x)`,
+        `WALL/STALL at stage ${a.stage}: only ${a.clears}/${nSeeds} seeds cleared it in the window`,
       );
     }
-    if (a.meanDur !== null) prevDur = a.meanDur;
   }
-
-  // Hint accuracy: recommended power (the suggested floor) vs the team power we
-  // actually won with. team >> rec => boss trivialised (we're gated by the kill
-  // goal, not power, so we overshoot). team < rec => the hint over-warned.
+  let pd: number | null = null;
   for (const a of agg) {
-    if (a.meanRec !== null && a.meanTeam !== null) {
-      const ratio = a.meanTeam / a.meanRec;
-      if (ratio > 1.6) {
-        flags.push(
-          `boss SOFT at stage ${a.stage}: won with team ${Math.round(
-            a.meanTeam,
-          )} vs recommended ${Math.round(a.meanRec)} (${ratio.toFixed(
-            2,
-          )}x) — kill-gated overshoot, boss trivial`,
-        );
-      } else if (ratio < 0.9) {
-        flags.push(
-          `hint HIGH at stage ${a.stage}: won with team ${Math.round(
-            a.meanTeam,
-          )} below recommended ${Math.round(a.meanRec)} (${ratio.toFixed(
-            2,
-          )}x) — hint over-warns`,
-        );
-      }
+    if (a.meanDur !== null && pd !== null && a.meanDur > pd * 2.5) {
+      flags.push(`SPIKE at stage ${a.stage}: ${(a.meanDur / pd).toFixed(2)}x prev`);
     }
+    if (a.meanDur !== null) pd = a.meanDur;
   }
-
-  // Dominant upgrade line: compare final level distribution.
-  const totals = results.reduce(
-    (acc, r) => {
-      acc.atk += r.finalUpgrades.atk;
-      acc.speed += r.finalUpgrades.speed;
-      acc.hp += r.finalUpgrades.hp;
-      return acc;
-    },
-    { atk: 0, speed: 0, hp: 0 },
-  );
+  const totalDeaths = results.reduce((x, r) => x + r.totalDeaths, 0);
+  const totalWipes = results.reduce((x, r) => x + r.totalWipes, 0);
   flags.push(
-    `final upgrade mix (sum over seeds) atk/spd/hp = ${totals.atk}/${totals.speed}/${totals.hp}`,
+    `reached stages: ${results.map((r) => r.finalStage).join(",")} | ` +
+      `final levels: ${results.map((r) => r.finalLevel).join(",")} | ` +
+      `solo respawns: ${totalDeaths} | boss wipes: ${totalWipes}`,
   );
-
-  // Retreat loops (wipes) — a farm-wall symptom.
-  const totalWipes = results.reduce((a, r) => a + r.totalWipes, 0);
-  flags.push(`total boss wipes across seeds: ${totalWipes}`);
-
+  // Class-change quest completion beat (M5 task 5): stage + time tier flipped 1->2.
+  flags.push(
+    `class-change stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
+      `at time (s): ${results.map((r) => (r.evolveTime === null ? "-" : r.evolveTime.toFixed(0))).join(",")}`,
+  );
   for (const line of flags) console.log("  - " + line);
 }
 
 // ---------------------------------------------------------------------------
-// Machine-parsable summary (single JSON line, prefix-tagged for grep)
+// Cross-class comparison
 // ---------------------------------------------------------------------------
 
-function printMachineSummary(results: SeedResult[], agg: StageAgg[]): void {
-  const summary = {
-    simSeconds: SIM_SECONDS,
-    seeds: SEEDS,
-    finalStages: results.map((r) => r.finalStage),
-    firstUpgradeMean: meanOrNull(results.map((r) => r.firstUpgradeTime)),
-    firstBossKillMean: meanOrNull(results.map((r) => r.firstBossKillTime)),
-    totalWipes: results.reduce((a, r) => a + r.totalWipes, 0),
-    perStage: agg.map((a) => ({
-      stage: a.stage,
-      clears: a.clears,
-      meanDur: a.meanDur === null ? null : round1(a.meanDur),
-      meanGoldPerMin: a.meanGpm === null ? null : Math.round(a.meanGpm),
-      attempts: a.totalAttempts,
-      wipes: a.totalWipes,
-      rec: a.meanRec === null ? null : Math.round(a.meanRec),
-      team: a.meanTeam === null ? null : Math.round(a.meanTeam),
-    })),
-  };
-  console.log("\nSIM_JSON " + JSON.stringify(summary));
-}
-
-const round1 = (n: number): number => Math.round(n * 10) / 10;
-function meanOrNull(xs: (number | null)[]): number | null {
-  const v = xs.filter((x): x is number => x !== null);
-  return v.length ? round1(mean(v)) : null;
+function printComparison(byClass: Map<HeroClass, StageAgg[]>): void {
+  console.log(`\n=== CLASS BALANCE (mean time-to-clear per stage) ===`);
+  const maxStage = Math.max(
+    ...[...byClass.values()].map((agg) => agg.length),
+    0,
+  );
+  const header = "  " + pad("stage", 6) + CLASSES.map((c) => pad(c, 11)).join("") + "spread";
+  console.log(header);
+  for (let stage = 1; stage <= maxStage; stage++) {
+    const durs = CLASSES.map((c) => {
+      const a = byClass.get(c)?.find((x) => x.stage === stage);
+      return a?.meanDur ?? null;
+    });
+    const present = durs.filter((d): d is number => d !== null);
+    const spread =
+      present.length >= 2 ? (Math.max(...present) / Math.min(...present)).toFixed(2) + "x" : "-";
+    console.log(
+      "  " +
+        pad(stage, 6) +
+        durs.map((d) => pad(d === null ? "-" : d.toFixed(0) + "s", 11)).join("") +
+        spread,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -458,15 +424,17 @@ function meanOrNull(xs: (number | null)[]): number | null {
 
 function main(): void {
   console.log(
-    `[balance-sim] ${SIM_SECONDS}s (${STEPS} fixed steps) per seed, ` +
-      `${SEEDS.length} seeds, auto-pilot on`,
+    `[balance-sim M5 solo] ${SIM_SECONDS}s (${STEPS} steps) per seed, ` +
+      `${SEEDS.length} seeds, classes: ${CLASSES.join("/")}`,
   );
-  const results = SEEDS.map(runSeed);
-  for (const r of results) printSeed(r);
-  const agg = aggregate(results);
-  printAggregate(agg, results.length);
-  analyse(results, agg);
-  printMachineSummary(results, agg);
+  const byClass = new Map<HeroClass, StageAgg[]>();
+  for (const cls of CLASSES) {
+    const results = SEEDS.map((seed) => runSeed(cls, seed));
+    const agg = aggregate(results);
+    byClass.set(cls, agg);
+    printClass(cls, results, agg);
+  }
+  printComparison(byClass);
 }
 
 main();

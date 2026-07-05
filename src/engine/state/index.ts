@@ -5,13 +5,27 @@
  * cursor). `SaveData` is the persisted subset (progress + economy) written to
  * MySQL. They are intentionally different: transient runtime arrays (heroes,
  * enemies, projectiles) are never saved — they are rebuilt from progress on load.
+ *
+ * M5 Character Pivot: the persisted model is a SINGLE character (chosen class +
+ * level/xp/tier); the purchasable upgrade lines are gone. The live `heroes` array
+ * is KEPT (it becomes the M8 party engine) but holds exactly one hero.
  */
 
-import { CONFIG, SLOT_ORDER } from "@/engine/config";
+import { CONFIG } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
-import { makeHero } from "@/engine/entities";
-import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
-import type { Upgrades } from "@/engine/systems/stats";
+import { makeHero, defaultAutoSlots } from "@/engine/entities";
+import type {
+  Hero,
+  Enemy,
+  Boss,
+  Projectile,
+  HeroClass,
+  HeroStats,
+  HeroQuest,
+  SkillId,
+} from "@/engine/entities";
+import { classChangeQuestFor } from "@/engine/systems/quests";
+import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
 
@@ -29,14 +43,19 @@ export interface GameState {
   wave: number;
   kills: number;
   gold: number;
-  /** Upgrade levels per stat line — the modifier path into `systems/stats`. */
-  upgrades: Upgrades;
-  autoUpgrade: boolean;
+  /** The player's chosen base class (M5). Drives which hero is spawned. */
+  heroClass: HeroClass;
   autoCast: boolean;
-  /** Countdown driving the auto-upgrade cadence (POC ticked every 150ms). */
-  autoUpgradeTimer: number;
-  /** Number of hero slots currently unlocked (1..maxHeroes). */
-  heroSlots: number;
+  /**
+   * UI-owned toggle (mirrors `autoCast`): when true, each hero's unspent stat
+   * points are auto-allocated into its class primary stat every step. Read off
+   * the store onto state each frame; never part of `FrameInput`, never persisted.
+   */
+  autoAllocate: boolean;
+  /**
+   * Live heroes. Solo gameplay keeps exactly one here (the chosen class); the
+   * array + formation machinery is retained for the M8 party of up to `maxHeroes`.
+   */
   heroes: Hero[];
   enemies: Enemy[];
   boss: Boss | null;
@@ -63,37 +82,85 @@ export interface GameState {
  * Persisted save shape. Keep this small and JSON-serialisable — it goes into
  * `save_states.data`. Anything derivable from these fields is NOT stored.
  */
+/** The single active character's progression (M5). */
+export interface CharacterSave {
+  /** Chosen base class. */
+  cls: HeroClass;
+  level: number;
+  xp: number;
+  /** Class-advancement tier (1 = base, 2 = evolved). */
+  tier: 1 | 2;
+  /** Unspent base-stat points (M5 "Base stats", SAVE v5). */
+  statPoints: number;
+  /** Allocated base-stat block (absolute values, M5 "Base stats", SAVE v5). */
+  stats: HeroStats;
+  /** Current mana (M5 "mana", SAVE v6). Clamped to the derived pool on load. */
+  mana: number;
+  /**
+   * Auto-cast slot loadout (M5 skill framework v2, SAVE v6): skill id per slot,
+   * or null. Learned skills are DERIVED from level/tier (not persisted); only the
+   * player's slot assignments are saved.
+   */
+  autoSlots: (SkillId | null)[];
+  /**
+   * Active class-change quest (M5 task 5, SAVE v7), or null. Only an ACCEPTED,
+   * unfinished quest is meaningful to persist; an un-accepted offer is derived
+   * (re-offered on load), and a tier-2 hero has consumed its quest (null).
+   */
+  quest: HeroQuest | null;
+}
+
 export interface SaveData {
   version: number;
   stage: number;
   gold: number;
-  /** Unlocked hero classes (its length drives how many slots init). */
-  unlocked: string[];
-  /** Upgrade levels per stat line. */
-  upgrades: Upgrades;
+  /** The single active character (M5 — replaces the team's `unlocked`/`heroes`). */
+  hero: CharacterSave;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
 
-/** Build a fresh set of heroes for the currently unlocked slots. */
+/**
+ * (Re)build the live hero(es) for the current `heroClass`, PRESERVING per-hero
+ * level/xp/tier across a battlefield reset (a stage advance never wipes
+ * progression). Solo: rebuilds the single chosen-class hero. The loop is written
+ * to scale back up to a party (M8) — a slot keeps whoever occupied it before.
+ */
 export function initHeroes(state: GameState): void {
-  state.heroes = [];
-  for (let i = 0; i < state.heroSlots; i++) {
-    state.heroes.push(makeHero(state.nextId++, SLOT_ORDER[i], state.upgrades));
-  }
+  const prev = state.heroes[0];
+  state.heroes = [
+    makeHero(
+      state.nextId++,
+      state.heroClass,
+      prev?.level ?? 1,
+      prev?.xp ?? 0,
+      prev?.tier ?? 1,
+      prev?.statPoints,
+      prev ? { ...prev.stats } : undefined,
+      // A battlefield reset (stage advance) refills mana to full; the auto-slot
+      // loadout (player config) is preserved across the reset.
+      undefined,
+      prev ? [...prev.autoSlots] : undefined,
+      // Quest progress MUST survive a stage reset — the boss-defeat objective
+      // completes as the stage clears, then nextStage rebuilds the hero.
+      prev ? cloneQuest(prev.quest) : null,
+    ),
+  ];
+}
+
+/** Deep-copy a hero quest (so a rebuilt hero never shares the progress array). */
+function cloneQuest(q: HeroQuest | null): HeroQuest | null {
+  return q ? { id: q.id, accepted: q.accepted, progress: [...q.progress] } : null;
 }
 
 /**
  * Construct a live `GameState` from a seed and (optionally) a loaded save.
- * A save restores stage / gold / upgrades / unlocked-slot count; the battlefield
- * always starts fresh at wave 0 of the saved stage.
+ * A save restores stage / gold / chosen class / character progression; the
+ * battlefield always starts fresh at wave 0 of the saved stage.
  */
 export function initGameState(seed: number, save?: SaveData): GameState {
   const stage = save?.stage ?? 1;
-  const upgrades: Upgrades = save
-    ? { ...save.upgrades }
-    : { atk: 0, speed: 0, hp: 0 };
-  const heroSlots = clamp(save ? save.unlocked.length : 1, 1, CONFIG.maxHeroes);
+  const heroClass: HeroClass = save?.hero.cls ?? "swordsman";
 
   const state: GameState = {
     time: 0,
@@ -102,11 +169,9 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     wave: 0,
     kills: 0,
     gold: save?.gold ?? 0,
-    upgrades,
-    autoUpgrade: false,
+    heroClass,
     autoCast: false,
-    autoUpgradeTimer: CONFIG.autoUpgradeInterval,
-    heroSlots,
+    autoAllocate: false,
     heroes: [],
     enemies: [],
     boss: null,
@@ -119,25 +184,106 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     events: [],
   };
   initHeroes(state);
+  // Restore per-character level/xp/tier from the save (M5). `initHeroes` built a
+  // level-1 hero; overlay the saved progression and re-derive max HP.
+  if (save) {
+    const h = state.heroes[0];
+    h.level = clamp(save.hero.level, 1, CONFIG.leveling.levelCap);
+    h.xp = Math.max(0, save.hero.xp);
+    h.tier = save.hero.tier === 2 ? 2 : 1;
+    // Restore allocated base stats (M5 "Base stats"). A well-formed v5 save always
+    // carries them (migrate backfills older shapes); default defensively to the
+    // class base if a field is somehow absent.
+    const base = baseStats(h.cls);
+    h.stats = {
+      str: Math.max(0, save.hero.stats?.str ?? base.str),
+      dex: Math.max(0, save.hero.stats?.dex ?? base.dex),
+      int: Math.max(0, save.hero.stats?.int ?? base.int),
+      vit: Math.max(0, save.hero.stats?.vit ?? base.vit),
+    };
+    h.statPoints = Math.max(0, save.hero.statPoints ?? 0);
+    h.maxHp = heroMaxHpOf(h);
+    h.hp = h.maxHp;
+    // Restore mana pool + auto-slot loadout (M5 "mana + skill framework v2",
+    // SAVE v6). maxMana is derived from int; current mana is clamped into it.
+    h.maxMana = heroMaxManaOf(h);
+    h.mana = clamp(save.hero.mana ?? h.maxMana, 0, h.maxMana);
+    h.autoSlots = normalizeAutoSlots(h.cls, save.hero.autoSlots);
+    // Restore the class-change quest (M5 task 5, SAVE v7). A tier-2 hero has no
+    // quest; a saved accepted quest is validated against the current class def
+    // (unknown/foreign or un-accepted -> re-offer by leaving it null).
+    h.quest = normalizeHeroQuest(h.cls, h.tier, save.hero.quest);
+  }
   return state;
 }
 
 /**
- * Serialise a live `GameState` down to the persisted `SaveData` subset.
- *
- * The inverse of `initGameState(seed, save)`: only progress + economy are kept
- * (transient battlefield arrays are rebuilt on load). `unlocked` is derived from
- * the number of unlocked slots via `SLOT_ORDER`. `lastSeen` is a server-owned
- * field — the client cannot be trusted to stamp wall-clock time (offline-idle
- * anti-cheat), so it is emitted as 0 and the server overwrites it on persist.
+ * Validate a saved class-change quest against the hero's current class def
+ * (SAVE v7). A tier-2 hero holds no quest; a foreign/unknown id or an
+ * un-accepted offer normalises to null (the UI re-offers a fresh quest); a valid
+ * accepted quest keeps its progress (clamped non-negative, per-objective length).
+ */
+function normalizeHeroQuest(
+  cls: HeroClass,
+  tier: 1 | 2,
+  saved: HeroQuest | null | undefined,
+): HeroQuest | null {
+  if (tier === 2 || !saved || saved.accepted !== true) return null;
+  const def = classChangeQuestFor(cls);
+  if (saved.id !== def.id) return null;
+  const progress = def.objectives.map((_, i) => {
+    const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
+    return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+  });
+  return { id: def.id, accepted: true, progress };
+}
+
+/**
+ * Coerce a saved auto-slot array to the current `autoSlots.max` length, dropping
+ * unknown/foreign skill ids. A missing/short array is backfilled from the class
+ * default (signature in slot 0). Defensive — a well-formed v6 save is exact.
+ */
+function normalizeAutoSlots(
+  cls: HeroClass,
+  saved: (SkillId | null)[] | undefined,
+): (SkillId | null)[] {
+  const fallback = defaultAutoSlots(cls);
+  if (!Array.isArray(saved)) return fallback;
+  const out: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  for (let i = 0; i < out.length; i++) {
+    const id = saved[i];
+    out[i] = typeof id === "string" || id === null ? (id ?? null) : fallback[i];
+  }
+  return out;
+}
+
+/**
+ * Serialise a live `GameState` down to the persisted `SaveData` subset — the
+ * inverse of `initGameState(seed, save)`. Only progress + economy are kept
+ * (transient battlefield arrays rebuild on load). `lastSeen` is server-owned
+ * (offline-idle anti-cheat), so it is emitted as 0 for the server to overwrite.
  */
 export function toSaveData(state: GameState): SaveData {
+  const h = state.heroes[0];
   return {
     version: SAVE_VERSION,
     stage: state.stage,
     gold: state.gold,
-    unlocked: SLOT_ORDER.slice(0, state.heroSlots),
-    upgrades: { ...state.upgrades },
+    hero: {
+      cls: h.cls,
+      level: h.level,
+      xp: h.xp,
+      tier: h.tier,
+      statPoints: h.statPoints,
+      stats: { ...h.stats },
+      // Persist current mana (cheap resource snapshot) + the auto-slot loadout
+      // (player config). Learned skills derive from level/tier — not persisted.
+      mana: h.mana,
+      autoSlots: [...h.autoSlots],
+      // Persist the class-change quest (M5 task 5) — only an accepted, unfinished
+      // quest is meaningful; null otherwise (offer is re-derived, tier 2 consumed).
+      quest: h.quest ? { id: h.quest.id, accepted: h.quest.accepted, progress: [...h.quest.progress] } : null,
+    },
     lastSeen: 0,
   };
 }

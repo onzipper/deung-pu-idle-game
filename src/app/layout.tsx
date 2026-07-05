@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Chakra_Petch, Geist, Geist_Mono } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,11 +28,17 @@ const chakraPetch = Chakra_Petch({
   weight: ["400", "500", "600", "700"],
 });
 
-export const metadata: Metadata = {
-  title: "ดึ๋งปุ๊ Idle Game",
-  description:
-    "เกมไอเดิลผจญภัยฮีโร่ 3 คลาส ปราบเวฟศัตรู ท้าบอส อัพเกรดไม่หยุด",
-};
+// Locale-aware (cookie-resolved, same as the rest of the app — see
+// `src/i18n/request.ts`) rather than the static `metadata` export, so the
+// browser tab title/description follow the `common` message catalog instead
+// of hardcoding Thai here.
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("common");
+  return {
+    title: t("appTitle"),
+    description: t("appDescription"),
+  };
+}
 
 // DEV-ONLY diagnostics: inline (not external-file) client error beacon.
 //
@@ -129,14 +137,20 @@ const DEV_CLIENT_BEACON_SCRIPT = `
 })();
 `;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Cookie-resolved locale (see `src/i18n/request.ts`) — no `[locale]` route
+  // segment, so this only affects `<html lang>` + the messages handed to
+  // `NextIntlClientProvider` below, never the route tree `GameClient` mounts
+  // into (see M4.7 i18n framework setup).
+  const locale = await getLocale();
+
   return (
     <html
-      lang="th"
+      lang={locale}
       className={`${geistSans.variable} ${geistMono.variable} ${chakraPetch.variable} h-full antialiased`}
     >
       <head>
@@ -150,7 +164,12 @@ export default function RootLayout({
       {/* Background/text color come from globals.css's `body { }` rule
           (--background/--foreground tokens) — not redeclared here so there is
           exactly one source of truth for the app-wide dark theme. */}
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        {/* `locale`/`messages` are picked up automatically from the request
+            config (`src/i18n/request.ts`) since this is a Server Component —
+            no need to thread them through manually. */}
+        <NextIntlClientProvider>{children}</NextIntlClientProvider>
+      </body>
     </html>
   );
 }

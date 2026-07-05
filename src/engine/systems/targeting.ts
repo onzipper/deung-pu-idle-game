@@ -4,7 +4,7 @@
  * like the POC. Pure — no mutation.
  */
 
-import { CONFIG } from "@/engine/config";
+import { CONFIG, HERO_TYPES } from "@/engine/config";
 import type { Hero, CombatTarget } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -70,6 +70,24 @@ export function nearestTarget<T extends HasX>(
 /** Heroes that are not currently dead. */
 export function aliveHeroes(state: GameState): Hero[] {
   return state.heroes.filter((h) => !h.dead);
+}
+
+/**
+ * Can ANY alive hero hit a foe standing at world-x `ex` this instant? Mirrors the
+ * per-class attack-target test: a melee hero reaches symmetrically (|Δx| ≤ range),
+ * a ranged hero only forward (0 ≤ Δx ≤ range). Used to gate a ranged enemy's fire
+ * so it never plinks the party from beyond every hero's reach ("มอนตีดาบฟรี").
+ */
+export function anyHeroCanRetaliate(state: GameState, ex: number): boolean {
+  for (const h of state.heroes) {
+    if (h.dead) continue;
+    const t = HERO_TYPES[h.cls];
+    const d = ex - h.x;
+    if (t.attack === "melee" ? Math.abs(d) <= t.range : d >= 0 && d <= t.range) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Nearest living hero to x, or null if the whole team is down. */

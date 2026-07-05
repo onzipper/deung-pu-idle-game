@@ -1,5 +1,13 @@
 # M4 Balance Pass — ดึ๋งปุ๊ Idle Game
 
+> ⚠️ **SUPERSEDED for team composition (M5 Character Pivot, 2026-07-05).** This
+> table is the 3-hero-TEAM baseline with the purchasable atk/speed/hp upgrade
+> lines — both of which are GONE in M5. It no longer describes the live game.
+> The current solo (single-character) baseline is **[balance-m5.md](./balance-m5.md)**.
+> Kept for historical reference: the enemy/boss HP+atk curves, wave composition,
+> and formation/free-hit knobs it tuned are still in force and were re-validated
+> against solo play in M5.
+
 ClickUp: 86d3jvcxz · Branch: `develop`
 
 All numbers below come from the headless balance harness
@@ -620,3 +628,194 @@ The stage-9 prestige wall is unchanged in absolute terms (608 vs 609 s); its
   close into range and damage the boss.
 - `charge.test.ts` — surrounded swordsman never idle (swings each cooldown while
   taking damage); a straggler beyond reach re-approaches instead of free-hitting.
+
+---
+
+## Follow-up 2 — ranged-enemy free hit + idle backline (live playtest)
+
+The swordsman **still** took free hits after the 7bbdf35 fixes, and while he did
+the archer + mage stood idle. Root cause found headlessly (not in a browser): a
+**ranged-behaviour enemy** anchors its 160 standoff to its *nearest* hero. When the
+swordsman is walled at `chargeHardCap` (770) he becomes that nearest hero, so the
+shooter parks at ~930 — past his 96 melee reach **and** past the anchor-capped
+backline's forward reach (archer ~834 / mage ~766). It plinked him with zero
+possible counter while all three heroes were out of range (both reported bugs). The
+7bbdf35 `chargeHardCap = spawnX − 90` math only guaranteed reach to a shooter at the
+spawn *edge* (860); a shooter that spawns further right (`spawnX + i·spawnGap`) and
+is already inside 160 of the walled swordsman never advances, so it rests *beyond*
+860.
+
+### Fix
+
+- **Engine (`combat.ts` ranged branch):** a shooter beyond **every** alive hero's
+  reach (`anyHeroCanRetaliate`, new in `targeting.ts`) **holds fire** and creeps in
+  at `rangedReengageSpeed` until a hero can answer it — the ranged counterpart of the
+  melee `enemyBehindReach` re-approach. No un-answerable damage is ever dealt, and it
+  is never an immortal wall.
+- **Engine (`combat.ts` hero branch):** ranged heroes fall back to the nearest
+  in-range foe on **either** side when they have no forward target, so they engage a
+  flanking attacker instead of idling (BUG 2). Pacing-neutral (fires only when
+  otherwise idle).
+
+### One new knob
+
+| Constant             | Value | Why                                                                                                                                                                                                                                                                                              |
+| -------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rangedReengageSpeed` | `4`   | Creep speed for a held-fire shooter, far below its own approach speed (32). The prior free-hit *stall* (10–35 s of un-killable plinking per shooter) was load-bearing clear-time the table is tuned on; a straight pull-in into melee deleted it (S2–S6 −25…−45 %), a freeze inflated it (+9…+97 %, S9 gate collapsed to 3.8x). A slow creep re-creates that stall as a **fair** fight (roughly stage-independent), landing every stage in budget. |
+
+### Pacing (aggregate, 5 seeds, 1800 s) — all stages within ±15 %, 0 wipes
+
+| Stage | Prior table | New   | Δ       |
+| ----- | ----------- | ----- | ------- |
+| 1     | 86.4        | 86.4  | 0 %     |
+| 2     | 58.5        | 51.8  | −11.5 % |
+| 3     | 78.8        | 71.1  | −9.8 %  |
+| 4     | 73.4        | 75.3  | +2.6 %  |
+| 5     | 86.9        | 89.8  | +3.3 %  |
+| 6     | 99.9        | 94.7  | −5.2 %  |
+| 7     | 98.7        | 108.8 | +10.2 % |
+| 8     | 112.0       | 126.5 | +12.9 % |
+| 9     | 608.2       | 627.8 | +3.2 %  |
+
+S9 prestige gate 4.96x (~5x), 0 wipes. Free-hit steps across seeds 1/2/3/42/1337 =
+**0** (a headless detector: a hero taking a hit while the firing shooter sits beyond
+all reach).
+
+### Tests (`charge.test.ts`)
+
+- BUG 1 (unit): a shooter past every reach edge never spawns a bolt while beyond
+  reach, creeps in, and ends inside the swordsman's melee range.
+- BUG 1 (integration): under a full sim with a melee wall + trailing shooter, no bolt
+  is ever fired from beyond all-hero reach, and the shooter is eventually damaged.
+- BUG 2: a foe behind both ranged heroes but inside their ranges draws an archer
+  volley **and** a mage orb (no idling) and takes damage.
+
+---
+
+## M5 — Character XP + Level system (86d3jv7m3)
+
+Per-hero level + XP as a second progression axis (the GDD's "immediate" 30-second
+goal tier). XP comes deterministically from **kills** (no RNG draw — the seeded
+stream stays wave-composition-only): every ALIVE hero gains equal XP per enemy
+kill, boss kills grant a larger amount, dead heroes earn nothing. Levels grant a
+per-level stat multiplier that **compounds multiplicatively** with the three
+upgrade lines (`systems/stats`). Progression is preserved across stage resets
+(`initHeroes` carries slot-indexed level/xp) and persisted (SAVE_VERSION 1→2).
+
+### Chosen knobs (`CONFIG.leveling`)
+
+| Knob | Value | Note |
+|---|---|---|
+| `levelCap` | `50` | Generous; the evolution card keys off level thresholds. |
+| `xpPerKill(n)` | `4 + n` | Per normal kill, per alive hero (S1=5 … S9=13). |
+| `xpPerBossKill(n)` | `30 + 10n` | Boss milestone (a level or two). |
+| `xpToLevel(level)` | `round(20 · 1.15^(level−1))` | Strictly increasing; early levels pop fast, later ones slow. |
+| `atkPerLevel` | **`0.001`** (+0.1%/level) | Token — see below. |
+| `hpPerLevel` | **`0.015`** (+1.5%/level) | Carries the felt "small win". |
+
+### Why the split is asymmetric (the balance finding)
+
+Team **attack** gates the boss (`teamPower = Σ heroAtk` vs `bossHp/26`), and the
+stage-9 wall is a structural knife-edge where `team ≈ rec`. By S9 the auto-pilot's
+heroes reach ~level 26, so a naïve **+1%/level** atk bonus (≈+22% by S9) or even
+**+0.15%/level** (≈+4%) *dissolved* the ~5x prestige gate:
+
+| `atkPerLevel` | S9 meanDur | gate (S9/S8) | vs baseline 627.8s |
+|---|---|---|---|
+| 0.10 % | 633 s | 4.9x | +1 % ✅ |
+| 0.15 % | 418 s | 3.3x | −33 % ❌ |
+| 0.30 % | 312 s | 2.5x | −50 % ❌ |
+| 1.00 % | 128 s | ~1x (wall → S10) | −80 % ❌ |
+
+Closing the gate to budget with a bigger atk bonus would require retuning the M4
+atk/HP curves (forbidden). So **atk is held to a token +0.1%/level** (provably in
+budget) and **HP carries the progression feel** at +1.5%/level: waves are
+DPS-gated with 0 wipes, so extra HP does *not* speed clears — it is pacing-neutral
+survivability. A level-up also heals by the added HP headroom (a small bump).
+
+### Resulting sim deltas (5 seeds, 1800 s, vs pre-M5 baseline)
+
+| Stage | Pre-M5 | With M5 | Δ |
+|---|---|---|---|
+| 1 | 86.4 | 86.8 | +0.5 % |
+| 2 | 51.8 | 51.8 | 0 % |
+| 3 | 71.1 | 71.0 | −0.1 % |
+| 4 | 75.3 | 75.6 | +0.4 % |
+| 5 | 89.8 | 93.9 | +4.6 % |
+| 6 | 94.7 | 99.4 | +5.0 % |
+| 7 | 108.8 | 106.4 | −2.2 % |
+| 8 | 126.5 | 128.7 | +1.7 % |
+| 9 | 627.8 | 633.4 | +0.9 % |
+
+Every stage within ±15 %; **S9 prestige gate 4.92x (~5x) preserved, 0 wipes**,
+same final stages. A transient `levelUp` event (`{id, cls, level}`) is emitted for
+render/UI juice (nothing in the engine consumes it).
+
+## M5 — Class advancement / evolution (86d3jv7m3)
+
+A THIRD per-hero power axis (the GDD's mid-tier "ปลดคลาส evolution" goal), on top
+of upgrades + levels. **Player-triggered**: the `evolveHero` FrameInput intent
+flips a hero from `tier 1` to `tier 2` (single path in M5) once it meets **both**
+`hero.level >= levelRequired` **and** `gold >= cost(classIndex)`; the intent is a
+no-op if unmet or the hero is already tier 2, and is applied once per drained
+input (a click evolves exactly once at any speed). Tier 2 grants a **permanent
+multiplier** (`tierAtkMult`/`tierHpMult`) that compounds MULTIPLICATIVELY with the
+upgrade lines and the per-level bonus. NO RNG (deterministic; the seeded stream
+stays wave-composition-only). A transient `evolve` event (`{id, cls, tier}`) is
+emitted for render/UI juice. Persisted via **SAVE_VERSION 2 → 3** (`tier` per hero;
+`migrate()` defaults tier 1).
+
+### Chosen knobs (`CONFIG.evolution`)
+
+| Knob | Value | Note |
+|---|---|---|
+| `levelRequired` | `15` | Met well before S9, so the GOLD gate times the evolution. |
+| `cost(classIndex)` | `round(800 · (index+1))` | 800 / 1600 / 2400 (sword/archer/mage). One clear knob family; later heroes cost more. |
+| `atkMult` | **`1.0`** (no offense) | Forced by the S9 knife-edge — see below. |
+| `hpMult` | **`1.5`** (+50 % HP) | Carries the entire felt "big evolution" power. |
+
+### Why atk is held at exactly 1.0 (the balance finding)
+
+The S9 wall is an **atk knife-edge**: the pre-M5 (leveling) baseline already sits
+at `teamPower == rec == 66` at ~633 s, so the auto-pilot challenges the boss the
+instant one more atk point lands. Evolution fires **before** the S9 crossing, so
+**any** atkMult that rounds a single hero's atk up by 1 tips the challenge one
+(geometrically expensive) upgrade-level early and collapses S9:
+
+| `atkMult` | S9 meanDur | gate (S9/S8) | vs baseline 633 s |
+|---|---|---|---|
+| 1.04 | 508 s | 3.95x | −20 % ❌ |
+| 1.02 | 508 s | 3.95x | −20 % ❌ |
+| 1.01 | 509 s | 3.95x | −20 % ❌ |
+| **1.00** | **608 s** | **4.73x** | **−4 % ✅** |
+
+Even +1 % tips it (discrete crossing). Closing the gate back to budget with any
+offense would require retuning the M4 atk/HP curves (forbidden). So **atk is held
+at 1.0** and the felt power lives entirely in **hpMult = +50 %**: waves are
+DPS-gated with 0 wipes, so extra HP does *not* speed wave clears; it only gently
+softens the S9 boss fight (heroes survive longer), nudging the gate 4.92x → 4.73x
+(still ~5x). The `atkMult` knob stays wired for the prestige half of M5 / the M7
+branch card, where the relaxed gate can afford real offense.
+
+### Auto-play + sim deltas (5 seeds, 1800 s, vs the M5-leveling baseline)
+
+The harness auto-evolves the first eligible hero each step (deterministic; over
+successive steps all three evolve — first ~534 s, all tier 2 by ~S8). Evolution
+gold competes with auto-upgrade exactly as a real player's spend would.
+
+| Stage | Baseline | With evolution | Δ |
+|---|---|---|---|
+| 1 | 86.8 | 86.8 | 0 % |
+| 2 | 51.8 | 51.8 | 0 % |
+| 3 | 71.0 | 71.0 | 0 % |
+| 4 | 75.6 | 75.6 | 0 % |
+| 5 | 93.9 | 93.9 | 0 % |
+| 6 | 99.4 | 99.4 | 0 % |
+| 7 | 106.4 | 106.4 | 0 % |
+| 8 | 128.7 | 128.7 | 0 % |
+| 9 | 633.4 | 608.3 | −4.0 % |
+
+Every stage within ±15 %; **S9 prestige gate 4.73x (~5x) preserved, 0 wipes**, same
+final stages (all seeds reach S10). Stages 1–8 are byte-identical because they are
+kill-goal/DPS-gated (evolution's HP is neutral there and its atk is 1.0); only the
+power-gated S9 moves, and only via HP survivability.

@@ -33,6 +33,7 @@ import { FloatingTextPool } from "@/render/fx/floatingText";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
+import { LevelUpBurstPool } from "@/render/fx/levelUp";
 import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
 import { burst, burstDirectional, burstInward, ParticlePool, shower } from "@/render/fx/particles";
@@ -183,6 +184,50 @@ const REVIVE_PILLAR_HEAD_MARGIN = 26; // px above HERO_TOP_Y the beam starts
 const REVIVE_PILLAR_WIDTH = 16;
 const REVIVE_PILLAR_DURATION = 0.35;
 
+// ---- hero level-up (M5 "Character XP + Level system", 86d3jv7m3) ----------
+// Golden, jewel-tone-against-desaturated-scenery beat (README art direction):
+// a starburst pop (bespoke shape, `levelUp.ts`) + a quick golden ring pulse +
+// a small upward sparkle burst + a rising "LEVEL UP" label, all at the
+// leveling hero's own position. Deliberately NOT a shake/arena-flash — this
+// fires per-hero, potentially several times a minute early in a run, so it
+// stays a contained, readable pop rather than competing with combat's own
+// juice budget.
+const LEVEL_UP_BURST_DURATION = 0.5;
+const LEVEL_UP_RING_R0 = 14;
+const LEVEL_UP_RING_R1 = 50;
+const LEVEL_UP_RING_DURATION = 0.5;
+const LEVEL_UP_PARTICLE_COUNT = 12;
+const LEVEL_UP_PARTICLE_SPEED = 85;
+const LEVEL_UP_PARTICLE_LIFE = 0.5;
+const LEVEL_UP_TEXT_DURATION = 0.9;
+const LEVEL_UP_TEXT_RISE = 42;
+
+// ---- hero class-advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) -
+// A mid-tier GOAL-LADDER moment (permanent tier-2 flip, gold-gated, rare —
+// at most once per hero for the whole M5 run) — deliberately bigger/grander
+// than `levelUp`'s contained pop above: a light pillar dropping from above
+// (reuses `lightPillars.ts`, same vocabulary as hero revive but taller/wider/
+// longer), a bigger starburst (reuses `levelUp.ts`'s bespoke shape at a
+// larger scale), a two-tone (gold + the hero's own class color) ring pulse +
+// particle burst, and a BRIEF arena flash (kept within the README's "subtle
+// ~0.2-0.3 peak alpha, no strobing" rule even for a big moment) — plays
+// through a `timeDirector` freeze/slow-mo exactly like every other `fx/`
+// effect (real `dt`, never sub-step count).
+const EVOLVE_PILLAR_HEAD_MARGIN = 34; // taller than revive's — a grander descent
+const EVOLVE_PILLAR_WIDTH = 22;
+const EVOLVE_PILLAR_DURATION = 0.55;
+const EVOLVE_BURST_DURATION = 0.7; // longer hang-time than levelUp's starburst
+const EVOLVE_RING_R0 = 16;
+const EVOLVE_RING_R1 = 70;
+const EVOLVE_RING_DURATION = 0.6;
+const EVOLVE_PARTICLE_COUNT_GOLD = 16;
+const EVOLVE_PARTICLE_COUNT_CLASS = 10;
+const EVOLVE_PARTICLE_SPEED = 100;
+const EVOLVE_PARTICLE_LIFE = 0.6;
+const EVOLVE_FLASH_ALPHA = 0.26;
+const EVOLVE_TEXT_DURATION = 1.1;
+const EVOLVE_TEXT_RISE = 50;
+
 // ---- boss entrance (state.boss null -> object): dust + dark tint + shake --
 const BOSS_ENTRANCE_DUST_COUNT = 16;
 const BOSS_ENTRANCE_DUST_SPEED = 90;
@@ -247,6 +292,7 @@ export class FxController {
   private readonly corpseEcho: CorpseEchoPool;
   private readonly bossEcho = new BossEcho();
   private readonly rings: RingPool;
+  private readonly levelUpBursts: LevelUpBurstPool;
   private readonly particles: ParticlePool;
   private readonly damageNumbers: FloatingTextPool;
   private readonly eventText: FloatingTextPool;
@@ -381,6 +427,7 @@ export class FxController {
     this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer);
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.rings = new RingPool(this.ringsLayer);
+    this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
     this.soulWisps = new SoulWispPool(this.particlesLayer);
@@ -448,6 +495,12 @@ export class FxController {
           break;
         case "skillCast":
           this.onSkillCast(ev, state);
+          break;
+        case "levelUp":
+          this.onLevelUp(ev, state);
+          break;
+        case "evolve":
+          this.onEvolve(ev, state);
           break;
         case "bossSlamTelegraph":
           this.rings.spawn({
@@ -528,6 +581,7 @@ export class FxController {
     this.groundArrows.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
+    this.levelUpBursts.update(dt);
     this.lightPillars.update(dt);
     this.crescents.update(dt);
     this.ghostBlades.update(dt);
@@ -570,6 +624,7 @@ export class FxController {
     this.castAura.destroy();
     this.impactFilters.destroy();
     this.rings.destroy();
+    this.levelUpBursts.destroy();
     this.lightPillars.destroy();
     this.particles.destroy();
     this.soulWisps.destroy();
@@ -784,6 +839,115 @@ export class FxController {
       color: colors.light,
       duration: REVIVE_PILLAR_DURATION,
       width: REVIVE_PILLAR_WIDTH,
+    });
+  }
+
+  /** Hero level-up (M5): golden starburst + ring pulse + sparkle burst +
+   * rising "LEVEL UP" label at the hero's own position — see the
+   * `LEVEL_UP_*` knobs block above for timings/magnitudes. `state.heroes`
+   * still contains the hero this same step (levels are applied in-place, the
+   * hero entity is never removed), so a lookup miss here would only mean a
+   * genuinely stale id and is skipped rather than guessed at. */
+  private onLevelUp(ev: Extract<GameEvent, { type: "levelUp" }>, state: GameState): void {
+    const hero = state.heroes.find((h) => h.id === ev.id);
+    if (!hero) return;
+    const x = hero.x;
+    const y = HERO_TOP_Y;
+
+    this.levelUpBursts.spawn({ x, y, color: PALETTE.gold, duration: LEVEL_UP_BURST_DURATION });
+    this.rings.spawn({
+      x,
+      y,
+      r0: LEVEL_UP_RING_R0,
+      r1: LEVEL_UP_RING_R1,
+      duration: LEVEL_UP_RING_DURATION,
+      width: 3,
+      color: PALETTE.gold,
+    });
+    burst(this.particles, x, y, LEVEL_UP_PARTICLE_COUNT, PALETTE.gold, {
+      speed: LEVEL_UP_PARTICLE_SPEED,
+      life: LEVEL_UP_PARTICLE_LIFE,
+      radius: 2.5,
+      gravity: -30, // slight upward drift — "rising" energy, not falling debris
+      drag: 0.3,
+    });
+    // "Lv." is a literal, locale-invariant prefix in this game's own i18n
+    // (see messages/th.json + en.json's `common.levelBadge`: identical in
+    // both) — render/ has no i18n hookup at all (canvas text elsewhere is
+    // numeric-only, e.g. damage/gold labels), so this stays consistent with
+    // that convention instead of hardcoding an English "LEVEL UP" phrase.
+    this.eventText.spawn({
+      x,
+      y: y - 14,
+      label: `Lv.${ev.level} ▲`,
+      color: PALETTE.gold,
+      fontSize: 14,
+      duration: LEVEL_UP_TEXT_DURATION,
+      rise: LEVEL_UP_TEXT_RISE,
+    });
+  }
+
+  /** Hero class-advancement / evolution (M5): the "big" goal-ladder beat —
+   * pillar of light + a bigger two-tone starburst/ring/particle spread +
+   * a brief arena flash + a rising "TIER 2!" label, all at the evolving
+   * hero's own position. See the `EVOLVE_*` knobs block above for
+   * timings/magnitudes and why this is deliberately grander than
+   * `onLevelUp()`. Same "hero still in `state.heroes` this step" lookup
+   * contract as `onLevelUp()` (evolution flips the entity in place, never
+   * removes it). */
+  private onEvolve(ev: Extract<GameEvent, { type: "evolve" }>, state: GameState): void {
+    const hero = state.heroes.find((h) => h.id === ev.id);
+    if (!hero) return;
+    const x = hero.x;
+    const y = HERO_TOP_Y;
+    const classColor = HERO_COLORS[ev.cls].light;
+
+    const topY = y - EVOLVE_PILLAR_HEAD_MARGIN;
+    this.lightPillars.spawn({
+      x,
+      topY,
+      height: GROUND_Y - topY,
+      color: PALETTE.gold,
+      duration: EVOLVE_PILLAR_DURATION,
+      width: EVOLVE_PILLAR_WIDTH,
+    });
+    this.levelUpBursts.spawn({ x, y, color: PALETTE.gold, duration: EVOLVE_BURST_DURATION });
+    this.rings.spawn({
+      x,
+      y,
+      r0: EVOLVE_RING_R0,
+      r1: EVOLVE_RING_R1,
+      duration: EVOLVE_RING_DURATION,
+      width: 4,
+      color: classColor,
+    });
+    burst(this.particles, x, y, EVOLVE_PARTICLE_COUNT_GOLD, PALETTE.gold, {
+      speed: EVOLVE_PARTICLE_SPEED,
+      life: EVOLVE_PARTICLE_LIFE,
+      radius: 3,
+      gravity: -30, // rising energy, not falling debris — same read as levelUp's
+      drag: 0.3,
+    });
+    burst(this.particles, x, y, EVOLVE_PARTICLE_COUNT_CLASS, classColor, {
+      speed: EVOLVE_PARTICLE_SPEED * 0.8,
+      life: EVOLVE_PARTICLE_LIFE,
+      radius: 2.5,
+      gravity: -30,
+      drag: 0.3,
+    });
+    // Brief, subtle full-arena flash — README's "~0.2-0.3 peak alpha, never
+    // strobing" rule holds even for this bigger moment.
+    this.flash.trigger(PALETTE.gold, EVOLVE_FLASH_ALPHA);
+    // "TIER" is a literal, locale-invariant label (render/ has no i18n hookup
+    // — see `onLevelUp()`'s doc comment for the same convention).
+    this.eventText.spawn({
+      x,
+      y: y - 16,
+      label: `TIER ${ev.tier} ▲`,
+      color: PALETTE.gold,
+      fontSize: 16,
+      duration: EVOLVE_TEXT_DURATION,
+      rise: EVOLVE_TEXT_RISE,
     });
   }
 

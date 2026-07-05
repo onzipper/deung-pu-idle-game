@@ -1,6 +1,17 @@
+import { redirect } from "next/navigation";
 import { GameClient } from "@/app/(game)/GameClient";
+import { hasResolvableActiveCharacter } from "@/app/characterGate";
 
-export default function Home() {
+export default async function Home() {
+  // M5 Character Pivot: the game is now per-character. Gate the whole page
+  // server-side (before GameClient ever mounts) — see characterGate.ts for
+  // why this reads cookies directly instead of calling the identity/active-
+  // character server helpers (which may try to WRITE a cookie, unsupported
+  // during a plain page render).
+  if (!(await hasResolvableActiveCharacter())) {
+    redirect("/characters");
+  }
+
   return (
     // Top-aligned (not vertically centered): on a short mobile-portrait
     // viewport the dock can legitimately run past the fold — this lets the

@@ -7,7 +7,22 @@
  * stage number `n`, exactly as the POC wrote them.
  */
 
-import type { HeroClass, EnemyKind, AttackKind, EnemyBehavior } from "@/engine/entities";
+import type {
+  HeroClass,
+  EnemyKind,
+  AttackKind,
+  EnemyBehavior,
+  StatKey,
+  HeroStats,
+} from "@/engine/entities";
+
+// M5 Character Pivot (docs/GDD.md v2): the 3-hero team became a SINGLE player
+// character. The formation / targeting / multi-hero combat engine is KEPT intact
+// (it becomes the M8 party engine) but gameplay spawns exactly ONE hero of the
+// chosen class. The three purchasable upgrade lines (atk/speed/hp) are REMOVED —
+// power now = level + tier (+ base stats/gear later). Balance is rebaselined for
+// solo play (docs/balance-m5.md); the old docs/balance-m4.md team table is
+// superseded and kept only for reference.
 
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
@@ -18,13 +33,19 @@ export const CONFIG = {
   /** Throttle for engine -> UI (Zustand) state sync, in Hz. */
   uiSyncHz: 10,
 
-  // ---- team / hero base ----
+  // ---- party / hero base ----
+  // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
+  // multi-actor engine is retained for M8, so this stays as the formation cap.
   maxHeroes: 3,
   heroBaseAtk: 10,
   heroBaseHp: 150,
+  // Solo RESPAWN (GDD: dead solo hero = respawn, town doesn't exist until M6).
+  // The lone hero going down auto-respawns after this many seconds; the
+  // battlefield is cleared so it never respawns into a pile-up death spiral
+  // (see combat.resolveDeaths). No penalty — respawn at FULL HP.
   heroReviveTime: 4,
-  /** Revived heroes come back at this fraction of max HP. */
-  reviveHpFraction: 0.5,
+  /** Respawn HP fraction (1.0 = full, no death penalty per GDD). */
+  reviveHpFraction: 1.0,
 
   // ---- formation / movement ----
   baseAnchor: 180,
@@ -128,6 +149,19 @@ export const CONFIG = {
   // 90 sits strictly inside the swordsman's 96 melee reach, so every enemy still
   // ALLOWED to attack from behind is one he can symmetrically swing back at.
   enemyBehindReach: 90,
+  // Free-hit fix (ranged counterpart of enemyBehindReach): a ranged enemy that
+  // has ended up beyond EVERY alive hero's reach (the swordsman walled at
+  // chargeHardCap becomes its nearest hero, so it parks at range 160 ≈ 930, past
+  // his 96 melee reach and the anchor-capped backline's ~834/766 forward reach)
+  // HOLDS FIRE and creeps forward at THIS speed until a hero can answer it (see
+  // combat.ts). Deliberately far slower than its own approach speed (32): the
+  // creep re-creates, as a FAIR fight, the ~10-35 s stall the un-killable shooter
+  // used to impose — the clear time the M4.6 table is tuned around — instead of
+  // deleting it (a straight pull-in ran S2-S6 25-45 % fast) or inflating it (a
+  // freeze ran +9..+97 % and broke the S9 gate). 4 px/s ≈ a ~15 s close over the
+  // typical overhang, which sim-lands every stage inside the ±15 % budget (worst
+  // S8 +13 %) with the S9 prestige gate (~5x) and 0 wipes preserved.
+  rangedReengageSpeed: 4,
 
   /** Stage-gated random thresholds for wave composition (POC rollWave). */
   waveComp: {
@@ -242,11 +276,186 @@ export const CONFIG = {
     arrowRainRange: 760,
   },
 
+  // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
+  // With the upgrade lines REMOVED (M5 Character Pivot), per-hero LEVEL is the
+  // PRIMARY interim power axis (base-stat allocation is a later task). The solo
+  // hero banks ALL kill XP (no team split); each level grants an atk/hp bonus that
+  // must keep pace with the GEOMETRIC enemy/boss HP curve (25 * 1.2^(n-1)), so
+  // these are far more generous than the pre-pivot team knobs. NO RNG is drawn
+  // here (kills are deterministic); the seeded stream stays wave-composition-only.
+  // Sim-rebaselined per class solo — see docs/balance-m5.md.
+  leveling: {
+    // Level cap; the evolution gate keys off a threshold below this.
+    levelCap: 60,
+    // Per-level ADDITIVE bonuses (combine additively with the primary-stat atk
+    // bonus, then the tier multiplier applies).
+    //
+    // M5 "Base stats" re-tune (avoid double-counting): pre-stats, LEVELS carried
+    // ALL atk scaling at 0.10/level. Base stats now let the player allocate
+    // `stats.pointsPerLevel` (3) points per level into the class PRIMARY stat for
+    // `stats.atkPerPrimaryPoint` (0.02) each, so an auto-allocated hero adds
+    // 3 * 0.02 = 0.06/level of atk from STATS. atkPerLevel is dropped 0.10 -> 0.04
+    // so the innate level bonus (0.04) + auto-allocated primary bonus (0.06) sum
+    // back to the SAME 0.10/level total power growth as the pre-stats baseline
+    // (exact for an organically-levelled hero — see stats.ts / docs/balance-m5.md).
+    // Manually diverting points into vit/dex trades atk for survivability/speed.
+    atkPerLevel: 0.04,
+    // hp stays LEVEL-driven at 0.09/level: auto-allocate feeds the PRIMARY stat
+    // (never vit), so if HP scaling moved to vit an idle hero would get none and
+    // die. VIT (below) is an OPTIONAL survivability investment ON TOP of this.
+    // Unchanged from the pre-stats baseline, so auto-allocated HP == baseline.
+    hpPerLevel: 0.09,
+    // XP granted to the solo hero per NORMAL enemy kill; scales with stage so
+    // deeper (tougher) kills are worth more and leveling keeps pace with HP.
+    xpPerKill: (n: number): number => 10 + n * 3,
+    // XP granted per BOSS kill — a chunky milestone reward (a level or more).
+    xpPerBossKill: (n: number): number => 80 + n * 25,
+    // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
+    // geometric growth so the hero keeps leveling deep into the run (reaching
+    // ~L40+ by S10) rather than stalling at a hard cap mid-game.
+    xpToLevel: (level: number): number => Math.round(30 * Math.pow(1.12, level - 1)),
+  },
+
+  // ---- base stats (M5 "Base stats", 86d3jv7m3) ----
+  // Four RO-flavoured axes the player allocates on level-up (see entities StatKey).
+  // A class's DAMAGE scales off its PRIMARY stat only (str/dex/int); dex also gives
+  // a small UNIVERSAL atk-speed factor and vit a UNIVERSAL max-HP bonus. Bonuses
+  // are computed from the amount ALLOCATED ABOVE the class base, so a fresh hero
+  // sits exactly on its class baseline (stats.ts). Auto-allocate (UI toggle) dumps
+  // points into the primary stat so idle players never drown in unspent points.
+  // NO RNG (deterministic); the seeded stream stays wave-composition-only.
+  stats: {
+    // Points granted per level-up. The atk re-tune above is calibrated to this:
+    // pointsPerLevel * atkPerPrimaryPoint (3 * 0.02 = 0.06) is exactly the atk/level
+    // moved out of the innate level bonus, so auto == baseline (docs/balance-m5.md).
+    pointsPerLevel: 3,
+    // Per-stat allocation ceiling (no respec in this phase — a future NPC service).
+    // Generous; exists only so a hand-edited save can't drive stats to absurdity.
+    cap: 999,
+    // ATK-mult per PRIMARY-stat point above base (additive with the level bonus).
+    atkPerPrimaryPoint: 0.02,
+    // HP-mult per VIT point above base (additive with the level hp bonus). VIT is
+    // NOT auto-allocated, so this never perturbs the auto baseline — it's the
+    // manual "tank" investment. (No mitigation axis exists in combat yet — VIT is
+    // HP-only; a defense/mitigation factor is a documented future hook.)
+    hpPerVitPoint: 0.03,
+    // Universal atk-SPEED factor per DEX point above base (lower cooldown = faster).
+    // Deliberately tiny: the archer's PRIMARY is dex, so auto-allocate funnels every
+    // point into dex — a large factor would inflate archer DPS out of budget. At the
+    // ~S10 clear level (~108 allocated dex) this is only ~+4% attack speed. It is
+    // mostly a future-facing hook; a manual off-stat dabbler feels it slightly.
+    atkSpeedPerDexPoint: 0.0004,
+    // Per-class STARTING stat block (the zero-point for bonuses + the RO-flavour
+    // display value). Primary stat highest; vit tracks the class survivability
+    // identity (sword tanky, mage squishy). Because bonuses are measured ABOVE
+    // base, these values grant NO power themselves — they set where allocation
+    // begins. (The class HP identity itself still lives in HERO_TYPES.hpMult:
+    // folding it into base vit is rejected because vit isn't auto-allocated, so
+    // idle heroes would lose their class survivability — see docs/balance-m5.md.)
+    base: {
+      swordsman: { str: 8, dex: 4, int: 3, vit: 6 },
+      archer: { str: 4, dex: 8, int: 3, vit: 5 },
+      mage: { str: 3, dex: 4, int: 8, vit: 4 },
+    } satisfies Record<HeroClass, HeroStats>,
+  },
+
+  // ---- mana (M5 "mana + skill framework v2", 86d3jv7m3) ----
+  // Skills cost mana AND keep cooldowns (GDD: both). The pool + regen scale off
+  // INT above the class base (`stats.base[cls].int`), giving the mage — whose
+  // PRIMARY is int, so auto-allocate funnels every point into it — a real caster
+  // identity (a deep pool + fast regen it can sustain multiple skills on), while
+  // the str/dex classes live on the flat base pool + base regen and must be
+  // economical with their one signature cast. CRITICAL (idle guarantee): base
+  // regen alone MUST sustain each class's SIGNATURE skill at ~its cooldown
+  // cadence, so a mana-starved hero never hard-stalls — a skipped skill is fine,
+  // basic attacks (which cost NO mana) always continue and keep banking kills/XP.
+  // NO RNG (deterministic). Sim-tuned — see docs/balance-m5.md.
+  mana: {
+    base: 60, // flat pool every class starts with (before INT scaling)
+    perIntPoint: 3.5, // +max mana per INT point above the class base
+    // Base regen is sized to sustain each class's SIGNATURE cast (idle guarantee)
+    // with only a THIN margin — so a str/dex class (flat base regen) is genuinely
+    // mana-gated on its EXTRA skills and can't spam its whole kit (that's the DPS
+    // cut mana is meant to impose). The mage's INT-fed regen lifts it clear of the
+    // gate, so it sustains its full kit — the caster identity.
+    baseRegen: 7, // mana/sec every class regenerates (sustains the signature cast)
+    regenPerIntPoint: 0.15, // +mana/sec per INT point above base (caster identity)
+  },
+
+  // ---- auto-cast slots (M5 "skill framework v2") ----
+  // Up to `max` skills can sit in auto-cast slots; a slot at index i only fires
+  // once the hero reaches `unlockLevels[i]`. Auto-cast walks the slots IN ORDER
+  // (deterministic priority) and casts each slotted skill that is learned, off
+  // cooldown, and affordable. The player assigns skills to slots (setAutoSlot
+  // intent); slot 0 defaults to the class signature so a fresh hero auto-casts it.
+  autoSlots: {
+    max: 3,
+    // Level thresholds that unlock slot 0 / 1 / 2 (length MUST equal `max`).
+    unlockLevels: [1, 15, 30] as const,
+  },
+
+  // ---- combat power ("พลังต่อสู้") — the HOF metric + boss-hint gauge ----
+  // A single scalar from a hero's EFFECTIVE DPS (basic + skill, so it no longer
+  // under-reads the skill-heavy ranged classes the way raw summed atk did) plus a
+  // survivability term from max HP. Monotonic non-decreasing in every stat point,
+  // level, and tier. Weights are advisory-scale (the sim ignores the hint); tuned
+  // so the boss-hint divisor lands "ready" near a real clear (see combatPower).
+  power: {
+    dpsWeight: 6,
+    hpWeight: 0.5,
+  },
+
+  // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----
+  // A second power axis on top of levels: the player advances the hero to tier 2,
+  // granting a PERMANENT atk/hp multiplier (systems/stats tierAtkMult/tierHpMult).
+  // PLAYER-TRIGGERED (evolveHero intent) but the TRIGGER is now the class-change
+  // QUEST (M5 task 5, `quest` below): the old gold cost is GONE — quest EFFORT
+  // replaces it. Requirement: tier 1 AND the class-change quest is COMPLETE
+  // (systems/quests `isQuestComplete`); the quest is itself only offerable at
+  // `levelRequired`, so the level gate still times the beat. Rejected (no-op) if
+  // unmet or already tier 2. Single path in M5. NO RNG (deterministic).
+  //
+  // ECONOMY NOTE (task 5): removing the gold cost leaves NO gold sink until M6/M7
+  // (NPC potions, marketplace) — gold accumulates freely by design; the pacing
+  // that the gold gate used to add is now carried entirely by the quest objectives.
+  evolution: {
+    // Level gate — the class-change quest is auto-offered here (mid-run milestone).
+    levelRequired: 15,
+    // Permanent tier-2 multipliers. With the ±15% M4 budget gone (full rebaseline),
+    // evolution can carry REAL offense: a meaningful atk + hp jump that helps the
+    // solo hero break the boss gate. Sim-tuned per class — see docs/balance-m5.md.
+    atkMult: 1.35,
+    hpMult: 1.5,
+  },
+
+  // ---- class-change quest (M5 "เปลี่ยนคลาสผ่านเควส" v1, ROADMAP task 5) ----
+  // The tier-1 -> tier-2 class change is gated by a lean QUEST instead of gold.
+  // Auto-offered at level >= evolution.levelRequired while tier 1; the player
+  // accepts (acceptQuest intent), objectives then count deterministically from the
+  // hero's own kills / boss defeats (systems/quests, driven by combat — NO RNG, no
+  // wall-clock), and completing them makes the class change available. Numbers are
+  // sim-tuned so completion lands on the same mid-game beat the old ~level-15 gold
+  // gate did (see docs/balance-m5.md "Class-change quest timing"). Same objective
+  // numbers for every class in v1; per-class quest IDS (systems/quests
+  // `classChangeQuestId`) let M8's full quest system diverge them later.
+  quest: {
+    classChange: {
+      // Enemy kills to bank after accepting (the grind portion of the effort gate).
+      kills: 60,
+      // Boss defeats required (a stage-clear milestone — proves real progress).
+      bossKills: 1,
+    },
+  },
+
   // ---- flow / progression ----
-  bossHintPowerDivisor: 26, // recommendedPower = round(bossHp / this)
-  bossRetreatWaveGap: 1.0, // waveGap after a boss retreat (team wipe)
+  // recommendedPower = round(bossHp / this), on the COMBAT-POWER scale (M5 base
+  // stats): teamPower is now `sum(combatPower(hero))` (effective DPS + HP), not
+  // raw summed atk, so the divisor was re-derived from 26 -> 2 to keep "ready"
+  // landing near an actual clear. Advisory only (the sim challenges on the kill
+  // goal + retry loop, never this hint).
+  bossHintPowerDivisor: 2, // recommendedPower = round(bossHp / this)
+  bossRetreatWaveGap: 1.0, // waveGap after a boss retreat / solo respawn
   nextStageWaveGap: 0.8, // waveGap at the start of a new stage
-  autoUpgradeInterval: 0.15, // seconds between auto-upgrade attempts (POC 150ms tick)
 
   // ---- boss (movement + slam/enrage tuning) ----
   boss: {
@@ -298,6 +507,12 @@ export interface HeroType {
   /** Seconds between attacks at base (lower = faster). */
   atkSpeed: number;
   dmgMult: number;
+  /**
+   * Per-class max-HP multiplier on `heroBaseHp` (M5 solo survivability knob):
+   * the melee swordsman tanks a wave alone, the squishier ranged classes lean on
+   * kiting + AoE. A precursor to full base-stat allocation (a later task).
+   */
+  hpMult: number;
   /** Projectile travel speed (ranged classes only; 0 for melee). */
   projSpeed: number;
   /** AoE radius for `aoe` attackers (0 otherwise). */
@@ -311,6 +526,7 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     range: 96,
     atkSpeed: 0.5,
     dmgMult: 1.0,
+    hpMult: 1.5,
     projSpeed: 0,
     aoe: 0,
   },
@@ -319,23 +535,45 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     attack: "arrow",
     range: 350,
     atkSpeed: 0.72,
-    dmgMult: 0.55,
+    // Solo rebaseline: bumped from the team-era 0.55 — a lone archer needs real
+    // single-target DPS (esp. vs the boss, where its arrow-rain AoE barely lands).
+    dmgMult: 0.9,
+    hpMult: 1.0,
     projSpeed: 660,
     aoe: 0,
   },
   mage: {
     offset: -74,
     attack: "aoe",
+    // Solo rebaseline: faster cadence (1.35 -> 1.15) + more base (0.85 -> 1.0) so a
+    // lone mage isn't helpless between meteors / on small early waves & the boss.
     range: 330,
-    atkSpeed: 1.35,
-    dmgMult: 0.85,
+    atkSpeed: 1.15,
+    dmgMult: 1.0,
+    hpMult: 0.95,
     projSpeed: 360,
     aoe: 46,
   },
 };
 
-/** Heroes are unlocked (and slotted) in this order as stages are cleared. */
+/**
+ * Canonical class list. Pre-pivot this was the stage-by-stage hero UNLOCK order;
+ * post-pivot the player picks ONE base class at creation (hero-unlock progression
+ * removed). Retained as the authoritative ordered class list — the server's
+ * known-classes enum and the evolution cost index both key off it.
+ */
 export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage"];
+
+/**
+ * Each class's PRIMARY (damage-scaling) base stat, and the auto-allocate target
+ * (M5 "Base stats"). Mirrors the attack kind: melee→str, ranged→dex, magic→int.
+ * The class's `heroAtk` scales off this stat; off-affinity damage stats are inert.
+ */
+export const PRIMARY_STAT: Record<HeroClass, StatKey> = {
+  swordsman: "str",
+  archer: "dex",
+  mage: "int",
+};
 
 export interface EnemyType {
   hpMult: number;
@@ -394,56 +632,153 @@ export const ENEMY_TYPES: Record<EnemyKind, EnemyType> = {
   },
 };
 
+/**
+ * How a skill resolves (M5 "skill framework v2"). All reuse EXISTING combat
+ * mechanics — no new ProjectileKind is introduced (footgun #6):
+ *  - `nova`   : instant AoE centred on the HERO (swordsman whirl).
+ *  - `strike` : instant AoE centred on the nearest in-range target's x (a ground
+ *               slam / frost burst — the ranged counterpart of `nova`).
+ *  - `meteor` : a single falling point-projectile AoE (mage meteor).
+ *  - `rain`   : many small falling point-projectiles over the cluster (arrow rain).
+ *  - `bolt`   : a single high-damage HOMING arrow at the nearest target (nuke).
+ *  - `buff`   : a self ATK buff for a duration (no damage; war-cry).
+ */
+export type SkillKind = "nova" | "strike" | "meteor" | "rain" | "bolt" | "buff";
+
 export interface SkillType {
+  /** Unique, class-namespaced id (the key into `SKILLS`). */
+  id: string;
+  cls: HeroClass;
+  /** Hero TIER required to have learned this skill (1 = base kit, 2 = evolution). */
+  tier: 1 | 2;
+  /** Hero LEVEL required to have learned it (unlock-by-level within the tier). */
+  unlockLevel: number;
+  kind: SkillKind;
+  /** Mana cost to cast. */
+  cost: number;
   cd: number;
-  /** AoE radius: swordsman spin / mage meteor blast / archer per-rain-drop splash. */
+  /** AoE radius: nova/strike blast, meteor blast, per-rain-drop splash (0 = none). */
   radius: number;
-  /** Damage multiplier on heroAtk. For the archer this is PER falling arrow. */
+  /** Damage multiplier on heroAtk (PER falling arrow for `rain`; 0 for `buff`). */
   mult: number;
-  /** For the archer ARROW RAIN this is the NUMBER OF DROPS; 0 for other classes. */
+  /** For `rain` this is the NUMBER OF DROPS; 0 otherwise. */
   targets: number;
-  /** Skill projectile speed (archer rain-drop fall / mage meteor); 0 for the spin. */
+  /** Skill projectile speed (rain-drop / meteor / bolt fall); 0 for instant kinds. */
   projSpeed: number;
+  /** Cast/guard range — the farthest a target may be for the skill to fire. */
+  range: number;
+  /** ATK buff multiplier for `buff` skills (1 = none). */
+  buffMult: number;
+  /** ATK buff duration in seconds for `buff` skills (0 = none). */
+  buffDuration: number;
 }
 
-/** Per-class skill tuning. */
+/**
+ * The SKILL CATALOG (M5 "skill framework v2"): per class, a kit of skills
+ * unlocked by LEVEL within a TIER. The signature skill of each class (whirl /
+ * arrow rain / meteor) is kept as skill #1 with its established identity + fx —
+ * its numbers are unchanged from the solo rebaseline. Each class gains one new
+ * tier-1 skill (a distinct role using existing mechanics) and one tier-2 skill
+ * (an evolution reward). All numbers here are sim-tuned — see docs/balance-m5.md.
+ *
+ * The mage's pool/regen (INT-scaled) lets it sustain several skills; the str/dex
+ * classes run mostly their signature (base regen sustains it) and dip into their
+ * extra skills opportunistically.
+ */
+const SKILL_LIST = [
+  // ---- swordsman ----
+  // Signature: WHIRL SLASH — instant AoE spin around the swordsman (unchanged).
+  {
+    id: "sword_whirl", cls: "swordsman", tier: 1, unlockLevel: 1, kind: "nova",
+    cost: 24, cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0, range: 95,
+    buffMult: 1, buffDuration: 0,
+  },
+  // WAR CRY — self ATK buff (steroid). No damage; guarded on a nearby foe so it
+  // isn't wasted while idle. Cheap enough that the swordsman's spare mana sustains
+  // occasional uptime on top of the whirl.
+  {
+    id: "sword_warcry", cls: "swordsman", tier: 1, unlockLevel: 8, kind: "buff",
+    cost: 20, cd: 16, radius: 0, mult: 0, targets: 0, projSpeed: 0, range: 260,
+    buffMult: 1.4, buffDuration: 6,
+  },
+  // EARTHQUAKE (tier-2) — a heavy ground-slam AoE a short reach ahead (evolution
+  // burst). Bigger radius/mult than the whirl; costs more mana.
+  {
+    id: "sword_quake", cls: "swordsman", tier: 2, unlockLevel: 15, kind: "strike",
+    cost: 44, cd: 12, radius: 120, mult: 3.2, targets: 0, projSpeed: 0, range: 200,
+    buffMult: 1, buffDuration: 0,
+  },
+
+  // ---- archer ----
+  // Signature: ARROW RAIN — many drops fall over the cluster (unchanged).
+  {
+    id: "archer_rain", cls: "archer", tier: 1, unlockLevel: 1, kind: "rain",
+    cost: 24, cd: 7, radius: 44, mult: 0.5, targets: 9, projSpeed: 900, range: 760,
+    buffMult: 1, buffDuration: 0,
+  },
+  // POWER SHOT — a single high-damage homing arrow (single-target nuke; the
+  // archer's answer to a lone boss, where its rain AoE barely lands).
+  {
+    id: "archer_powershot", cls: "archer", tier: 1, unlockLevel: 8, kind: "bolt",
+    cost: 28, cd: 9, radius: 0, mult: 5.5, targets: 0, projSpeed: 1100, range: 700,
+    buffMult: 1, buffDuration: 0,
+  },
+  // EXPLOSIVE SHOT (tier-2) — an instant AoE burst at the nearest target
+  // (evolution wave-buster complementing the single-target power shot).
+  {
+    id: "archer_barrage", cls: "archer", tier: 2, unlockLevel: 15, kind: "strike",
+    cost: 46, cd: 11, radius: 90, mult: 2.4, targets: 0, projSpeed: 0, range: 700,
+    buffMult: 1, buffDuration: 0,
+  },
+
+  // ---- mage ----
+  // Signature: METEOR — a single falling AoE nuke (unchanged; the mage's burst).
+  {
+    id: "mage_meteor", cls: "mage", tier: 1, unlockLevel: 1, kind: "meteor",
+    cost: 40, cd: 10, radius: 90, mult: 5.5, targets: 0, projSpeed: 560, range: 330,
+    buffMult: 1, buffDuration: 0,
+  },
+  // FROST NOVA — a cheap, fast, short-cooldown AoE burst at the nearest cluster
+  // (sustained wave clear between meteors; the mage's INT-fed regen keeps it up).
+  {
+    id: "mage_frostnova", cls: "mage", tier: 1, unlockLevel: 8, kind: "strike",
+    cost: 20, cd: 6, radius: 85, mult: 1.5, targets: 0, projSpeed: 0, range: 330,
+    buffMult: 1, buffDuration: 0,
+  },
+  // CATACLYSM (tier-2) — a bigger, costlier meteor (evolution ultimate).
+  {
+    id: "mage_cataclysm", cls: "mage", tier: 2, unlockLevel: 15, kind: "meteor",
+    cost: 58, cd: 15, radius: 110, mult: 8.0, targets: 0, projSpeed: 560, range: 330,
+    buffMult: 1, buffDuration: 0,
+  },
+] as const satisfies readonly SkillType[];
+
+/** The skill catalog, keyed by id (the single source of truth for skill tuning). */
+export const SKILLS: Record<string, SkillType> = Object.fromEntries(
+  SKILL_LIST.map((s) => [s.id, s]),
+);
+
+/** Ordered skill-id list per class (signature first, then by unlock). */
+export const CLASS_SKILLS: Record<HeroClass, string[]> = {
+  swordsman: SKILL_LIST.filter((s) => s.cls === "swordsman").map((s) => s.id),
+  archer: SKILL_LIST.filter((s) => s.cls === "archer").map((s) => s.id),
+  mage: SKILL_LIST.filter((s) => s.cls === "mage").map((s) => s.id),
+};
+
+/** Each class's SIGNATURE skill id (slot-0 default; the HOF/combat-power skill). */
+export const SIGNATURE_SKILL: Record<HeroClass, string> = {
+  swordsman: "sword_whirl",
+  archer: "archer_rain",
+  mage: "mage_meteor",
+};
+
+/**
+ * Back-compat alias: the per-class SIGNATURE skill def. Render + the combat-power
+ * metric read a class's signature tuning through this (radius / projSpeed / cd /
+ * mult), unchanged from before the catalog existed.
+ */
 export const SKILL_TYPES: Record<HeroClass, SkillType> = {
-  swordsman: { cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0 },
-  // ARROW RAIN (86d3k2t18): `targets` drops fall over the cluster, each a `radius`
-  // splash for `mult` * heroAtk. Unlike the OLD nearest-3 spread (3 * 1.35 = 4.05
-  // heroAtk onto exactly 3 foes) the rain reliably BLANKETS every enemy in its zone
-  // every cooldown (whole-field arc range, see skills.arrowRainRange), so per-drop
-  // `mult` is tuned WELL below the old per-hit value — 9 * 0.29 = 2.61 nominal — to
-  // land the same EFFECTIVE DPS. Sim-tuned to keep S1–S9 time-to-clear within ±15%
-  // of the pre-change table (0 wipes). Was { radius:0, mult:1.35, targets:3 }.
-  archer: { cd: 7, radius: 44, mult: 0.29, targets: 9, projSpeed: 900 },
-  mage: { cd: 12, radius: 90, mult: 3.2, targets: 0, projSpeed: 560 },
+  swordsman: SKILLS[SIGNATURE_SKILL.swordsman],
+  archer: SKILLS[SIGNATURE_SKILL.archer],
+  mage: SKILLS[SIGNATURE_SKILL.mage],
 };
-
-export interface UpgradeLineDef {
-  base: number;
-  growth: number;
-  /** Per-level effect (e.g. +12% atk per level). */
-  per: number;
-}
-
-/** The three upgrade lines. `speed` alone is capped (see `speedCap`). */
-export const UPGRADES: {
-  atk: UpgradeLineDef;
-  speed: UpgradeLineDef;
-  hp: UpgradeLineDef;
-} = {
-  // M4 tune: atk growth 1.45 -> 1.38. atk is the boss-gating stat (team power =
-  // sum of heroAtk), so its high-level cost is what builds the wall. 1.38 barely
-  // moves L0-3 costs (25/35/48/66 vs 25/36/53/76) but roughly halves L12+ costs,
-  // softening the stage-9 wall (~7.5x -> ~4.9x) and shaving stage 1. It also makes
-  // atk the cheapest-GROWTH line, so the cheapest-first auto-buy funnels a bit
-  // more into the stat that actually advances the boss gate — without starving hp
-  // /speed (final mix stays ~atk 40% / hp 33% / speed 27%, no dominant line).
-  atk: { base: 25, growth: 1.38, per: 0.12 },
-  speed: { base: 32, growth: 1.55, per: 0.06 },
-  hp: { base: 22, growth: 1.48, per: 0.15 },
-};
-
-/** Speed-line level cap (POC UP.speed.cap). */
-export const SPEED_UPGRADE_CAP = 18;

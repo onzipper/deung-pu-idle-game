@@ -36,21 +36,31 @@
  * the relevant `GameState` fields back out.
  */
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import {
   CONFIG,
   FIXED_DT,
+  SIGNATURE_SKILL,
   bossHint,
+  canEvolveHero,
+  classChangeQuestFor,
+  combatPower,
   createAccumulator,
   drainAccumulator,
   initGameState,
+  isClassChangeQuestOffered,
+  learnedSkills,
   migrate,
+  primaryStat,
+  skillCdOf,
   step,
   toSaveData,
-  upgradeCost,
+  unlockedAutoSlotCount,
   type FrameInput,
   type GameEvent,
   type GameState,
+  type Hero,
   type SaveData,
 } from "@/engine";
 import { AudioController } from "@/render/audio";
@@ -59,7 +69,9 @@ import { GameHud } from "@/ui/components/GameHud";
 import {
   useGameStore,
   type EngineSnapshot,
+  type HeroQuestSummary,
   type HeroSummary,
+  type SkillSummary,
 } from "@/ui/store/gameStore";
 import { TimeDirector } from "./timeDirector";
 
@@ -120,14 +132,86 @@ async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void
   }
 }
 
+/** Precompute the learned-skill kit's display state (M5 skill framework v2). */
+function buildSkillSummaries(h: Hero): SkillSummary[] {
+  return learnedSkills(h).map((def): SkillSummary => {
+    const cd = skillCdOf(h, def.id);
+    const affordable = h.mana >= def.cost;
+    const autoSlot = h.autoSlots.indexOf(def.id);
+    return {
+      id: def.id,
+      cd,
+      maxCd: def.cd,
+      cost: def.cost,
+      ready: cd <= 0 && affordable && !h.dead,
+      affordable,
+      autoSlot: autoSlot >= 0 ? autoSlot : null,
+    };
+  });
+}
+
+/**
+ * Precompute the class-change quest affordance state (M5 task 5). Returns null
+ * when there's nothing quest-related to show (tier 2, or below the level gate with
+ * no active quest — the bar shows the evolved badge / locked hint from tier/level).
+ */
+function buildQuestSummary(h: Hero): HeroQuestSummary | null {
+  if (h.tier === 2) return null;
+  const offered = isClassChangeQuestOffered(h);
+  const q = h.quest;
+  if (!offered && !q) return null; // below the level gate — no affordance yet
+  const def = classChangeQuestFor(h.cls);
+  const killIdx = def.objectives.findIndex((o) => o.type === "kill");
+  const bossIdx = def.objectives.findIndex((o) => o.type === "killBoss");
+  const kills = killIdx >= 0 ? (q?.progress[killIdx] ?? 0) : 0;
+  const killGoal = killIdx >= 0 ? def.objectives[killIdx].count : 0;
+  const bossDone =
+    bossIdx >= 0 && (q?.progress[bossIdx] ?? 0) >= def.objectives[bossIdx].count;
+  const accepted = q?.accepted ?? false;
+  const complete =
+    accepted && def.objectives.every((o, i) => (q?.progress[i] ?? 0) >= o.count);
+  return { offered, accepted, complete, kills, killGoal, bossDone };
+}
+
 function buildSnapshot(state: GameState): EngineSnapshot {
-  const heroes: HeroSummary[] = state.heroes.map((h) => ({
-    cls: h.cls,
-    hp: h.hp,
-    maxHp: h.maxHp,
-    skillCd: h.skillCd,
-    dead: h.dead,
-  }));
+  const heroes: HeroSummary[] = state.heroes.map((h) => {
+    const atLevelCap = h.level >= CONFIG.leveling.levelCap;
+    // Precompute the 0..1 progress float HERE (the one place the xp-curve
+    // math is allowed to run) so the throttled store only ever carries a
+    // display-ready number, never raw xp/`xpToLevel()` (see HeroSummary's
+    // doc comment).
+    const xpProgress = atLevelCap
+      ? 1
+      : Math.max(0, Math.min(1, h.xp / CONFIG.leveling.xpToLevel(h.level)));
+    return {
+      cls: h.cls,
+      hp: h.hp,
+      maxHp: h.maxHp,
+      // Signature skill cooldown (onboarding's "you cast a skill" detector).
+      skillCd: skillCdOf(h, SIGNATURE_SKILL[h.cls]),
+      mana: h.mana,
+      maxMana: h.maxMana,
+      skills: buildSkillSummaries(h),
+      autoSlots: [...h.autoSlots],
+      unlockedSlots: unlockedAutoSlotCount(h.level),
+      dead: h.dead,
+      level: h.level,
+      xpProgress,
+      atLevelCap,
+      tier: h.tier,
+      // Pure display reads (M5 evolution) — the same rule/read-path
+      // `xpProgress` uses: engine helpers compute it, the store just carries
+      // the display-ready result.
+      canEvolve: canEvolveHero(state, h),
+      quest: buildQuestSummary(h),
+      // M5 "Base stats" — same one-way display read-path: engine helpers compute
+      // it, the store just carries the display-ready result.
+      statPoints: h.statPoints,
+      stats: { ...h.stats },
+      primaryStat: primaryStat(h.cls),
+      combatPower: combatPower(h),
+    };
+  });
 
   return {
     gold: state.gold,
@@ -139,17 +223,18 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     bossReady: state.bossReady,
     bossHint: bossHint(state),
     heroes,
-    upgrades: { ...state.upgrades },
-    upgradeCosts: {
-      atk: upgradeCost("atk", state.upgrades.atk),
-      speed: upgradeCost("speed", state.upgrades.speed),
-      hp: upgradeCost("hp", state.upgrades.hp),
-    },
   };
 }
 
 export function GameClient() {
   const arenaRef = useRef<HTMLDivElement | null>(null);
+  const t = useTranslations("common");
+  // Captured in a ref (not read directly inside the mount-only effect below)
+  // so a mid-session locale switch (`router.refresh()` — no remount, see
+  // `LocaleSwitch.tsx`) still updates the string this rare fatal-error path
+  // would show, without re-running the boot/rAF-loop effect itself.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -223,7 +308,7 @@ export function GameClient() {
           "absolute inset-0 z-10 flex items-center justify-center p-4 text-center text-sm font-medium text-red-300";
         arenaEl.appendChild(errorEl);
       }
-      errorEl.textContent = `ไม่สามารถเริ่มเกมได้: ${reason}`;
+      errorEl.textContent = tRef.current("fatalError", { reason });
     }
 
     function frame(now: number) {
@@ -235,8 +320,8 @@ export function GameClient() {
       const store = useGameStore.getState();
 
       // UI-owned flags the engine reads directly (not part of FrameInput).
-      state.autoUpgrade = store.autoUpgrade;
       state.autoCast = store.autoCast;
+      state.autoAllocate = store.autoAllocate;
       // UI-owned sound preference — applied to the audio module every frame,
       // same pattern (never queued through FrameInput; it isn't sim state).
       audio.setMuted(store.soundMuted);
@@ -247,9 +332,12 @@ export function GameClient() {
       const pending = store.drainPendingInput();
       const firstInput: FrameInput = {
         castSkills: pending.castSkills.length ? pending.castSkills : undefined,
-        buyUpgrade: pending.buyUpgrade ?? undefined,
+        setAutoSlots: pending.setAutoSlots.length ? pending.setAutoSlots : undefined,
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
+        evolveHero: pending.evolveHero ?? undefined,
+        acceptQuest: pending.acceptQuest ?? undefined,
+        allocateStat: pending.allocateStat ?? undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of

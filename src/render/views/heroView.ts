@@ -161,6 +161,13 @@ interface HeroAnimState {
    * from outside via `peekSwordSwing()` without re-deriving the cd-reset
    * tell itself (item 2's per-swing slash crescent). */
   attackSeq: number;
+  /** Highest hero tier this view has already built the tier-accent geometry
+   * for (M5 evolution) — starts at 1 (no accent); once `hero.tier` exceeds
+   * this, `buildTierAccent()`/`buildAuraRing()` run ONCE and this is bumped,
+   * same one-time-build-on-edge convention as `initialized`/`wasDead`. Tier
+   * only ever increases (single evolution path in M5), so this never needs
+   * to un-build anything. */
+  tierBuilt: 1 | 2;
 }
 
 export interface HeroView extends Container {
@@ -172,6 +179,16 @@ export interface HeroView extends Container {
   torso: Graphics;
   offArm: Graphics;
   weaponArm: Graphics;
+  /** Tier-2 (M5 evolution) identity accent — a NEW, separate Graphics (not
+   * extra draws into `torso`/`offArm`/`weaponArm`) so the tier-1 rig those
+   * build once never needs touching again; see `buildTierAccent()`. Child of
+   * `upperBody`, same absolute-coordinate convention as `torso`. Empty/inert
+   * until the hero's tier actually flips (see `HeroAnimState.tierBuilt`). */
+  tierAccent: Graphics;
+  /** Tier-2 subtle idle aura — a ground-anchored ellipse, top-level sibling
+   * (like `hpBar`/`reviveRing`) so it stays upright regardless of body
+   * lean/death-fall. Built once (always present, invisible at tier 1). */
+  auraRing: Graphics;
   hpBar: Graphics;
   reviveRing: Graphics;
   reviveLabel: Text;
@@ -227,7 +244,18 @@ export function createHeroView(): HeroView {
   weaponArm.pivot.set(0, SHOULDER_Y);
   weaponArm.position.set(0, SHOULDER_Y);
 
-  upperBody.addChild(torso, offArm, weaponArm);
+  // Tier-2 (M5 evolution) identity accent — a separate, initially-empty
+  // Graphics alongside torso/offArm/weaponArm (never drawn into until the
+  // hero's tier actually flips; see `buildTierAccent()`). Starts `visible =
+  // false`: an EMPTY Graphics still contributes a bounds point at its own
+  // local origin (which resolves near world y≈0 through the parent chain,
+  // same footgun class `rig.test.ts` guards against) even with nothing
+  // drawn, so a tier-1 hero must exclude it from `bodyRoot.getBounds()`
+  // entirely rather than rely on "empty == invisible-ish".
+  const tierAccent = new Graphics();
+  tierAccent.visible = false;
+
+  upperBody.addChild(torso, offArm, weaponArm, tierAccent);
   bodyRoot.addChild(legBack, legFront, upperBody);
 
   const hpBar = new Graphics();
@@ -244,7 +272,13 @@ export function createHeroView(): HeroView {
   reviveLabel.anchor.set(0.5);
   reviveLabel.position.set(0, HEAD_Y - 18);
 
-  view.addChild(bodyRoot, hpBar, reviveRing, reviveLabel);
+  // Tier-2 idle aura — ground-anchored, top-level (upright regardless of
+  // body lean/death-fall), invisible until `buildAuraRing()` runs.
+  const auraRing = new Graphics();
+  auraRing.position.set(0, GROUND_Y - 2);
+  auraRing.visible = false;
+
+  view.addChild(bodyRoot, auraRing, hpBar, reviveRing, reviveLabel);
 
   view.bodyRoot = bodyRoot;
   view.legBack = legBack;
@@ -253,6 +287,8 @@ export function createHeroView(): HeroView {
   view.torso = torso;
   view.offArm = offArm;
   view.weaponArm = weaponArm;
+  view.tierAccent = tierAccent;
+  view.auraRing = auraRing;
   view.hpBar = hpBar;
   view.reviveRing = reviveRing;
   view.reviveLabel = reviveLabel;
@@ -270,6 +306,7 @@ export function createHeroView(): HeroView {
     comboIndex: 0,
     shotPoseIndex: 0,
     attackSeq: 0,
+    tierBuilt: 1,
   };
   return view;
 }
@@ -499,6 +536,105 @@ function buildRig(view: HeroView, cls: HeroClass): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tier-2 (M5 "class advancement / evolution", 86d3jv7m3) identity accent —
+// MODEST per-class add-ons (gold trim / small cape / brighter jewel accent)
+// plus a shared subtle idle aura, all drawn into the dedicated `tierAccent`/
+// `auraRing` Graphics added in `createHeroView` (never touching `torso`/
+// `offArm`/`weaponArm`'s already-built paths). Triggered ONCE on the
+// `HeroAnimState.tierBuilt` edge in `updateHeroView` below — a hero can
+// evolve well after its rig was first built, so this can't ride `buildRig`'s
+// cls-gated one-time call. All absolute GROUND_Y-relative coordinates, same
+// convention as `buildRig` (see its doc comment for why).
+// ---------------------------------------------------------------------------
+
+/** Shared gold accent color for every class's tier-2 trim — reads as "the
+ * evolution color" regardless of class, same jewel-tone-against-desaturated-
+ * scenery logic the render README's art direction calls for. */
+const TIER_ACCENT_GOLD = PALETTE.gold;
+
+/** One-time per-class tier-2 detail pass into `view.tierAccent`. */
+function buildTierAccent(view: HeroView, cls: HeroClass): void {
+  const colors = HERO_COLORS[cls];
+  const g = view.tierAccent;
+  g.clear();
+  g.visible = true;
+
+  if (cls === "swordsman") {
+    // Gold trim tracing the existing chest plate + pauldrons (stroke only —
+    // sits on top of the armor fill rather than replacing it), plus a small
+    // cape drape behind the body (-x side; heroes face +x).
+    g.roundRect(-4, SHOULDER_Y - 1, 8, HIP_Y - SHOULDER_Y - 3, 2).stroke({
+      width: 1,
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.85,
+    });
+    g.circle(-4.5, SHOULDER_Y, 3.2).stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.85 });
+    g.circle(4.5, SHOULDER_Y, 3.2).stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.85 });
+    g.poly([-5, SHOULDER_Y + 1, -12, HIP_Y - 3, -4, HIP_Y + 3], true).fill({
+      color: colors.shade,
+      alpha: 0.9,
+    });
+    g.moveTo(-5, SHOULDER_Y + 1)
+      .lineTo(-12, HIP_Y - 3)
+      .stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.8 });
+  } else if (cls === "archer") {
+    // Brighter jewel accent: a small glowing gem clasp at the collar (same
+    // layered-alpha "glow" vocabulary the mage's staff crystal uses) plus a
+    // thin gold trim line along the cloak edge.
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.18 });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(2.4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.55 });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
+    g.moveTo(-6, SHOULDER_Y - 2)
+      .lineTo(-10, HIP_Y - 2)
+      .stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.7 });
+  } else {
+    // Brighter jewel accent: a glowing gem brooch at the collar (mirrors the
+    // archer's, keeping the "evolution gem" motif consistent) plus a gold
+    // band trim over the hat.
+    g.circle(0, SHOULDER_Y - 2, safeRadius(4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.18 });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(2.4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.55 });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
+    g.moveTo(-6, HEAD_Y - 9)
+      .lineTo(6, HEAD_Y - 9)
+      .stroke({ width: 1.6, color: TIER_ACCENT_GOLD, alpha: 0.85 });
+  }
+}
+
+/** Ground-level pulsing aura ellipse half-width/half-height — deliberately
+ * flattened (a squashed ellipse, not a circle) so it reads as a glow ON the
+ * ground rather than a floating halo. */
+const AURA_RX = 14;
+const AURA_RY = 5;
+/** Breathing pulse range (see `updateHeroView`'s aura block) — kept small so
+ * this reads as "subtle idle aura", never a strobe. */
+const AURA_BASE_ALPHA = 0.75;
+const AURA_ALPHA_RANGE = 0.2;
+const AURA_SCALE_RANGE = 0.06;
+
+/** One-time build of the tier-2 idle aura shape into `view.auraRing` —
+ * layered flat-alpha ellipses (no gradients) in the hero's own class color
+ * plus a thin gold rim, breathing via `alpha`/`scale` only from here on (see
+ * `updateHeroView`). */
+function buildAuraRing(view: HeroView, cls: HeroClass): void {
+  const colors = HERO_COLORS[cls];
+  const g = view.auraRing;
+  g.clear();
+  g.ellipse(0, 0, safeRadius(AURA_RX), safeRadius(AURA_RY)).fill({
+    color: colors.light,
+    alpha: 0.14,
+  });
+  g.ellipse(0, 0, safeRadius(AURA_RX * 0.6), safeRadius(AURA_RY * 0.6)).fill({
+    color: TIER_ACCENT_GOLD,
+    alpha: 0.22,
+  });
+  g.ellipse(0, 0, safeRadius(AURA_RX), safeRadius(AURA_RY)).stroke({
+    width: 1,
+    color: TIER_ACCENT_GOLD,
+    alpha: 0.35,
+  });
+}
+
 /** Sampled points around a circular arc, for use with `Graphics.poly()` —
  * deliberately NOT `Graphics.arc().fill()`: an arc has no explicit start
  * `moveTo`, and filling one collapses the shape toward the path's stale
@@ -650,6 +786,20 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   const anim = view.anim;
   const dt = Math.max(0, ctx.dt);
 
+  // ---- tier-2 (M5 evolution) identity accent: one-time build on the edge --
+  // A hero can evolve long after its rig was first built, so this can't ride
+  // `buildRig`'s cls-gated call above — it watches `hero.tier` directly and
+  // fires once the first time it exceeds what's already been built (also
+  // covers a save loaded already at tier 2, whose first frame here has
+  // `tierBuilt` still at its default 1).
+  if (anim.tierBuilt < hero.tier) {
+    anim.tierBuilt = hero.tier;
+    if (hero.tier === 2) {
+      buildTierAccent(view, hero.cls);
+      buildAuraRing(view, hero.cls);
+    }
+  }
+
   if (!anim.initialized) {
     anim.initialized = true;
     anim.lastX = hero.x;
@@ -800,6 +950,19 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   } else {
     view.reviveLabel.text = "";
   }
+
+  // ---- tier-2 idle aura: subtle breathing pulse, hidden while dead ---------
+  // Reuses the same `breathPhase` clock as the body's own idle sway/scale —
+  // "subtle" per the render brief, so it's a small alpha/scale wobble, never
+  // a spin or a bright strobe.
+  const showAura = hero.tier === 2 && !hero.dead;
+  view.auraRing.visible = showAura;
+  if (showAura) {
+    const wobble = Math.sin(anim.breathPhase * 0.8);
+    view.auraRing.alpha = AURA_BASE_ALPHA + wobble * AURA_ALPHA_RANGE;
+    const scale = 1 + wobble * AURA_SCALE_RANGE;
+    view.auraRing.scale.set(scale, scale);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -872,4 +1035,5 @@ function setGhostTint(view: HeroView, dead: boolean): void {
   view.torso.tint = tint;
   view.offArm.tint = tint;
   view.weaponArm.tint = tint;
+  view.tierAccent.tint = tint;
 }

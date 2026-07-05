@@ -14,11 +14,14 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
+import type { StatKey } from "@/engine/entities";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
-import { processSkills } from "@/engine/systems/skills";
-import { buyUpgrade, processAutoUpgrade } from "@/engine/systems/upgrades";
+import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
+import { evolveHero } from "@/engine/systems/evolution";
+import { acceptQuest } from "@/engine/systems/quests";
+import { processStatAllocation } from "@/engine/systems/allocation";
 import { nextStage } from "@/engine/systems/flow";
 import {
   decayHeroTimers,
@@ -28,16 +31,55 @@ import {
   resolveDeaths,
 } from "@/engine/systems/combat";
 
+/** A manual skill cast: cast `skillId` on the hero at `slot` (0 = solo hero). */
+export interface CastSkillInput {
+  slot: number;
+  skillId: string;
+}
+
+/** Assign an auto-cast slot for the solo hero (M5 skill framework v2). */
+export interface SetAutoSlotInput {
+  slot: number;
+  /** Skill id to place in the slot, or null to clear it. */
+  skillId: string | null;
+}
+
 /** Per-step player input. Every field is optional; omit for a pure idle step. */
 export interface FrameInput {
-  /** Hero-slot indices to cast a skill this step (subject to the range guard). */
-  castSkills?: number[];
-  /** Upgrade line to purchase this step, if affordable / uncapped. */
-  buyUpgrade?: "atk" | "speed" | "hp";
+  /**
+   * Manual skill casts this step (M5): each names a hero slot + a specific skill
+   * id, subject to the cooldown / mana / range guards. Applied once per drained
+   * input (a click casts exactly once, at any speed).
+   */
+  castSkills?: CastSkillInput[];
+  /**
+   * Auto-cast slot assignments for the solo hero (M5). Honoured across phases; a
+   * no-op for a locked slot or an unlearned skill. Applied once per drained input.
+   */
+  setAutoSlots?: SetAutoSlotInput[];
   /** Begin the boss fight (only honoured when bossReady && phase "battle"). */
   challengeBoss?: boolean;
   /** Advance to the next stage (only honoured when phase "victory"). */
   advanceStage?: boolean;
+  /**
+   * Evolve the hero at this slot index (M5 class advancement). Honoured across
+   * phases; a no-op if the hero is already tier 2 or its class-change quest is not
+   * complete. Applied once per drained input (a click evolves exactly once).
+   */
+  evolveHero?: number;
+  /**
+   * Accept the class-change quest for the hero at this slot index (M5 task 5).
+   * Honoured across phases; a no-op unless the quest is offerable (tier 1, level
+   * gate met, none active). Applied once per drained input (a click accepts once).
+   */
+  acceptQuest?: number;
+  /**
+   * Allocate `amount` unspent base-stat points into `stat` for the solo hero (M5
+   * "Base stats"). Honoured across phases; a no-op if the amount is invalid,
+   * exceeds the unspent pool, or breaches the cap. Applied once per drained input
+   * (a click allocates exactly once, at any speed — like `evolveHero`).
+   */
+  allocateStat?: { stat: StatKey; amount: number };
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -48,7 +90,16 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   state.events.length = 0;
 
   // --- discrete player actions (valid across phases) ---
-  if (input.buyUpgrade) buyUpgrade(state, input.buyUpgrade);
+  if (input.acceptQuest !== undefined) acceptQuest(state, input.acceptQuest);
+  if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
+  // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
+  if (input.setAutoSlots) {
+    for (const a of input.setAutoSlots) setAutoSlot(state, state.heroes[0], a.slot, a.skillId);
+  }
+  // Manual + auto base-stat allocation (M5 "Base stats"). Runs in all phases so a
+  // player can spend points between stages (victory) and auto-allocate keeps up
+  // with boss-kill level-ups; before the victory early-return below.
+  processStatAllocation(state, input.allocateStat);
   if (input.advanceStage && state.phase === "victory") nextStage(state);
   if (input.challengeBoss && state.bossReady && state.phase === "battle") {
     startBossFight(state);
@@ -69,7 +120,6 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   if (state.phase === "boss") updateBoss(state);
   updateHeroes(state);
   updateProjectiles(state);
-  processAutoUpgrade(state);
   resolveDeaths(state); // enemy kills / boss kill / boss retreat / bossReady
 
   state.time += FIXED_DT;

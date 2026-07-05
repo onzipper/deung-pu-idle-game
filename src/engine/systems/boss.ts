@@ -16,7 +16,9 @@
 import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { makeBoss } from "@/engine/entities";
-import { heroAtk } from "@/engine/systems/stats";
+import { combatPower } from "@/engine/systems/stats";
+import { grantKillXp } from "@/engine/systems/leveling";
+import { advanceQuestObjective } from "@/engine/systems/quests";
 import { applyDamage } from "@/engine/systems/damage";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
@@ -87,6 +89,12 @@ export function updateBoss(state: GameState): void {
 export function onBossKilled(state: GameState): void {
   const goldGained = CONFIG.goldPerBoss(state.stage);
   state.gold += goldGained;
+  // Boss kills grant a larger XP milestone to every alive hero (before payout /
+  // phase flip, while the winning team is still on the field).
+  grantKillXp(state, CONFIG.leveling.xpPerBossKill(state.stage));
+  // Count the boss defeat toward the solo hero's class-change quest (M5 task 5),
+  // while the winning hero is still on the field (before the phase flip).
+  advanceQuestObjective(state, "killBoss");
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;
@@ -119,9 +127,9 @@ export interface BossHint {
   stage: number;
   bossHp: number;
   bossAtk: number;
-  /** Suggested team attack power to attempt the fight. */
+  /** Suggested combat power to attempt the fight (bossHp / divisor). */
   recommendedPower: number;
-  /** Current summed team attack power. */
+  /** Current summed team COMBAT POWER (effective DPS + HP, not raw atk). */
   teamPower: number;
   ready: boolean;
 }
@@ -130,10 +138,10 @@ export function bossHint(state: GameState): BossHint {
   const bossHp = CONFIG.bossHp(state.stage);
   const bossAtk = CONFIG.bossAtk(state.stage);
   const recommendedPower = Math.round(bossHp / CONFIG.bossHintPowerDivisor);
-  const teamPower = state.heroes.reduce(
-    (sum, h) => sum + heroAtk(h.cls, state.upgrades),
-    0,
-  );
+  // teamPower is now sum(combatPower) — effective DPS + survivability — so it no
+  // longer under-reads the skill-heavy ranged classes that raw summed atk did
+  // (the pivot-handoff flag). Both sides are on the same combat-power scale.
+  const teamPower = state.heroes.reduce((sum, h) => sum + combatPower(h), 0);
   return {
     stage: state.stage,
     bossHp,

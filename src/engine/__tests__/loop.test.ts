@@ -40,6 +40,6 @@ describe("save migration", () => {
   it("fills defaults and stamps the current version", () => {
     const save = migrate({});
     expect(save.version).toBe(SAVE_VERSION);
-    expect(save.unlocked).toContain("swordsman");
+    expect(save.hero.cls).toBe("swordsman");
   });
 });

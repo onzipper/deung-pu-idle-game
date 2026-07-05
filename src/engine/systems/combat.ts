@@ -16,11 +16,19 @@
 import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
-import { heroAtk, heroAtkSpeed } from "@/engine/systems/stats";
+import {
+  heroAtkOf,
+  heroAtkSpeedOf,
+  heroManaRegenOf,
+  heroMaxManaOf,
+} from "@/engine/systems/stats";
 import { applyDamage, isHero } from "@/engine/systems/damage";
+import { grantKillXp } from "@/engine/systems/leveling";
+import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
 import {
   aliveHeroes,
+  anyHeroCanRetaliate,
   frontHeroX,
   getTargets,
   nearestAliveHero,
@@ -37,7 +45,11 @@ const L = CONFIG.layout;
 // Timers
 // ---------------------------------------------------------------------------
 
-/** Tick hero revive + skill cooldown timers (POC top of update loop). */
+/**
+ * Tick hero revive, per-skill cooldowns, the self ATK buff, and mana regen
+ * (M5 "mana + skill framework v2"). Runs at the top of `step()` before skills
+ * cast, so a freshly-regenerated point can fund a cast the same step.
+ */
 export function decayHeroTimers(state: GameState): void {
   for (const h of state.heroes) {
     if (h.dead) {
@@ -54,7 +66,23 @@ export function decayHeroTimers(state: GameState): void {
         });
       }
     }
-    if (h.skillCd > 0) h.skillCd = Math.max(0, h.skillCd - FIXED_DT);
+    // Per-skill cooldowns (M5 skill framework v2).
+    for (const id in h.skillCds) {
+      if (h.skillCds[id] > 0) h.skillCds[id] = Math.max(0, h.skillCds[id] - FIXED_DT);
+    }
+    // Self ATK buff (war cry) countdown.
+    if (h.atkBuffTimer > 0) {
+      h.atkBuffTimer = Math.max(0, h.atkBuffTimer - FIXED_DT);
+      if (h.atkBuffTimer === 0) h.atkBuffMult = 1;
+    }
+    // Mana regen toward the (INT-derived) pool. Refresh the cached max first so a
+    // just-allocated INT point is reflected immediately.
+    h.maxMana = heroMaxManaOf(h);
+    if (h.mana < h.maxMana) {
+      h.mana = Math.min(h.maxMana, h.mana + heroManaRegenOf(h) * FIXED_DT);
+    } else if (h.mana > h.maxMana) {
+      h.mana = h.maxMana;
+    }
   }
 }
 
@@ -72,6 +100,24 @@ export function updateEnemies(state: GameState): void {
       const dist = h ? Math.abs(e.x - h.x) : Infinity;
       if (dist > e.range) {
         e.x -= e.speed * FIXED_DT;
+      } else if (h && !anyHeroCanRetaliate(state, e.x)) {
+        // Free-hit fix ("มอนตีดาบฟรี"), ranged counterpart of the melee
+        // enemyBehindReach rule. Root cause of the surviving free hit: when the
+        // swordsman is walled at chargeHardCap (770) he becomes the shooter's nearest
+        // hero, so it parks at range 160 from him (~930) — past his 96 melee reach AND
+        // past the anchor-capped backline's forward reach (~834/766) — and plinked him
+        // with zero possible counter while the whole team stood unable to answer (both
+        // reported bugs). Here a shooter sitting beyond EVERY hero's reach HOLDS FIRE
+        // (no un-answerable damage) and CREEPS forward at rangedReengageSpeed until it
+        // enters a hero's reach, where it resumes firing and is answered (BUG 2). Two
+        // extremes were rejected by the sim: freezing it (pure hold-fire) turns shooters
+        // into passive walls the formation must grind to — S3-S9 ran +9..+97 % and the
+        // S9 prestige gate collapsed to 3.8x; snapping it straight to melee range made
+        // the swordsman one-shot it, deleting ~10-35 s of tuned clear time per shooter
+        // (S2-S6 −25..−45 %). The slow creep restores that flat, roughly
+        // stage-independent stall time AS A FAIR FIGHT, keeping pacing within budget and
+        // the gate intact (sim-tuned; see docs/balance-m4.md).
+        e.x -= CONFIG.rangedReengageSpeed * FIXED_DT;
       } else {
         e.cd -= FIXED_DT;
         if (e.cd <= 0 && h) {
@@ -181,10 +227,18 @@ export function updateHeroes(state: GameState): void {
       const tgt =
         t.attack === "melee"
           ? nearestWithin(targets, h.x, t.range)
-          : nearestTarget(targets, h.x, 0, t.range);
+          : // Ranged heroes fire FORWARD by default (nearestTarget, minD 0). But if
+            // NOTHING is forward-in-range they must not idle while an enemy is actively
+            // engaging the party from their flank/behind — fall back to the nearest foe
+            // within range on EITHER side so the whole team answers a live threat (BUG 2:
+            // "ranged heroes stand idle while the melee hero is free-hit"). Only the
+            // otherwise-idle case changes, so normal nearest-forward selection — and its
+            // balance pacing — is unchanged.
+            (nearestTarget(targets, h.x, 0, t.range) ??
+            nearestWithin(targets, h.x, t.range));
       if (tgt) {
-        h.cd = heroAtkSpeed(h.cls, state.upgrades);
-        const dmg = heroAtk(h.cls, state.upgrades);
+        h.cd = heroAtkSpeedOf(h);
+        const dmg = heroAtkOf(h);
         if (t.attack === "melee") {
           applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {
@@ -337,6 +391,8 @@ export function resolveDeaths(state: GameState): void {
         state.kills++;
         const goldGained = CONFIG.goldPerKill(state.stage);
         state.gold += goldGained;
+        // Every alive hero banks kill XP (dead heroes earn nothing).
+        grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
         state.events.push({
           type: "kill",
           kind: e.kind,
@@ -344,6 +400,8 @@ export function resolveDeaths(state: GameState): void {
           y: e.y,
           goldGained,
         });
+        // Count the kill toward the solo hero's class-change quest (M5 task 5).
+        advanceQuestObjective(state, "kill");
         return false;
       }
       return true;
@@ -363,5 +421,22 @@ export function resolveDeaths(state: GameState): void {
   // Team wiped during the boss fight -> boss retreats, back to normal waves.
   if (state.phase === "boss" && aliveHeroes(state).length === 0) {
     bossRetreat(state);
+  }
+
+  // Solo respawn (GDD: dead solo hero = respawn, no penalty). When the lone hero
+  // goes down mid-battle it auto-revives via decayHeroTimers after heroReviveTime;
+  // clear the battlefield NOW so it never respawns into the pile-up that killed it
+  // (the "waves reset sensibly" rule + the anti-permanent-stall guarantee). Kills
+  // banked toward the boss are kept (no progress penalty). Fires once — after the
+  // clear `enemies.length` is 0, and `updateWaveSpawns` holds new waves until a
+  // hero is alive again. Boss phase is handled above (bossRetreat).
+  if (
+    state.phase === "battle" &&
+    state.enemies.length > 0 &&
+    aliveHeroes(state).length === 0
+  ) {
+    state.enemies = [];
+    state.projectiles = state.projectiles.filter((p) => p.team === "hero");
+    state.waveGap = CONFIG.bossRetreatWaveGap;
   }
 }

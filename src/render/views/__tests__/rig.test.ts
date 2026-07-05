@@ -37,7 +37,17 @@ function makeHero(cls: Hero["cls"]): Hero {
     cd: 1,
     dead: false,
     reviveTimer: 0,
-    skillCd: 0,
+    skillCds: {},
+    mana: 60,
+    maxMana: 60,
+    atkBuffMult: 1,
+    atkBuffTimer: 0,
+    level: 1,
+    xp: 0,
+    tier: 1,
+    statPoints: 0,
+    stats: { str: 8, dex: 4, int: 3, vit: 6 },
+    autoSlots: ["sword_whirl", null, null],
   };
 }
 

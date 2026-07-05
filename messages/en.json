@@ -1,0 +1,338 @@
+{
+  "common": {
+    "appTitle": "ดึ๋งปุ๊ Idle Game",
+    "appDescription": "A solo-character idle MMORPG-lite — level up, allocate stats, cast skills, challenge bosses, and change classes to keep growing stronger.",
+    "levelBadge": "Lv.{level}",
+    "maxLabel": "MAX",
+    "fatalError": "Could not start the game: {reason}"
+  },
+  "hud": {
+    "stageLabel": "Stage",
+    "waveLabel": "Wave",
+    "killProgressLabel": "Kills to boss",
+    "victoryTitle": "🎉 Stage {stage} cleared!",
+    "nextStageButton": "Next Stage →",
+    "bossHpLabel": "Boss HP",
+    "bossAtkLabel": "Attack Power",
+    "recommendedPowerLabel": "Recommended Power",
+    "yourPowerLabel": "Your Power",
+    "bossReadyYes": "✅ Ready to fight",
+    "bossReadyNo": "⚠ Power may not be enough",
+    "challengeBossButton": "⚔ Challenge Boss",
+    "challengeBossAriaReady": "Challenge Boss",
+    "challengeBossAriaNotReady": "Challenge Boss (not available yet)"
+  },
+  "panels": {
+    "skillsLabel": "Skills",
+    "heroDeadBadge": "Dead",
+    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (dead)} cooldown { (cooldown {seconds}s)} nomana { (no mana)} other {}}",
+    "autoSkillToggle": "✨ Auto Skill: {state, select, on {ON} other {OFF}}",
+    "skillManaCost": "{cost} MP",
+    "manaLabel": "Mana {mana}/{max}",
+    "autoSlotAdd": "+ Auto",
+    "autoSlotAssigned": "Auto {slot}",
+    "autoSlotToggleHint": "Toggle this skill into a free auto-cast slot",
+    "autoSlotNextUnlock": "More auto slots at Lv.{level}",
+    "evolvedBadgeTitle": "{name} (Evolved)",
+    "classQuest": {
+      "lockedHint": "Class-change quest unlocks at Lv.{level}",
+      "ariaLocked": "{heroName}: class change (quest unlocks at Lv.{level})",
+      "acceptButton": "Accept quest",
+      "ariaAccept": "{heroName}: accept the class-change quest",
+      "progress": "{kills}/{goal} · boss {boss}",
+      "progressTitle": "Class-change quest progress",
+      "ariaProgress": "{heroName}: class-change quest — {kills}/{goal} kills, boss {boss, select, done {defeated} other {pending}}",
+      "changeButton": "Change class!",
+      "confirmLabel": "Confirm?",
+      "confirmHint": "Tap again to confirm",
+      "ariaChange": "{heroName}: change class{state, select, confirm { (tap again to confirm)} other {}}"
+    }
+  },
+  "stats": {
+    "title": "Stats",
+    "pointsBadge": "+{count} pts",
+    "pointsTitle": "Unspent stat points — tap + to allocate",
+    "combatPower": "Power",
+    "autoAllocateToggle": "🎯 Auto Stat: {state, select, on {ON} other {OFF}}",
+    "allocateAria": "Add 1 point to {stat}",
+    "primaryTag": "main",
+    "names": { "str": "STR", "dex": "DEX", "int": "INT", "vit": "VIT" },
+    "full": {
+      "str": "Strength",
+      "dex": "Dexterity",
+      "int": "Intelligence",
+      "vit": "Vitality"
+    },
+    "effect": {
+      "str": "Melee attack",
+      "dex": "Ranged attack + attack speed",
+      "int": "Magic attack",
+      "vit": "Max HP"
+    }
+  },
+  "settings": {
+    "speedLabel": "Speed",
+    "soundOn": "Unmute",
+    "soundOff": "Mute",
+    "localeLabel": "Language",
+    "localeTh": "ไทย",
+    "localeEn": "EN"
+  },
+  "onboarding": {
+    "mascotName": "Deung",
+    "nextButton": "Next →",
+    "skipAllButton": "Skip all",
+    "tipDismissButton": "Got it",
+    "stepProgress": "{current} / {total}",
+    "steps": {
+      "welcome": {
+        "title": "Welcome, {className}!",
+        "body": "Your character just picked the {className} class. It charges through enemy waves automatically — your job is to spend stat points, cast skills, and take it to the boss to keep growing stronger. Let's take a look!"
+      },
+      "watchFight": {
+        "title": "Let your hero fight",
+        "body": "Your hero attacks enemies on its own. Every kill banks gold, and the bar below fills up toward the boss."
+      },
+      "allocateStats": {
+        "title": "Spend stat points on level-up",
+        "body": "Every level-up grants 3 stat points to allocate yourself (STR/DEX/INT/VIT). Tap the + button on a stat here to spend one, or flip on \"Auto Stat\" to let the system allocate for you."
+      },
+      "castSkill": {
+        "title": "Cast a skill yourself",
+        "body": "Each skill costs mana plus a cooldown. Tap a skill button once you have enough mana and its cooldown is up for a big burst of damage!"
+      },
+      "slotAutoSkill": {
+        "title": "Slot a skill into auto-cast",
+        "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (up to 3, unlocked by level). Skills outside a slot still need a manual tap."
+      },
+      "bossChallenge": {
+        "title": "Challenge the stage boss",
+        "body": "Once your power is ready, the Challenge Boss button lights up. Tap it to fight the boss and unlock the next stage!"
+      },
+      "settingsTour": {
+        "title": "Tune your play here",
+        "body": "Speed up the game, mute/unmute sound, switch languages, or tap \"📖 Guide\" to reopen the game guide anytime from this row."
+      },
+      "outro": {
+        "title": "You're ready!",
+        "body": "That's the whole core loop: kill → bank XP/gold → spend stats & skills → challenge the boss → grow stronger, on repeat. Enjoy the adventure!"
+      }
+    },
+    "tips": {
+      "heroDeathRespawn": {
+        "title": "Don't worry when a hero goes down!",
+        "body": "A downed hero auto-revives after a short timer — no button to tap, just wait for them to get back up and keep fighting."
+      },
+      "autoCastAvailable": {
+        "title": "Try auto-cast for your skills",
+        "body": "A skill is ready. Slot it into an auto-cast slot (tap \"+ Auto\") and flip on \"Auto Skill\" — your hero will cast slotted skills automatically the instant they're ready."
+      },
+      "questOffered": {
+        "title": "Class-change quest available!",
+        "body": "Your hero hit the level gate for the class-change quest. Tap \"Accept quest\" next to the level badge to start it."
+      },
+      "questComplete": {
+        "title": "Quest complete!",
+        "body": "Objectives done. Tap \"Change class!\" (tap again to confirm) to advance to the next class tier with a new skill."
+      },
+      "autoSlotUnlocked": {
+        "title": "New auto-cast slot unlocked!",
+        "body": "Your hero unlocked another auto-cast slot. Tap \"+ Auto\" under a skill to fill the new slot."
+      },
+      "statPointsPiling": {
+        "title": "Stat points are piling up",
+        "body": "You've got several unspent stat points saved up. Tap + to allocate them, or flip on \"Auto Stat\" to let the system spend them for you."
+      },
+      "stageClear": {
+        "title": "Boss down! Stage cleared.",
+        "body": "Tap \"Next stage\" to push into a tougher stage and keep leveling up."
+      },
+      "bossWipe": {
+        "title": "Your hero got wiped — but it's not over!",
+        "body": "Your hero revives with no penalty and goes back to normal waves. Spend a few more stat points or grind a bit more, then challenge the boss again."
+      }
+    }
+  },
+  "codex": {
+    "openButton": "📖 Guide",
+    "title": "Game Guide",
+    "closeButton": "Close",
+    "replayTutorialButton": "▶ Replay tutorial",
+    "categories": {
+      "coreLoop": "Core Loop",
+      "character": "Character",
+      "heroes": "Heroes",
+      "boss": "Boss",
+      "controls": "Controls",
+      "offlineIdle": "Offline Gold"
+    },
+    "entries": {
+      "coreLoop": {
+        "title": "Kill → bank XP/gold → grow stronger → boss",
+        "body": "Your hero charges through enemy waves on its own, all the time. Every kill banks XP (level-ups + stat points) and gold, and pushes the kill counter closer to the stage's boss. Use skills to help clear faster, then challenge the boss to unlock the next stage. Then it loops again."
+      },
+      "characterSlots": {
+        "title": "Characters & 3 slots",
+        "body": "Each account can create up to 3 characters, each locked to a starting class (Sword/Bow/Magic) chosen at creation. Switch between them anytime from the characters page (the \"Switch character\" button in the settings row)."
+      },
+      "baseStats": {
+        "title": "Base stats (STR/DEX/INT/VIT)",
+        "body": "Every level-up grants 3 stat points to spend yourself — STR boosts melee attack, DEX boosts ranged attack + attack speed, INT boosts magic attack and mana, VIT boosts max HP. Turn on \"Auto Stat\" to let the system allocate for you. There's no gold-bought upgrade line anymore — a hero's power comes purely from level + stats + class/skills."
+      },
+      "manaSkills": {
+        "title": "Mana, skills & auto slots",
+        "body": "Skills cost mana (fed by INT) plus a cooldown. Each class tier learns 2-3 skills, unlocked by level. Tap a skill to cast it yourself, or drop it into an auto-cast slot with \"+ Auto\" (up to 3 slots, unlocked at Lv 1/15/30) — skills left outside a slot still need a manual tap."
+      },
+      "classQuest": {
+        "title": "Class-change quest",
+        "body": "At Lv.15 the game auto-offers a class-change quest — accept it, then defeat 60 enemies and 1 boss. Once complete, tap \"Change class!\" (tap again to confirm) to advance to the next class tier with a new skill and a permanent power boost."
+      },
+      "hero-swordsman": {
+        "body": "The Swordsman is your melee frontliner — auto-attacks whatever's directly in front, and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
+      },
+      "hero-archer": {
+        "body": "The Archer attacks at range with arrows — fast and precise — and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
+      },
+      "hero-mage": {
+        "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
+      },
+      "boss": {
+        "title": "Challenging the stage boss",
+        "body": "The panel below the arena shows the boss's HP, attack power, recommended power, and your current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your hero dies, the boss retreats, your hero fully revives with no penalty, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
+      },
+      "gameSpeed": {
+        "title": "⚡ Game speed",
+        "body": "Switch between 1×/2×/3× anytime from the settings row. The simulation stays exactly as accurate — it simply runs faster."
+      },
+      "autoCast": {
+        "title": "✨ Auto Skill",
+        "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. Up to 3 slots unlock by level (Lv 1/15/30) — no need to tap the skill buttons yourself."
+      },
+      "autoAllocate": {
+        "title": "🎯 Auto Stat",
+        "body": "When on, the system spends stat points from level-ups for you automatically (favoring your class's main stat) — no need to tap + yourself."
+      },
+      "offlineIdle": {
+        "title": "Offline gold",
+        "body": "Close the game and come back later — it automatically calculates the progress you would have made while away (capped at 8 hours per session) and hands you the banked gold as soon as you return."
+      }
+    }
+  },
+  "content": {
+    "classes": {
+      "swordsman": { "name": "Swordsman", "evolvedName": "Knight" },
+      "archer": { "name": "Archer", "evolvedName": "Ranger" },
+      "mage": { "name": "Mage", "evolvedName": "Archmage" }
+    },
+    "skills": {
+      "swordsman": {
+        "name": "Whirl Slash",
+        "desc": "Spins the blade to hit every foe in range"
+      },
+      "archer": {
+        "name": "Arrow Rain",
+        "desc": "Rains arrows across the whole battlefield"
+      },
+      "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "sword_whirl": {
+        "name": "Whirl Slash",
+        "desc": "Spins the blade to hit every foe in range"
+      },
+      "sword_warcry": {
+        "name": "War Cry",
+        "desc": "A rallying shout that boosts your attack for a while"
+      },
+      "sword_quake": {
+        "name": "Earthquake",
+        "desc": "Slams the ground for heavy area damage ahead"
+      },
+      "archer_rain": {
+        "name": "Arrow Rain",
+        "desc": "Rains arrows across the whole battlefield"
+      },
+      "archer_powershot": {
+        "name": "Power Shot",
+        "desc": "A single devastating arrow — the boss-buster"
+      },
+      "archer_barrage": {
+        "name": "Explosive Shot",
+        "desc": "An explosive arrow that bursts over a cluster"
+      },
+      "mage_meteor": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "mage_frostnova": {
+        "name": "Frost Nova",
+        "desc": "A quick, cheap frost blast for clearing waves"
+      },
+      "mage_cataclysm": {
+        "name": "Cataclysm",
+        "desc": "A colossal meteor — the ultimate burst"
+      }
+    },
+    "quests": {},
+    "items": {}
+  },
+  "characters": {
+    "pageTitle": "Your Characters",
+    "pageSubtitle": "Pick a character to play, or create a new one (up to 3 per account)",
+    "slotCount": "{count}/3 characters",
+    "loading": "Loading characters...",
+    "loadError": "Couldn't load your characters",
+    "retryButton": "Retry",
+    "emptyTitle": "No characters yet",
+    "emptyBody": "Create your first character to start the adventure!",
+    "createButton": "+ Create new",
+    "backToRosterButton": "← Back to characters",
+    "hudLink": "Switch character",
+    "card": {
+      "powerLabel": "Power",
+      "createdAtLabel": "Created {date}",
+      "playButton": "Play",
+      "selecting": "Entering game...",
+      "deleteButton": "Delete",
+      "selectError": "Couldn't select this character — try again"
+    },
+    "delete": {
+      "title": "Delete \"{name}\"?",
+      "warning": "This cannot be undone — the character and all its progress will be permanently lost.",
+      "confirmInstruction": "Type \"{name}\" exactly to confirm deletion",
+      "confirmPlaceholder": "Type the character name here",
+      "cancelButton": "Cancel",
+      "confirmButton": "Permanently delete",
+      "deleting": "Deleting...",
+      "error": "Delete failed — try again"
+    },
+    "create": {
+      "title": "Create a New Character",
+      "classPickerLabel": "Pick a starting class",
+      "affinityLabel": "Main stat",
+      "classes": {
+        "swordsman": {
+          "tagline": "Melee frontliner",
+          "playstyle": "Wades into melee range with a blade — tough and hard-hitting."
+        },
+        "archer": {
+          "tagline": "Ranged marksman",
+          "playstyle": "Fires arrows from range — fast and precise."
+        },
+        "mage": {
+          "tagline": "Area-of-effect destroyer",
+          "playstyle": "Casts spells that shred grouped-up enemies."
+        }
+      },
+      "nameLabel": "Character name",
+      "namePlaceholder": "Name your character",
+      "nameHint": "2-24 characters, Thai/English letters and digits only (no spaces or symbols)",
+      "nameError": {
+        "empty": "Please enter a name",
+        "tooShort": "Name must be at least 2 characters",
+        "tooLong": "Name must be at most 24 characters",
+        "invalidChars": "Only Thai/English letters and digits are allowed"
+      },
+      "submitButton": "Create character",
+      "submitting": "Creating...",
+      "limitError": "You already have the maximum of 3 characters",
+      "duplicateError": "That name is already taken — try another",
+      "genericError": "Couldn't create the character — try again"
+    }
+  }
+}

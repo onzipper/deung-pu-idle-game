@@ -1,21 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { parseSaveData } from "@/server/save";
-import { SAVE_VERSION, SPEED_UPGRADE_CAP, CONFIG } from "@/engine";
+import { SAVE_VERSION, CONFIG, SIGNATURE_SKILL } from "@/engine";
 
 /**
  * Validation is the server's trust boundary: `parseSaveData` is the pure gate
- * every incoming save passes before it can touch the DB. These exercise the
- * accept/reject rules headlessly (no DB, no mocks).
+ * every incoming save passes before it can touch the DB. M5 v5: the payload is a
+ * single character (`hero: {cls, level, xp, tier, statPoints?, stats?}`) — the
+ * upgrade lines / unlocked roster are gone; base stats (M5) are optional (migrate
+ * backfills). These exercise the accept/reject rules headlessly (no DB).
  */
 
-/** A minimal well-formed payload a well-behaved client would POST. */
+/** A minimal well-formed payload a well-behaved client would POST (base stats
+ * omitted here — migrate backfills them; a couple of tests below send them). */
 function validSave(overrides: Record<string, unknown> = {}) {
   return {
     version: SAVE_VERSION,
     stage: 3,
     gold: 500,
-    unlocked: ["swordsman", "archer"],
-    upgrades: { atk: 2, speed: 1, hp: 3 },
+    hero: { cls: "archer", level: 4, xp: 12, tier: 2 },
     lastSeen: 0,
     ...overrides,
   };
@@ -29,8 +31,60 @@ describe("parseSaveData — accepts", () => {
       expect(r.data.version).toBe(SAVE_VERSION);
       expect(r.data.stage).toBe(3);
       expect(r.data.gold).toBe(500);
-      expect(r.data.unlocked).toEqual(["swordsman", "archer"]);
+      // Base stats omitted in the payload -> migrate backfills (retro grant +
+      // class base block).
+      expect(r.data.hero).toEqual({
+        cls: "archer",
+        level: 4,
+        xp: 12,
+        tier: 2,
+        statPoints: 4 * CONFIG.stats.pointsPerLevel,
+        stats: { ...CONFIG.stats.base.archer },
+        // SAVE v6: mana omitted in the payload -> migrate backfills full pool +
+        // the class default auto-slot loadout.
+        mana: CONFIG.mana.base,
+        autoSlots: [SIGNATURE_SKILL.archer, null, null],
+        // SAVE v7: tier-2 hero -> no class-change quest (consumed / none applicable).
+        quest: null,
+      });
     }
+  });
+
+  it("accepts a full v5 hero WITH base stats and preserves them", () => {
+    const r = parseSaveData(
+      validSave({
+        hero: {
+          cls: "mage",
+          level: 20,
+          xp: 5,
+          tier: 1,
+          statPoints: 3,
+          stats: { str: 3, dex: 4, int: 50, vit: 12 },
+        },
+      }),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.hero.statPoints).toBe(3);
+      expect(r.data.hero.stats).toEqual({ str: 3, dex: 4, int: 50, vit: 12 });
+    }
+  });
+
+  it("rejects a negative / non-integer stat axis", () => {
+    expect(
+      parseSaveData(
+        validSave({
+          hero: { cls: "mage", level: 1, xp: 0, tier: 1, stats: { str: -1, dex: 4, int: 8, vit: 4 } },
+        }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseSaveData(
+        validSave({
+          hero: { cls: "mage", level: 1, xp: 0, tier: 1, stats: { str: 3.5, dex: 4, int: 8, vit: 4 } },
+        }),
+      ).ok,
+    ).toBe(false);
   });
 
   it("accepts a save with lastSeen omitted (server owns it)", () => {
@@ -39,14 +93,15 @@ describe("parseSaveData — accepts", () => {
     expect(parseSaveData(save).ok).toBe(true);
   });
 
-  it("accepts the speed line exactly at the cap", () => {
-    const r = parseSaveData(validSave({ upgrades: { atk: 0, speed: SPEED_UPGRADE_CAP, hp: 0 } }));
+  it("accepts a hero at the level cap", () => {
+    const r = parseSaveData(
+      validSave({ hero: { cls: "mage", level: CONFIG.leveling.levelCap, xp: 0, tier: 1 } }),
+    );
     expect(r.ok).toBe(true);
   });
 
-  it("accepts a full roster of maxHeroes classes", () => {
-    const r = parseSaveData(validSave({ unlocked: ["swordsman", "archer", "mage"] }));
-    expect(r.ok).toBe(true);
+  it.each(["swordsman", "archer", "mage"])("accepts the %s base class", (cls) => {
+    expect(parseSaveData(validSave({ hero: { cls, level: 1, xp: 0, tier: 1 } })).ok).toBe(true);
   });
 });
 
@@ -69,31 +124,48 @@ describe("parseSaveData — rejects", () => {
     expect(parseSaveData(validSave({ stage: 2.5 })).ok).toBe(false);
   });
 
-  it("rejects negative upgrade levels", () => {
-    expect(parseSaveData(validSave({ upgrades: { atk: -1, speed: 0, hp: 0 } })).ok).toBe(false);
-  });
-
-  it("rejects a speed line above the cap", () => {
+  it("rejects a hero level below 1 or above the cap", () => {
+    expect(parseSaveData(validSave({ hero: { cls: "archer", level: 0, xp: 0, tier: 1 } })).ok).toBe(
+      false,
+    );
     expect(
-      parseSaveData(validSave({ upgrades: { atk: 0, speed: SPEED_UPGRADE_CAP + 1, hp: 0 } })).ok,
+      parseSaveData(
+        validSave({ hero: { cls: "archer", level: CONFIG.leveling.levelCap + 1, xp: 0, tier: 1 } }),
+      ).ok,
     ).toBe(false);
   });
 
+  it("rejects negative xp", () => {
+    expect(parseSaveData(validSave({ hero: { cls: "archer", level: 4, xp: -1, tier: 1 } })).ok).toBe(
+      false,
+    );
+  });
+
+  it("rejects a hero tier outside 1..2", () => {
+    expect(parseSaveData(validSave({ hero: { cls: "archer", level: 1, xp: 0, tier: 0 } })).ok).toBe(
+      false,
+    );
+    expect(parseSaveData(validSave({ hero: { cls: "archer", level: 1, xp: 0, tier: 3 } })).ok).toBe(
+      false,
+    );
+  });
+
   it("rejects an unknown hero class", () => {
-    expect(parseSaveData(validSave({ unlocked: ["swordsman", "necromancer"] })).ok).toBe(false);
+    expect(
+      parseSaveData(validSave({ hero: { cls: "necromancer", level: 1, xp: 0, tier: 1 } })).ok,
+    ).toBe(false);
   });
 
-  it("rejects more unlocked than maxHeroes", () => {
-    const tooMany = Array(CONFIG.maxHeroes + 1).fill("swordsman");
-    expect(parseSaveData(validSave({ unlocked: tooMany })).ok).toBe(false);
+  it("rejects a missing hero", () => {
+    const save = validSave();
+    delete (save as Record<string, unknown>).hero;
+    expect(parseSaveData(save).ok).toBe(false);
   });
 
-  it("rejects duplicate unlocked classes (would forge extra slots)", () => {
-    expect(parseSaveData(validSave({ unlocked: ["swordsman", "swordsman"] })).ok).toBe(false);
-  });
-
-  it("rejects an empty unlocked list", () => {
-    expect(parseSaveData(validSave({ unlocked: [] })).ok).toBe(false);
+  it("rejects unknown extra keys on the hero (strict shape)", () => {
+    expect(
+      parseSaveData(validSave({ hero: { cls: "archer", level: 1, xp: 0, tier: 1, hp: 999 } })).ok,
+    ).toBe(false);
   });
 
   it("rejects unknown extra keys (strict shape)", () => {

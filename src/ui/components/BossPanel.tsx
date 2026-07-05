@@ -11,6 +11,7 @@
  * beat (kill -> gold -> upgrade -> power spike -> boss).
  */
 
+import { useTranslations } from "next-intl";
 import { useGameStore } from "@/ui/store/gameStore";
 
 export function BossPanel() {
@@ -19,19 +20,23 @@ export function BossPanel() {
   const bossHint = useGameStore((s) => s.bossHint);
   const challengeBoss = useGameStore((s) => s.challengeBoss);
   const advanceStage = useGameStore((s) => s.advanceStage);
+  const t = useTranslations("hud");
 
   if (phase === "victory") {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-(--ddp-radius-lg) border border-emerald-400/50 bg-emerald-950/60 px-4 py-3 shadow-(--ddp-shadow-panel)">
+      <div
+        data-onboarding-anchor="boss-panel"
+        className="flex items-center justify-between gap-3 rounded-(--ddp-radius-lg) border border-emerald-400/50 bg-emerald-950/60 px-4 py-3 shadow-(--ddp-shadow-panel)"
+      >
         <span className="text-sm font-bold text-emerald-300">
-          🎉 ชนะด่าน {bossHint.stage}!
+          {t("victoryTitle", { stage: bossHint.stage })}
         </span>
         <button
           type="button"
           onClick={advanceStage}
           className="min-h-11 rounded-(--ddp-radius-md) bg-emerald-400 px-5 py-2.5 text-sm font-extrabold text-emerald-950 shadow-(--ddp-shadow-btn) transition-transform duration-100 hover:brightness-110 active:translate-y-0.5 active:scale-[0.97]"
         >
-          ด่านถัดไป →
+          {t("nextStageButton")}
         </button>
       </div>
     );
@@ -40,23 +45,26 @@ export function BossPanel() {
   const canChallenge = bossReady && phase === "battle";
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)">
+    <div
+      data-onboarding-anchor="boss-panel"
+      className="flex flex-wrap items-center gap-3 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)"
+    >
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ddp-ink-muted">
         <span>
-          HP บอส{" "}
+          {t("bossHpLabel")}{" "}
           <b className="font-bold text-ddp-ink tabular-nums">
             {bossHint.bossHp.toLocaleString()}
           </b>
         </span>
         <span>
-          พลังโจมตี <b className="font-bold text-ddp-ink tabular-nums">{bossHint.bossAtk}</b>
+          {t("bossAtkLabel")} <b className="font-bold text-ddp-ink tabular-nums">{bossHint.bossAtk}</b>
         </span>
         <span>
-          พลังทีมแนะนำ{" "}
+          {t("recommendedPowerLabel")}{" "}
           <b className="font-bold text-ddp-ink tabular-nums">{bossHint.recommendedPower}</b>
         </span>
         <span>
-          พลังทีมคุณ{" "}
+          {t("yourPowerLabel")}{" "}
           <b className="font-bold text-ddp-ink tabular-nums">{bossHint.teamPower}</b>
         </span>
         <span
@@ -66,7 +74,7 @@ export function BossPanel() {
               : "font-semibold text-amber-400"
           }
         >
-          {bossHint.ready ? "✅ พร้อมสู้" : "⚠ พลังอาจไม่พอ"}
+          {bossHint.ready ? t("bossReadyYes") : t("bossReadyNo")}
         </span>
       </div>
       <div className="flex-1" />
@@ -75,7 +83,7 @@ export function BossPanel() {
         disabled={!canChallenge}
         onClick={challengeBoss}
         aria-label={
-          canChallenge ? "ท้าบอส" : "ท้าบอส (ยังท้าไม่ได้ตอนนี้)"
+          canChallenge ? t("challengeBossAriaReady") : t("challengeBossAriaNotReady")
         }
         className={`relative min-h-11 rounded-(--ddp-radius-md) border px-5 py-2.5 text-sm font-extrabold shadow-(--ddp-shadow-btn) transition-all duration-100 ${
           canChallenge
@@ -83,7 +91,7 @@ export function BossPanel() {
             : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted grayscale"
         }`}
       >
-        ⚔ ท้าบอส
+        {t("challengeBossButton")}
       </button>
     </div>
   );

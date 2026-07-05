@@ -11,29 +11,84 @@ datasource db {
 }
 
 model User {
-  id        String      @id @default(cuid())
-  createdAt DateTime    @default(now())
-  saves     SaveState[]
+  id         String      @id @default(cuid())
+  createdAt  DateTime    @default(now())
+  saves      SaveState[]
+  characters Character[]
+}
+
+// A player character (GDD v2: account -> up to 3 characters, each its own
+// class/level/save). One SaveState holds the character's versioned progress blob;
+// the columns below are DENORMALIZED CACHES for cheap Hall-of-Fame queries — the
+// engine save (SaveState.data) remains the source of truth and is re-derivable.
+//
+// The <=3-per-account limit is enforced at APP level (count where deletedAt IS
+// NULL): MySQL has no clean per-account row-count constraint. Soft delete
+// (deletedAt) frees the live slot but keeps the row for audit; `id` is a cuid,
+// opaque and NEVER reused — safe to use as ownerId for M7 gear item-instances and
+// M9 HOF snapshots.
+//
+// Name uniqueness (RECOMMENDATION): global, case-insensitive (utf8mb4 default
+// collation is CI), enforced at APP level among LIVE characters (deletedAt IS
+// NULL) — NOT a DB @@unique. Rationale: a hard unique would keep soft-deleted
+// names reserved forever (MySQL lacks partial indexes), and app-level lets a
+// freed slot free the name. Trade-off: a TOCTOU race on concurrent creates —
+// wrap create in a tx / catch. The @@index([name]) keeps the check + future
+// name search fast.
+model Character {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String     @db.VarChar(24)
+  baseClass String     @db.VarChar(16) // engine HeroClass string: swordsman | archer | mage
+  level     Int        @default(1) // cache of engine level (re-derivable)
+  power     Int        @default(0) // cache of derived combat power for HOF (re-derivable; widen to BigInt if it ever exceeds 2^31)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime? // soft delete: slot freed, row kept for audit
+  // CUTOVER APPLIED: `SaveState.characterId` is now @unique, so this is an
+  // effective 1:1 — a character has AT MOST one save row.
+  save      SaveState?
+
+  @@index([userId]) // list an account's characters
+  @@index([userId, deletedAt]) // count/enumerate LIVE slots (<=3 rule)
+  @@index([name]) // app-level uniqueness check + future name search
 }
 
 // One row per player save slot. `data` holds the versioned SaveData JSON blob
 // (see src/engine/state). `lastSeen` drives capped offline-idle earnings.
 // `version` mirrors SaveData.version so migrations can target rows by schema age.
 //
-// MVP: exactly one save slot per user, so `userId` is UNIQUE. This is what lets
+// Today: exactly one save slot per user, so `userId` is UNIQUE. This is what lets
 // `persistSave` upsert by userId (Prisma upsert needs a unique field in `where`).
 // A unique constraint also provides the index, so no separate @@index is needed.
-// When multi-slot saves land, drop the unique for `@@unique([userId, slot])`.
+//
+// M5 CUTOVER APPLIED (see docs/persistence-m5.md): saves are now PER CHARACTER.
+// `characterId` is @unique (one save per character) and `userId @unique` is
+// DROPPED — an account may hold up to 3 saves (one per live character). `userId`
+// keeps a plain @@index for account-scoped queries + the cascade relation.
+// `persistSave`/`loadSave` key off `characterId`; the active character is chosen
+// via the `activeCharacterId` cookie (src/server/activeCharacter.ts).
+//
+// Cutover sequence that produced this state:
+//   1. Backfill (prisma/backfill-characters.ts): 1 Character per existing save.
+//   2. Set SaveState.characterId to that Character.id (verified distinct+non-null).
+//   3. This push: characterId -> @unique, DROP userId @unique. (--accept-data-loss)
 model SaveState {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  version   Int
-  data      Json
-  lastSeen  DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // One save per character: @unique makes the load/persist path key off it and
+  // provides the index (so no separate @@index needed). Nullable is retained so a
+  // soft-deleted character's orphaned save can keep the (now-dangling-but-audited)
+  // link; a live save always has it set.
+  characterId String?    @unique
+  character   Character? @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  version     Int
+  data        Json
+  lastSeen    DateTime
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-// Future (M5): leaderboards
-// model Leaderboard { ... }
+  @@index([userId]) // account-scoped queries + cascade (was covered by @unique before)
+}

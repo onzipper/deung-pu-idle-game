@@ -8,9 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**ดึ๋งปุ๊ Idle Game** — a 2D idle / auto-battler for the web. A team of up to 3 hero classes auto-advances through enemy waves, banks kills, challenges a boss, clears the stage, unlocks the next hero/upgrade, and loops. Systems: skills (cooldown + auto-cast), three separate upgrade lines (+ auto), and a 1×/2×/3× speed multiplier.
+**ดึ๋งปุ๊ Idle Game** — a single-character idle MMORPG-lite for the web (Ragnarok × IdleOn feel). Players create a character (up to 3 per account), pick a base class (sword/bow/magic), auto-fight through walkable zones, allocate stat points, class-change via quests, collect weapon/armor drops (tradable item-instances), party up in real time (max 3, lockstep on the deterministic engine), and climb a multi-category Hall of Fame. Power = level + stats + class/skills + gear — there are NO purchasable upgrade lines (the old atk/speed/hp lines are being removed in the M5 pivot).
 
-Status: past POC (a single playable HTML+Canvas file proved the core loop). This repo is the **production rebuild on Next.js**. Tracked in ClickUp task [86d3jv7m3](https://app.clickup.com/t/86d3jv7m3).
+**Source of truth (in-repo, NOT ClickUp):** vision/direction = `docs/GDD.md` · roadmap + task checklists = `docs/ROADMAP.md`. Update checkboxes there as work lands; if anything conflicts, GDD.md wins. ClickUp is a legacy pointer only — do not fetch or update it in normal work.
+
+Status: **M1–M4.8 complete** (deterministic engine, Pixi render, React HUD, MySQL persistence, offline idle, balance, juice/art, i18n th/en, onboarding/FTUE/codex/mascot) + per-hero XP/level and tier evolution (will be reworked in the pivot). Next: **M5 Character Pivot ⭐** (single character, char creation + 3 slots, base stats, mana + skill framework, class change v1, FTUE rework) → M6 World & Town → M7 Gear & Drops ⭐ → M8 Party → M9 Economy & Competition. PvP cut; prestige on hold.
+
+Git: `develop` = integration branch (work lands here per-task), `main` = stable (merged via PR at milestone boundaries).
 
 ## Commands
 
@@ -22,104 +26,76 @@ Package manager is **pnpm**.
 | `pnpm build` / `pnpm start` | Production build / serve |
 | `pnpm lint` | ESLint (includes the engine-purity boundary rule) |
 | `pnpm format` / `pnpm format:check` | Prettier write / check |
-| `pnpm test` | Run all Vitest suites (headless, Node env) |
-| `pnpm test:watch` | Vitest watch mode |
-| `pnpm sim` | Run the headless balance-simulation harness |
-| `pnpm db:generate` | Regenerate Prisma client (also runs on `postinstall`) |
-| `pnpm db:migrate` | `prisma migrate dev` (needs a live `DATABASE_URL`) |
-| `pnpm db:studio` | Prisma Studio |
+| `pnpm test` | All Vitest suites (headless, Node env; 125+ tests, <1s) |
+| `pnpm sim` | Balance harness — per-stage time-to-clear/gold/boss metrics; env knobs `SIM_SECONDS`, `SEEDS` |
+| `pnpm db:generate` / `db:migrate` / `db:studio` | Prisma (needs `DATABASE_URL` in `.env`) |
 
-Run a single test file: `pnpm test src/engine/__tests__/loop.test.ts`
-Run tests by name: `pnpm vitest run -t "seeded rng"`
+Single test file: `pnpm test src/engine/__tests__/loop.test.ts` · by name: `pnpm vitest run -t "seeded rng"`
+
+**Env quirk (subagent shells):** the pnpm `.cmd` shims sometimes can't resolve `node` (nested cmd.exe PATH issue). Workaround — invoke binaries directly: `node node_modules/eslint/bin/eslint.js .`, `node node_modules/.pnpm/vitest@*/node_modules/vitest/vitest.mjs run`, `node node_modules/tsx/dist/cli.mjs src/engine/__tests__/balance-sim.ts`. Not a project bug; don't spend time diagnosing it.
 
 ## Architecture — the load-bearing rule
 
-Three layers are kept **strictly separate**. This is the single most important design constraint; do not blur it.
+Three layers, **strictly separate** (ESLint-enforced):
 
 ```
 src/
-  engine/   ← pure TypeScript game simulation. NO DOM, canvas, React, Pixi, Next.
-  render/   ← PixiJS. Reads engine state, draws it. One-way.
-  ui/       ← React HUD/menus. Reads a throttled engine snapshot via Zustand.
+  engine/   ← pure TS simulation. NO DOM/canvas/React/Pixi/Next/Zustand.
+  render/   ← PixiJS: views (entities), fx (juice), environment (biomes), audio (WebAudio SFX). One-way reads.
+  ui/       ← React HUD via throttled Zustand snapshot (~10Hz) + intent queue.
 ```
 
-- **`engine/` is pure.** It is a state transformer (`step(state, dt, input) → state`) with no I/O, no wall-clock reads, and a seeded RNG (`engine/core/rng.ts`) — never `Math.random()`. Purity is enforced by ESLint: importing `react`, `pixi.js`, `zustand`, `next`, or any of `@/render`, `@/ui`, `@/server`, `@/lib` from `engine/**` is a lint error. The payoff is that combat and balance run **headless under Vitest**, which is how the nasty POC bugs get caught without opening a browser.
-- **`render/` and `ui/` import the engine only through `@/engine` (its `index.ts`)** — never reach into engine internals.
-- **`ui/` must never hold per-frame game state.** React re-renders on every store write; syncing at 60 Hz kills performance. The engine pushes a **throttled** snapshot (~10 Hz, `CONFIG.uiSyncHz`) of only the HUD-visible fields into the Zustand store (`src/ui/store/gameStore.ts`).
+- **`engine/` is pure & deterministic**: `step(state, input)` advances exactly one `FIXED_DT` (1/60). Speed = more sub-steps, never bigger dt. Seeded RNG only (`core/rng.ts`) — **the RNG stream is reserved for wave composition; combat/skills must NEVER draw from it** (use fixed offset tables). All tunables in `engine/config` (the sim sweeps them). Save shape changes go through `SAVE_VERSION` + `migrate()` (`state/version.ts`).
+- **`state.events`** (per-step, transient, deterministic, never persisted): 15+ event types (hit/kill/skillCast/boss lifecycle/…) consumed one-way by render/audio. Frame loops MUST collect events across ALL sub-steps before draw (they're cleared each step).
+- **render/**: `GameRenderer.draw(state, frameEvents)`; pooled views keyed by entity id (build-once, transform-only per frame); `fx/` = pooled, capped, real-dt effect modules with knobs at top; `environment/` = stage-keyed biomes + parallax; `audio/` = synthesized SFX (no asset files), AudioContext after first gesture.
+- **ui/**: components read narrow store selectors; player intents go into `pendingInput`, drained ONCE per real frame by `GameClient` (a click applies exactly once at any speed). `speed/autoUpgrade/autoCast/soundMuted` are plain UI-owned store fields.
+- **`GameClient.tsx`** hosts the rAF loop (engine state in a closure, never React state) + `timeDirector.ts` (hit-stop/slow-mo: shapes ONLY the accumulator input; renderer/audio/UI keep real time — effects play through freezes by design).
 
-Each layer has its own `README.md` describing responsibilities and the import boundary.
-
-### Game loop
-
-Fixed-timestep + accumulator (`src/engine/core/loop.ts`, `FIXED_DT = 1/60`). Deterministic. A speed multiplier runs **more fixed sub-steps**, never a larger `dt` (that is what prevents tunnelling at 2×/3×). Offline idle catch-up feeds the (capped) elapsed time through the same accumulator.
-
-### Path aliases
-
-`@/*` → `src/*` (so `@/engine/...`, `@/render/...`, etc. all resolve). Configured in `tsconfig.json` and mirrored for Vitest in `vitest.config.ts`.
+Each layer has a `README.md` with its contract; `render/README.md` carries the **binding art direction** (desaturated scenery vs jewel-tone entities, flat-alpha layering).
 
 ## Persistence & economy
 
-- **DB: MySQL + Prisma 6** (`prisma/schema.prisma`). Pinned to v6 deliberately — Prisma 7 removed `url` from the datasource and requires driver adapters + `prisma.config.ts`, which is unneeded connection surface at this stage. Upgrading to 7 is a known future option.
-- **Save model:** `SaveState` stores the versioned `SaveData` JSON blob (`src/engine/state`), a `version`, and `lastSeen`. `User` owns saves.
-- **Save versioning from day one:** `src/engine/state/version.ts` holds `SAVE_VERSION` + `migrate()`. Bump the version and add a migration branch whenever `SaveData` changes shape — never mutate an old save without going through `migrate()`.
-- **Offline idle** (`src/server/offline.ts`): earnings computed from server wall-clock vs `lastSeen`, **capped** (`CONFIG.offlineCapHours`) as anti-cheat. Runs server-side only.
-- **Server-authoritative economy:** the target is that gold/upgrades can be re-validated server-side so a tampered client can't grant currency. MVP may compute client-side, but keep the shape server-authoritative for monetization/anti-cheat. Save/load lives in `src/app/api/save/route.ts` + `src/server/`.
+- MySQL (Hostinger) + **Prisma 6** (pinned; v7 needs driver adapters). Schema applied via **`prisma db push`** — shared host denies the shadow DB (P3014), so no migration history; baseline when the DB moves.
+- Identity = anonymous httpOnly cookie (`src/server/identity.ts`, swappable for real auth). One save slot per user (`SaveState.userId @unique`).
+- `POST /api/save` zod-validates strictly; **server stamps `lastSeen`** (client timestamps discarded). Offline idle capped `CONFIG.offlineCapHours`, replayed client-side through `step()` under a 250ms wall-clock budget.
+- M5 target: re-derive max-plausible progress server-side; slot marked in `persistSave`.
 
-Set `DATABASE_URL` in `.env` (see `.env.example`) before any `db:migrate`/runtime DB use.
+## Hard-won footguns (each cost a real debugging round — don't re-learn them)
 
-## Known POC bugs to avoid (rendering only — never in `engine/`)
-
-1. **Negative-radius `IndexSizeError`** — the POC `shockwave()` pushed rings with `life > dur`, making `r = maxR*(1 - life/dur)` go negative and throwing in `ctx.arc()`. In the Pixi rebuild, clamp any radius `Math.max(0, r)`; Pixi avoids raw `arc` so this largely disappears.
-2. **`createRadialGradient` + `addColorStop` crash** when a CSS var resolved empty in a sandbox. Use Pixi filters instead of hand-built gradients.
-
-These are **rendering** concerns and belong in `render/`. The pure engine has no visual code.
-
-## Milestones
-
-- **M1** — Engine port: extract core loop + entities + combat as pure TS + unit tests. *(scaffold done; engine port next)*
-- **M2** — Render (Pixi) + UI (React/Zustand): draw the game + HUD/upgrade/skill panels.
-- **M3** — Persistence: MySQL + Prisma, save/load, offline idle.
-- **M4** — Balance & juice: balance simulation, effects/particles/sound. (Framer Motion + GSAP get installed here, not before.)
-- **M5** — Prestige/reset loop + server-authoritative economy & anti-cheat.
-
-Current state: **M1 scaffold complete** — Next.js + TS + tooling + the empty 3-layer skeleton. No game logic yet.
+1. **Pixi transform double-subtraction**: Pixi applies `(local − pivot)` itself. Graphics paths inside pivoted containers must use absolute GROUND_Y-relative coords — never pre-subtract the pivot in path data, or rigs collapse toward y≈0. Guarded by `render/views/__tests__/rig.test.ts` (headless bounds).
+2. **`Graphics.arc().fill()` without `moveTo`** collapses toward the stale pen position — use point-sampled `poly()` (see `arcFanPoints` in heroView).
+3. **Every radius through `safeRadius()`**; no hand-built canvas gradients (layered flat alpha / Pixi filters only) — the original POC crash class.
+4. **Windows 10 has no Unicode-13+ emoji glyphs** (🪙🪄…) — UI icons must be pre-2020 emoji or CSS-drawn.
+5. **Absolute-position caps rot**: POC-era constants like `midCap` silently broke formation spacing when the anchor design deepened — prefer anchor/spawn-relative bounds with config knobs.
+6. **New `ProjectileKind`/enum members need their render map entries in the same change** (`PROJECTILE_COLORS` etc.) or the client crashes at runtime ("Unable to convert color undefined") — grep for `Record<ProjectileKind` when extending engine unions.
+7. **Balance changes must run the sim** vs the latest table in `docs/balance-m5.md` (per-class solo, 0 permanent walls; balance-m4 is the superseded team-comp baseline). Tune new knobs before touching tuned curves.
+8. **Next 16: `cookies().set()` during a Server Component render throws** (`ReadonlyRequestCookiesError`) — cookie writes belong in Route Handlers / Server Actions only. Gate/redirect helpers in server components must be strictly read-only (see `src/app/characterGate.ts`).
 
 ## Orchestration workflow
 
-**You (Fable) are the orchestrator.** Plan, decompose, and synthesize — but do the heavy *execution* through subagents so Fable tokens are spent only on genuine orchestration and hard reasoning. **Keep your own context lean:** hand subagents a tight spec, and have them return a short, actionable conclusion rather than pulling large outputs back into your context.
+**You (Fable) are the orchestrator.** Plan, decompose, synthesize; execution goes to subagents. Keep your own context lean — agents return short conclusions.
 
-Routing:
-- **Reasoning-heavy** (architecture, tricky debugging, algorithm/economy design) → the relevant **Opus** domain agent, or the generic `deep-reasoner` (Opus) when it's not domain-specific.
-- **Mechanical** (boilerplate, tests, formatting, simple/repetitive edits) → the relevant **Sonnet** domain agent, or the generic `fast-worker` (Sonnet).
-- **High-stakes decisions** — task two independent perspectives on the same problem in parallel (e.g. two Opus agents from different angles), then synthesize the best of both **without showing either the other's answer**. (A slot for an external peer like OpenAI Codex can be added here later; not wired up yet.)
+Routing: reasoning-heavy → Opus domain agent or `deep-reasoner` · mechanical → Sonnet domain agent or `fast-worker` · trivial fully-specified single-file edits → `haiku-worker` · high-stakes → two independent perspectives in parallel, synthesize without cross-showing.
 
-Each subagent is pinned to a model in its frontmatter, so delegation is automatically cost-aware — Fable orchestrates, Opus/Sonnet do the work.
+**Token discipline (learned from the M4 build-out):**
+- One agent = one task; spawn fresh with a tight brief instead of chaining SendMessage (chained context re-reads cost 2-3x). Exception: urgent fixes on work the agent just wrote.
+- Knob/feel tuning on known files → the orchestrator edits directly; no agent for a constant change.
+- Batch same-area items into one medium task (~100-150k tokens); avoid 10+ item mega-passes and single-item micro-agents (fixed ~20-40k read-in each).
+- Agent returns ≤20 lines; detail goes in commit messages / `docs/`.
+- Cross-task context lives in repo files (render/README.md, docs/balance-m4.md), never chat history.
+- Parallel agents must own disjoint file zones (engine vs render vs ui); the orchestrator commits per-zone by path.
 
 ## Project subagents
 
-Personas live in `.claude/agents/`, each pinned to a model. Delegate to them:
+Personas in `.claude/agents/`, each pinned to a model:
 
-**Generic (model-tier roles)**
-| Agent | Model | Use for |
-|---|---|---|
-| `deep-reasoner` | Opus | reasoning-heavy, non-domain-specific problems |
-| `fast-worker` | Sonnet | mechanical, well-specified execution |
-| `haiku-worker` | Haiku | trivial fully-specified single-file edits (label/knob/doc changes) |
-
-**Token discipline (learned from the M4 build-out):**
-- One agent = one task; spawn fresh with a tight brief instead of chaining SendMessage (chained context re-reads cost 2-3x).
-- Feel/knob tuning on files the orchestrator knows → orchestrator edits directly; don't spawn an agent for a constant change.
-- Batch same-area items into one medium task (~100-150k tokens); avoid 10+ item mega-passes and avoid single-item micro-agents (fixed ~20-40k context-read cost each).
-- Agent returns: ≤20 lines, conclusions only; put detail in the commit message or docs/ — the orchestrator's context is the scarcest resource.
-- Shared context across tasks goes in repo files (render/README.md art direction, docs/balance-m4.md), never in chat history.
-
-**Domain experts**
 | Agent | Model | Scope |
 |---|---|---|
-| `game-engine-specialist` | Opus | pure-TS simulation core, fixed-timestep, determinism (`engine/**`) |
-| `game-economy-balance-designer` | Opus | cost curves, pacing, prestige, balance-sim tuning |
-| `sr-dba` | Opus | MySQL/Prisma schema, migrations, indexing (`prisma/**`) |
-| `sr-backend-developer` | Opus | save/load, offline idle, server economy/anti-cheat (`server/**`, `api/**`) |
-| `sr-nextjs-developer` | Sonnet | App Router, React/Zustand, Pixi mounting (`app/**`, `ui/**`) |
-| `sr-uxui-game-designer` | Sonnet | game feel, juice, animation, HUD/effects (M4) |
-| `qa-test-engineer` | Sonnet | headless Vitest strategy, determinism/regression tests |
+| `deep-reasoner` / `fast-worker` / `haiku-worker` | Opus / Sonnet / Haiku | generic tiers (see routing) |
+| `game-engine-specialist` | Opus | pure-TS sim core, determinism (`engine/**`) |
+| `game-economy-balance-designer` | Opus | curves, pacing, prestige, sim analysis |
+| `sr-dba` | Opus | MySQL/Prisma schema, indexing (`prisma/**`) |
+| `sr-backend-developer` | Opus | save/load, offline idle, anti-cheat (`server/**`, `api/**`) |
+| `sr-nextjs-developer` | Sonnet | App Router, GameClient loop, store wiring (`app/**`, `ui/**`) |
+| `sr-uxui-game-designer` | Sonnet | game feel, fx/animation/biomes, HUD design (`render/**`, `ui/**`) |
+| `qa-test-engineer` | Sonnet | headless Vitest strategy, regression suites |

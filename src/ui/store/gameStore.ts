@@ -22,20 +22,101 @@
  */
 
 import { create } from "zustand";
-import type { BossHint, HeroClass, Phase, SpeedMultiplier, Upgrades } from "@/engine";
+import type { BossHint, HeroClass, HeroStats, Phase, SpeedMultiplier, StatKey } from "@/engine";
+
+/**
+ * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
+ * snapshot builder so the store carries only display-ready values (no engine
+ * logic runs in React).
+ */
+export interface SkillSummary {
+  /** Engine skill id (key into the `content.skills.<id>` i18n + `SKILL_ICONS`). */
+  id: string;
+  /** Remaining cooldown, seconds (0 = ready). */
+  cd: number;
+  /** The skill's full cooldown, seconds (for the CSS sweep duration). */
+  maxCd: number;
+  /** Mana cost to cast. */
+  cost: number;
+  /** Off cooldown AND mana-affordable AND the hero is alive (castable now). */
+  ready: boolean;
+  /** Mana-affordable right now (drives the disabled/greyed cost readout). */
+  affordable: boolean;
+  /** Which auto-cast slot index this skill occupies, or null (not slotted). */
+  autoSlot: number | null;
+}
+
+/**
+ * Class-change quest state (M5 task 5) for the SkillBar quest flow. `null` when
+ * not applicable (tier 2, or the hero is below the level gate with no active
+ * quest — the bar shows the evolved badge / locked hint from `tier`/`level`
+ * instead). Precomputed by the snapshot builder (engine reads only).
+ */
+export interface HeroQuestSummary {
+  /** The quest is available to accept now (tier 1, level gate met, not yet taken). */
+  offered: boolean;
+  /** The quest has been accepted and is tracking objectives. */
+  accepted: boolean;
+  /** All objectives met — the class change is available (the evolve affordance). */
+  complete: boolean;
+  /** Enemy-kill objective progress + goal (compact "n/N" readout). */
+  kills: number;
+  killGoal: number;
+  /** Boss-defeat objective satisfied (✓/✗). */
+  bossDone: boolean;
+}
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
 export interface HeroSummary {
   cls: HeroClass;
   hp: number;
   maxHp: number;
-  /** Skill cooldown remaining, seconds (0 = ready). */
+  /**
+   * SIGNATURE skill cooldown remaining, seconds (0 = ready). Kept for the
+   * onboarding "you cast a skill" detector (`ui/onboarding`); the full per-skill
+   * kit lives in `skills` below.
+   */
   skillCd: number;
+  /** Current mana + pool (M5 "mana"). Drives the mana bar. */
+  mana: number;
+  maxMana: number;
+  /** The learned skill kit (M5 skill framework v2), ordered signature-first. */
+  skills: SkillSummary[];
+  /** Auto-cast slot loadout: skill id per slot, or null (empty). */
+  autoSlots: (string | null)[];
+  /** How many auto-cast slots are unlocked at this hero's level. */
+  unlockedSlots: number;
   dead: boolean;
+  /** Hero level (M5), 1..`CONFIG.leveling.levelCap`. */
+  level: number;
+  /** Progress toward the NEXT level, precomputed 0..1 float (never the raw
+   * xp/curve numbers — see `GameClient.tsx`'s `buildSnapshot`, which keeps the
+   * xp-curve math (`CONFIG.leveling.xpToLevel`) out of the throttled store).
+   * `1` once at `levelCap` (nothing left to progress toward). */
+  xpProgress: number;
+  /** `true` once the hero is at `CONFIG.leveling.levelCap` — the store never
+   * ships the cap number itself, just this precomputed flag (same "no raw
+   * curve math in the store" rule as `xpProgress`). */
+  atLevelCap: boolean;
+  /** Class-advancement tier (M5 evolution). 1 = base, 2 = evolved. */
+  tier: 1 | 2;
+  /** Precomputed `canEvolveHero(state, hero)` read (tier 1, class-change quest
+   * complete) — the store never runs engine logic itself, just carries this
+   * one-way display flag (same pattern as `atLevelCap`). */
+  canEvolve: boolean;
+  /** Class-change quest state (M5 task 5) driving the quest affordance, or null
+   * (tier 2 / below the level gate — see `HeroQuestSummary`). */
+  quest: HeroQuestSummary | null;
+  /** Unspent base-stat points (M5 "Base stats") — drives the stat-panel badge. */
+  statPoints: number;
+  /** Allocated base-stat block (absolute values), for the +stat readouts. */
+  stats: HeroStats;
+  /** This hero's class primary (auto-allocate target) — for the panel's hint. */
+  primaryStat: StatKey;
+  /** Precomputed `combatPower(hero)` read ("พลังต่อสู้") — same one-way display
+   * pattern as `canEvolve`: the engine computes it, the store just carries it. */
+  combatPower: number;
 }
-
-/** Gold cost of the next level of each upgrade line, at the current levels. */
-export type UpgradeCosts = Upgrades;
 
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
@@ -48,20 +129,37 @@ export interface EngineSnapshot {
   bossReady: boolean;
   bossHint: BossHint;
   heroes: HeroSummary[];
-  upgrades: Upgrades;
-  upgradeCosts: UpgradeCosts;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
 export interface PendingInput {
-  castSkills: number[];
-  buyUpgrade: keyof Upgrades | null;
+  /** Manual skill casts this frame (M5): hero slot + specific skill id. */
+  castSkills: { slot: number; skillId: string }[];
+  /** Auto-cast slot assignments this frame (M5), solo hero (slot 0). */
+  setAutoSlots: { slot: number; skillId: string | null }[];
   challengeBoss: boolean;
   advanceStage: boolean;
+  /** Hero slot index to evolve (M5), or `null` (last-wins per frame — a big
+   * one-way purchase never needs to queue more than one per frame). */
+  evolveHero: number | null;
+  /** Hero slot index to accept the class-change quest for (M5 task 5), or `null`
+   * (last-wins per frame — a single tap accepts once). */
+  acceptQuest: number | null;
+  /** Base-stat allocation for the solo hero (M5), or `null`. Last-wins per frame
+   * (a click allocates once; the engine no-ops an invalid/over-cap amount). */
+  allocateStat: { stat: StatKey; amount: number } | null;
 }
 
 function emptyPendingInput(): PendingInput {
-  return { castSkills: [], buyUpgrade: null, challengeBoss: false, advanceStage: false };
+  return {
+    castSkills: [],
+    setAutoSlots: [],
+    challengeBoss: false,
+    advanceStage: false,
+    evolveHero: null,
+    acceptQuest: null,
+    allocateStat: null,
+  };
 }
 
 /** localStorage key for the sound preference. This is a CLIENT PREFERENCE,
@@ -95,6 +193,71 @@ function writeSoundMuted(muted: boolean): void {
   }
 }
 
+/** localStorage key for the FTUE-completed flag. Same client-preference
+ * pattern as `SOUND_MUTED_STORAGE_KEY` above: UI-owned, not `SaveData`.
+ * M5+: fold into server save (cross-device sync) — until then this is a
+ * per-browser flag, same tier as the sound preference.
+ *
+ * Unlike `soundMuted` (default false is safe pre-hydration either way), the
+ * FTUE flag's SAFE default is `true` ("already completed") so a
+ * server-rendered page never flashes the onboarding overlay before the real
+ * persisted value is read post-hydration (see `readStoredFtueCompleted`). */
+const FTUE_STORAGE_KEY = "ddp-ftue-completed";
+
+export function readStoredFtueCompleted(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(FTUE_STORAGE_KEY) === "1";
+  } catch {
+    return true; // storage blocked — never force onboarding on a broken store
+  }
+}
+
+function writeFtueCompleted(completed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(FTUE_STORAGE_KEY, completed ? "1" : "0");
+  } catch {
+    /* storage blocked — onboarding just won't persist across reloads */
+  }
+}
+
+/** localStorage key for contextual-tip "seen" ids (M4.8 card A) — same
+ * client-preference tier as `FTUE_STORAGE_KEY`: a flat array of tip ids
+ * already shown, so each `CONTEXTUAL_TIPS` entry (`src/ui/onboarding/tips.ts`)
+ * fires at most once ever, across reloads.
+ * // M5+: fold into server save (cross-device sync). */
+const TIPS_SEEN_STORAGE_KEY = "ddp-tips-seen";
+
+export function readStoredSeenTips(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TIPS_SEEN_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return []; // storage blocked/corrupt — tips just replay this session
+  }
+}
+
+/** Appends `id` to `seen` (no-op if already present) and persists the result.
+ * Returns the new array so the caller can update its own in-memory copy
+ * without a redundant `readStoredSeenTips()` round-trip. */
+export function writeSeenTip(id: string, seen: readonly string[]): string[] {
+  const next = seen.includes(id) ? seen.slice() : [...seen, id];
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(TIPS_SEEN_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage blocked — this tip just won't persist across reloads */
+    }
+  }
+  return next;
+}
+
 const emptyBossHint: BossHint = {
   stage: 1,
   bossHp: 0,
@@ -115,18 +278,36 @@ export interface HudState {
   bossReady: boolean;
   bossHint: BossHint;
   heroes: HeroSummary[];
-  upgrades: Upgrades;
-  upgradeCosts: UpgradeCosts;
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   speed: SpeedMultiplier;
-  autoUpgrade: boolean;
   autoCast: boolean;
+  /** Auto-allocate base-stat points into the class primary stat (M5 "Base
+   * stats"). UI-owned like `autoCast`: the loop copies it onto `state.autoAllocate`
+   * every frame; not part of `FrameInput`, never persisted. */
+  autoAllocate: boolean;
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
    * every frame and applies it to the `AudioController`, same pattern as
    * `speed`/`autoUpgrade`/`autoCast`. */
   soundMuted: boolean;
+
+  // ---- onboarding/FTUE (M4.8) — see src/ui/onboarding/steps.ts for the
+  // data-driven step registry and pure trigger/advance logic; this store
+  // only holds the session/persisted PROGRESS through that registry. ----
+  /** `true` once the throttled snapshot has synced at least once — the
+   * fresh-save heuristic (`isFreshSave` in `onboarding/steps.ts`) is only
+   * meaningful AFTER the real engine/save state has arrived (the store's
+   * hardcoded initial values would otherwise look "fresh" even for a
+   * returning player for one instant). */
+  hasSyncedOnce: boolean;
+  /** Persisted flag (localStorage, mirrors `soundMuted`'s pattern —
+   * M5+: fold into server save). Defaults `true` pre-hydration so SSR never
+   * flashes the overlay; corrected post-mount via `setFtueCompleted`. */
+  ftueCompleted: boolean;
+  /** `-1` = onboarding not running (either finished/skipped, or not yet
+   * gated-in); `0..N-1` = index into `ONBOARDING_STEPS` currently shown. */
+  onboardingStepIndex: number;
 
   // ---- intent queue: drained by the integration loop into FrameInput ----
   pendingInput: PendingInput;
@@ -135,20 +316,45 @@ export interface HudState {
   syncFromEngine: (snapshot: EngineSnapshot) => void;
 
   setSpeed: (speed: SpeedMultiplier) => void;
-  toggleAutoUpgrade: () => void;
   toggleAutoCast: () => void;
+  toggleAutoAllocate: () => void;
   toggleSound: () => void;
   /** Mount-effect-only: apply the persisted preference once, post-hydration
    * (see `soundMuted`'s doc comment). Does NOT re-persist (avoids a
    * redundant localStorage write on every mount). */
   setSoundMuted: (muted: boolean) => void;
 
-  /** Queue a skill cast for hero slot `i` (deduped; consumed on next drain). */
-  castSkill: (slot: number) => void;
-  /** Queue a purchase attempt for one upgrade line (last-wins per frame). */
-  buyUpgrade: (stat: keyof Upgrades) => void;
+  /** Onboarding-controller-only: begin the FTUE at step 0. Callers must have
+   * already checked `!ftueCompleted && hasSyncedOnce && isFreshSave(...)`. */
+  startOnboarding: () => void;
+  /** Jump to a specific step index (used by the pure resolver's result). */
+  setOnboardingStepIndex: (index: number) => void;
+  /** Finish (naturally or via skip-all) — persists so it never shows again. */
+  completeOnboarding: () => void;
+  /** Mount-effect-only sync of the persisted flag (see `ftueCompleted` doc). */
+  setFtueCompleted: (completed: boolean) => void;
+  /** Codex-only ("ดูบทช่วยสอนอีกครั้ง"): un-persists completion and jumps
+   * straight to step 0 — unlike `startOnboarding`, this bypasses
+   * `useOnboardingController`'s one-shot gate (which only fires once per
+   * mount) since the overlay renders directly off `onboardingStepIndex`. */
+  resetOnboarding: () => void;
+
+  /** Queue a manual cast of `skillId` for the solo hero (deduped by skill id;
+   * consumed on next drain — a click casts exactly once at any speed). */
+  castSkill: (skillId: string) => void;
+  /** Queue an auto-cast slot assignment for the solo hero (last-wins per slot). */
+  setAutoSlot: (slot: number, skillId: string | null) => void;
   challengeBoss: () => void;
   advanceStage: () => void;
+  /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
+   * `buyUpgrade`) — the engine no-ops it if requirements aren't met. */
+  evolveHero: (slot: number) => void;
+  /** Queue accepting the class-change quest for hero slot `i` (last-wins per
+   * frame) — the engine no-ops it unless the quest is offerable. */
+  acceptQuest: (slot: number) => void;
+  /** Queue a base-stat allocation for the solo hero (last-wins per frame) — the
+   * engine no-ops an invalid/over-cap/over-spend amount. */
+  allocateStat: (stat: StatKey, amount: number) => void;
 
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
@@ -164,21 +370,23 @@ export const useGameStore = create<HudState>((set, get) => ({
   bossReady: false,
   bossHint: emptyBossHint,
   heroes: [],
-  upgrades: { atk: 0, speed: 0, hp: 0 },
-  upgradeCosts: { atk: 0, speed: 0, hp: 0 },
 
   speed: 1,
-  autoUpgrade: false,
   autoCast: false,
+  autoAllocate: false,
   soundMuted: false,
+
+  hasSyncedOnce: false,
+  ftueCompleted: true,
+  onboardingStepIndex: -1,
 
   pendingInput: emptyPendingInput(),
 
-  syncFromEngine: (snapshot) => set(snapshot),
+  syncFromEngine: (snapshot) => set({ ...snapshot, hasSyncedOnce: true }),
 
   setSpeed: (speed) => set({ speed }),
-  toggleAutoUpgrade: () => set((s) => ({ autoUpgrade: !s.autoUpgrade })),
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
+  toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
   toggleSound: () =>
     set((s) => {
       const soundMuted = !s.soundMuted;
@@ -187,21 +395,54 @@ export const useGameStore = create<HudState>((set, get) => ({
     }),
   setSoundMuted: (soundMuted) => set({ soundMuted }),
 
-  castSkill: (slot) =>
+  startOnboarding: () => set({ onboardingStepIndex: 0 }),
+  setOnboardingStepIndex: (onboardingStepIndex) => set({ onboardingStepIndex }),
+  completeOnboarding: () => {
+    writeFtueCompleted(true);
+    set({ onboardingStepIndex: -1, ftueCompleted: true });
+  },
+  setFtueCompleted: (ftueCompleted) => set({ ftueCompleted }),
+  resetOnboarding: () => {
+    writeFtueCompleted(false);
+    set({ ftueCompleted: false, onboardingStepIndex: 0 });
+  },
+
+  castSkill: (skillId) =>
     set((s) => ({
-      pendingInput: s.pendingInput.castSkills.includes(slot)
+      pendingInput: s.pendingInput.castSkills.some((c) => c.skillId === skillId)
         ? s.pendingInput
-        : { ...s.pendingInput, castSkills: [...s.pendingInput.castSkills, slot] },
+        : {
+            ...s.pendingInput,
+            castSkills: [...s.pendingInput.castSkills, { slot: 0, skillId }],
+          },
     })),
 
-  buyUpgrade: (stat) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, buyUpgrade: stat } })),
+  setAutoSlot: (slot, skillId) =>
+    set((s) => ({
+      pendingInput: {
+        ...s.pendingInput,
+        // Last-wins per slot: replace any pending assignment for the same slot.
+        setAutoSlots: [
+          ...s.pendingInput.setAutoSlots.filter((a) => a.slot !== slot),
+          { slot, skillId },
+        ],
+      },
+    })),
 
   challengeBoss: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, challengeBoss: true } })),
 
   advanceStage: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, advanceStage: true } })),
+
+  evolveHero: (slot) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, evolveHero: slot } })),
+
+  acceptQuest: (slot) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, acceptQuest: slot } })),
+
+  allocateStat: (stat, amount) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, allocateStat: { stat, amount } } })),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;
