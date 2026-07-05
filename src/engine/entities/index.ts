@@ -9,6 +9,30 @@
 /** Player hero classes (POC: sword / archer / mage). */
 export type HeroClass = "swordsman" | "archer" | "mage";
 
+/**
+ * Base-stat axes (M5 "Base stats", 86d3jv7m3 — RO-flavoured but lean):
+ *  - str: melee attack power (the swordsman's damage stat).
+ *  - dex: ranged attack power (the archer's damage stat) + a small universal
+ *    attack-SPEED factor (faster attacks for any class).
+ *  - int: magic attack power (the mage's damage stat); the future mana pool
+ *    (task 4) will also key off int — the hook is designed, not built.
+ *  - vit: max HP (universal). A defense/mitigation factor is left as a future
+ *    hook — the combat engine has no mitigation concept yet, so VIT is HP-only.
+ *
+ * A class's DAMAGE scales off its PRIMARY stat only (sword=str, archer=dex,
+ * mage=int); an off-affinity damage stat (e.g. str on an archer) is inert. The
+ * universal effects (dex→atk-speed, vit→HP) apply to every class.
+ */
+export type StatKey = "str" | "dex" | "int" | "vit";
+
+/** A hero's allocated base-stat block (absolute values = class base + spent). */
+export interface HeroStats {
+  str: number;
+  dex: number;
+  int: number;
+  vit: number;
+}
+
 /** Enemy kinds (POC: grunt / runner / tank / shooter). */
 export type EnemyKind = "normal" | "fast" | "tank" | "ranged";
 
@@ -65,6 +89,20 @@ export interface Hero {
    * that compounds with upgrades + levels. Persisted per hero. Single path in M5.
    */
   tier: 1 | 2;
+  /**
+   * Unspent base-stat points (M5 "Base stats"). Each level-up grants
+   * `CONFIG.stats.pointsPerLevel`; the player allocates them via the
+   * `allocateStat` intent (or the auto-allocate toggle dumps them into the
+   * class primary stat). Persisted per hero.
+   */
+  statPoints: number;
+  /**
+   * Allocated base-stat block (absolute values). Starts at the class base
+   * (`CONFIG.stats.base[cls]`); allocation only ever raises a value. The
+   * DAMAGE/HP/speed bonuses are computed from the amount ABOVE the class base
+   * (so a fresh, unallocated hero sits exactly on its class baseline). Persisted.
+   */
+  stats: HeroStats;
 }
 
 export interface Enemy {

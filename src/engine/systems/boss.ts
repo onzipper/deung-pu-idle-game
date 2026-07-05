@@ -16,7 +16,7 @@
 import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { makeBoss } from "@/engine/entities";
-import { heroAtk } from "@/engine/systems/stats";
+import { combatPower } from "@/engine/systems/stats";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { applyDamage } from "@/engine/systems/damage";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
@@ -123,9 +123,9 @@ export interface BossHint {
   stage: number;
   bossHp: number;
   bossAtk: number;
-  /** Suggested team attack power to attempt the fight. */
+  /** Suggested combat power to attempt the fight (bossHp / divisor). */
   recommendedPower: number;
-  /** Current summed team attack power. */
+  /** Current summed team COMBAT POWER (effective DPS + HP, not raw atk). */
   teamPower: number;
   ready: boolean;
 }
@@ -134,10 +134,10 @@ export function bossHint(state: GameState): BossHint {
   const bossHp = CONFIG.bossHp(state.stage);
   const bossAtk = CONFIG.bossAtk(state.stage);
   const recommendedPower = Math.round(bossHp / CONFIG.bossHintPowerDivisor);
-  const teamPower = state.heroes.reduce(
-    (sum, h) => sum + heroAtk(h.cls, h.level, h.tier),
-    0,
-  );
+  // teamPower is now sum(combatPower) — effective DPS + survivability — so it no
+  // longer under-reads the skill-heavy ranged classes that raw summed atk did
+  // (the pivot-handoff flag). Both sides are on the same combat-power scale.
+  const teamPower = state.heroes.reduce((sum, h) => sum + combatPower(h), 0);
   return {
     stage: state.stage,
     bossHp,

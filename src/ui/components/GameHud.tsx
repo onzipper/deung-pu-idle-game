@@ -17,6 +17,7 @@ import { HudBar } from "@/ui/components/HudBar";
 import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
 import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
+import { StatPanel } from "@/ui/components/StatPanel";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
@@ -67,6 +68,8 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
 
       <div className="flex flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
         <SkillBar />
+        <div className="h-px bg-ddp-border-soft" />
+        <StatPanel />
         <div className="h-px bg-ddp-border-soft" />
         <div
           data-onboarding-anchor="settings-row"

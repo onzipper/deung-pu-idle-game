@@ -37,6 +37,28 @@
     "evolveAriaLabel": "{heroName}: Evolve{state, select, locked { (unlocks at Lv.{level})} confirm { (tap again to confirm)} other {, cost {cost} gold}}",
     "evolvedBadgeTitle": "{name} (Evolved)"
   },
+  "stats": {
+    "title": "Stats",
+    "pointsBadge": "+{count} pts",
+    "pointsTitle": "Unspent stat points — tap + to allocate",
+    "combatPower": "Power",
+    "autoAllocateToggle": "🎯 Auto Stat: {state, select, on {ON} other {OFF}}",
+    "allocateAria": "Add 1 point to {stat}",
+    "primaryTag": "main",
+    "names": { "str": "STR", "dex": "DEX", "int": "INT", "vit": "VIT" },
+    "full": {
+      "str": "Strength",
+      "dex": "Dexterity",
+      "int": "Intelligence",
+      "vit": "Vitality"
+    },
+    "effect": {
+      "str": "Melee attack",
+      "dex": "Ranged attack + attack speed",
+      "int": "Magic attack",
+      "vit": "Max HP"
+    }
+  },
   "settings": {
     "speedLabel": "Speed",
     "soundOn": "Unmute",
@@ -112,7 +134,6 @@
     "categories": {
       "coreLoop": "Core Loop",
       "heroes": "Heroes",
-      "upgrades": "Upgrades",
       "boss": "Boss",
       "controls": "Controls",
       "offlineIdle": "Offline Gold"
@@ -130,19 +151,6 @@
       },
       "hero-mage": {
         "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and has their own special skill usable once its cooldown is up (tap the skill button on the skill bar, or turn on Auto Skill to let it cast itself)."
-      },
-      "upgrade-atk": {
-        "body": "Increases every hero's attack power — more damage per hit, helping both wave clears and boss fights."
-      },
-      "upgrade-speed": {
-        "body": "Increases attack speed (attacks land more often). This line has a maximum cap; once reached, the button shows MAX."
-      },
-      "upgrade-hp": {
-        "body": "Increases every hero's max HP. A tankier team survives longer both clearing waves and dueling the boss."
-      },
-      "autoUpgrade": {
-        "title": "💰 Auto Upgrade",
-        "body": "When on, the game automatically spends gold on the cheapest available upgrade the instant you can afford it — no manual buying needed."
       },
       "boss": {
         "title": "Challenging the stage boss",
@@ -178,11 +186,6 @@
         "desc": "Rains arrows across the whole battlefield"
       },
       "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" }
-    },
-    "upgrades": {
-      "atk": { "name": "Power" },
-      "speed": { "name": "Speed" },
-      "hp": { "name": "Vitality" }
     },
     "quests": {},
     "items": {}

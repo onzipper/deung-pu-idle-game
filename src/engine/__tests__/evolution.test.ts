@@ -114,7 +114,11 @@ describe("evolution stat multipliers", () => {
     step(s, { evolveHero: 0 });
 
     const atkAfter = heroAtk(h.cls, h.level, h.tier);
-    expect(atkAfter).toBe(Math.round(atkBefore * EV.atkMult));
+    // tier-2 atk is the engine's SINGLE-rounded value (base * level * atkMult);
+    // the ratio tracks EV.atkMult up to rounding on the small M5 base-stat scale.
+    expect(atkAfter).toBe(heroAtk(h.cls, h.level, 2));
+    expect(atkAfter).toBeGreaterThan(atkBefore);
+    expect(atkAfter / atkBefore).toBeCloseTo(EV.atkMult, 1);
     // maxHp equals the engine's single-round tier-2 value (not a double-round of
     // the pre-value), and it grew by ~the hp multiplier.
     expect(h.maxHp).toBe(heroMaxHp(h.cls, h.level, 2));
@@ -198,9 +202,17 @@ describe("migrate pre-v4 tier handling", () => {
       ],
       lastSeen: 0,
     };
-    const v4 = migrate(v2);
-    expect(v4.version).toBe(SAVE_VERSION);
-    expect(v4.hero).toEqual({ cls: "archer", level: 5, xp: 1, tier: 1 });
+    const v5 = migrate(v2);
+    expect(v5.version).toBe(SAVE_VERSION);
+    // v5: base stats granted (retro points = level * pointsPerLevel, base block).
+    expect(v5.hero).toEqual({
+      cls: "archer",
+      level: 5,
+      xp: 1,
+      tier: 1,
+      statPoints: 5 * CONFIG.stats.pointsPerLevel,
+      stats: { ...CONFIG.stats.base.archer },
+    });
   });
 
   it("preserves an existing tier 2 on the adopted hero", () => {
@@ -209,9 +221,16 @@ describe("migrate pre-v4 tier handling", () => {
       unlocked: ["swordsman"],
       heroes: [{ level: 9, xp: 2, tier: 2 as const }],
     };
-    const v4 = migrate(v3);
-    expect(v4.hero).toEqual({ cls: "swordsman", level: 9, xp: 2, tier: 2 });
-    expect(migrate(v4)).toEqual(v4);
+    const v5 = migrate(v3);
+    expect(v5.hero).toEqual({
+      cls: "swordsman",
+      level: 9,
+      xp: 2,
+      tier: 2,
+      statPoints: 9 * CONFIG.stats.pointsPerLevel,
+      stats: { ...CONFIG.stats.base.swordsman },
+    });
+    expect(migrate(v5)).toEqual(v5);
   });
 });
 

@@ -22,7 +22,7 @@
  */
 
 import { create } from "zustand";
-import type { BossHint, HeroClass, Phase, SpeedMultiplier } from "@/engine";
+import type { BossHint, HeroClass, HeroStats, Phase, SpeedMultiplier, StatKey } from "@/engine";
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
 export interface HeroSummary {
@@ -52,6 +52,15 @@ export interface HeroSummary {
   /** Gold cost of evolving this hero (`evolutionCost(hero.cls)`), for the
    * evolve affordance's cost label/tooltip — irrelevant once `tier === 2`. */
   evolutionCost: number;
+  /** Unspent base-stat points (M5 "Base stats") — drives the stat-panel badge. */
+  statPoints: number;
+  /** Allocated base-stat block (absolute values), for the +stat readouts. */
+  stats: HeroStats;
+  /** This hero's class primary (auto-allocate target) — for the panel's hint. */
+  primaryStat: StatKey;
+  /** Precomputed `combatPower(hero)` read ("พลังต่อสู้") — same one-way display
+   * pattern as `canEvolve`: the engine computes it, the store just carries it. */
+  combatPower: number;
 }
 
 /** The throttled snapshot shape pushed by the integration loop. */
@@ -75,6 +84,9 @@ export interface PendingInput {
   /** Hero slot index to evolve (M5), or `null` (last-wins per frame — a big
    * one-way purchase never needs to queue more than one per frame). */
   evolveHero: number | null;
+  /** Base-stat allocation for the solo hero (M5), or `null`. Last-wins per frame
+   * (a click allocates once; the engine no-ops an invalid/over-cap amount). */
+  allocateStat: { stat: StatKey; amount: number } | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -83,6 +95,7 @@ function emptyPendingInput(): PendingInput {
     challengeBoss: false,
     advanceStage: false,
     evolveHero: null,
+    allocateStat: null,
   };
 }
 
@@ -206,6 +219,10 @@ export interface HudState {
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   speed: SpeedMultiplier;
   autoCast: boolean;
+  /** Auto-allocate base-stat points into the class primary stat (M5 "Base
+   * stats"). UI-owned like `autoCast`: the loop copies it onto `state.autoAllocate`
+   * every frame; not part of `FrameInput`, never persisted. */
+  autoAllocate: boolean;
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
    * every frame and applies it to the `AudioController`, same pattern as
@@ -237,6 +254,7 @@ export interface HudState {
 
   setSpeed: (speed: SpeedMultiplier) => void;
   toggleAutoCast: () => void;
+  toggleAutoAllocate: () => void;
   toggleSound: () => void;
   /** Mount-effect-only: apply the persisted preference once, post-hydration
    * (see `soundMuted`'s doc comment). Does NOT re-persist (avoids a
@@ -265,6 +283,9 @@ export interface HudState {
   /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
    * `buyUpgrade`) — the engine no-ops it if requirements aren't met. */
   evolveHero: (slot: number) => void;
+  /** Queue a base-stat allocation for the solo hero (last-wins per frame) — the
+   * engine no-ops an invalid/over-cap/over-spend amount. */
+  allocateStat: (stat: StatKey, amount: number) => void;
 
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
@@ -283,6 +304,7 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   speed: 1,
   autoCast: false,
+  autoAllocate: false,
   soundMuted: false,
 
   hasSyncedOnce: false,
@@ -295,6 +317,7 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   setSpeed: (speed) => set({ speed }),
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
+  toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
   toggleSound: () =>
     set((s) => {
       const soundMuted = !s.soundMuted;
@@ -330,6 +353,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   evolveHero: (slot) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, evolveHero: slot } })),
+
+  allocateStat: (stat, amount) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, allocateStat: { stat, amount } } })),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;

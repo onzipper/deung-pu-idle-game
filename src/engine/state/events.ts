@@ -14,7 +14,7 @@
  * single plain-object allocation per game moment.
  */
 
-import type { EnemyKind, HeroClass, ProjectileKind } from "@/engine/entities";
+import type { EnemyKind, HeroClass, ProjectileKind, StatKey } from "@/engine/entities";
 
 /** Which side of the board a damaged target belongs to. */
 export type HitTargetKind = "hero" | "enemy" | "boss";
@@ -44,6 +44,7 @@ export type GameEvent =
   | { type: "heroRevived"; id: number; cls: HeroClass; x: number; y: number }
   | { type: "levelUp"; id: number; cls: HeroClass; level: number }
   | { type: "evolve"; id: number; cls: HeroClass; tier: number }
+  | { type: "statAllocated"; id: number; stat: StatKey; amount: number }
   | { type: "skillCast"; heroClass: HeroClass; slot: number }
   | { type: "projectileSpawn"; kind: ProjectileKind; x: number; y: number }
   | { type: "bossSlamTelegraph"; x: number; y: number }

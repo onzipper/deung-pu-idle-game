@@ -34,6 +34,12 @@ import { computeOfflineTime, type OfflineResult } from "@/server/offline";
 // SLOT_ORDER is the authoritative list of known hero classes.
 const KNOWN_CLASSES = [...SLOT_ORDER] as [HeroClass, ...HeroClass[]];
 
+/** A base-stat block: four non-negative integer axes (M5 "Base stats", SAVE v5). */
+const statAxis = z.number().int().min(0).max(CONFIG.stats.cap);
+const statBlockSchema = z
+  .object({ str: statAxis, dex: statAxis, int: statAxis, vit: statAxis })
+  .strict();
+
 /**
  * The accepted incoming-save contract (M5 v4 single character). Anything that
  * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
@@ -49,14 +55,19 @@ export const saveDataSchema = z
     // Gold is a non-negative finite amount (engine keeps it integral, but we
     // don't hard-require int() so rounding never spuriously 400s a real save).
     gold: z.number().min(0).finite(),
-    // The single active character (M5): chosen class + level/xp/tier. `tier` is
-    // the class-advancement tier (1 = base, 2 = evolved).
+    // The single active character (M5): chosen class + level/xp/tier + base stats.
+    // `tier` is the class-advancement tier (1 = base, 2 = evolved). `statPoints`
+    // (unspent) and `stats` (allocated block) are the M5 "Base stats" (SAVE v5);
+    // both are OPTIONAL so a payload missing them is backfilled by `migrate()`
+    // (retro grant), same resilience as the optional server-owned `lastSeen`.
     hero: z
       .object({
         cls: z.enum(KNOWN_CLASSES),
         level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
         xp: z.number().min(0).finite(),
         tier: z.number().int().min(1).max(2),
+        statPoints: z.number().int().min(0).optional(),
+        stats: statBlockSchema.optional(),
       })
       .strict(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave

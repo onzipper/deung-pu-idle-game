@@ -4,12 +4,14 @@ import { SAVE_VERSION, CONFIG } from "@/engine";
 
 /**
  * Validation is the server's trust boundary: `parseSaveData` is the pure gate
- * every incoming save passes before it can touch the DB. M5 v4: the payload is a
- * single character (`hero: {cls, level, xp, tier}`) — the upgrade lines / unlocked
- * roster are gone. These exercise the accept/reject rules headlessly (no DB).
+ * every incoming save passes before it can touch the DB. M5 v5: the payload is a
+ * single character (`hero: {cls, level, xp, tier, statPoints?, stats?}`) — the
+ * upgrade lines / unlocked roster are gone; base stats (M5) are optional (migrate
+ * backfills). These exercise the accept/reject rules headlessly (no DB).
  */
 
-/** A minimal well-formed v4 payload a well-behaved client would POST. */
+/** A minimal well-formed payload a well-behaved client would POST (base stats
+ * omitted here — migrate backfills them; a couple of tests below send them). */
 function validSave(overrides: Record<string, unknown> = {}) {
   return {
     version: SAVE_VERSION,
@@ -29,8 +31,54 @@ describe("parseSaveData — accepts", () => {
       expect(r.data.version).toBe(SAVE_VERSION);
       expect(r.data.stage).toBe(3);
       expect(r.data.gold).toBe(500);
-      expect(r.data.hero).toEqual({ cls: "archer", level: 4, xp: 12, tier: 2 });
+      // Base stats omitted in the payload -> migrate backfills (retro grant +
+      // class base block).
+      expect(r.data.hero).toEqual({
+        cls: "archer",
+        level: 4,
+        xp: 12,
+        tier: 2,
+        statPoints: 4 * CONFIG.stats.pointsPerLevel,
+        stats: { ...CONFIG.stats.base.archer },
+      });
     }
+  });
+
+  it("accepts a full v5 hero WITH base stats and preserves them", () => {
+    const r = parseSaveData(
+      validSave({
+        hero: {
+          cls: "mage",
+          level: 20,
+          xp: 5,
+          tier: 1,
+          statPoints: 3,
+          stats: { str: 3, dex: 4, int: 50, vit: 12 },
+        },
+      }),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.hero.statPoints).toBe(3);
+      expect(r.data.hero.stats).toEqual({ str: 3, dex: 4, int: 50, vit: 12 });
+    }
+  });
+
+  it("rejects a negative / non-integer stat axis", () => {
+    expect(
+      parseSaveData(
+        validSave({
+          hero: { cls: "mage", level: 1, xp: 0, tier: 1, stats: { str: -1, dex: 4, int: 8, vit: 4 } },
+        }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseSaveData(
+        validSave({
+          hero: { cls: "mage", level: 1, xp: 0, tier: 1, stats: { str: 3.5, dex: 4, int: 8, vit: 4 } },
+        }),
+      ).ok,
+    ).toBe(false);
   });
 
   it("accepts a save with lastSeen omitted (server owns it)", () => {

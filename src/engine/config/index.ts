@@ -7,7 +7,14 @@
  * stage number `n`, exactly as the POC wrote them.
  */
 
-import type { HeroClass, EnemyKind, AttackKind, EnemyBehavior } from "@/engine/entities";
+import type {
+  HeroClass,
+  EnemyKind,
+  AttackKind,
+  EnemyBehavior,
+  StatKey,
+  HeroStats,
+} from "@/engine/entities";
 
 // M5 Character Pivot (docs/GDD.md v2): the 3-hero team became a SINGLE player
 // character. The formation / targeting / multi-hero combat engine is KEPT intact
@@ -280,12 +287,23 @@ export const CONFIG = {
   leveling: {
     // Level cap; the evolution gate keys off a threshold below this.
     levelCap: 60,
-    // Per-level ADDITIVE multipliers (compound with the tier multiplier). atk
-    // now carries real growth so a solo hero's DPS tracks the geometric HP curve
-    // across S1->S10 (a stuck hero out-levels a wall from the kills it does land
-    // before dying — the anti-permanent-stall guarantee). hp gives survivability
-    // so a class can tank a wave solo without a front-line team-mate.
-    atkPerLevel: 0.1,
+    // Per-level ADDITIVE bonuses (combine additively with the primary-stat atk
+    // bonus, then the tier multiplier applies).
+    //
+    // M5 "Base stats" re-tune (avoid double-counting): pre-stats, LEVELS carried
+    // ALL atk scaling at 0.10/level. Base stats now let the player allocate
+    // `stats.pointsPerLevel` (3) points per level into the class PRIMARY stat for
+    // `stats.atkPerPrimaryPoint` (0.02) each, so an auto-allocated hero adds
+    // 3 * 0.02 = 0.06/level of atk from STATS. atkPerLevel is dropped 0.10 -> 0.04
+    // so the innate level bonus (0.04) + auto-allocated primary bonus (0.06) sum
+    // back to the SAME 0.10/level total power growth as the pre-stats baseline
+    // (exact for an organically-levelled hero — see stats.ts / docs/balance-m5.md).
+    // Manually diverting points into vit/dex trades atk for survivability/speed.
+    atkPerLevel: 0.04,
+    // hp stays LEVEL-driven at 0.09/level: auto-allocate feeds the PRIMARY stat
+    // (never vit), so if HP scaling moved to vit an idle hero would get none and
+    // die. VIT (below) is an OPTIONAL survivability investment ON TOP of this.
+    // Unchanged from the pre-stats baseline, so auto-allocated HP == baseline.
     hpPerLevel: 0.09,
     // XP granted to the solo hero per NORMAL enemy kill; scales with stage so
     // deeper (tougher) kills are worth more and leveling keeps pace with HP.
@@ -296,6 +314,60 @@ export const CONFIG = {
     // geometric growth so the hero keeps leveling deep into the run (reaching
     // ~L40+ by S10) rather than stalling at a hard cap mid-game.
     xpToLevel: (level: number): number => Math.round(30 * Math.pow(1.12, level - 1)),
+  },
+
+  // ---- base stats (M5 "Base stats", 86d3jv7m3) ----
+  // Four RO-flavoured axes the player allocates on level-up (see entities StatKey).
+  // A class's DAMAGE scales off its PRIMARY stat only (str/dex/int); dex also gives
+  // a small UNIVERSAL atk-speed factor and vit a UNIVERSAL max-HP bonus. Bonuses
+  // are computed from the amount ALLOCATED ABOVE the class base, so a fresh hero
+  // sits exactly on its class baseline (stats.ts). Auto-allocate (UI toggle) dumps
+  // points into the primary stat so idle players never drown in unspent points.
+  // NO RNG (deterministic); the seeded stream stays wave-composition-only.
+  stats: {
+    // Points granted per level-up. The atk re-tune above is calibrated to this:
+    // pointsPerLevel * atkPerPrimaryPoint (3 * 0.02 = 0.06) is exactly the atk/level
+    // moved out of the innate level bonus, so auto == baseline (docs/balance-m5.md).
+    pointsPerLevel: 3,
+    // Per-stat allocation ceiling (no respec in this phase — a future NPC service).
+    // Generous; exists only so a hand-edited save can't drive stats to absurdity.
+    cap: 999,
+    // ATK-mult per PRIMARY-stat point above base (additive with the level bonus).
+    atkPerPrimaryPoint: 0.02,
+    // HP-mult per VIT point above base (additive with the level hp bonus). VIT is
+    // NOT auto-allocated, so this never perturbs the auto baseline — it's the
+    // manual "tank" investment. (No mitigation axis exists in combat yet — VIT is
+    // HP-only; a defense/mitigation factor is a documented future hook.)
+    hpPerVitPoint: 0.03,
+    // Universal atk-SPEED factor per DEX point above base (lower cooldown = faster).
+    // Deliberately tiny: the archer's PRIMARY is dex, so auto-allocate funnels every
+    // point into dex — a large factor would inflate archer DPS out of budget. At the
+    // ~S10 clear level (~108 allocated dex) this is only ~+4% attack speed. It is
+    // mostly a future-facing hook; a manual off-stat dabbler feels it slightly.
+    atkSpeedPerDexPoint: 0.0004,
+    // Per-class STARTING stat block (the zero-point for bonuses + the RO-flavour
+    // display value). Primary stat highest; vit tracks the class survivability
+    // identity (sword tanky, mage squishy). Because bonuses are measured ABOVE
+    // base, these values grant NO power themselves — they set where allocation
+    // begins. (The class HP identity itself still lives in HERO_TYPES.hpMult:
+    // folding it into base vit is rejected because vit isn't auto-allocated, so
+    // idle heroes would lose their class survivability — see docs/balance-m5.md.)
+    base: {
+      swordsman: { str: 8, dex: 4, int: 3, vit: 6 },
+      archer: { str: 4, dex: 8, int: 3, vit: 5 },
+      mage: { str: 3, dex: 4, int: 8, vit: 4 },
+    } satisfies Record<HeroClass, HeroStats>,
+  },
+
+  // ---- combat power ("พลังต่อสู้") — the HOF metric + boss-hint gauge ----
+  // A single scalar from a hero's EFFECTIVE DPS (basic + skill, so it no longer
+  // under-reads the skill-heavy ranged classes the way raw summed atk did) plus a
+  // survivability term from max HP. Monotonic non-decreasing in every stat point,
+  // level, and tier. Weights are advisory-scale (the sim ignores the hint); tuned
+  // so the boss-hint divisor lands "ready" near a real clear (see combatPower).
+  power: {
+    dpsWeight: 6,
+    hpWeight: 0.5,
   },
 
   // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----
@@ -320,7 +392,12 @@ export const CONFIG = {
   },
 
   // ---- flow / progression ----
-  bossHintPowerDivisor: 26, // recommendedPower = round(bossHp / this)
+  // recommendedPower = round(bossHp / this), on the COMBAT-POWER scale (M5 base
+  // stats): teamPower is now `sum(combatPower(hero))` (effective DPS + HP), not
+  // raw summed atk, so the divisor was re-derived from 26 -> 2 to keep "ready"
+  // landing near an actual clear. Advisory only (the sim challenges on the kill
+  // goal + retry loop, never this hint).
+  bossHintPowerDivisor: 2, // recommendedPower = round(bossHp / this)
   bossRetreatWaveGap: 1.0, // waveGap after a boss retreat / solo respawn
   nextStageWaveGap: 0.8, // waveGap at the start of a new stage
 
@@ -430,6 +507,17 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
  * known-classes enum and the evolution cost index both key off it.
  */
 export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage"];
+
+/**
+ * Each class's PRIMARY (damage-scaling) base stat, and the auto-allocate target
+ * (M5 "Base stats"). Mirrors the attack kind: melee→str, ranged→dex, magic→int.
+ * The class's `heroAtk` scales off this stat; off-affinity damage stats are inert.
+ */
+export const PRIMARY_STAT: Record<HeroClass, StatKey> = {
+  swordsman: "str",
+  archer: "dex",
+  mage: "int",
+};
 
 export interface EnemyType {
   hpMult: number;

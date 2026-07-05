@@ -3,6 +3,12 @@
 ClickUp: 86d3jv7m3 · Branch: `develop` · Supersedes [balance-m4.md](./balance-m4.md)
 for team composition (that table was a 3-hero baseline; it no longer applies).
 
+> **Base-stats update (task 3)** is documented in its own section at the bottom
+> ("Base stats — the STAT re-tune"). It re-runs the sim with **auto-allocate on**
+> and lands within ~±1% of the solo table below for S1–S10 (the re-tune is
+> calibrated to be baseline-neutral by construction). Read that section for the
+> per-point stat effects, the combat-power formula, and the new sim table.
+
 ## What changed (M5 Character Pivot)
 
 The game went from a **3-hero team** to a **single player character** (docs/GDD.md
@@ -112,15 +118,100 @@ life → XP). Future milestones extend progression past here.
 
 ## Notes for phase-2 M5 tasks
 
-- **Base stats (task 3):** with upgrades gone, the per-class `HERO_TYPES.hpMult`
-  is a placeholder survivability axis — fold it into the real base-stat allocation.
-  Level growth (atk/hp per level) currently carries all scaling; adding player-
-  allocated stats will need a re-tune to avoid double-counting.
+- **Base stats (task 3): DONE** — see "Base stats — the STAT re-tune" below.
 - **Mana (task 4):** skills are cooldown-only here. A solo hero's skill is a large
   slice of its DPS (esp. the mage meteor vs bosses); gating skills behind mana will
   materially cut effective DPS and require a re-run.
 - **Class-change quests (task 5):** they replace the current player-triggered
   `evolveHero` gold trigger; the tier-2 multipliers stay the power delta.
-- **Boss hint** (`bossHintPowerDivisor`, `teamPower`) still sums raw hero atk, which
-  under-reads high-DPS-low-atk classes (archer/mage). It's advisory-only now (the
-  sim ignores it); if the UI leans on it, make it effective-DPS-aware.
+- **Boss hint** (`bossHintPowerDivisor`, `teamPower`): **FIXED in task 3.**
+  `teamPower` is now `sum(combatPower(hero))` — effective DPS (basic + skill) plus a
+  survivability term — so it no longer under-reads the skill-heavy ranged classes.
+  `bossHintPowerDivisor` was re-derived 26 → 2 for the new combat-power scale.
+
+---
+
+## Base stats — the STAT re-tune (task 3, 86d3jv7m3)
+
+Four RO-flavoured axes the player allocates on level-up: **STR** (melee atk),
+**DEX** (ranged atk + a small universal atk-speed factor), **INT** (magic atk; the
+future mana pool keys off it — task 4), **VIT** (max HP; no mitigation axis exists
+in combat yet, so VIT is HP-only — a defense/mitigation factor is a documented
+future hook). A class's DAMAGE scales off its **primary** stat only
+(sword=STR, archer=DEX, mage=INT); an off-affinity damage stat is inert. The
+universal effects (DEX atk-speed, VIT HP) apply to every class.
+
+### Per-point effects & knobs
+
+| knob | value | effect |
+|---|---|---|
+| `stats.pointsPerLevel` | **3** | points granted per level-up |
+| `stats.atkPerPrimaryPoint` | **0.02** | +2% of class-base atk per PRIMARY point above base (additive) |
+| `stats.hpPerVitPoint` | **0.03** | +3% of class-base HP per VIT point above base (additive) |
+| `stats.atkSpeedPerDexPoint` | **0.0004** | attack-speed factor per DEX point above base (`atkSpeed / (1 + dex·k)`) — tiny on purpose (see archer note) |
+| `stats.cap` | 999 | per-stat allocation ceiling (no respec — a future NPC service) |
+| `stats.base.*` | sword `{8,4,3,6}` · archer `{4,8,3,5}` · mage `{3,4,8,4}` (str,dex,int,vit) | RO-flavour starting block + the bonus ZERO-POINT (grants no power itself) |
+
+**No-double-count calibration.** Pre-stats, levels carried all atk at **0.10/level**
+(`atkPerLevel`). That axis is split: `atkPerLevel` drops **0.10 → 0.04**, and an
+auto-allocated hero adds `pointsPerLevel · atkPerPrimaryPoint = 3 · 0.02 = 0.06`/level
+from stats. `0.04 + 0.06 = 0.10` — an organically-levelled auto-allocated hero
+reproduces the pre-stats atk curve **exactly** (unit-tested). HP stays LEVEL-driven
+(`hpPerLevel` unchanged at 0.09) because auto-allocate feeds the PRIMARY stat, never
+VIT — moving HP scaling to VIT would leave idle heroes with none.
+
+**Why `hpMult` is NOT folded into VIT** (the handoff flag): `HERO_TYPES.hpMult`
+(sword 1.5 / archer 1.0 / mage 0.95) stays as the class HP identity. VIT isn't
+auto-allocated, so folding class survivability into it would erase it for idle
+players; and mage's sub-1.0 multiplier can't be expressed as a positive additive VIT
+bonus without inflating base-stat magnitudes out of a lean RO range. VIT is instead
+the player's OPTIONAL survivability investment ON TOP of the class base.
+
+**Manual allocation matters** (the FEEL target): a level's 3 points is either +6%
+atk (primary) or +9% HP (VIT) or a slice of atk-speed (DEX) — a real, visible
+damage/survivability/tempo trade. Auto-allocate dumps everything into the primary
+stat so idle players never drown in unspent points; it emits **no** event, whereas a
+manual allocation emits a `statAllocated` event (UI feedback only).
+
+### Combat power ("พลังต่อสู้") — the HOF metric + boss gauge
+
+`combatPower(hero)` (pure, exported) = a single scalar:
+
+```
+offense = heroAtk/heroAtkSpeed  +  heroAtk·skillEffectiveMult / skillCd   (basic + skill DPS)
+combatPower = round(offense · power.dpsWeight + heroMaxHp · power.hpWeight)   // 6 · offense + 0.5 · HP
+```
+
+`skillEffectiveMult` is derived from `SKILL_TYPES` (archer = `mult · targets` for the
+9-drop rain; others = `mult`), so it counts skill DPS and no longer under-reads the
+ranged classes the way raw summed atk did. It is non-decreasing in every stat point,
+level, and tier. `bossHint.teamPower` is now `sum(combatPower)`; `recommendedPower =
+bossHp / 2` lands "ready" near an actual clear (advisory only — the sim challenges on
+the kill goal + retry loop, never the hint).
+
+### Re-run (auto-allocate ON) — baseline-neutral
+
+`SIM_SECONDS=2400`, 5 seeds, `s.autoAllocate = true`. Mean time-to-clear (s):
+
+| stage | swordsman | archer | mage | Δ vs pre-stats table |
+|------:|----------:|-------:|-----:|:--|
+| 1  |  34 |  37 |  51 | ≈0 |
+| 2  |  54 |  50 |  60 | ≈0 |
+| 3  |  81 |  49 |  70 | ≈0 |
+| 4  |  94 |  59 |  85 | ≈0 |
+| 5  |  93 |  68 |  93 | ≈0 |
+| 6  | 103 |  72 |  99 | ≈0 |
+| 7  | 114 |  85 | 112 | ≈0 |
+| 8  | 136 | 102 | 130 | ≈0 |
+| 9  | 146 | 110 | 148 | ≈0 |
+| 10 | 165 | 129 | 170 | ≈0 |
+| 11 | 316 | 159 | 382 | archer −14% (DEX atk-speed at high lvl — an improvement, in budget) |
+
+Every class clears **S1–S10 on every seed (5/5)**, **0 boss wipes** through S10,
+spread ≤1.65× (unchanged). The only material move is **archer S11 184 → 159s**:
+because DEX is the archer's primary, auto-allocate funnels points into it and the
+small atk-speed factor compounds at high level — a modest speed-up, within the ±15%
+budget, and only at the S11 soft grind. The **S12 content ceiling is intact**
+(0/5 — intended; extended by M6/M7). The tiny per-point atk-speed factor
+(`0.0004`) exists precisely so this archer effect stays in budget rather than
+blowing it.

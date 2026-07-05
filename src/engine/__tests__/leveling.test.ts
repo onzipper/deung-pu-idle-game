@@ -64,9 +64,13 @@ describe("level stat multipliers", () => {
   });
 
   it("tier-2 evolution compounds on the level bonus", () => {
-    expect(heroAtk("swordsman", 10, 2)).toBe(
-      Math.round(heroAtk("swordsman", 10, 1) * CONFIG.evolution.atkMult),
-    );
+    // Single-round of base * levelMult * tierMult (the engine computes it in one
+    // round; a double-round of the tier-1 value can drift by 1 on the small M5
+    // base-stat scale, so assert against the direct formula).
+    const levelMult = 1 + 9 * LV.atkPerLevel;
+    const base = CONFIG.heroBaseAtk * HERO_TYPES.swordsman.dmgMult * levelMult;
+    expect(heroAtk("swordsman", 10, 2)).toBe(Math.round(base * CONFIG.evolution.atkMult));
+    expect(heroAtk("swordsman", 10, 2)).toBeGreaterThan(heroAtk("swordsman", 10, 1));
   });
 });
 
@@ -159,8 +163,8 @@ describe("progression persists across stage resets and saves", () => {
   });
 });
 
-describe("migrate pre-v4 team -> v4 single character", () => {
-  it("adopts the highest-level unlocked hero and drops the rest + upgrades", () => {
+describe("migrate pre-v5 team/single -> v5 base stats", () => {
+  it("adopts the highest-level unlocked hero, drops the rest + upgrades, grants stats", () => {
     const v3 = {
       version: 3,
       stage: 4,
@@ -173,13 +177,36 @@ describe("migrate pre-v4 team -> v4 single character", () => {
       ],
       lastSeen: 0,
     };
-    const v4 = migrate(v3);
-    expect(v4.version).toBe(SAVE_VERSION);
-    expect(v4.hero).toEqual({ cls: "archer", level: 7, xp: 9, tier: 2 });
+    const v5 = migrate(v3);
+    expect(v5.version).toBe(SAVE_VERSION);
+    // v5: retro stat points = level * pointsPerLevel, unallocated (base block).
+    expect(v5.hero).toEqual({
+      cls: "archer",
+      level: 7,
+      xp: 9,
+      tier: 2,
+      statPoints: 7 * CONFIG.stats.pointsPerLevel,
+      stats: { ...CONFIG.stats.base.archer },
+    });
   });
 
-  it("preserves an already-v4 hero (idempotent)", () => {
-    const hero = { cls: "mage" as const, level: 6, xp: 5, tier: 2 as const };
+  it("grants retro base stats to a v4 single-character save (no stats field)", () => {
+    // A v4 save has the hero shape but no statPoints/stats — migrate backfills them.
+    const v4 = { version: 4, stage: 2, gold: 0, hero: { cls: "mage", level: 10, xp: 0, tier: 1 } };
+    const v5 = migrate(v4);
+    expect(v5.hero.statPoints).toBe(10 * CONFIG.stats.pointsPerLevel);
+    expect(v5.hero.stats).toEqual({ ...CONFIG.stats.base.mage });
+  });
+
+  it("preserves an already-v5 hero (idempotent — no re-grant of points)", () => {
+    const hero = {
+      cls: "mage" as const,
+      level: 6,
+      xp: 5,
+      tier: 2 as const,
+      statPoints: 3,
+      stats: { str: 3, dex: 4, int: 20, vit: 8 },
+    };
     const once = migrate({ version: SAVE_VERSION, hero });
     expect(migrate(once)).toEqual(once);
     expect(once.hero).toEqual(hero);

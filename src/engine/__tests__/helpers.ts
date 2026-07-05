@@ -3,15 +3,15 @@
  * (no `.test.ts` suffix), so Vitest's `include` glob skips it.
  */
 
-import { SAVE_VERSION, initGameState, makeHero, step } from "@/engine";
+import { CONFIG, SAVE_VERSION, initGameState, makeHero, step } from "@/engine";
 import type { Enemy, GameState, HeroClass, SaveData } from "@/engine";
 
-/** A fresh single-character save of class `cls` at the given stage (M5). */
+/** A fresh single-character save of class `cls` at the given stage (M5 v5 shape). */
 export const soloSave = (cls: HeroClass = "swordsman", stage = 3): SaveData => ({
   version: SAVE_VERSION,
   stage,
   gold: 0,
-  hero: { cls, level: 1, xp: 0, tier: 1 },
+  hero: { cls, level: 1, xp: 0, tier: 1, statPoints: 0, stats: { ...CONFIG.stats.base[cls] } },
   lastSeen: 0,
 });
 

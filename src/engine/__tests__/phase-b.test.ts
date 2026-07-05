@@ -3,7 +3,7 @@ import {
   initGameState,
   step,
   bossHint,
-  heroAtk,
+  combatPower,
   SKILL_TYPES,
   SAVE_VERSION,
   CONFIG,
@@ -152,8 +152,8 @@ describe("boss hint", () => {
     expect(hint.recommendedPower).toBe(
       Math.round(CONFIG.bossHp(1) / CONFIG.bossHintPowerDivisor),
     );
-    // teamPower now = the single hero's atk at its level/tier.
-    expect(hint.teamPower).toBe(heroAtk("swordsman", s.heroes[0].level, s.heroes[0].tier));
+    // teamPower now = the single hero's COMBAT POWER (effective DPS + HP), M5.
+    expect(hint.teamPower).toBe(combatPower(s.heroes[0]));
     expect(hint.ready).toBe(hint.teamPower >= hint.recommendedPower);
   });
 });

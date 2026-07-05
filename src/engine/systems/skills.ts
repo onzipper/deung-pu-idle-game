@@ -16,7 +16,7 @@
 
 import { CONFIG, HERO_TYPES, SKILL_TYPES } from "@/engine/config";
 import { applyDamage } from "@/engine/systems/damage";
-import { heroAtk } from "@/engine/systems/stats";
+import { heroAtkOf } from "@/engine/systems/stats";
 import { aliveHeroes, getTargets, nearestAny } from "@/engine/systems/targeting";
 import type { Hero } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
@@ -64,7 +64,7 @@ export function castSkill(state: GameState, hero: Hero): boolean {
   });
 
   if (hero.cls === "swordsman") {
-    const dmg = Math.round(heroAtk(hero.cls, hero.level, hero.tier) * sk.mult);
+    const dmg = Math.round(heroAtkOf(hero) * sk.mult);
     for (const e of targets) {
       if (Math.abs(e.x - hero.x) < sk.radius) applyDamage(state, e, dmg, "skill");
     }
@@ -78,7 +78,7 @@ export function castSkill(state: GameState, hero: Hero): boolean {
       (e) => Math.abs(e.x - hero.x) < CONFIG.skills.arrowRainRange,
     );
     const cx = inRange.reduce((sum, e) => sum + e.x, 0) / inRange.length;
-    const dmg = Math.round(heroAtk(hero.cls, hero.level, hero.tier) * sk.mult);
+    const dmg = Math.round(heroAtkOf(hero) * sk.mult);
     const ty = L.groundY - L.heroProjImpactYOffset;
     for (let i = 0; i < sk.targets; i++) {
       const off = CONFIG.arrowRainOffsets[i];
@@ -114,7 +114,7 @@ export function castSkill(state: GameState, hero: Hero): boolean {
       kind: "meteor",
       x: tx,
       y: CONFIG.skills.meteorSpawnY,
-      damage: Math.round(heroAtk(hero.cls, hero.level, hero.tier) * sk.mult),
+      damage: Math.round(heroAtkOf(hero) * sk.mult),
       speed: sk.projSpeed,
       targetId: null,
       tx,

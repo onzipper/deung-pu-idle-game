@@ -14,11 +14,13 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
+import type { StatKey } from "@/engine/entities";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
 import { processSkills } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
+import { processStatAllocation } from "@/engine/systems/allocation";
 import { nextStage } from "@/engine/systems/flow";
 import {
   decayHeroTimers,
@@ -42,6 +44,13 @@ export interface FrameInput {
    * is unmet. Applied once per drained input (a click evolves exactly once).
    */
   evolveHero?: number;
+  /**
+   * Allocate `amount` unspent base-stat points into `stat` for the solo hero (M5
+   * "Base stats"). Honoured across phases; a no-op if the amount is invalid,
+   * exceeds the unspent pool, or breaches the cap. Applied once per drained input
+   * (a click allocates exactly once, at any speed — like `evolveHero`).
+   */
+  allocateStat?: { stat: StatKey; amount: number };
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -53,6 +62,10 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
 
   // --- discrete player actions (valid across phases) ---
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
+  // Manual + auto base-stat allocation (M5 "Base stats"). Runs in all phases so a
+  // player can spend points between stages (victory) and auto-allocate keeps up
+  // with boss-kill level-ups; before the victory early-return below.
+  processStatAllocation(state, input.allocateStat);
   if (input.advanceStage && state.phase === "victory") nextStage(state);
   if (input.challengeBoss && state.bossReady && state.phase === "battle") {
     startBossFight(state);

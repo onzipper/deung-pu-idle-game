@@ -6,13 +6,15 @@
 
 import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
 import type { Rng } from "@/engine/core/rng";
-import { heroMaxHp } from "@/engine/systems/stats";
-import type { Hero, Enemy, Boss, HeroClass, EnemyKind } from "@/engine/entities";
+import { baseStats, heroMaxHp } from "@/engine/systems/stats";
+import type { Hero, Enemy, Boss, HeroClass, HeroStats, EnemyKind } from "@/engine/entities";
 
 /**
  * Build a hero at its formation home position, at full HP. `level` / `xp` / `tier`
- * carry per-hero M5 progression forward across stage resets and save loads; they
- * default to a fresh level-1, tier-1 hero.
+ * / `statPoints` / `stats` carry per-hero M5 progression forward across stage
+ * resets and save loads; they default to a fresh hero — level 1, tier 1, the class
+ * base stat block, and the retro-free `(level - 1) * pointsPerLevel` unspent points
+ * (0 for a level-1 hero; each level-up grants more in leveling.ts).
  */
 export function makeHero(
   id: number,
@@ -20,9 +22,11 @@ export function makeHero(
   level = 1,
   xp = 0,
   tier: 1 | 2 = 1,
+  statPoints: number = (level - 1) * CONFIG.stats.pointsPerLevel,
+  stats: HeroStats = baseStats(cls),
 ): Hero {
   const t = HERO_TYPES[cls];
-  const maxHp = heroMaxHp(cls, level, tier);
+  const maxHp = heroMaxHp(cls, level, tier, stats.vit);
   return {
     id,
     cls,
@@ -37,6 +41,8 @@ export function makeHero(
     level,
     xp,
     tier,
+    statPoints,
+    stats,
   };
 }
 

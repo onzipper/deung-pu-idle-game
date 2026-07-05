@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SAVE_VERSION, initGameState, toSaveData, step } from "@/engine";
+import { CONFIG, SAVE_VERSION, initGameState, toSaveData, step } from "@/engine";
 import { soloSave } from "./helpers";
 
 /**
@@ -15,15 +15,29 @@ describe("toSaveData (v4 single character)", () => {
     expect(save.lastSeen).toBe(0);
   });
 
-  it("defaults a cold start to a fresh swordsman", () => {
+  it("defaults a cold start to a fresh swordsman (level 1, 0 stat points, base stats)", () => {
     const cold = toSaveData(initGameState(1));
-    expect(cold.hero).toEqual({ cls: "swordsman", level: 1, xp: 0, tier: 1 });
+    expect(cold.hero).toEqual({
+      cls: "swordsman",
+      level: 1,
+      xp: 0,
+      tier: 1,
+      statPoints: 0,
+      stats: { ...CONFIG.stats.base.swordsman },
+    });
   });
 
   it("round-trips the chosen class + progress + economy through initGameState", () => {
     const original = soloSave("mage", 5);
     original.gold = 1234;
-    original.hero = { cls: "mage", level: 12, xp: 30, tier: 2 };
+    original.hero = {
+      cls: "mage",
+      level: 12,
+      xp: 30,
+      tier: 2,
+      statPoints: 6,
+      stats: { str: 3, dex: 4, int: 30, vit: 10 },
+    };
 
     const restored = toSaveData(initGameState(9, original));
     expect(restored.stage).toBe(original.stage);

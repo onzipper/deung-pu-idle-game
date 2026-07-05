@@ -25,6 +25,7 @@ import {
   bossHint,
   canEvolveHero,
   evolutionCost,
+  CONFIG,
   SAVE_VERSION,
   FIXED_DT,
   type FrameInput,
@@ -87,7 +88,7 @@ function makeSave(cls: HeroClass): SaveData {
     version: SAVE_VERSION,
     stage: 1,
     gold: 0,
-    hero: { cls, level: 1, xp: 0, tier: 1 },
+    hero: { cls, level: 1, xp: 0, tier: 1, statPoints: 0, stats: { ...CONFIG.stats.base[cls] } },
     lastSeen: 0,
   };
 }
@@ -95,6 +96,9 @@ function makeSave(cls: HeroClass): SaveData {
 function runSeed(cls: HeroClass, seed: number): SeedResult {
   const s = initGameState(seed, makeSave(cls));
   s.autoCast = true;
+  // M5 "Base stats": measure the AUTO-allocated baseline (idle player) — every
+  // level's points dump into the class primary stat each step.
+  s.autoAllocate = true;
 
   const stages: StageMetric[] = [];
   let cur: StageMetric = freshStage(s.stage, 0);

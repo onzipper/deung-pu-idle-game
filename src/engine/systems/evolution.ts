@@ -17,7 +17,7 @@
  */
 
 import { CONFIG, SLOT_ORDER } from "@/engine/config";
-import { heroMaxHp } from "@/engine/systems/stats";
+import { heroMaxHpOf } from "@/engine/systems/stats";
 import type { Hero } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -52,7 +52,7 @@ export function evolveHero(state: GameState, index: number): boolean {
   state.gold -= evolutionCost(hero.cls);
   hero.tier = 2;
 
-  const newMax = heroMaxHp(hero.cls, hero.level, hero.tier);
+  const newMax = heroMaxHpOf(hero);
   hero.hp += newMax - hero.maxHp;
   hero.maxHp = newMax;
 

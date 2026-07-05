@@ -43,11 +43,13 @@ import {
   FIXED_DT,
   bossHint,
   canEvolveHero,
+  combatPower,
   createAccumulator,
   drainAccumulator,
   evolutionCost,
   initGameState,
   migrate,
+  primaryStat,
   step,
   toSaveData,
   type FrameInput,
@@ -147,6 +149,12 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       // the display-ready result.
       canEvolve: canEvolveHero(state, h),
       evolutionCost: evolutionCost(h.cls),
+      // M5 "Base stats" — same one-way display read-path: engine helpers compute
+      // it, the store just carries the display-ready result.
+      statPoints: h.statPoints,
+      stats: { ...h.stats },
+      primaryStat: primaryStat(h.cls),
+      combatPower: combatPower(h),
     };
   });
 
@@ -258,6 +266,7 @@ export function GameClient() {
 
       // UI-owned flags the engine reads directly (not part of FrameInput).
       state.autoCast = store.autoCast;
+      state.autoAllocate = store.autoAllocate;
       // UI-owned sound preference — applied to the audio module every frame,
       // same pattern (never queued through FrameInput; it isn't sim state).
       audio.setMuted(store.soundMuted);
@@ -271,6 +280,7 @@ export function GameClient() {
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
         evolveHero: pending.evolveHero ?? undefined,
+        allocateStat: pending.allocateStat ?? undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of

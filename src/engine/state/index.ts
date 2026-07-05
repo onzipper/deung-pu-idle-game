@@ -14,8 +14,8 @@
 import { CONFIG } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
 import { makeHero } from "@/engine/entities";
-import type { Hero, Enemy, Boss, Projectile, HeroClass } from "@/engine/entities";
-import { heroMaxHp } from "@/engine/systems/stats";
+import type { Hero, Enemy, Boss, Projectile, HeroClass, HeroStats } from "@/engine/entities";
+import { baseStats, heroMaxHpOf } from "@/engine/systems/stats";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
 
@@ -36,6 +36,12 @@ export interface GameState {
   /** The player's chosen base class (M5). Drives which hero is spawned. */
   heroClass: HeroClass;
   autoCast: boolean;
+  /**
+   * UI-owned toggle (mirrors `autoCast`): when true, each hero's unspent stat
+   * points are auto-allocated into its class primary stat every step. Read off
+   * the store onto state each frame; never part of `FrameInput`, never persisted.
+   */
+  autoAllocate: boolean;
   /**
    * Live heroes. Solo gameplay keeps exactly one here (the chosen class); the
    * array + formation machinery is retained for the M8 party of up to `maxHeroes`.
@@ -74,6 +80,10 @@ export interface CharacterSave {
   xp: number;
   /** Class-advancement tier (1 = base, 2 = evolved). */
   tier: 1 | 2;
+  /** Unspent base-stat points (M5 "Base stats", SAVE v5). */
+  statPoints: number;
+  /** Allocated base-stat block (absolute values, M5 "Base stats", SAVE v5). */
+  stats: HeroStats;
 }
 
 export interface SaveData {
@@ -101,6 +111,8 @@ export function initHeroes(state: GameState): void {
       prev?.level ?? 1,
       prev?.xp ?? 0,
       prev?.tier ?? 1,
+      prev?.statPoints,
+      prev ? { ...prev.stats } : undefined,
     ),
   ];
 }
@@ -123,6 +135,7 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     gold: save?.gold ?? 0,
     heroClass,
     autoCast: false,
+    autoAllocate: false,
     heroes: [],
     enemies: [],
     boss: null,
@@ -142,7 +155,18 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     h.level = clamp(save.hero.level, 1, CONFIG.leveling.levelCap);
     h.xp = Math.max(0, save.hero.xp);
     h.tier = save.hero.tier === 2 ? 2 : 1;
-    h.maxHp = heroMaxHp(h.cls, h.level, h.tier);
+    // Restore allocated base stats (M5 "Base stats"). A well-formed v5 save always
+    // carries them (migrate backfills older shapes); default defensively to the
+    // class base if a field is somehow absent.
+    const base = baseStats(h.cls);
+    h.stats = {
+      str: Math.max(0, save.hero.stats?.str ?? base.str),
+      dex: Math.max(0, save.hero.stats?.dex ?? base.dex),
+      int: Math.max(0, save.hero.stats?.int ?? base.int),
+      vit: Math.max(0, save.hero.stats?.vit ?? base.vit),
+    };
+    h.statPoints = Math.max(0, save.hero.statPoints ?? 0);
+    h.maxHp = heroMaxHpOf(h);
     h.hp = h.maxHp;
   }
   return state;
@@ -160,7 +184,14 @@ export function toSaveData(state: GameState): SaveData {
     version: SAVE_VERSION,
     stage: state.stage,
     gold: state.gold,
-    hero: { cls: h.cls, level: h.level, xp: h.xp, tier: h.tier },
+    hero: {
+      cls: h.cls,
+      level: h.level,
+      xp: h.xp,
+      tier: h.tier,
+      statPoints: h.statPoints,
+      stats: { ...h.stats },
+    },
     lastSeen: 0,
   };
 }

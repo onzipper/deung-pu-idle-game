@@ -15,7 +15,7 @@
  */
 
 import { CONFIG } from "@/engine/config";
-import { heroMaxHp } from "@/engine/systems/stats";
+import { heroMaxHpOf } from "@/engine/systems/stats";
 import { aliveHeroes } from "@/engine/systems/targeting";
 import type { Hero } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
@@ -33,8 +33,13 @@ export function grantHeroXp(state: GameState, hero: Hero, amount: number): void 
   while (hero.level < LV.levelCap && hero.xp >= LV.xpToLevel(hero.level)) {
     hero.xp -= LV.xpToLevel(hero.level);
     hero.level++;
-    // Recompute max HP at the new level and heal by the added headroom.
-    const newMax = heroMaxHp(hero.cls, hero.level, hero.tier);
+    // Grant this level's base-stat points (M5 "Base stats"); the player allocates
+    // them via the allocateStat intent, or auto-allocate dumps them into the
+    // class primary stat.
+    hero.statPoints += CONFIG.stats.pointsPerLevel;
+    // Recompute max HP at the new level (using allocated vit) and heal by the
+    // added headroom.
+    const newMax = heroMaxHpOf(hero);
     hero.hp += newMax - hero.maxHp;
     hero.maxHp = newMax;
     state.events.push({

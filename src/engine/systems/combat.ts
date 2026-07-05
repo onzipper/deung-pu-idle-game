@@ -16,7 +16,7 @@
 import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
-import { heroAtk, heroAtkSpeed } from "@/engine/systems/stats";
+import { heroAtkOf, heroAtkSpeedOf } from "@/engine/systems/stats";
 import { applyDamage, isHero } from "@/engine/systems/damage";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
@@ -211,8 +211,8 @@ export function updateHeroes(state: GameState): void {
             (nearestTarget(targets, h.x, 0, t.range) ??
             nearestWithin(targets, h.x, t.range));
       if (tgt) {
-        h.cd = heroAtkSpeed(h.cls);
-        const dmg = heroAtk(h.cls, h.level, h.tier);
+        h.cd = heroAtkSpeedOf(h);
+        const dmg = heroAtkOf(h);
         if (t.attack === "melee") {
           applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {

@@ -4,6 +4,7 @@ import {
   step,
   createAccumulator,
   drainAccumulator,
+  CONFIG,
   FIXED_DT,
   migrate,
   SAVE_VERSION,
@@ -97,7 +98,14 @@ describe("save round-trip", () => {
       version: SAVE_VERSION,
       stage: s.stage,
       gold: s.gold,
-      hero: { cls: "mage", level: 8, xp: 12, tier: 1 },
+      hero: {
+        cls: "mage",
+        level: 8,
+        xp: 12,
+        tier: 1,
+        statPoints: 0,
+        stats: { ...CONFIG.stats.base.mage },
+      },
       lastSeen: 123456,
     };
 
@@ -120,7 +128,15 @@ describe("save round-trip", () => {
       version: SAVE_VERSION,
       stage: 1,
       gold: 0,
-      hero: { cls: "swordsman", level: 1, xp: 0, tier: 1 },
+      hero: {
+        cls: "swordsman",
+        level: 1,
+        xp: 0,
+        tier: 1,
+        // A bare save has level 1 -> retro grant of 1 * pointsPerLevel points.
+        statPoints: 1 * CONFIG.stats.pointsPerLevel,
+        stats: { ...CONFIG.stats.base.swordsman },
+      },
       lastSeen: 0,
     });
   });
@@ -148,8 +164,16 @@ describe("save round-trip", () => {
       lastSeen: 42,
     };
     const migrated = migrate(v3);
-    // Highest level (archer @ 11) becomes the single character; upgrades dropped.
-    expect(migrated.hero).toEqual({ cls: "archer", level: 11, xp: 7, tier: 2 });
+    // Highest level (archer @ 11) becomes the single character; upgrades dropped;
+    // v5 base stats granted (retro points = level * pointsPerLevel).
+    expect(migrated.hero).toEqual({
+      cls: "archer",
+      level: 11,
+      xp: 7,
+      tier: 2,
+      statPoints: 11 * CONFIG.stats.pointsPerLevel,
+      stats: { ...CONFIG.stats.base.archer },
+    });
     expect(migrated.stage).toBe(6);
     expect(migrated.gold).toBe(999);
     expect("upgrades" in migrated).toBe(false);
