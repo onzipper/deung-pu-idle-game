@@ -24,26 +24,28 @@
 ## M6 — World & Town
 
 - [x] Zone system: map → zones เดินถึงกัน (แตะขอบ/ลูกศร) + เงื่อนไขปลด zone + ย้อนฟาร์มอิสระ — engine zone/world layer (SAVE v8: location/unlockedZones/lastFarmZone), walk transit, unlock progression, town respawn + auto-return, boss-room gate; sim rebaselined per map/zone (docs/balance-m6.md); functional walk-controls UI. NPC shops = next task (zone kind "town" hook left)
-- [ ] ห้องบอสพิเศษท้าย map (ฉาก/การนำเสนอพิเศษ) — engine ROOM framing + zoneEntered/bossRoomEntered/mapUnlocked events done; special render/presentation is the render task
-- [ ] เมืองหลัก + NPC shops: ยาเลือด/ยามานา/ยันกลับเมือง (+ ของวาปปาร์ตี้ เปิดใช้ตอน M8) — town zone (kind "town") + respawn hook exists; shops build on it
-- [ ] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง) — store field + engine honor wired (minimal toggle); settings UI task expands it
-- [ ] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม)
+- [x] ห้องบอสพิเศษท้าย map (ฉาก/การนำเสนอพิเศษ) — arena จริง (เสาประตู/vignette ค้างทั้งไฟต์) + entrance beat (สั่น/แฟลช/วงแหวน/drone) + biome *_BOSS แยกต่อ map
+- [x] เมืองหลัก + NPC shops: ยาเลือด/ยามานา/ยันกลับเมือง (+ ของวาปปาร์ตี้ เปิดใช้ตอน M8) — ราคา scale ตามความลึก lastFarmZone, auto-use 35%HP/25%mana, gold sink แรกของเกม, SAVE v9; catalog ต่อขยายได้ (M8 warp = union append)
+- [x] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง) — AutoReturnToggle + engine honor + auto-potion thresholds; จะขยายเป็น settings panel เต็มตอน goal-ladder UI
+- [x] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม) — biomeForZone ต่อ map family ไล่เข้ม/ระอุเข้าหาห้องบอส, เมืองอบอุ่น (หลังคา/ตะเกียง/ควันไฟ/เงา NPC), whoosh ตอนย้าย zone
+- [ ] **Combat rework "สนามล่ามอน"** (เคาะ 2026-07-05): มอนสุ่มเกิดกระจายใน zone (cap+respawn config), hero auto-hunt ไล่เป้า, มอน passive เป็นหลัก + aggressive (aggro radius) ใกล้ห้องบอส, กล้องนิ่งต่อ zone (เผื่อ config zone กว้าง), rebalance ใหม่
 - [ ] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …)
 
-## 🎨 M6.5 — Art & Game-feel (แทรกหลัง M6 — รอเจ้าของเคาะ)
+## 🎨 M6.5 — Art & Game-feel (เคาะแล้ว 2026-07-05)
 
-> เป้า: หลุดจากหน้าตา web app → เกมจริง (คุยไว้ 2026-07-05: Pixi ทำเกิน IdleOn ได้ คอขวดคือ art assets)
+> เรนเดอร์เนียน (pixel ตกรอบ) · ฉากหลังแบบ /proto ผ่าน · ฟอนต์ Chakra Petch + Kanit · ตัวละครอนิเมะ/RO คนจริงย่อส่วน · จุดว้าว = ของสวมใส่ (ดู GDD Art Direction)
 
-- [ ] **เจ้าของเคาะ**: art direction (pixel art / HD painted / vector-upgrade) + reference 2-3 ภาพ · แหล่ง asset (ซื้อ pack / จ้าง / AI-gen+เก็บงาน) + งบ · ฟอนต์ไทยเกม
-- [ ] Character sprite + animation ตาม direction ที่เคาะ
+- [x] เจ้าของเคาะ art direction — เนียน/อนิเมะ-RO/procedural/ฟอนต์ เคาะครบ (decision log 2026-07-05)
+- [ ] ตัวละครใหม่แนวอนิเมะ/RO: ตัวใหญ่ ดีเทลจริง + animation — **มัดรวมกับ paper-doll ใน M7** (พึ่งกัน)
 - [ ] UI skin ทั้งเกม: title/login scene, หน้าเลือกตัวละคร, HUD กรอบเกม 9-slice + ฟอนต์
-- [ ] **Aura/glow tiers** — ตัวละครมีแสงตามความหายากของ gear/tier (pixi-filters bloom/glow, additive layers, คุม GPU budget มือถือ) — จุดว้าวสุดตอน M8 party (คนอื่นเห็นออร่าเรา)
+- [ ] ลบ /proto + สครินช็อตเวิร์กโฟลว์คงไว้ (proto-shot.mjs ใช้ตรวจงาน visual ต่อ)
 
-## M7 — Gear & Drops ⭐
+## M7 — Gear & Drops ⭐ (+ visual gear)
 
-- [ ] **Item-instance model** (unique ID + ownerId + audit) + server-authoritative — schema + anti-dupe รากฐานตลาดกลาง
+- [ ] **Item-instance model** (unique ID + ownerId + audit) + server-authoritative — schema + anti-dupe รากฐานตลาดกลาง (DB เสร็จแล้ว — persistence-m7.md)
 - [ ] Drop tables อาวุธ+ชุด ต่อ zone/บอส
 - [ ] Inventory + equip/loadout UI
+- [ ] **Paper-doll + ตัวละครอนิเมะ/RO**: เรนเดอร์ชุด/อาวุธจริงบนตัว, อาวุธใหญ่อลัง, tier สูง = ชุดระยิบ + ออร่าอาวุธซุปเปอร์ไซย่า (คุม GPU มือถือ)
 - [ ] โยงเข้า codex/collection
 
 ## M8 — Party
