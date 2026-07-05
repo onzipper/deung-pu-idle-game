@@ -23,6 +23,8 @@ import type {
   HeroStats,
   HeroQuest,
   SkillId,
+  ShopItemId,
+  ConsumableCounts,
   WorldLocation,
 } from "@/engine/entities";
 
@@ -57,7 +59,13 @@ import type {
 //   v8 save's own world fields are validated + preserved (idempotent for the
 //   server's migrate-on-every-save). `stage` is re-derived to the placed zone's
 //   stage so it can never drift from `location`.
-export const SAVE_VERSION = 8;
+// v8 -> v9 (M6 "เมืองหลัก + NPC shops"): the save gains `consumables` (held
+//   {hpPotion, manaPotion, returnScroll} stack COUNTS — non-tradable, fungible;
+//   NOT M7 item-instances). A pre-v9 save had none, so migration backfills ZEROS.
+//   A v9 save's counts are preserved (clamped to [0, stackCap] — idempotent for
+//   the server's migrate-on-every-save). Use-cooldowns + the auto-use toggles are
+//   transient / UI-owned, so nothing else persists.
+export const SAVE_VERSION = 9;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -78,6 +86,8 @@ export interface UnknownSave {
   location?: UnknownLocation;
   unlockedZones?: Record<string, unknown>;
   lastFarmZone?: UnknownLocation;
+  // v9 NPC-consumable stacks (M6). Optional so a pre-v9 save backfills to zeros.
+  consumables?: { hpPotion?: unknown; manaPotion?: unknown; returnScroll?: unknown };
   // v4/v5/v6/v7 single-character shape (v5 adds statPoints + stats; v6 adds mana +
   // autoSlots; v7 adds quest):
   hero?: Partial<CharacterSave> & {
@@ -170,6 +180,26 @@ function normalizeAutoSlots(
     out[i] = typeof id === "string" ? id : id === null ? null : fallback[i];
   }
   return out;
+}
+
+/**
+ * Normalise saved consumable stacks (M6, v9) to the {hp,mana,return} shape: each
+ * count clamped to [0, stackCap], anything missing/malformed -> 0. A pre-v9 save
+ * (no `consumables`) becomes all zeros.
+ */
+function normalizeConsumables(
+  saved: UnknownSave["consumables"],
+): ConsumableCounts {
+  const cap = CONFIG.shop.stackCap;
+  const one = (v: unknown): number => {
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return 0;
+    return Math.min(Math.floor(v), cap);
+  };
+  return {
+    hpPotion: one(saved?.hpPotion),
+    manaPotion: one(saved?.manaPotion),
+    returnScroll: one(saved?.returnScroll),
+  } satisfies Record<ShopItemId, number>;
 }
 
 /** A location is valid only if it addresses a real zone; else null. */
@@ -295,6 +325,9 @@ export function migrate(save: UnknownSave): SaveData {
     location,
     unlockedZones,
     lastFarmZone: placedFarm,
+    // NPC consumables (M6, v9): preserve a v9 save's clamped counts; a pre-v9 save
+    // backfills to zeros.
+    consumables: normalizeConsumables(save.consumables),
     lastSeen: save.lastSeen ?? 0,
   };
 }

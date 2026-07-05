@@ -44,6 +44,7 @@ import {
   SIGNATURE_SKILL,
   bossHint,
   canEvolveHero,
+  canUseConsumable,
   classChangeQuestFor,
   combatPower,
   createAccumulator,
@@ -53,6 +54,8 @@ import {
   learnedSkills,
   migrate,
   primaryStat,
+  shopPriceAt,
+  shopStageOf,
   skillCdOf,
   step,
   toSaveData,
@@ -72,6 +75,7 @@ import {
   type EngineSnapshot,
   type HeroQuestSummary,
   type HeroSummary,
+  type ShopSummary,
   type SkillSummary,
 } from "@/ui/store/gameStore";
 import { TimeDirector } from "./timeDirector";
@@ -221,6 +225,23 @@ function buildSnapshot(state: GameState): EngineSnapshot {
   const neighbor = (n: typeof nav.left) =>
     n ? { mapId: n.zone.mapId, zoneIdx: n.zone.zoneIdx, kind: n.zone.kind, unlocked: n.unlocked } : null;
 
+  // NPC shop + consumables (M6). Prices scale by farming depth (shopStageOf), not
+  // the town's stage; readiness is the precomputed quick-use guard.
+  const shopStage = shopStageOf(state);
+  const shop: ShopSummary = {
+    counts: { ...state.consumables },
+    prices: {
+      hpPotion: shopPriceAt("hpPotion", shopStage),
+      manaPotion: shopPriceAt("manaPotion", shopStage),
+      returnScroll: shopPriceAt("returnScroll", shopStage),
+    },
+    stackCap: CONFIG.shop.stackCap,
+    ready: {
+      hpPotion: canUseConsumable(state, "hpPotion"),
+      manaPotion: canUseConsumable(state, "manaPotion"),
+    },
+  };
+
   return {
     gold: state.gold,
     stage: state.stage,
@@ -240,6 +261,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       left: neighbor(nav.left),
       right: neighbor(nav.right),
     },
+    shop,
   };
 }
 
@@ -340,6 +362,11 @@ export function GameClient() {
       state.autoCast = store.autoCast;
       state.autoAllocate = store.autoAllocate;
       state.autoReturn = store.autoReturn;
+      // Auto-use potion toggles + thresholds (M6), same UI-owned pattern.
+      state.autoHpPotion = store.autoHpPotion;
+      state.autoManaPotion = store.autoManaPotion;
+      state.autoHpThreshold = store.autoHpThreshold;
+      state.autoManaThreshold = store.autoManaThreshold;
       // UI-owned sound preference — applied to the audio module every frame,
       // same pattern (never queued through FrameInput; it isn't sim state).
       audio.setMuted(store.soundMuted);
@@ -357,6 +384,9 @@ export function GameClient() {
         evolveHero: pending.evolveHero ?? undefined,
         acceptQuest: pending.acceptQuest ?? undefined,
         allocateStat: pending.allocateStat ?? undefined,
+        buyShopItem: pending.buyShopItem ?? undefined,
+        useConsumable: pending.useConsumable ?? undefined,
+        useReturnScroll: pending.useReturnScroll || undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of

@@ -18,6 +18,7 @@ import type {
   EnemyKind,
   HeroClass,
   ProjectileKind,
+  ShopItemId,
   StatKey,
   ZoneKind,
 } from "@/engine/entities";
@@ -81,4 +82,15 @@ export type GameEvent =
   | { type: "zoneEntered"; mapId: string; zoneIdx: number; kind: ZoneKind; stage: number }
   | { type: "zoneUnlocked"; mapId: string; zoneIdx: number }
   | { type: "mapUnlocked"; mapId: string }
-  | { type: "bossRoomEntered"; mapId: string; stage: number };
+  | { type: "bossRoomEntered"; mapId: string; stage: number }
+  // Frontier reached (M6): the last map's boss room was cleared and there is no
+  // further map yet (map4 doesn't exist). Signals the graceful "สุดเขตแดนตอนนี้"
+  // end-state instead of a stall/crash. One-way (UI reads it for a banner).
+  | { type: "frontierCleared"; mapId: string }
+  // NPC shop / consumables lifecycle (M6 "เมืองหลัก" — for UI + future render juice).
+  // `shopPurchase`: a town buy went through (post-clamp qty + total gold cost).
+  // `consumableUsed`: a potion was used (type-keyed by item). `townReturned`: a
+  // return scroll teleported the hero to town (render may hook a warp fx later).
+  | { type: "shopPurchase"; item: ShopItemId; qty: number; cost: number }
+  | { type: "consumableUsed"; item: ShopItemId }
+  | { type: "townReturned"; mapId: string };

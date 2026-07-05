@@ -289,7 +289,20 @@
       }
     },
     "quests": {},
-    "items": {},
+    "items": {
+      "hpPotion": {
+        "name": "Healing Potion",
+        "desc": "Restores 50% of max HP"
+      },
+      "manaPotion": {
+        "name": "Mana Potion",
+        "desc": "Restores 45% of max mana"
+      },
+      "returnScroll": {
+        "name": "Return Scroll",
+        "desc": "Teleports you back to town"
+      }
+    },
     "maps": {
       "map1": {
         "name": "Human World"
@@ -376,6 +389,24 @@
     "lockedTooltip": "Locked — clear this zone’s quota first",
     "enterBossRoom": "Enter Boss Room",
     "autoReturnOn": "Auto: return to farming",
-    "autoReturnOff": "Auto: wait in town"
+    "autoReturnOff": "Auto: wait in town",
+    "frontier": "End of the frontier for now"
+  },
+  "shop": {
+    "title": "Town Shop",
+    "subtitle": "Stock up before you head out",
+    "owned": "{count}/{cap} held",
+    "buyAria": "Buy {qty} {name}",
+    "quickUseLabel": "Items",
+    "useAria": "Use {name} ({count} left)",
+    "returnScrollTitle": "Return to town",
+    "returnScrollInTown": "You're already in town",
+    "returnScrollAria": "Use a Return Scroll to teleport to town ({count} left)",
+    "autoLabel": "Auto",
+    "hpLabel": "HP potion",
+    "manaLabel": "Mana potion",
+    "autoUseAria": "Auto {name}: {state, select, on {on} other {off}}",
+    "thresholdDownAria": "Lower the auto {name} threshold",
+    "thresholdUpAria": "Raise the auto {name} threshold"
   }
 }

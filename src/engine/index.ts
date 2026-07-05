@@ -56,6 +56,18 @@ export {
   type ZoneNeighbor,
 } from "@/engine/systems/world";
 
+// NPC shop / consumables read helpers (M6 "เมืองหลัก"): the UI derives shop prices
+// (stage-scaled) + potion quick-use affordances from these pure reads. The
+// mutators (buy / use / return-scroll) happen ONLY through `step()` intents, so
+// they stay internal.
+export {
+  SHOP_ITEMS,
+  shopPriceAt,
+  shopStageOf,
+  canUseConsumable,
+  emptyConsumables,
+} from "@/engine/systems/consumables";
+
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure
 // reads. Casting / slot assignment happen ONLY through `step()` intents

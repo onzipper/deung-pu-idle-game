@@ -16,18 +16,25 @@ import { useGameStore, type NavNeighborSummary } from "@/ui/store/gameStore";
 
 export function WalkControls() {
   const world = useGameStore((s) => s.world);
+  const phase = useGameStore((s) => s.phase);
   const walkToZone = useGameStore((s) => s.walkToZone);
   const t = useTranslations("world");
   const tMaps = useTranslations("content.maps");
 
   const mapName = tMaps(`${world.mapId}.name`);
+  // Frontier: cleared the last map's boss room and there's no further map yet
+  // (map4 is M7+ content) — a graceful "end of the frontier" state (walk left to
+  // keep farming), not a stall.
+  const atFrontier = phase === "victory" && world.right === null;
   const zoneLabel = world.traveling
     ? t("traveling")
-    : world.kind === "town"
-      ? t("zoneTown")
-      : world.kind === "boss"
-        ? t("zoneBoss")
-        : t("zoneFarm", { stage: world.stage });
+    : atFrontier
+      ? t("frontier")
+      : world.kind === "town"
+        ? t("zoneTown")
+        : world.kind === "boss"
+          ? t("zoneBoss")
+          : t("zoneFarm", { stage: world.stage });
 
   return (
     <div className="flex items-center justify-between gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">

@@ -14,7 +14,13 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
-import type { StatKey, WorldLocation } from "@/engine/entities";
+import type { ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
+import {
+  applyReturnScroll,
+  buyShopItem,
+  processConsumables,
+  tickConsumableCds,
+} from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
@@ -100,6 +106,24 @@ export interface FrameInput {
    * (a click allocates exactly once, at any speed — like `evolveHero`).
    */
   allocateStat?: { stat: StatKey; amount: number };
+  /**
+   * Buy `qty` (default 1) of an NPC-shop consumable (M6 "เมืองหลัก"). ONLY valid
+   * while standing in the TOWN zone (the NPC is there — GDD); a no-op elsewhere,
+   * when unaffordable, or when the stack is full. Applied once per drained input.
+   */
+  buyShopItem?: { item: ShopItemId; qty?: number };
+  /**
+   * Manual quick-use of a potion (`hpPotion` / `manaPotion`) on the solo hero
+   * (M6). A no-op for the scroll, a dead hero, an empty stack, on cooldown, or at
+   * a full pool. Applied once per drained input (a tap uses exactly one).
+   */
+  useConsumable?: ShopItemId;
+  /**
+   * Use a return scroll: teleport to town from anywhere (M6). Consumes one
+   * (instant); a no-op if none held or already in town. Applied once per drained
+   * input (a tap teleports once).
+   */
+  useReturnScroll?: boolean;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -108,6 +132,10 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // Drop last step's events before this step fills them (one-way render/audio
   // buffer). Clear-in-place keeps the array identity stable and allocation-light.
   state.events.length = 0;
+
+  // Tick per-type consumable-use cooldowns (M6) — unconditional so a cooldown
+  // counts down in every phase (town / travel / battle).
+  tickConsumableCds(state);
 
   // --- discrete player actions (valid across phases) ---
   if (input.acceptQuest !== undefined) acceptQuest(state, input.acceptQuest);
@@ -120,6 +148,12 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // player can spend points between stages (victory) and auto-allocate keeps up
   // with boss-kill level-ups; before the victory early-return below.
   processStatAllocation(state, input.allocateStat);
+
+  // --- NPC shop / consumables (M6 "เมืองหลัก") ---
+  // Buy is town-only (checked inside); the return scroll teleports before the walk
+  // intents below so a scroll+walk in the same frame resolves scroll-first.
+  if (input.buyShopItem) buyShopItem(state, input.buyShopItem.item, input.buyShopItem.qty ?? 1);
+  if (input.useReturnScroll) applyReturnScroll(state);
 
   // --- world navigation (M6 "World & Town") ---
   if (input.walkToZone) walkToZone(state, input.walkToZone);
@@ -154,6 +188,9 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   }
 
   decayHeroTimers(state);
+  // Consumables (M6): a manual quick-use then threshold-gated auto-use, BEFORE
+  // skills so a mana potion this step can fund a cast the same step.
+  processConsumables(state, input.useConsumable);
   processSkills(state, input); // manual casts + guarded auto-cast
   updateAnchor(state);
   updateWaveSpawns(state, rng);

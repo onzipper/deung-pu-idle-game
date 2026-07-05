@@ -22,11 +22,14 @@
  */
 
 import { create } from "zustand";
+import { CONFIG } from "@/engine";
 import type {
   BossHint,
+  ConsumableCounts,
   HeroClass,
   HeroStats,
   Phase,
+  ShopItemId,
   SpeedMultiplier,
   StatKey,
   WorldLocation,
@@ -150,6 +153,19 @@ export interface WorldNavSummary {
   right: NavNeighborSummary | null;
 }
 
+/** NPC shop + consumable display state (M6 "เมืองหลัก"). Precomputed by the
+ * snapshot builder so the store carries only display-ready values. */
+export interface ShopSummary {
+  /** Held stack counts of each consumable. */
+  counts: ConsumableCounts;
+  /** Stage-scaled unit price of each item (by the player's farming depth). */
+  prices: Record<ShopItemId, number>;
+  /** Max held per item (the buy button greys at the cap). */
+  stackCap: number;
+  /** Quick-use readiness for the two potions (alive, in stock, off cd, not full). */
+  ready: { hpPotion: boolean; manaPotion: boolean };
+}
+
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
   gold: number;
@@ -163,6 +179,8 @@ export interface EngineSnapshot {
   heroes: HeroSummary[];
   /** World position + walk-arrow state (M6 "World & Town"). */
   world: WorldNavSummary;
+  /** NPC shop + consumable state (M6 "เมืองหลัก"). */
+  shop: ShopSummary;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -185,6 +203,13 @@ export interface PendingInput {
   /** Base-stat allocation for the solo hero (M5), or `null`. Last-wins per frame
    * (a click allocates once; the engine no-ops an invalid/over-cap amount). */
   allocateStat: { stat: StatKey; amount: number } | null;
+  /** Buy an NPC-shop item (M6), or `null` (last-wins per frame). Town-only —
+   * the engine no-ops it elsewhere / when unaffordable / at the stack cap. */
+  buyShopItem: { item: ShopItemId; qty: number } | null;
+  /** Manual quick-use of a potion (M6), or `null` (last-wins per frame). */
+  useConsumable: ShopItemId | null;
+  /** Use a return scroll to teleport to town (M6, once per frame). */
+  useReturnScroll: boolean;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -197,6 +222,9 @@ function emptyPendingInput(): PendingInput {
     evolveHero: null,
     acceptQuest: null,
     allocateStat: null,
+    buyShopItem: null,
+    useConsumable: null,
+    useReturnScroll: false,
   };
 }
 
@@ -305,6 +333,17 @@ const emptyBossHint: BossHint = {
   ready: false,
 };
 
+const emptyShop: ShopSummary = {
+  counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+  prices: {
+    hpPotion: CONFIG.shop.items.hpPotion.basePrice,
+    manaPotion: CONFIG.shop.items.manaPotion.basePrice,
+    returnScroll: CONFIG.shop.items.returnScroll.basePrice,
+  },
+  stackCap: CONFIG.shop.stackCap,
+  ready: { hpPotion: false, manaPotion: false },
+};
+
 export interface HudState {
   // ---- throttled engine snapshot (~CONFIG.uiSyncHz) ----
   gold: number;
@@ -318,6 +357,8 @@ export interface HudState {
   heroes: HeroSummary[];
   /** World position + walk-arrow state (M6 "World & Town"). */
   world: WorldNavSummary;
+  /** NPC shop + consumable state (M6 "เมืองหลัก"). */
+  shop: ShopSummary;
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   speed: SpeedMultiplier;
@@ -331,6 +372,14 @@ export interface HudState {
    * `state.autoReturn` every frame; not part of `FrameInput`, never persisted.
    * Defaults ON (design). */
   autoReturn: boolean;
+  /** Auto-use hp/mana potions below a threshold (M6). UI-owned like `autoCast`:
+   * the loop copies these onto `state.autoHpPotion`/`state.autoManaPotion` +
+   * thresholds every frame; not part of `FrameInput`, never persisted. Default ON
+   * (idle sustain works without setup). Thresholds are fractions of the max pool. */
+  autoHpPotion: boolean;
+  autoManaPotion: boolean;
+  autoHpThreshold: number;
+  autoManaThreshold: number;
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
    * every frame and applies it to the `AudioController`, same pattern as
@@ -365,6 +414,12 @@ export interface HudState {
   toggleAutoAllocate: () => void;
   /** Toggle death auto-return (M6 "auto กลับไปฟาร์ม" / "รอที่เมือง"). */
   toggleAutoReturn: () => void;
+  /** Toggle auto hp/mana potion use (M6). */
+  toggleAutoHpPotion: () => void;
+  toggleAutoManaPotion: () => void;
+  /** Set an auto-use threshold (fraction of the max pool, clamped 0.05..0.95). */
+  setAutoHpThreshold: (frac: number) => void;
+  setAutoManaThreshold: (frac: number) => void;
   toggleSound: () => void;
   /** Mount-effect-only: apply the persisted preference once, post-hydration
    * (see `soundMuted`'s doc comment). Does NOT re-persist (avoids a
@@ -405,6 +460,12 @@ export interface HudState {
   /** Queue a base-stat allocation for the solo hero (last-wins per frame) — the
    * engine no-ops an invalid/over-cap/over-spend amount. */
   allocateStat: (stat: StatKey, amount: number) => void;
+  /** Queue an NPC-shop buy (M6, town-only, last-wins per frame). */
+  buyShopItem: (item: ShopItemId, qty: number) => void;
+  /** Queue a potion quick-use (M6, last-wins per frame). */
+  useConsumable: (item: ShopItemId) => void;
+  /** Queue a return-scroll teleport (M6, once per frame). */
+  useReturnScroll: () => void;
 
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
@@ -429,11 +490,16 @@ export const useGameStore = create<HudState>((set, get) => ({
     left: null,
     right: null,
   },
+  shop: emptyShop,
 
   speed: 1,
   autoCast: false,
   autoAllocate: false,
   autoReturn: true,
+  autoHpPotion: CONFIG.shop.autoDefaults.hpPotion,
+  autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
+  autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
+  autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
   soundMuted: false,
 
   hasSyncedOnce: false,
@@ -448,6 +514,12 @@ export const useGameStore = create<HudState>((set, get) => ({
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
   toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
   toggleAutoReturn: () => set((s) => ({ autoReturn: !s.autoReturn })),
+  toggleAutoHpPotion: () => set((s) => ({ autoHpPotion: !s.autoHpPotion })),
+  toggleAutoManaPotion: () => set((s) => ({ autoManaPotion: !s.autoManaPotion })),
+  setAutoHpThreshold: (frac) =>
+    set({ autoHpThreshold: Math.max(0.05, Math.min(0.95, frac)) }),
+  setAutoManaThreshold: (frac) =>
+    set({ autoManaThreshold: Math.max(0.05, Math.min(0.95, frac)) }),
   toggleSound: () =>
     set((s) => {
       const soundMuted = !s.soundMuted;
@@ -507,6 +579,15 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   allocateStat: (stat, amount) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, allocateStat: { stat, amount } } })),
+
+  buyShopItem: (item, qty) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, buyShopItem: { item, qty } } })),
+
+  useConsumable: (item) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, useConsumable: item } })),
+
+  useReturnScroll: () =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, useReturnScroll: true } })),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;

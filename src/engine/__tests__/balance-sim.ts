@@ -81,12 +81,13 @@ function makeSave(cls: HeroClass): SaveData {
   // A cold-start save at stage 1 (first farm zone). Built directly; the world
   // fields are what initGameState fills for a fresh start, mirrored here.
   return {
-    version: 8,
+    version: 9,
     stage: 1,
     gold: 0,
     location: { mapId: "map1", zoneIdx: 1 },
     unlockedZones: { map1: 2 },
     lastFarmZone: { mapId: "map1", zoneIdx: 1 },
+    consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
     hero: {
       cls,
       level: 1,
@@ -150,11 +151,33 @@ function navInput(s: GameState): Partial<FrameInput> {
   return {};
 }
 
+/**
+ * Idle-player SHOP autopilot (M6): the ONLY moment the world autopilot passes
+ * through town is a death respawn (auto-return pops to town then walks back), so
+ * restock potions with surplus gold in that town step — a deterministic "buy on
+ * pass-through" rule. Gold is otherwise unused, so spend freely to a target stack;
+ * `buyShopItem` is partial (buys as many as gold + stack room allow). One item type
+ * per visit (one intent/step); frequent frontier deaths top both over time.
+ */
+const RESTOCK_TARGET = 15;
+function shopInput(s: GameState): Partial<FrameInput> {
+  if (zoneAt(s.location).kind !== "town") return {};
+  const hp = s.consumables.hpPotion;
+  const mana = s.consumables.manaPotion;
+  if (hp < RESTOCK_TARGET) return { buyShopItem: { item: "hpPotion", qty: RESTOCK_TARGET - hp } };
+  if (mana < RESTOCK_TARGET) {
+    return { buyShopItem: { item: "manaPotion", qty: RESTOCK_TARGET - mana } };
+  }
+  return {};
+}
+
 function runSeed(cls: HeroClass, seed: number): SeedResult {
   const s = initGameState(seed, makeSave(cls));
   s.autoCast = true;
   s.autoAllocate = true;
   s.autoReturn = true;
+  // Auto-use potions at the config defaults (initGameState already seeds these ON
+  // with the 35%/25% thresholds) — the idle sustain feature under test.
 
   const zones: ZoneMetric[] = [];
   const byKey = new Map<string, ZoneMetric>();
@@ -172,7 +195,7 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let totalWipes = 0;
 
   for (let i = 0; i < STEPS; i++) {
-    const input: FrameInput = { ...navInput(s) };
+    const input: FrameInput = { ...navInput(s), ...shopInput(s) };
     if (isClassChangeQuestOffered(s.heroes[0])) input.acceptQuest = 0;
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
     const slots = fillAutoSlots(s.heroes[0]);

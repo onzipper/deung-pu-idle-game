@@ -23,8 +23,11 @@ import type {
   HeroStats,
   HeroQuest,
   SkillId,
+  ShopItemId,
+  ConsumableCounts,
   WorldLocation,
 } from "@/engine/entities";
+import { emptyConsumables } from "@/engine/systems/consumables";
 import { classChangeQuestFor } from "@/engine/systems/quests";
 import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import {
@@ -88,6 +91,29 @@ export interface GameState {
    * NEVER persisted — a reload resumes standing in `location`.
    */
   traveling: TravelState | null;
+  /**
+   * Held NPC-consumable stack counts (M6 "เมืองหลัก"). Persisted (SAVE v9).
+   */
+  consumables: ConsumableCounts;
+  /**
+   * Per-type consumable-use cooldown timers (seconds), keyed by item id. A
+   * missing/<=0 entry means ready. Transient runtime state (ticked by
+   * systems/consumables `tickConsumableCds`; reset on zone arrival); NEVER
+   * persisted — same tier as `Hero.skillCds`.
+   */
+  consumableCds: Partial<Record<ShopItemId, number>>;
+  /**
+   * UI-owned auto-use toggles + thresholds (M6, mirror `autoCast`): auto hp/mana
+   * potion when the pool drops below the fraction threshold. Read off the store
+   * onto state each frame; never part of `FrameInput`, never persisted. Defaults
+   * from CONFIG.shop.autoDefaults (auto ON so idle play sustains without setup).
+   */
+  autoHpPotion: boolean;
+  autoManaPotion: boolean;
+  /** Auto hp-potion fires below this fraction of MAX HP (0..1). */
+  autoHpThreshold: number;
+  /** Auto mana-potion fires below this fraction of MAX MANA (0..1). */
+  autoManaThreshold: number;
   /**
    * Live heroes. Solo gameplay keeps exactly one here (the chosen class); the
    * array + formation machinery is retained for the M8 party of up to `maxHeroes`.
@@ -159,6 +185,9 @@ export interface SaveData {
   unlockedZones: Record<string, number>;
   /** Death auto-return target — the last farmed zone (M6, SAVE v8). */
   lastFarmZone: WorldLocation;
+  /** Held NPC-consumable stack counts (M6 "เมืองหลัก", SAVE v9). Non-tradable,
+   * fungible COUNTS (not M7 item-instances — see entities `ShopItemId`). */
+  consumables: ConsumableCounts;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -233,6 +262,17 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     unlockedZones,
     lastFarmZone: { mapId: lastFarmZone.mapId, zoneIdx: lastFarmZone.zoneIdx },
     traveling: null,
+    // NPC consumables (M6, SAVE v9): restore saved stacks, else empty. Use-cooldowns
+    // are transient (rebuilt empty). Auto-use toggles/thresholds seed from config
+    // (GameClient mirrors the store's live values onto these each frame).
+    consumables: save?.consumables
+      ? { ...save.consumables }
+      : emptyConsumables(),
+    consumableCds: {},
+    autoHpPotion: CONFIG.shop.autoDefaults.hpPotion,
+    autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
+    autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
+    autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
     heroes: [],
     enemies: [],
     boss: null,
@@ -335,6 +375,9 @@ export function toSaveData(state: GameState): SaveData {
     location: { mapId: state.location.mapId, zoneIdx: state.location.zoneIdx },
     unlockedZones: { ...state.unlockedZones },
     lastFarmZone: { mapId: state.lastFarmZone.mapId, zoneIdx: state.lastFarmZone.zoneIdx },
+    // NPC consumable stacks (M6, SAVE v9). Use-cooldowns + auto-use toggles are
+    // transient/UI-owned — not persisted.
+    consumables: { ...state.consumables },
     hero: {
       cls: h.cls,
       level: h.level,

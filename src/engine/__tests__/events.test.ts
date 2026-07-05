@@ -244,6 +244,7 @@ describe("events are transient (never persisted)", () => {
       "location",
       "unlockedZones",
       "lastFarmZone",
+      "consumables",
       "hero",
       "lastSeen",
     ]);

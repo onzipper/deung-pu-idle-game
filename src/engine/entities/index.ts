@@ -87,6 +87,26 @@ export interface WorldLocation {
 }
 
 /**
+ * NPC-shop consumable ids (M6 "เมืองหลัก + NPC shops", ROADMAP task): bought with
+ * gold in TOWN, non-tradable, held as engine-level STACKABLE COUNTS (see
+ * `ConsumableCounts`).
+ *
+ * BOUNDARY NOTE (vs M7 gear): these are deliberately NOT DB `ItemInstance`s. M7's
+ * item-instance model (unique id + ownerId + audit, server-authoritative) is for
+ * TRADABLE GEAR only; NPC potions are fungible, non-tradable, and cheap, so they
+ * live as plain counts in the save (SAVE v9) — no per-item identity to dupe. A
+ * future warp/party-summon item (M8) can join this union without a schema change.
+ */
+export type ShopItemId = "hpPotion" | "manaPotion" | "returnScroll";
+
+/** Held stack counts of each NPC consumable (M6, SAVE v9). Persisted. */
+export interface ConsumableCounts {
+  hpPotion: number;
+  manaPotion: number;
+  returnScroll: number;
+}
+
+/**
  * Quest framework v1 (M5 "เปลี่ยนคลาสผ่านเควส", ROADMAP task 5). Deliberately
  * LEAN — exactly what the class-change quest needs — but forward-compatible with
  * the full quest system in M8.

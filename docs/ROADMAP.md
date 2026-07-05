@@ -30,6 +30,15 @@
 - [ ] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม)
 - [ ] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …)
 
+## 🎨 M6.5 — Art & Game-feel (แทรกหลัง M6 — รอเจ้าของเคาะ)
+
+> เป้า: หลุดจากหน้าตา web app → เกมจริง (คุยไว้ 2026-07-05: Pixi ทำเกิน IdleOn ได้ คอขวดคือ art assets)
+
+- [ ] **เจ้าของเคาะ**: art direction (pixel art / HD painted / vector-upgrade) + reference 2-3 ภาพ · แหล่ง asset (ซื้อ pack / จ้าง / AI-gen+เก็บงาน) + งบ · ฟอนต์ไทยเกม
+- [ ] Character sprite + animation ตาม direction ที่เคาะ
+- [ ] UI skin ทั้งเกม: title/login scene, หน้าเลือกตัวละคร, HUD กรอบเกม 9-slice + ฟอนต์
+- [ ] **Aura/glow tiers** — ตัวละครมีแสงตามความหายากของ gear/tier (pixi-filters bloom/glow, additive layers, คุม GPU budget มือถือ) — จุดว้าวสุดตอน M8 party (คนอื่นเห็นออร่าเรา)
+
 ## M7 — Gear & Drops ⭐
 
 - [ ] **Item-instance model** (unique ID + ownerId + audit) + server-authoritative — schema + anti-dupe รากฐานตลาดกลาง

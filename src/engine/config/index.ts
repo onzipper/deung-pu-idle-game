@@ -62,6 +62,50 @@ export const CONFIG = {
     transitSeconds: 0.6,
   },
 
+  // ---- NPC shop / consumables (M6 "เมืองหลัก + NPC shops", ROADMAP task) ----
+  // The FIRST real gold sink since the upgrade lines were removed (gold otherwise
+  // accumulates unused). Three NPC-bought, non-tradable, stackable consumables:
+  //   hpPotion     — restore `restoreFrac` of MAX HP (idle sustain; cooldown-gated)
+  //   manaPotion   — restore `restoreFrac` of MAX MANA (caster sustain)
+  //   returnScroll — teleport to town from anywhere (consumed; instant)
+  //
+  // PRICING is STAGE-SCALED: `priceAt(item, stage) = round(basePrice *
+  // priceStageBase^(stage-1))`. Gold income per kill itself grows (~1.05^n plus a
+  // linear term), so a flat price would trivialise late-game; scaling at 1.12/stage
+  // keeps a potion worth a meaningful slice (~4-6 kills) of the CURRENT zone's gold
+  // at every depth — a real sink that bites hardest exactly at the frontier wall
+  // (where the hero dies + drinks most). Non-tradable + fungible => plain COUNTS in
+  // the save (SAVE v9), NOT M7 item-instances (see entities `ShopItemId`).
+  //
+  // AUTO-USE (the idle feature): settings-style toggles + thresholds (UI-owned like
+  // autoCast, mirrored onto state each frame). `autoDefaults` seeds the initial
+  // toggle/threshold values; a step-level, per-type-cooldown deterministic use
+  // fires when the pool drops below the threshold (systems/consumables). Defaults
+  // ON so idle play benefits without setup (same spirit as autoReturn).
+  //
+  // Sim-tuned — see docs/balance-m6.md (prices, sustain deltas, gold sink rate).
+  shop: {
+    /** Max held per item (a hand-edited save can't stockpile absurd counts). */
+    stackCap: 99,
+    /** Per-stage price multiplier (compounds on `basePrice`). */
+    priceStageBase: 1.12,
+    /** Initial (UI-owned) auto-use toggle + threshold values. */
+    autoDefaults: {
+      hpPotion: true,
+      manaPotion: true,
+      /** Auto hp-potion fires below this fraction of MAX HP. */
+      hpThreshold: 0.35,
+      /** Auto mana-potion fires below this fraction of MAX MANA. */
+      manaThreshold: 0.25,
+    },
+    /** The catalog. `restoreFrac` / `cooldown` are 0 for the non-potion scroll. */
+    items: {
+      hpPotion: { basePrice: 60, restoreFrac: 0.5, cooldown: 8 },
+      manaPotion: { basePrice: 45, restoreFrac: 0.45, cooldown: 10 },
+      returnScroll: { basePrice: 150, restoreFrac: 0, cooldown: 0 },
+    },
+  },
+
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.

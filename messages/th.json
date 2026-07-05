@@ -289,7 +289,20 @@
       }
     },
     "quests": {},
-    "items": {},
+    "items": {
+      "hpPotion": {
+        "name": "ยาเลือด",
+        "desc": "ฟื้นฟู HP 50% ของค่าสูงสุด"
+      },
+      "manaPotion": {
+        "name": "ยามานา",
+        "desc": "ฟื้นฟูมานา 45% ของค่าสูงสุด"
+      },
+      "returnScroll": {
+        "name": "ยันกลับเมือง",
+        "desc": "วาร์ปกลับเมืองหลักทันที"
+      }
+    },
     "maps": {
       "map1": {
         "name": "โลกมนุษย์"
@@ -376,6 +389,24 @@
     "lockedTooltip": "ล็อกอยู่ — เคลียร์โควตาของโซนนี้ก่อน",
     "enterBossRoom": "เข้าห้องบอส",
     "autoReturnOn": "อัตโนมัติ: กลับไปฟาร์ม",
-    "autoReturnOff": "อัตโนมัติ: รอที่เมือง"
+    "autoReturnOff": "อัตโนมัติ: รอที่เมือง",
+    "frontier": "สุดเขตแดนตอนนี้"
+  },
+  "shop": {
+    "title": "ร้านค้าในเมือง",
+    "subtitle": "ซื้อของตุนก่อนออกไปลุย",
+    "owned": "มี {count}/{cap}",
+    "buyAria": "ซื้อ {name} {qty} ชิ้น",
+    "quickUseLabel": "ไอเทม",
+    "useAria": "ใช้ {name} (เหลือ {count})",
+    "returnScrollTitle": "กลับเมืองหลัก",
+    "returnScrollInTown": "อยู่ในเมืองอยู่แล้ว",
+    "returnScrollAria": "ใช้ยันกลับเมืองเพื่อวาร์ปกลับเมือง (เหลือ {count})",
+    "autoLabel": "อัตโนมัติ",
+    "hpLabel": "ยาเลือด",
+    "manaLabel": "ยามานา",
+    "autoUseAria": "ใช้ {name} อัตโนมัติ: {state, select, on {เปิด} other {ปิด}}",
+    "thresholdDownAria": "ลดเกณฑ์ใช้ {name} อัตโนมัติ",
+    "thresholdUpAria": "เพิ่มเกณฑ์ใช้ {name} อัตโนมัติ"
   }
 }

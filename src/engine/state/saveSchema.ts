@@ -37,6 +37,17 @@ export const worldLocationSchema = z
   .object({ mapId: z.string(), zoneIdx: z.number().int().min(0) })
   .strict();
 
+/** Held NPC-consumable stack counts (M6 "เมืองหลัก", SAVE v9). Loose non-negative
+ * ints — `migrate` clamps each to `CONFIG.shop.stackCap`, so an over-cap saved
+ * count never needlessly 400s (same resilience as the world fields below). */
+export const consumablesSchema = z
+  .object({
+    hpPotion: z.number().int().min(0),
+    manaPotion: z.number().int().min(0),
+    returnScroll: z.number().int().min(0),
+  })
+  .strict();
+
 /**
  * The accepted incoming-save contract (M5 v5 single character). Anything that
  * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
@@ -96,6 +107,10 @@ export const saveDataSchema = z
     location: worldLocationSchema.optional(),
     unlockedZones: z.record(z.string(), z.number().int().min(0)).optional(),
     lastFarmZone: worldLocationSchema.optional(),
+    // M6 "เมืองหลัก" NPC-consumable stacks (SAVE v9). OPTIONAL so a pre-v9 (or
+    // trimmed) payload is backfilled to zeros by `migrate()` — same resilience as
+    // the world fields above.
+    consumables: consumablesSchema.optional(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

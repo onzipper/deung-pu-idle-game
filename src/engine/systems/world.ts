@@ -41,8 +41,12 @@ export interface Zone {
   stage: number;
 }
 
-/** Reason a transit was started — town arrival auto-returns only after a death. */
-export type TravelReason = "walk" | "death";
+/**
+ * Reason a transit / arrival happened — town arrival auto-returns to farming after
+ * a "death" (respawn) or a "scroll" (return-scroll teleport); a plain "walk" stays
+ * put. Kept a small closed union so the auto-return branch reads clearly.
+ */
+export type TravelReason = "walk" | "death" | "scroll";
 
 /** In-flight walk between zones (transient; never persisted). */
 export interface TravelState {
@@ -291,6 +295,9 @@ export function arriveAtZone(
   state.bossReady = false;
   state.anchorX = CONFIG.baseAnchor;
   state.waveGap = CONFIG.firstWaveGap;
+  // Fresh footing: clear the per-type consumable-use cooldowns (M6) alongside the
+  // per-hero skill cooldowns reset in reviveHeroesFull.
+  state.consumableCds = {};
   reviveHeroesFull(state);
 
   state.events.push({
@@ -306,9 +313,10 @@ export function arriveAtZone(
     state.lastFarmZone = { mapId: zone.mapId, zoneIdx: zone.zoneIdx };
   } else if (zone.kind === "town") {
     state.phase = "battle";
-    // Auto-return after a death respawn (never stalls). Toggle-gated for live
-    // play ("รอที่เมือง"); the offline replay forces it on so idle never stalls.
-    if (reason === "death" && state.autoReturn) {
+    // Auto-return after a death respawn OR a return-scroll teleport (never stalls).
+    // Toggle-gated for live play ("รอที่เมือง"); the offline replay forces it on so
+    // idle never stalls. A plain "walk" into town (manual visit) stays put.
+    if ((reason === "death" || reason === "scroll") && state.autoReturn) {
       const back = state.lastFarmZone;
       if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
         beginTransit(state, back, CONFIG.world.transitSeconds, "walk");
@@ -374,7 +382,14 @@ export function onBossRoomCleared(state: GameState): void {
   if (zone.kind !== "boss") return;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
-  if (!next || next.mapId === zone.mapId) return; // no further map (frontier)
+  if (!next || next.mapId === zone.mapId) {
+    // Frontier: the last map's boss room is cleared and no further map exists yet
+    // (map4 is M7+ content). Signal the graceful "สุดเขตแดนตอนนี้" end-state instead
+    // of stalling — the hero stays in the (paused) victory and can walk LEFT to keep
+    // farming. Additive event for the UI banner + future render juice.
+    state.events.push({ type: "frontierCleared", mapId: zone.mapId });
+    return;
+  }
   if (next.zoneIdx >= (state.unlockedZones[next.mapId] ?? 0)) {
     state.unlockedZones[next.mapId] = next.zoneIdx + 1;
     state.events.push({ type: "mapUnlocked", mapId: next.mapId });

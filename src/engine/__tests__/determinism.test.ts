@@ -154,6 +154,8 @@ describe("save round-trip", () => {
       location: { mapId: "map1", zoneIdx: 1 },
       unlockedZones: { map1: 2 },
       lastFarmZone: { mapId: "map1", zoneIdx: 1 },
+      // M6 v9 NPC consumables: a bare save backfills to zeros.
+      consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
       lastSeen: 0,
     });
   });

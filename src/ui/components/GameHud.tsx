@@ -11,10 +11,13 @@
  */
 
 import { forwardRef, type ReactNode } from "react";
+import { AutoPotionToggles } from "@/ui/components/AutoPotionToggles";
 import { BossPanel } from "@/ui/components/BossPanel";
 import { CodexButton } from "@/ui/components/CodexButton";
+import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { HudBar } from "@/ui/components/HudBar";
 import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
+import { ShopPanel } from "@/ui/components/ShopPanel";
 import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { StatPanel } from "@/ui/components/StatPanel";
@@ -71,13 +74,20 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           goal-ladder polish are later tasks). */}
       <WalkControls />
 
+      {/* NPC shop (M6): only rendered while standing in town. */}
+      <ShopPanel />
+
       <BossPanel />
 
       <div className="flex flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
         <SkillBar />
+        {/* Potion quick-use + return scroll (M6), next to the skill/mana area. */}
+        <ConsumableBar />
         <div className="h-px bg-ddp-border-soft" />
         <StatPanel />
         <div className="h-px bg-ddp-border-soft" />
+        {/* Auto-use potion toggles + thresholds (M6). */}
+        <AutoPotionToggles />
         <div
           data-onboarding-anchor="settings-row"
           className="flex flex-wrap items-center justify-between gap-3"

@@ -92,3 +92,80 @@ Boss rooms (mean s to beat):
   at the three map gates. Total map-to-map progression and the leveling curve
   (level-at-clear tracks the M5 table) are preserved; this per-zone table is the new
   M6 baseline. No M5 curve was retuned.
+
+---
+
+## M6 task 2 — NPC shop + consumables (เมืองหลัก)
+
+The **first real gold sink** since the upgrade lines were removed (gold otherwise
+accumulated unused). Three NPC-bought, non-tradable, **stackable COUNTS** (SAVE v9,
+NOT M7 item-instances): `hpPotion`, `manaPotion`, `returnScroll`. Bought only in
+**town** (the NPC is there — GDD); potions restore a % of the pool on a per-type
+cooldown; the scroll teleports to town.
+
+### Catalog (CONFIG.shop) + auto-use defaults
+
+| item | effect | cooldown | base price | auto default |
+|---|---|---|---|---|
+| hpPotion | restore **50%** max HP | 8 s | 60 | ON, fire < **35%** HP |
+| manaPotion | restore **45%** max mana | 10 s | 45 | ON, fire < **25%** mana |
+| returnScroll | teleport to town (instant) | — | 150 | — |
+
+- **Auto-use is the idle feature**: settings-style toggles + thresholds (UI-owned
+  like `autoCast`, mirrored onto state each frame), resolved deterministically at
+  the step level with per-type cooldowns. Defaults **ON** so idle play sustains
+  without setup (same spirit as `autoReturn`). Manual quick-use buttons too.
+- **Pricing is depth-scaled, NOT current-stage-scaled.** The NPC lives in town
+  (whose content stage is always 1), so pricing by `state.stage` would flatten to
+  base prices forever. Prices instead scale by the player's **farming depth**
+  (`lastFarmZone`'s stage): `price = round(basePrice · 1.12^(stage−1))`. So a
+  frontier potion costs ~4-6× its base — a meaningful slice of that depth's gold
+  income (which itself grows), keeping the sink real at every depth. Stack cap 99.
+
+### Sim (auto-use ON at defaults; autopilot restocks on town pass-through)
+
+`pnpm sim`, `SIM_SECONDS=2400`, 5 seeds. The world autopilot only passes through
+town on a **death respawn** (auto-return pops to town, then walks back), so it
+restocks potions there with surplus gold to a target stack — a deterministic
+"buy on pass-through" rule. `buyShopItem` is partial (buys what gold + stack room
+allow), so a pricier frontier potion just buys fewer, never blocks.
+
+**Gold economy (per class, full 2400 s run):**
+
+| class | income | potion sink | sink % | potions used | gold banked (end) |
+|---|---:|---:|---:|---:|---:|
+| swordsman | ~60.9k | 45.8k | **75%** | 180 | 17.4k |
+| archer | ~54.4k | 22.7k | **42%** | 69 | 34.2k |
+| mage | ~51.5k | 8.6k | **17%** | 4 | 45.4k |
+
+The sink **scales with need**: the melee tank (leans hardest on hp potions at the
+wall) spends most of its gold; the self-sustaining mage (INT-fed mana regen, kites
+away HP damage) barely buys. Nobody starves — every class banks positive gold and
+buys are never blocked. This is deliberately a *first* sink that converts unused
+gold into a real, difficulty-scaled decision without draining it to zero (M7 gear +
+M8 warp/marketplace add the deeper sinks).
+
+### Wall status — held (frontier preserved)
+
+| gate | swordsman | archer | mage |
+|---|---|---|---|
+| map1 boss (s5) | 5/5, 0 wipes | 5/5, 0 wipes | 5/5, 0 wipes |
+| map2 boss (s10) | 5/5, 0 wipes | 5/5, 0 wipes | 5/5, 0 wipes |
+| map3 frontier (s15) | never clears s15 farm | s15 boss **0/5** (18 wipes) | s15 boss **0/5** (18 wipes) |
+
+- **map1 + map2 stay clean** (all classes, 0 boss wipes) — potions can only help a
+  range that was already viable, so nothing collapsed. Class change still lands at
+  **stage 5** for all classes.
+- **The s15 frontier soft-wall HOLDS.** Potions extend *survival* but not *DPS*:
+  the s15 boss out-damages the sustain, so archer/mage still lose 0/5 and the
+  swordsman never even clears the s15 farm zone — the intended wall, to be broken
+  by later M7/M8 content, not by potions.
+- **Potions did give real sustain where the design allows it.** The melee
+  swordsman's old s12 death-spiral (M6 baseline: 1219 s, 2/5) smooths out with hp
+  potions and it now reaches the s15 frontier — a wall *shift* the design
+  explicitly permits ("acceptable for potions to push the wall"), still short of
+  breaking s15.
+- **Graceful post-map3 state.** No class beats the s15 boss in-sim, but if one ever
+  does, `onBossRoomCleared` finds no map4 and emits a `frontierCleared` event; the
+  UI shows the "สุดเขตแดนตอนนี้" banner and the hero sits in the paused victory able
+  to walk LEFT to keep farming — never a crash/stall.
