@@ -8,9 +8,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**ดึ๋งปุ๊ Idle Game** — a 2D idle / auto-battler for the web. A team of up to 3 hero classes charges through enemy waves, banks kills, challenges a boss, clears the stage, unlocks the next hero/upgrade, and loops. Skills (cooldown + auto-cast), three upgrade lines (+ auto), 1×/2×/3× speed.
+**ดึ๋งปุ๊ Idle Game** — a competition-driven idle RPG for the web (levelled up from the original auto-battler POC). Players level heroes, unlock/evolve classes (sword/bow/magic), collect tradable gear, and quest across maps to get strong enough to rank on the Hall of Fame. A town hub (shops/quests/market) and **official trading** are core features.
 
-Status: **M1–M4.6 complete** (engine, Pixi render, React HUD, MySQL persistence, offline idle, balance pass, full juice/visual-polish). PR #1 merges `develop` → `main`. Remaining: **M5** — prestige loop + full server-authoritative economy (design notes in `docs/balance-m4.md`; anti-cheat slot marked in `src/server/save.ts` `persistSave`). Tracked in ClickUp [86d3jv7m3](https://app.clickup.com/t/86d3jv7m3).
+**Vision source of truth:** ClickUp GDD doc [3huqe-536](https://app.clickup.com/3730158/docs/3huqe-536) (linked from main card [86d3jv7m3](https://app.clickup.com/t/86d3jv7m3)). If this file and the GDD conflict, the GDD wins.
+
+Status: **M1–M4.6 complete** (engine, Pixi render, React HUD, MySQL persistence, offline idle, balance pass, full juice/visual-polish). Roadmap (build order is deliberate — competition is the north star but ships LAST):
+- **M4.7** i18n th/en via next-intl · **M4.8** onboarding (FTUE/tutorial/codex/mascot) — cross-cutting, before content
+- **M5** Progression: XP/level, class evolution, **gear as server-authoritative item-instances ⭐** (unique ID + ownerId + audit; retrofit later is near-impossible; item dupe = existential), goal-ladder UI
+- **M6** World (maps/quests/town) · **M7** Collection (classes/sets/inventory/codex) · **M8** Meta (prestige/events) · **M9** Competition (economy/anti-dupe, leaderboard/Hall of Fame, PvP, marketplace/RMT)
+
+New ClickUp work items go in as top-level Tasks, not subtasks of the main card.
 
 Git: `develop` = integration branch (work lands here per-task), `main` = stable (merged via PR at milestone boundaries).
 

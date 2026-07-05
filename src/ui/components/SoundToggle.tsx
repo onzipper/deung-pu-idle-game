@@ -12,6 +12,7 @@
  * only affordance a player needs before then.
  */
 
+import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { readStoredSoundMuted, useGameStore } from "@/ui/store/gameStore";
 
@@ -19,6 +20,7 @@ export function SoundToggle() {
   const soundMuted = useGameStore((s) => s.soundMuted);
   const toggleSound = useGameStore((s) => s.toggleSound);
   const setSoundMuted = useGameStore((s) => s.setSoundMuted);
+  const t = useTranslations("settings");
 
   // Apply the persisted preference once, AFTER hydration (reading
   // localStorage during the initial render would make the server-rendered
@@ -33,8 +35,8 @@ export function SoundToggle() {
       type="button"
       onClick={toggleSound}
       aria-pressed={!soundMuted}
-      aria-label={soundMuted ? "เปิดเสียง" : "ปิดเสียง"}
-      title={soundMuted ? "เปิดเสียง" : "ปิดเสียง"}
+      aria-label={soundMuted ? t("soundOn") : t("soundOff")}
+      title={soundMuted ? t("soundOn") : t("soundOff")}
       className={`flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-(--ddp-radius-md) border px-3 text-lg shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.95] ${
         soundMuted
           ? "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"

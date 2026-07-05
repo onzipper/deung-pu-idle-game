@@ -1,0 +1,13 @@
+{
+  "common": {},
+  "hud": {},
+  "panels": {},
+  "settings": {
+    "speedLabel": "ความเร็ว",
+    "soundOn": "เปิดเสียง",
+    "soundOff": "ปิดเสียง",
+    "localeLabel": "ภาษา",
+    "localeTh": "ไทย",
+    "localeEn": "EN"
+  }
+}

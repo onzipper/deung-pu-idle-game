@@ -6,17 +6,19 @@
  * drain (never a bigger `dt`), so there is no intent-queue entry for this.
  */
 
+import { useTranslations } from "next-intl";
 import { CONFIG, type SpeedMultiplier } from "@/engine";
 import { useGameStore } from "@/ui/store/gameStore";
 
 export function SpeedSelector() {
   const speed = useGameStore((s) => s.speed);
   const setSpeed = useGameStore((s) => s.setSpeed);
+  const t = useTranslations("settings");
 
   return (
     <div className="flex items-center gap-2">
       <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
-        ความเร็ว
+        {t("speedLabel")}
       </span>
       <div className="flex gap-1 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-1 shadow-(--ddp-shadow-btn)">
         {CONFIG.speeds.map((s) => (
