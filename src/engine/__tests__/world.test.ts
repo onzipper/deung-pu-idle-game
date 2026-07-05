@@ -201,7 +201,7 @@ describe("SAVE v7 -> v8 migration", () => {
       gold: 100,
       hero: { cls: "archer", level: 20, xp: 0, tier: 1 },
       lastSeen: 5,
-    };
+    } as const;
     const m = migrate(v7);
     expect(m.version).toBe(SAVE_VERSION);
     expect(m.location).toEqual({ mapId: "map2", zoneIdx: 1 });

@@ -48,6 +48,7 @@ function makeHero(cls: Hero["cls"]): Hero {
     statPoints: 0,
     stats: { str: 8, dex: 4, int: 3, vit: 6 },
     autoSlots: ["sword_whirl", null, null],
+    quest: null,
   };
 }
 
