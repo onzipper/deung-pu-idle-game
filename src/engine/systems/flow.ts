@@ -21,6 +21,9 @@ export function nextStage(state: GameState): void {
   state.projectiles = [];
   state.waveGap = CONFIG.nextStageWaveGap;
   state.anchorX = CONFIG.baseAnchor;
+  // Refill the hunt-field pool for the new stage (M6 "สนามล่ามอน").
+  state.spawnBurst = true;
+  state.spawnCd = CONFIG.hunt.initialGap;
   initHeroes(state);
   state.events.push({ type: "stageAdvanced", stage: state.stage });
 }

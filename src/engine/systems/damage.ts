@@ -35,6 +35,10 @@ export function applyDamage(
   source: HitSource,
 ): void {
   target.hp -= amount;
+  // Passive-mob RETALIATION (M6 "สนามล่ามอน"): a mob that is HIT starts fighting
+  // back, even if it never initiated. Aggressive mobs latch the same flag on aggro
+  // (combat.updateEnemies). The boss has no `engaged` field (its own AI).
+  if (!isHero(target) && "engaged" in target) target.engaged = true;
   state.events.push({
     type: "hit",
     target: targetKind(target),

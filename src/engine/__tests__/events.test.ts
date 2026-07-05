@@ -62,16 +62,18 @@ describe("event buffer lifecycle", () => {
     const s = initGameState(1);
     expect(s.events).toEqual([]);
 
-    // Force a wave to spawn (emits waveSpawn), then step once more.
-    const withEvents = collectUntil(s, (st) => st.enemies.length > 0, 3000);
-    expect(withEvents.length).toBeGreaterThan(0);
-
-    // The step that spawned the wave left a non-empty buffer...
+    // Step until combat (hunt/hit/kill) fills the buffer.
+    let steps = 0;
+    while (s.events.length === 0 && steps < 3000) {
+      step(s, {});
+      steps++;
+    }
     expect(s.events.length).toBeGreaterThan(0);
-    // ...but a subsequent quiet step clears it (no new events that step).
+
+    // A subsequent step reuses the SAME array (cleared in place, not reallocated),
+    // reflecting only that step's events.
     const before = s.events;
     step(s, {});
-    // Same array identity (cleared in place), and it reflects only THIS step.
     expect(s.events).toBe(before);
   });
 
@@ -84,12 +86,18 @@ describe("event buffer lifecycle", () => {
 });
 
 describe("combat events", () => {
-  it("emits waveSpawn with the wave number when a wave spawns", () => {
-    const s = initGameState(1);
-    const evs = collectUntil(s, (st) => st.enemies.length > 0, 3000);
-    const wave = evs.find((e) => e.type === "waveSpawn");
-    expect(wave).toBeDefined();
-    expect(wave).toMatchObject({ type: "waveSpawn", wave: 1 });
+  it("emits mobAggroed when an aggressive mob's radius triggers (M6 สนามล่ามอน)", () => {
+    // A map3 farm zone mixes in aggressive mobs (aggro ramp) — hunting toward them
+    // trips at least one aggro radius, emitting mobAggroed.
+    const s = initGameState(1, soloSave("swordsman", 12));
+    const evs = collectEvents(s, 1500);
+    const aggro = evs.find((e) => e.type === "mobAggroed");
+    expect(aggro).toBeDefined();
+    expect(aggro).toMatchObject({ type: "mobAggroed" });
+    if (aggro?.type === "mobAggroed") {
+      expect(typeof aggro.id).toBe("number");
+      expect(["normal", "fast", "tank", "ranged"]).toContain(aggro.kind);
+    }
   });
 
   it("emits projectileSpawn + hit for a ranged team, and kill on a death", () => {
@@ -231,7 +239,7 @@ describe("determinism", () => {
 describe("events are transient (never persisted)", () => {
   it("toSaveData excludes the events buffer entirely", () => {
     const s = initGameState(7, soloSave("swordsman", 3));
-    // Populate the buffer with a real event (a spawned wave emits waveSpawn).
+    // Populate the buffer with a real event (hunting a mob emits hit/kill).
     runUntil(s, (st) => st.events.length > 0, 3000);
     expect(s.events.length).toBeGreaterThan(0);
 

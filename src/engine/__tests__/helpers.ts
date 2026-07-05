@@ -137,5 +137,9 @@ export function makeStubEnemy(id: number, x: number, hp = 1000): Enemy {
     range: 0,
     cd: 999,
     engageOffset: 0,
+    homeX: x,
+    aggressive: false,
+    aggroRadius: 0,
+    engaged: true, // injected test mobs act like the old always-engaged enemies
   };
 }

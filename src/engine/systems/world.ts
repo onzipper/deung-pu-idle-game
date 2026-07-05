@@ -298,6 +298,10 @@ export function arriveAtZone(
   // Fresh footing: clear the per-type consumable-use cooldowns (M6) alongside the
   // per-hero skill cooldowns reset in reviveHeroesFull.
   state.consumableCds = {};
+  // Hunt-field spawn pool (M6 "สนามล่ามอน"): a farm zone bursts to full on entry;
+  // town/boss zones spawn nothing (guarded in updateSpawns).
+  state.spawnBurst = zone.kind === "farm";
+  state.spawnCd = CONFIG.hunt.initialGap;
   reviveHeroesFull(state);
 
   state.events.push({

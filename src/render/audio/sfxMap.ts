@@ -12,8 +12,10 @@
  * coin shower) never clip together.
  *
  * Intentionally SILENT event types (no entry / no case in AudioController):
- *  - `waveSpawn` — fires on every wave, constantly; a game-y idle-exposure
- *    context makes even a "subtle" tick fatiguing over a long session.
+ *  - `mobAggroed` (M6 "สนามล่ามอน") — fires whenever an aggressive mob aggros,
+ *    constantly on a busy field; a game-y idle-exposure context makes even a
+ *    "subtle" tick fatiguing over a long session (its visual alert puff in
+ *    `FxController` carries the beat). (Replaced the retired march-model `waveSpawn`.)
  *  - `projectileSpawn` — fires per-shot, far too high frequency for a discrete
  *    sound without machine-gunning even with throttling.
  *  - `stageCleared` — fires in the same instant as `bossDefeated` (see

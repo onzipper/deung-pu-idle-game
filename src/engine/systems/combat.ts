@@ -15,7 +15,7 @@
 
 import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
-import { clamp } from "@/engine/core/math";
+import { clamp, sign } from "@/engine/core/math";
 import {
   heroAtkOf,
   heroAtkSpeedOf,
@@ -29,18 +29,38 @@ import { onBossKilled } from "@/engine/systems/boss";
 import { respawnToTown } from "@/engine/systems/world";
 import {
   aliveHeroes,
-  anyHeroCanRetaliate,
-  frontHeroX,
   getTargets,
   nearestAliveHero,
-  nearestAny,
   nearestTarget,
   nearestWithin,
 } from "@/engine/systems/targeting";
-import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
+import type { Hero, Enemy, Boss, Projectile, CombatTarget } from "@/engine/entities";
 import type { GameState, HitSource } from "@/engine/state";
 
 const L = CONFIG.layout;
+
+/** The current zone's walkable right edge (M6 "สนามล่ามอน" hero clamp). */
+function fieldMaxX(state: GameState): number {
+  const map = CONFIG.world.maps.find((m) => m.id === state.location.mapId);
+  return map?.fieldWidth ?? 900;
+}
+
+/**
+ * Nearest alive target to `x` for the hero auto-hunt, tie-broken by the LOWER id
+ * so equidistant mobs never make the hero ping-pong between them (deterministic).
+ */
+function huntTarget(targets: readonly CombatTarget[], x: number): CombatTarget | null {
+  let best: CombatTarget | null = null;
+  let bd = Infinity;
+  for (const target of targets) {
+    const d = Math.abs(target.x - x);
+    if (d < bd || (d === bd && best !== null && target.id < best.id)) {
+      bd = d;
+      best = target;
+    }
+  }
+  return best;
+}
 
 // ---------------------------------------------------------------------------
 // Timers
@@ -96,58 +116,65 @@ export function decayHeroTimers(state: GameState): void {
 // Enemies: move OR attack
 // ---------------------------------------------------------------------------
 
+/**
+ * Idle wander around a mob's spawn point (M6 "สนามล่ามอน"). Deterministic: an
+ * id-hashed phase + frequency drive a gentle sine drift — NO RNG draw (the seeded
+ * stream is reserved for spawn composition; mid-combat draws stay forbidden).
+ */
+function wanderMob(state: GameState, e: Enemy): void {
+  const hunt = CONFIG.hunt;
+  const phase = e.id * 2.399963; // golden-angle-ish spread so mobs desync
+  const freq = hunt.wanderFreqBase + ((e.id * 0.618034) % 1) * hunt.wanderFreqSpread;
+  const target = e.homeX + Math.sin(state.time * freq + phase) * hunt.wanderAmp;
+  e.x += clamp(target - e.x, -hunt.wanderSpeed * FIXED_DT, hunt.wanderSpeed * FIXED_DT);
+}
+
+/**
+ * Hunt-field enemy behaviour (M6). A mob is either IDLE (wandering its spawn
+ * point) or ENGAGED (approaching + attacking the hero on either side of it):
+ *  - AGGRESSIVE mobs engage when the hero enters their aggro radius (emit
+ *    `mobAggroed`); PASSIVE mobs only engage once HIT (combat.applyDamage /
+ *    damage.ts latches `engaged`), never initiating.
+ *  - engaged melee closes to `mobContactGap` (+ its jitter) and swings; engaged
+ *    ranged closes to its range and fires. No march-model free-hit hacks are
+ *    needed — the hero comes TO the mob, so nothing is ever stuck out of reach.
+ * Boss phase clears the enemy list, so this loop is a no-op then.
+ */
 export function updateEnemies(state: GameState): void {
-  const fX = frontHeroX(state);
-  // Phase A processes the live enemy list. Boss-phase movement (a single Boss in
-  // getTargets) is Phase B and hooks in here alongside this loop.
+  const hunt = CONFIG.hunt;
   for (const e of state.enemies) {
+    const h = nearestAliveHero(state, e.x);
+    if (!h) {
+      wanderMob(state, e); // no living hero (transient): just drift
+      continue;
+    }
+    if (!e.engaged) {
+      if (e.aggressive && Math.abs(e.x - h.x) <= e.aggroRadius) {
+        e.engaged = true;
+        state.events.push({ type: "mobAggroed", id: e.id, kind: e.kind, x: e.x, y: e.y });
+      } else {
+        wanderMob(state, e);
+        continue;
+      }
+    }
     if (e.behavior === "ranged") {
-      const h = nearestAliveHero(state, e.x);
-      const dist = h ? Math.abs(e.x - h.x) : Infinity;
+      const dist = Math.abs(e.x - h.x);
       if (dist > e.range) {
-        e.x -= e.speed * FIXED_DT;
-      } else if (h && !anyHeroCanRetaliate(state, e.x)) {
-        // Free-hit fix ("มอนตีดาบฟรี"), ranged counterpart of the melee
-        // enemyBehindReach rule. Root cause of the surviving free hit: when the
-        // swordsman is walled at chargeHardCap (770) he becomes the shooter's nearest
-        // hero, so it parks at range 160 from him (~930) — past his 96 melee reach AND
-        // past the anchor-capped backline's forward reach (~834/766) — and plinked him
-        // with zero possible counter while the whole team stood unable to answer (both
-        // reported bugs). Here a shooter sitting beyond EVERY hero's reach HOLDS FIRE
-        // (no un-answerable damage) and CREEPS forward at rangedReengageSpeed until it
-        // enters a hero's reach, where it resumes firing and is answered (BUG 2). Two
-        // extremes were rejected by the sim: freezing it (pure hold-fire) turns shooters
-        // into passive walls the formation must grind to — S3-S9 ran +9..+97 % and the
-        // S9 prestige gate collapsed to 3.8x; snapping it straight to melee range made
-        // the swordsman one-shot it, deleting ~10-35 s of tuned clear time per shooter
-        // (S2-S6 −25..−45 %). The slow creep restores that flat, roughly
-        // stage-independent stall time AS A FAIR FIGHT, keeping pacing within budget and
-        // the gate intact (sim-tuned; see docs/balance-m4.md).
-        e.x -= CONFIG.rangedReengageSpeed * FIXED_DT;
+        e.x += sign(h.x - e.x) * e.speed * FIXED_DT;
       } else {
         e.cd -= FIXED_DT;
-        if (e.cd <= 0 && h) {
+        if (e.cd <= 0) {
           spawnBolt(state, e, h);
           e.cd = ENEMY_TYPES.ranged.atkSpeed;
         }
       }
     } else {
-      const h = nearestAliveHero(state, e.x);
-      const engageX = fX + CONFIG.clash + e.engageOffset;
-      if (e.x > engageX) {
-        // Approach from the front toward the front line (unchanged flow).
-        e.x -= e.speed * FIXED_DT;
-      } else if (h && e.x < h.x - CONFIG.enemyBehindReach) {
-        // Left behind by a sprint-charging front hero: it has fallen further behind
-        // its NEAREST hero than melee reach, so instead of free-hitting from out of
-        // range ("มอนตีดาบฟรี") it closes back up to that hero (into retaliation
-        // range). Referenced to the nearest hero — NOT the front line — so an enemy
-        // legitimately fighting the BACKLINE keeps hitting it instead of abandoning it
-        // to chase the charged-ahead swordsman.
-        e.x += e.speed * FIXED_DT;
+      const d = h.x - e.x;
+      if (Math.abs(d) > hunt.mobContactGap + e.engageOffset) {
+        e.x += sign(d) * e.speed * FIXED_DT;
       } else {
         e.cd -= FIXED_DT;
-        if (e.cd <= 0 && h) {
+        if (e.cd <= 0) {
           applyDamage(state, h, e.atk, "attack");
           e.cd = CONFIG.enemyMeleeAtkCd;
         }
@@ -161,67 +188,40 @@ export function updateEnemies(state: GameState): void {
 // ---------------------------------------------------------------------------
 
 export function updateHeroes(state: GameState): void {
+  const hunt = CONFIG.hunt;
   const targets = getTargets(state);
+  const minX = hunt.heroMinX;
+  const maxX = fieldMaxX(state) - hunt.fieldRightMargin;
   for (const h of state.heroes) {
     if (h.dead) continue;
     const t = HERO_TYPES[h.cls];
-    const homeX = state.anchorX + t.offset;
 
-    if (t.attack === "melee") {
-      // CHARGE: if any enemy is within the wide charge-seek range, sprint at it
-      // (chargeSpeed) with a loosened forward leash (meleeChargeLeash) and a DYNAMIC
-      // forward cap so the swordsman genuinely runs across the field to smash it. With
-      // nothing in charge range he falls back to the calm hold-formation walk (heroMove,
-      // tight meleeLeash / midCap) toward his home slot.
-      const chargeTgt = nearestWithin(targets, h.x, CONFIG.chargeSeekRange);
-      let goalX: number;
-      let moveSpeed: number;
-      let upperCap: number;
-      if (chargeTgt) {
-        const d = chargeTgt.x - h.x;
-        goalX =
-          Math.abs(d) > CONFIG.meleeStopGap
-            ? chargeTgt.x + (d > 0 ? -CONFIG.meleeApproachGap : CONFIG.meleeApproachGap)
-            : h.x;
-        moveSpeed = CONFIG.chargeSpeed;
-        // Dynamic forward cap (86d3k2nhm follow-up): the cap FOLLOWS the charge target
-        // (up to chargeHardCap) so it never sits between the swordsman and the enemy.
-        // A static chargeCap froze him mid-field waiting for enemies to walk in AND left
-        // ranged enemies resting beyond his reach dealing free hits; tracking the target
-        // both kills the park and guarantees he can always close to melee range.
-        // chargeCap is the floor (stay aggressive vs a close/behind target),
-        // chargeHardCap the ceiling (spawn-relative, keeps an entrance corridor).
-        const dynCap = clamp(
-          chargeTgt.x - CONFIG.meleeApproachGap,
-          CONFIG.chargeCap,
-          CONFIG.chargeHardCap,
-        );
-        upperCap = Math.min(homeX + CONFIG.meleeChargeLeash, dynCap);
+    // AUTO-HUNT (M6 "สนามล่ามอน"): walk to the nearest alive target (deterministic
+    // id tie-break) and stop at attack range — melee closes to contact, ranged
+    // holds at a standoff and kites if the target crowds it. No formation anchor /
+    // forward march: the hero goes to the mob wherever it is on the field. Aggro-ed
+    // mobs coming AT the hero are just targets that arrive early. The multi-actor
+    // machinery is retained for M8 — each party member hunts independently here, and
+    // the per-class `offset` (formation spacing) is preserved in config for it.
+    const hntTgt = huntTarget(targets, h.x);
+    let goalX = h.x;
+    if (hntTgt) {
+      const d = hntTgt.x - h.x;
+      const dist = Math.abs(d);
+      const dir = sign(d) || 1;
+      if (t.attack === "melee") {
+        goalX = dist > hunt.contactGap ? hntTgt.x - dir * hunt.meleeApproachGap : h.x;
       } else {
-        goalX = homeX;
-        moveSpeed = CONFIG.heroMove;
-        upperCap = Math.min(homeX + CONFIG.meleeLeash, CONFIG.midCap);
+        const standoff = t.range * hunt.rangedStandoffFrac;
+        if (dist > standoff)
+          goalX = hntTgt.x - dir * standoff; // close in to firing range
+        else if (dist < CONFIG.kiteDist)
+          goalX = h.x - dir * CONFIG.rangedKiteStep; // crowded: step back
+        // else hold and fire
       }
-      goalX = clamp(goalX, homeX - CONFIG.meleeHomeBack, upperCap);
-      h.x += clamp(goalX - h.x, -moveSpeed * FIXED_DT, moveSpeed * FIXED_DT);
-    } else {
-      const near = nearestAny(targets, h.x);
-      let goalX =
-        near && Math.abs(near.x - h.x) < CONFIG.kiteDist
-          ? h.x - CONFIG.rangedKiteStep
-          : homeX;
-      // Upper clamp uses rangedForwardCap (spawn-relative safety net), NOT the POC
-      // absolute midCap: homeX = anchorX + offset carries the -26/-74 formation spread,
-      // so a cap above the max homeX preserves spacing at ANY anchor depth. midCap(400)
-      // collided (archer & mage both pinned to 400 -> exact stack) once the anchor pushed
-      // deep — fixed here (86d3k2nhm follow-up).
-      goalX = clamp(
-        goalX,
-        CONFIG.rangedMinX,
-        Math.min(homeX + CONFIG.rangedHomeFront, CONFIG.rangedForwardCap),
-      );
-      h.x += clamp(goalX - h.x, -CONFIG.heroMove * FIXED_DT, CONFIG.heroMove * FIXED_DT);
     }
+    goalX = clamp(goalX, minX, maxX);
+    h.x += clamp(goalX - h.x, -hunt.huntSpeed * FIXED_DT, hunt.huntSpeed * FIXED_DT);
 
     h.cd -= FIXED_DT;
     if (h.cd <= 0) {

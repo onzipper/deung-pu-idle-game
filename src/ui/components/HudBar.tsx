@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * Top HUD strip: stage/wave badges, gold, and the kill-goal progress bar
- * toward boss-readiness. Reads only the throttled snapshot fields it needs.
+ * Top HUD strip: stage badge, gold, and the kill-goal progress bar toward
+ * boss-readiness. Reads only the throttled snapshot fields it needs. (The wave
+ * badge was retired with the M6 "สนามล่ามอน" combat rework — there are no waves.)
  *
  * Hierarchy (task 86d3k2tap): gold + kill-progress are the player's
  * heartbeat, so they get the biggest/boldest numerals + tabular-nums + an
- * icon; stage/wave recede into small chip badges.
+ * icon; the stage recedes into a small chip badge.
  */
 
 import { useTranslations } from "next-intl";
@@ -15,7 +16,6 @@ import { useGameStore } from "@/ui/store/gameStore";
 
 export function HudBar() {
   const stage = useGameStore((s) => s.stage);
-  const wave = useGameStore((s) => s.wave);
   const gold = useGameStore((s) => s.gold);
   const kills = useGameStore((s) => s.kills);
   const killGoal = useGameStore((s) => s.killGoal);
@@ -32,12 +32,6 @@ export function HudBar() {
             {t("stageLabel")}
           </span>
           <span className="text-base font-bold text-emerald-300 tabular-nums">{stage}</span>
-        </span>
-        <span className="inline-flex items-baseline gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-1">
-          <span className="text-[10px] font-semibold tracking-wide text-ddp-ink-muted uppercase">
-            {t("waveLabel")}
-          </span>
-          <span className="text-base font-bold text-ddp-ink tabular-nums">{wave}</span>
         </span>
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/10 px-2.5 py-1">

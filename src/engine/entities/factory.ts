@@ -106,6 +106,13 @@ export function makeEnemy(
     range: et.range,
     cd: rng.next() * CONFIG.enemyInitialCdJitter,
     engageOffset: rng.next() * CONFIG.enemyEngageJitter,
+    // Hunt-field fields (M6 "สนามล่ามอน"): the spawn system positions the mob and
+    // sets its temperament (see systems/waves.ts `spawnMob`). Defaults are a
+    // passive mob anchored at x=0 — safe for a directly-injected test enemy.
+    homeX: 0,
+    aggressive: false,
+    aggroRadius: 0,
+    engaged: false,
   };
 }
 

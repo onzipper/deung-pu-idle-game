@@ -567,10 +567,12 @@ export class FxController {
         case "bossDefeated":
           this.onBossDefeated(ev);
           break;
-        case "waveSpawn":
-          burst(this.particles, CONFIG.spawnX, GROUND_Y - 16, 6, PALETTE.muted, {
-            speed: 40,
-            life: 0.3,
+        case "mobAggroed":
+          // M6 "สนามล่ามอน": an aggressive mob just aggroed onto the hero — a small
+          // alert puff at the mob (a placeholder for a fuller growl/alert beat).
+          burst(this.particles, ev.x, GROUND_Y - 18, 5, PALETTE.enrageAura, {
+            speed: 55,
+            life: 0.28,
             radius: 2,
           });
           break;

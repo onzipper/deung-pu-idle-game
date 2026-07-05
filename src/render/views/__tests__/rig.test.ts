@@ -66,6 +66,10 @@ function makeEnemy(kind: Enemy["kind"]): Enemy {
     range: kind === "ranged" ? 160 : 0,
     cd: 1,
     engageOffset: 0,
+    homeX: 0,
+    aggressive: false,
+    aggroRadius: 0,
+    engaged: false,
   };
 }
 

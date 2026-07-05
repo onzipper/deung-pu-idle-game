@@ -41,7 +41,7 @@ function objIndices(hero: Hero): { kill: number; boss: number } {
 function gateState(cls: "swordsman" | "archer" | "mage" = "swordsman"): GameState {
   const s = initGameState(1, soloSave(cls, 1));
   s.heroes[0].level = GATE;
-  s.waveGap = 999; // freeze wave spawns so seeded kills are the only ones
+  s.spawnPaused = true; // freeze mob spawns so seeded kills are the only ones
   return s;
 }
 

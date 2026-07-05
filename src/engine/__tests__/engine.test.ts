@@ -33,28 +33,34 @@ describe("determinism", () => {
   });
 });
 
-describe("first wave combat", () => {
-  it("spawns wave 1 after the initial gap", () => {
+describe("hunt-field spawning (M6 สนามล่ามอน)", () => {
+  it("bursts the mob pool to full on the first battle step", () => {
     const s = initGameState(42);
     expect(s.enemies.length).toBe(0);
-    run(s, 60); // ~1s: firstWaveGap is 0.5s
-    expect(s.wave).toBeGreaterThanOrEqual(1);
+    run(s, 1); // one step: the burst fills the field
     expect(s.enemies.length).toBeGreaterThan(0);
+    // Mobs are placed across the field, not stacked at one spawn edge.
+    const xs = s.enemies.map((e) => e.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0);
   });
 
-  it("heroes kill enemies and gold increases", () => {
+  it("heroes hunt + kill mobs and gold increases", () => {
     const s = initGameState(42);
     run(s, 6000); // ~100s of sim
     expect(s.kills).toBeGreaterThan(0);
     expect(s.gold).toBeGreaterThan(0);
-    // gold must equal the sum of per-kill rewards for the current stage.
+    // gold must be at least the sum of per-kill rewards for the current stage.
     expect(s.gold).toBeGreaterThanOrEqual(s.kills); // goldPerKill(1) = 7 > 1
   });
 
-  it("progresses past the first wave into later waves", () => {
+  it("keeps the pool respawning as mobs are hunted down", () => {
     const s = initGameState(42);
-    run(s, 6000);
-    expect(s.wave).toBeGreaterThanOrEqual(2);
+    run(s, 3000);
+    const killsMid = s.kills;
+    expect(killsMid).toBeGreaterThan(0);
+    run(s, 3000);
+    // The pool keeps feeding the hunt (respawn refills what the hero clears).
+    expect(s.kills).toBeGreaterThan(killsMid);
   });
 });
 

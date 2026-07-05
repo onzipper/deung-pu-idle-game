@@ -49,17 +49,76 @@ export const CONFIG = {
   // WITHOUT a per-zone boss). The boss room unlocks after the last farm zone;
   // beating it unlocks the next map. map3 is the soft-wall frontier (bossStageId 15
   // sits past the current content ceiling — intended; extended by M7/M8 content).
+  // Per-map fields:
+  //  - `fieldWidth`: the zone's walkable width in engine units (M6 "สนามล่ามอน").
+  //    Default = the current screen field (~900, the letterboxed logical width in
+  //    render/layout.ts). A wider zone is a DATA change here (+ a camera-follow
+  //    render task) — the hunt/spawn systems already read it, so no engine rework.
+  //  - `hunt`: the per-map spawn-pool + temperament knobs (see the `hunt` block
+  //    below for the shared defaults). `aggroStart`/`aggroEnd` ramp the AGGRESSIVE
+  //    fraction across the map's farm zones (index 0 -> last farm before the boss),
+  //    so aggression concentrates toward the boss room (GDD). `aggroRadius` is that
+  //    map's aggressive aggro range (slightly larger in later maps).
   world: {
     maps: [
-      { id: "map1", zoneStageIds: [1, 2, 3, 4, 5], bossStageId: 5 },
-      { id: "map2", zoneStageIds: [6, 7, 8, 9, 10], bossStageId: 10 },
-      { id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15 },
+      {
+        id: "map1", zoneStageIds: [1, 2, 3, 4, 5], bossStageId: 5, fieldWidth: 900,
+        hunt: { maxAlive: 6, respawnDelay: 1.7, aggroStart: 0.0, aggroEnd: 0.15, aggroRadius: 130 },
+      },
+      {
+        id: "map2", zoneStageIds: [6, 7, 8, 9, 10], bossStageId: 10, fieldWidth: 900,
+        hunt: { maxAlive: 7, respawnDelay: 1.5, aggroStart: 0.18, aggroEnd: 0.4, aggroRadius: 150 },
+      },
+      {
+        id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15, fieldWidth: 900,
+        hunt: { maxAlive: 8, respawnDelay: 1.35, aggroStart: 0.35, aggroEnd: 0.6, aggroRadius: 175 },
+      },
     ],
     townMapId: "map1",
     // Deterministic walk transit per hop (seconds). Negligible vs clear times;
     // render animates the actual multi-zone walk (a later task). Death respawn
     // reuses `heroReviveTime` as its walk-home time (unchanged death cost).
     transitSeconds: 0.6,
+  },
+
+  // ---- hunting field ("สนามล่ามอน", M6 combat rework, decided 2026-07-05) ----
+  // The forward-march wave model is replaced by an OPEN FIELD the hero HUNTS across.
+  // A per-zone spawn POOL keeps `maxAlive` mobs on the field (seeded RNG places +
+  // composes them — spawn composition/placement is exactly what the RNG stream is
+  // reserved for); a killed mob respawns after `respawnDelay`. Mobs idle-WANDER
+  // gently around their spawn point via a DETERMINISTIC id-hashed phase (NOT the RNG
+  // stream — mid-combat draws stay forbidden). Temperament: PASSIVE (default — never
+  // initiates; fights back once HIT) + AGGRESSIVE (an aggro radius — engages when the
+  // hero enters it). The AGGRESSIVE fraction ramps per map (`world.maps[].hunt`) so
+  // danger concentrates toward the boss rooms. All knobs sim-tuned — docs/balance-m6.md.
+  hunt: {
+    // Spawn-pool defaults (a map's `hunt` block overrides maxAlive/respawnDelay).
+    maxAlive: 7,
+    respawnDelay: 1.6,
+    /** Delay before the first spawn on zone entry (the field then bursts to full). */
+    initialGap: 0.3,
+    /** Spawn band as fractions of the zone `fieldWidth` (mobs placed in [min,max]). */
+    spawnMinXFrac: 0.3,
+    spawnMaxXFrac: 0.96,
+    // Idle wander around the spawn point (deterministic; no RNG). Amplitude in px,
+    // a gentle drift speed cap, and an id-hashed frequency spread so mobs desync.
+    wanderAmp: 22,
+    wanderSpeed: 18,
+    wanderFreqBase: 0.5,
+    wanderFreqSpread: 0.4,
+    /** Default aggro radius (per-map `aggroRadius` overrides). */
+    aggroRadius: 150,
+    // Hero auto-hunt: walk speed toward the target, the melee stop gap (+approach
+    // short), and the ranged standoff (hold at range*frac; kite in below kiteDist).
+    huntSpeed: 175,
+    contactGap: 34,
+    meleeApproachGap: 26,
+    rangedStandoffFrac: 0.82,
+    /** Engaged melee mob stops this far from the hero before swinging. */
+    mobContactGap: 34,
+    /** Hero field bounds: left clamp (don't back off-screen) + right margin. */
+    heroMinX: 55,
+    fieldRightMargin: 24,
   },
 
   // ---- NPC shop / consumables (M6 "เมืองหลัก + NPC shops", ROADMAP task) ----

@@ -169,3 +169,87 @@ M8 warp/marketplace add the deeper sinks).
   does, `onBossRoomCleared` finds no map4 and emits a `frontierCleared` event; the
   UI shows the "สุดเขตแดนตอนนี้" banner and the hero sits in the paused victory able
   to walk LEFT to keep farming — never a crash/stall.
+
+---
+
+## M6 task 3 — Combat rework "สนามล่ามอน" (open-field hunting)
+
+The forward-march wave model is replaced by an **open field the hero HUNTS across**
+(GDD "โลกและการเดิน" — Zone = สนามล่ามอน). A per-zone **spawn POOL** scatters up to
+`maxAlive` mobs at random field positions (seeded RNG — placement/composition is what
+the stream is reserved for); a killed mob **respawns** after `respawnDelay`; idle mobs
+**wander** their spawn point via a deterministic id-hashed sine (no RNG). Temperament:
+**PASSIVE** by default (never initiates; fights back once HIT) + an **AGGRESSIVE belt**
+(aggro radius) whose density **ramps toward the boss room**. The hero **auto-hunts** the
+nearest mob (deterministic id tie-break), walking to attack range (melee closes, ranged
+holds a standoff + kites). No formation anchor / forward pressure — the anchor survives
+only for the boss fight + the render "marching" cue. The multi-actor engine (M8 party)
+is reshaped, not removed: each actor hunts independently and the per-class `offset`
+(spacing) is retained in config. **SAVE: unchanged (v9)** — the whole spawn/hunt state
+is transient (`spawnCd`/`spawnBurst`/`spawnPaused`, mob temperament), never persisted.
+
+### Knob defaults (per map — `CONFIG.world.maps[].hunt`, shared `CONFIG.hunt`)
+
+| map | maxAlive | respawnDelay | aggro fraction (first→last farm) | aggroRadius |
+|---|---:|---:|---|---:|
+| map1 (Human World) | 6 | 1.7 s | 0.00 → 0.15 (zones 1-2 ~all passive) | 130 |
+| map2 (Demon Realm) | 7 | 1.5 s | 0.18 → 0.40 (mid game ~25-40%) | 150 |
+| map3 (Wild Frontier)| 8 | 1.35 s | 0.35 → 0.60 (last farm ~54-60%) | 175 |
+
+Shared: `wanderAmp 22`, `huntSpeed 175`, `mobContactGap 34`, spawn band = 30-96% of
+`fieldWidth` (900, the current screen field — a **zone-width knob is now data**, ready
+for wide zones + camera-follow later). The aggressive fraction is `lerp(start,end)` over
+a map's farm-zone index, so danger concentrates toward each boss room (GDD).
+
+### Method
+
+Same `pnpm sim` world autopilot (walk on unlock, enter boss room, advance on victory,
+auto-cast/auto-allocate/auto-return + auto-potions ON). `SIM_SECONDS=2400`, 5 seeds.
+
+### Results — farm-zone clear time per stage (mean s, 5 seeds), vs the M6 wave baseline
+
+| stage | sword (new / base) | archer (new / base) | mage (new / base) |
+|---:|---|---|---|
+| 1 | 17 / 21 | 18 / 21 | 21 / 32 |
+| 2 | 27 / 43 | 29 / 34 | 34 / 42 |
+| 3 | 34 / 73 | 34 / 31 | 37 / 49 |
+| 4 | 42 / 86 | 43 / 43 | 44 / 57 |
+| 5 | 51 / 83 | 52 / 52 | 55 / 69 |
+| 6 | 51 / 91 | 52 / 52 | 56 / 71 |
+| 7 | 59 / 102 | 60 / 62 | 60 / 83 |
+| 8 | 66 / 76 | 67 / 77 | 69 / 91 |
+| 9 | 75 / 79 | 78 / 86 | 77 / 95 |
+| 10 | 114 / 116 | 121 / 99 | 103 / 106 |
+| 11 | 110 / 289 | 111 / 124 | 110 / 125 |
+| 12 | 91 / 1219 | 161 / 132 | 147 / 136 |
+| 13 | 125 / — | 232 / 158 | 165 / 156 |
+| 14 | 199 / — | 525 / 195 | 182 / 174 |
+| 15 | 393 / — | wall / 563 | 462 / 310 |
+
+Boss rooms: map1 (s5) + map2 (s10) = **5/5, 0 wipes, all classes**. map3 (s15) =
+sword 0/5 (3 wipes), mage 0/5 (11 wipes), archer never reaches it. Class change lands
+at **stage 5 (5/5)** for every class, unchanged.
+
+### Targets — met
+
+- **Pacing ballpark preserved.** Early/mid zones (s1-s10) run 17-120 s — the same idle
+  cadence as the wave baseline (18-116 s), just **smoother + more class-uniform** (no
+  inter-wave idle gap; a continuously-populated field). The old melee mid-wall softened
+  (sword s11 289→110 s, s12 1219→91 s) into an even ramp — a cleaner idle curve.
+- **map1 + map2 = 0 permanent walls, 0 boss wipes, all classes.** Farm zones there are
+  **all/mostly passive** (aggro ≤0.15), so they're **0-death safe** — farm danger drops
+  exactly as designed.
+- **Damage pressure concentrated in the aggressive belt + bosses.** Deaths are **0 across
+  all of map1+map2** and pile up only in the map3 aggressive frontier (sword deaths:
+  s14 8, s15-farm 106; archer s14 39, s15 106; mage s15-farm 53). So sustain/potions now
+  **matter mainly in the aggressive belt + boss rooms** — the sword's potion sink doesn't
+  collapse to zero, it **relocates to the frontier** (where its HP pressure now lives).
+- **map3 s15 wall INTACT.** No class beats the s15 boss (sword/mage 0/5, archer walls at
+  the s15 farm). The frontier is a soft-wall, not a freeze — respawn + auto-return keep
+  banking XP (final levels 49-51). The aggressive belt is the tuning lever: the squishy
+  **archer** feels the s14 belt hardest (525 s, 39 deaths) — emergent class pressure, the
+  ranged glass-cannon caught in a 54%-aggressive swarm while the mage kites and the sword
+  tanks. Still short of a permanent freeze.
+- **Autopilot never stalls.** All 15 seeds×3 classes reach map3/s15 in 2400 s; mobs are
+  always reachable (spawn band ⊂ hero clamp), the id tie-break prevents hunt ping-pong,
+  and respawn keeps the field fed — verified by the long-sim + pure-farm anti-stall tests.

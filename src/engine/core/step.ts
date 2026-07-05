@@ -22,7 +22,7 @@ import {
   tickConsumableCds,
 } from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
-import { updateWaveSpawns } from "@/engine/systems/waves";
+import { updateSpawns } from "@/engine/systems/waves";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
@@ -193,7 +193,7 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   processConsumables(state, input.useConsumable);
   processSkills(state, input); // manual casts + guarded auto-cast
   updateAnchor(state);
-  updateWaveSpawns(state, rng);
+  updateSpawns(state, rng); // maintain the farm zone's mob pool (M6 "สนามล่ามอน")
   updateEnemies(state); // no-op during the boss phase (field is cleared)
   if (state.phase === "boss") updateBoss(state);
   updateHeroes(state);

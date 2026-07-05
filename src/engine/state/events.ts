@@ -59,7 +59,10 @@ export type GameEvent =
   | { type: "bossEnraged"; x: number; y: number }
   | { type: "bossDefeated"; x: number; y: number; goldGained: number }
   | { type: "bossRetreat"; x: number; y: number }
-  | { type: "waveSpawn"; wave: number }
+  // A mob AGGROED onto the hero (M6 "สนามล่ามอน"): an aggressive mob's aggro radius
+  // triggered, so it starts hunting the hero. One-way (render may hook a growl/alert
+  // beat). Replaces the retired march-model `waveSpawn` (there are no waves now).
+  | { type: "mobAggroed"; id: number; kind: EnemyKind; x: number; y: number }
   | { type: "stageCleared"; stage: number }
   | { type: "stageAdvanced"; stage: number }
   // Class-change quest lifecycle (M5 task 5 — for UI + future juice). All carry

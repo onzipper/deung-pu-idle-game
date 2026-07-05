@@ -124,8 +124,21 @@ export interface GameState {
   projectiles: Projectile[];
   /** Formation anchor x the team advances toward. */
   anchorX: number;
-  /** Countdown to the next wave spawn. */
+  /**
+   * Legacy wave gap (M6 "สนามล่ามอน" retired the march-model wave scheduler). Kept
+   * on the state as an inert field so the boss/flow resets that still touch it
+   * compile; the hunting spawn pool uses `spawnCd`/`spawnBurst` instead.
+   */
   waveGap: number;
+  /**
+   * Hunting spawn pool (M6 "สนามล่ามอน"). `spawnCd` counts down to the next
+   * respawn; `spawnBurst` (set on a farm-zone arrival) fills the field to
+   * `maxAlive` in one step; `spawnPaused` freezes spawns (tests inject their own
+   * mobs). All transient — the battlefield is never persisted.
+   */
+  spawnCd: number;
+  spawnBurst: boolean;
+  spawnPaused: boolean;
   /** True once the kill goal is met and the boss can be challenged. */
   bossReady: boolean;
   /** RNG stream cursor, persisted so a reload continues deterministically. */
@@ -279,6 +292,11 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     projectiles: [],
     anchorX: CONFIG.baseAnchor,
     waveGap: CONFIG.firstWaveGap,
+    // Hunting spawn pool (M6): burst-fill the field on the first battle step of a
+    // farm zone (a fresh start / loaded save both begin in one).
+    spawnCd: CONFIG.hunt.initialGap,
+    spawnBurst: true,
+    spawnPaused: false,
     bossReady: false,
     rngState: seed >>> 0,
     nextId: 1,

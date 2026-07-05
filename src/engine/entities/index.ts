@@ -244,6 +244,26 @@ export interface Enemy {
   cd: number;
   /** Per-enemy jitter so melee attackers don't stack on the exact same x. */
   engageOffset: number;
+  /**
+   * Wander anchor (M6 "สนามล่ามอน"): the spawn point a not-yet-engaged mob idly
+   * drifts around (deterministic, no RNG). Transient (mobs are never persisted).
+   */
+  homeX: number;
+  /**
+   * Temperament (M6): AGGRESSIVE mobs engage when the hero enters `aggroRadius`;
+   * PASSIVE mobs (`aggressive=false`, `aggroRadius=0`) never initiate and only
+   * fight back once HIT (combat sets `engaged`). Set at spawn from the zone's
+   * per-map aggro ramp (`world.maps[].hunt`). Transient.
+   */
+  aggressive: boolean;
+  /** Aggro radius for an aggressive mob (0 for passive). Transient. */
+  aggroRadius: number;
+  /**
+   * Latched once this mob is FIGHTING the hero (aggro-triggered, or retaliating
+   * after a hit): it then approaches + attacks like the old march-model enemy.
+   * Before that it idle-wanders. Transient.
+   */
+  engaged: boolean;
 }
 
 /**
