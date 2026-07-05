@@ -19,6 +19,7 @@ import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { StatPanel } from "@/ui/components/StatPanel";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
+import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 
@@ -77,6 +78,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         >
           <SpeedSelector />
           <div className="flex items-center gap-3">
+            <SwitchCharacterLink />
             <CodexButton />
             <SoundToggle />
             <LocaleSwitch />
