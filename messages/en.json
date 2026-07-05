@@ -25,8 +25,14 @@
   "panels": {
     "skillsLabel": "Skills",
     "heroDeadBadge": "Dead",
-    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (dead)} cooldown { (cooldown {seconds}s)} other {}}",
+    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (dead)} cooldown { (cooldown {seconds}s)} nomana { (no mana)} other {}}",
     "autoSkillToggle": "✨ Auto Skill: {state, select, on {ON} other {OFF}}",
+    "skillManaCost": "{cost} MP",
+    "manaLabel": "Mana {mana}/{max}",
+    "autoSlotAdd": "+ Auto",
+    "autoSlotAssigned": "Auto {slot}",
+    "autoSlotToggleHint": "Toggle this skill into a free auto-cast slot",
+    "autoSlotNextUnlock": "More auto slots at Lv.{level}",
     "upgradesLabel": "Upgrades",
     "upgradeAriaLabel": "{name} Level {level}{costState, select, capped { (MAX)} other {, cost {cost} gold}}",
     "autoUpgradeToggle": "💰 Auto Upgrade: {state, select, on {ON} other {OFF}}",
@@ -185,9 +191,106 @@
         "name": "Arrow Rain",
         "desc": "Rains arrows across the whole battlefield"
       },
-      "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" }
+      "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "sword_whirl": {
+        "name": "Whirl Slash",
+        "desc": "Spins the blade to hit every foe in range"
+      },
+      "sword_warcry": {
+        "name": "War Cry",
+        "desc": "A rallying shout that boosts your attack for a while"
+      },
+      "sword_quake": {
+        "name": "Earthquake",
+        "desc": "Slams the ground for heavy area damage ahead"
+      },
+      "archer_rain": {
+        "name": "Arrow Rain",
+        "desc": "Rains arrows across the whole battlefield"
+      },
+      "archer_powershot": {
+        "name": "Power Shot",
+        "desc": "A single devastating arrow — the boss-buster"
+      },
+      "archer_barrage": {
+        "name": "Explosive Shot",
+        "desc": "An explosive arrow that bursts over a cluster"
+      },
+      "mage_meteor": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "mage_frostnova": {
+        "name": "Frost Nova",
+        "desc": "A quick, cheap frost blast for clearing waves"
+      },
+      "mage_cataclysm": {
+        "name": "Cataclysm",
+        "desc": "A colossal meteor — the ultimate burst"
+      }
     },
     "quests": {},
     "items": {}
+  },
+  "characters": {
+    "pageTitle": "Your Characters",
+    "pageSubtitle": "Pick a character to play, or create a new one (up to 3 per account)",
+    "slotCount": "{count}/3 characters",
+    "loading": "Loading characters...",
+    "loadError": "Couldn't load your characters",
+    "retryButton": "Retry",
+    "emptyTitle": "No characters yet",
+    "emptyBody": "Create your first character to start the adventure!",
+    "createButton": "+ Create new",
+    "backToRosterButton": "← Back to characters",
+    "hudLink": "Switch character",
+    "card": {
+      "powerLabel": "Power",
+      "createdAtLabel": "Created {date}",
+      "playButton": "Play",
+      "selecting": "Entering game...",
+      "deleteButton": "Delete",
+      "selectError": "Couldn't select this character — try again"
+    },
+    "delete": {
+      "title": "Delete \"{name}\"?",
+      "warning": "This cannot be undone — the character and all its progress will be permanently lost.",
+      "confirmInstruction": "Type \"{name}\" exactly to confirm deletion",
+      "confirmPlaceholder": "Type the character name here",
+      "cancelButton": "Cancel",
+      "confirmButton": "Permanently delete",
+      "deleting": "Deleting...",
+      "error": "Delete failed — try again"
+    },
+    "create": {
+      "title": "Create a New Character",
+      "classPickerLabel": "Pick a starting class",
+      "affinityLabel": "Main stat",
+      "classes": {
+        "swordsman": {
+          "tagline": "Melee frontliner",
+          "playstyle": "Wades into melee range with a blade — tough and hard-hitting."
+        },
+        "archer": {
+          "tagline": "Ranged marksman",
+          "playstyle": "Fires arrows from behind the team — fast and precise."
+        },
+        "mage": {
+          "tagline": "Area-of-effect destroyer",
+          "playstyle": "Casts spells that shred grouped-up enemies."
+        }
+      },
+      "nameLabel": "Character name",
+      "namePlaceholder": "Name your character",
+      "nameHint": "2-24 characters, Thai/English letters and digits only (no spaces or symbols)",
+      "nameError": {
+        "empty": "Please enter a name",
+        "tooShort": "Name must be at least 2 characters",
+        "tooLong": "Name must be at most 24 characters",
+        "invalidChars": "Only Thai/English letters and digits are allowed"
+      },
+      "submitButton": "Create character",
+      "submitting": "Creating...",
+      "limitError": "You already have the maximum of 3 characters",
+      "duplicateError": "That name is already taken — try another",
+      "genericError": "Couldn't create the character — try again"
+    }
   }
 }

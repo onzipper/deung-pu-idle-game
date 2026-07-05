@@ -56,6 +56,13 @@ export type ProjectileKind = "arrow" | "orb" | "meteor" | "bolt" | "rainArrow";
 /** Which side fired a projectile / owns an entity. */
 export type Team = "hero" | "enemy";
 
+/**
+ * A skill id (M5 "skill framework v2"). Keyed into the `SKILLS` catalog
+ * (`engine/config`). Class-namespaced strings (e.g. `sword_whirl`), so a skill
+ * unambiguously identifies its owning class.
+ */
+export type SkillId = string;
+
 export interface Vec2 {
   x: number;
   y: number;
@@ -73,8 +80,39 @@ export interface Hero {
   dead: boolean;
   /** Seconds until revival while `dead`. */
   reviveTimer: number;
-  /** Active skill cooldown, seconds (Phase B — decays here already). */
-  skillCd: number;
+  /**
+   * Per-SKILL cooldown timers (M5 "skill framework v2"), keyed by skill id;
+   * seconds until that skill may be cast again. A missing/≤0 entry means ready.
+   * Decayed by `combat.decayHeroTimers`. Transient runtime state (rebuilt on
+   * load — cooldowns are not persisted).
+   */
+  skillCds: Record<SkillId, number>;
+  /**
+   * Current mana (M5 "mana + skill framework v2"). Spent by casting skills;
+   * regenerated each step (`combat.decayHeroTimers`) toward `maxMana`. Persisted
+   * per hero (cheap; a reasonable snapshot of caster resource state).
+   */
+  mana: number;
+  /**
+   * Max mana pool — derived from class base + INT allocation
+   * (`stats.heroMaxManaOf`). Cached here (mirrors `maxHp`) and refreshed each
+   * step / on INT allocation. Not persisted (re-derived on load).
+   */
+  maxMana: number;
+  /**
+   * Active self ATK buff multiplier (M5 war-cry style skills). 1 = no buff.
+   * Applied to `heroAtkOf` while `atkBuffTimer > 0`. Transient (not persisted).
+   */
+  atkBuffMult: number;
+  /** Remaining seconds on the ATK buff (0 = inactive). Transient. */
+  atkBuffTimer: number;
+  /**
+   * Auto-cast slot assignments (M5): skill id in each slot, or null (empty).
+   * Length is `CONFIG.autoSlots.max`; a slot only fires if its index is unlocked
+   * by the hero's level (`unlockedAutoSlotCount`). Persisted per hero (player
+   * loadout choice).
+   */
+  autoSlots: (SkillId | null)[];
   /**
    * Per-hero level (M5). Starts at 1, capped at `CONFIG.leveling.levelCap`. Grants
    * a small atk/hp bonus that compounds with the upgrade lines. Persisted per hero.

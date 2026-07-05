@@ -17,7 +17,7 @@ import type { GameState } from "@/engine/state";
 import type { StatKey } from "@/engine/entities";
 import { updateAnchor } from "@/engine/systems/movement";
 import { updateWaveSpawns } from "@/engine/systems/waves";
-import { processSkills } from "@/engine/systems/skills";
+import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
 import { processStatAllocation } from "@/engine/systems/allocation";
@@ -30,10 +30,32 @@ import {
   resolveDeaths,
 } from "@/engine/systems/combat";
 
+/** A manual skill cast: cast `skillId` on the hero at `slot` (0 = solo hero). */
+export interface CastSkillInput {
+  slot: number;
+  skillId: string;
+}
+
+/** Assign an auto-cast slot for the solo hero (M5 skill framework v2). */
+export interface SetAutoSlotInput {
+  slot: number;
+  /** Skill id to place in the slot, or null to clear it. */
+  skillId: string | null;
+}
+
 /** Per-step player input. Every field is optional; omit for a pure idle step. */
 export interface FrameInput {
-  /** Hero-slot indices to cast a skill this step (subject to the range guard). */
-  castSkills?: number[];
+  /**
+   * Manual skill casts this step (M5): each names a hero slot + a specific skill
+   * id, subject to the cooldown / mana / range guards. Applied once per drained
+   * input (a click casts exactly once, at any speed).
+   */
+  castSkills?: CastSkillInput[];
+  /**
+   * Auto-cast slot assignments for the solo hero (M5). Honoured across phases; a
+   * no-op for a locked slot or an unlearned skill. Applied once per drained input.
+   */
+  setAutoSlots?: SetAutoSlotInput[];
   /** Begin the boss fight (only honoured when bossReady && phase "battle"). */
   challengeBoss?: boolean;
   /** Advance to the next stage (only honoured when phase "victory"). */
@@ -62,6 +84,10 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
 
   // --- discrete player actions (valid across phases) ---
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
+  // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
+  if (input.setAutoSlots) {
+    for (const a of input.setAutoSlots) setAutoSlot(state, state.heroes[0], a.slot, a.skillId);
+  }
   // Manual + auto base-stat allocation (M5 "Base stats"). Runs in all phases so a
   // player can spend points between stages (victory) and auto-allocate keeps up
   // with boss-kill level-ups; before the victory early-return below.

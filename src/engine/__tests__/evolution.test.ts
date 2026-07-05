@@ -10,6 +10,7 @@ import {
   heroMaxHp,
   CONFIG,
   SAVE_VERSION,
+  SIGNATURE_SKILL,
   type GameState,
 } from "@/engine";
 import { clone } from "./helpers";
@@ -212,6 +213,8 @@ describe("migrate pre-v4 tier handling", () => {
       tier: 1,
       statPoints: 5 * CONFIG.stats.pointsPerLevel,
       stats: { ...CONFIG.stats.base.archer },
+      mana: CONFIG.mana.base,
+      autoSlots: [SIGNATURE_SKILL.archer, null, null],
     });
   });
 
@@ -229,6 +232,8 @@ describe("migrate pre-v4 tier handling", () => {
       tier: 2,
       statPoints: 9 * CONFIG.stats.pointsPerLevel,
       stats: { ...CONFIG.stats.base.swordsman },
+      mana: CONFIG.mana.base,
+      autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
     });
     expect(migrate(v5)).toEqual(v5);
   });

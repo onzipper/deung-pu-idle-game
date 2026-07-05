@@ -286,7 +286,12 @@ describe("base stats persist + migrate v4 -> v5", () => {
   });
 
   it("grants retro points = level * pointsPerLevel to a v4 save missing stats", () => {
-    const v4 = { version: 4, stage: 3, gold: 10, hero: { cls: "archer", level: 8, xp: 1, tier: 1 } };
+    const v4: Parameters<typeof migrate>[0] = {
+      version: 4,
+      stage: 3,
+      gold: 10,
+      hero: { cls: "archer", level: 8, xp: 1, tier: 1 },
+    };
     const v5 = migrate(v4);
     expect(v5.version).toBe(SAVE_VERSION);
     expect(v5.hero.statPoints).toBe(8 * ST.pointsPerLevel);

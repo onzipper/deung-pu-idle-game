@@ -24,7 +24,8 @@ function primeArcherBasicAttack(level = 1, targetHp = 1_000_000) {
   const archer = s.heroes[0];
   expect(archer.cls).toBe("archer");
   archer.level = level;
-  archer.skillCd = 999;
+  // Skills only fire via autoCast (off here) or a manual castSkills intent
+  // (never sent), so the basic-attack lane is isolated on its own.
   archer.cd = 0; // basic attack ready NOW
   const target = makeStubEnemy(1, archer.x + 100, targetHp);
   s.enemies = [target];

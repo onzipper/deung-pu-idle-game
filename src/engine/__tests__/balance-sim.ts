@@ -25,10 +25,14 @@ import {
   bossHint,
   canEvolveHero,
   evolutionCost,
+  learnedSkills,
+  unlockedAutoSlotCount,
+  SIGNATURE_SKILL,
   CONFIG,
   SAVE_VERSION,
   FIXED_DT,
   type FrameInput,
+  type Hero,
   type HeroClass,
   type SaveData,
 } from "@/engine";
@@ -88,9 +92,39 @@ function makeSave(cls: HeroClass): SaveData {
     version: SAVE_VERSION,
     stage: 1,
     gold: 0,
-    hero: { cls, level: 1, xp: 0, tier: 1, statPoints: 0, stats: { ...CONFIG.stats.base[cls] } },
+    hero: {
+      cls,
+      level: 1,
+      xp: 0,
+      tier: 1,
+      statPoints: 0,
+      stats: { ...CONFIG.stats.base[cls] },
+      mana: CONFIG.mana.base,
+      autoSlots: [SIGNATURE_SKILL[cls], null, null],
+    },
     lastSeen: 0,
   };
+}
+
+/**
+ * Idle-player auto-slot loadout (M5 skill framework v2): as slots unlock by level
+ * and skills unlock by level/tier, fill the next OPEN unlocked slot with the next
+ * learned-but-unslotted skill (unlock order — signature first). Returns the
+ * setAutoSlot intents needed this step (empty once everything is slotted).
+ */
+function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
+  const unlocked = unlockedAutoSlotCount(hero.level);
+  const learned = learnedSkills(hero).map((s) => s.id);
+  const slotted = new Set(hero.autoSlots.filter((id): id is string => id !== null));
+  const out: { slot: number; skillId: string | null }[] = [];
+  for (let i = 0; i < unlocked && i < hero.autoSlots.length; i++) {
+    if (hero.autoSlots[i]) continue;
+    const next = learned.find((id) => !slotted.has(id));
+    if (!next) break;
+    out.push({ slot: i, skillId: next });
+    slotted.add(next);
+  }
+  return out;
 }
 
 function runSeed(cls: HeroClass, seed: number): SeedResult {
@@ -142,6 +176,11 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
 
     // Auto-evolve (M5): the player evolves as soon as the level+gold gate is met.
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
+
+    // Idle-player auto-slot management: assign newly-unlocked skills into open
+    // auto-cast slots (mirrors a real player filling their loadout).
+    const slotAssigns = fillAutoSlots(s.heroes[0]);
+    if (slotAssigns.length) input.setAutoSlots = slotAssigns;
 
     step(s, input);
 

@@ -31,3 +31,15 @@ export { canEvolveHero, evolveHero, evolutionCost } from "@/engine/systems/evolu
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";
+
+// Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
+// button state (learned/ready/affordable) and auto-slot state from these pure
+// reads. Casting / slot assignment happen ONLY through `step()` intents
+// (`castSkills` / `setAutoSlots`), so the mutators stay internal.
+export {
+  learnedSkills,
+  unlockedAutoSlotCount,
+  isSkillLearned,
+  canCastSkill,
+  skillCdOf,
+} from "@/engine/systems/skills";

@@ -8,6 +8,7 @@ import {
   FIXED_DT,
   migrate,
   SAVE_VERSION,
+  SIGNATURE_SKILL,
 } from "@/engine";
 import type { FrameInput, GameState, SaveData } from "@/engine";
 import { soloSave } from "./helpers";
@@ -26,7 +27,7 @@ import { soloSave } from "./helpers";
 
 function scriptedInput(i: number): FrameInput {
   const input: FrameInput = {};
-  if (i % 47 === 3) input.castSkills = [0];
+  if (i % 47 === 3) input.castSkills = [{ slot: 0, skillId: "sword_whirl" }];
   if (i % 599 === 23) input.challengeBoss = true;
   if (i % 599 === 400) input.advanceStage = true;
   if (i % 733 === 29) input.evolveHero = 0;
@@ -105,6 +106,8 @@ describe("save round-trip", () => {
         tier: 1,
         statPoints: 0,
         stats: { ...CONFIG.stats.base.mage },
+        mana: CONFIG.mana.base,
+        autoSlots: [SIGNATURE_SKILL.mage, null, null],
       },
       lastSeen: 123456,
     };
@@ -136,6 +139,8 @@ describe("save round-trip", () => {
         // A bare save has level 1 -> retro grant of 1 * pointsPerLevel points.
         statPoints: 1 * CONFIG.stats.pointsPerLevel,
         stats: { ...CONFIG.stats.base.swordsman },
+        mana: CONFIG.mana.base,
+        autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
       },
       lastSeen: 0,
     });
@@ -173,6 +178,8 @@ describe("save round-trip", () => {
       tier: 2,
       statPoints: 11 * CONFIG.stats.pointsPerLevel,
       stats: { ...CONFIG.stats.base.archer },
+      mana: CONFIG.mana.base,
+      autoSlots: [SIGNATURE_SKILL.archer, null, null],
     });
     expect(migrated.stage).toBe(6);
     expect(migrated.gold).toBe(999);

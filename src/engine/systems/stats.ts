@@ -23,6 +23,7 @@ import { CONFIG, HERO_TYPES, PRIMARY_STAT, SKILL_TYPES } from "@/engine/config";
 import type { Hero, HeroClass, HeroStats, StatKey } from "@/engine/entities";
 
 const ST = CONFIG.stats;
+const MN = CONFIG.mana;
 
 /** A fresh copy of the class's starting stat block (mutable — safe to assign). */
 export function baseStats(cls: HeroClass): HeroStats {
@@ -94,18 +95,56 @@ export function heroMaxHp(
   return Math.round(CONFIG.heroBaseHp * HERO_TYPES[cls].hpMult * mult * tierHpMult(tier));
 }
 
+/**
+ * Max mana for a hero of class `cls` (M5 "mana"). A flat class-independent base
+ * plus a per-point bonus for INT ALLOCATED ABOVE the class base — so the mage
+ * (primary = int, the auto-allocate target) grows a deep caster pool while the
+ * str/dex classes sit on the flat base. `intValue` defaults to the class base
+ * (= base pool, no bonus).
+ */
+export function heroMaxMana(cls: HeroClass, intValue: number = ST.base[cls].int): number {
+  const allocInt = Math.max(0, intValue - ST.base[cls].int);
+  return Math.round(MN.base + allocInt * MN.perIntPoint);
+}
+
+/**
+ * Mana regenerated per SECOND (M5 "mana"). Base regen (sized to sustain each
+ * class's signature cast — the idle guarantee) plus an INT-above-base bonus that
+ * gives the mage the sustain to run several skills at once.
+ */
+export function heroManaRegen(cls: HeroClass, intValue: number = ST.base[cls].int): number {
+  const allocInt = Math.max(0, intValue - ST.base[cls].int);
+  return MN.baseRegen + allocInt * MN.regenPerIntPoint;
+}
+
 // ---------------------------------------------------------------------------
 // Live-hero convenience wrappers (read the hero's allocated stats).
 // ---------------------------------------------------------------------------
 
-export function heroAtkOf(h: Hero): number {
+/**
+ * Base attack of a live hero (level + primary stat + tier), WITHOUT any transient
+ * self ATK buff. Used by the combat-power metric so the HOF number doesn't
+ * flicker with a war-cry.
+ */
+export function heroBaseAtkOf(h: Hero): number {
   return heroAtk(h.cls, h.level, h.tier, h.stats[PRIMARY_STAT[h.cls]]);
+}
+/** Live attack INCLUDING the active self ATK buff (used by combat/skills). */
+export function heroAtkOf(h: Hero): number {
+  const base = heroBaseAtkOf(h);
+  return h.atkBuffTimer > 0 ? Math.round(base * h.atkBuffMult) : base;
 }
 export function heroAtkSpeedOf(h: Hero): number {
   return heroAtkSpeed(h.cls, h.stats.dex);
 }
 export function heroMaxHpOf(h: Hero): number {
   return heroMaxHp(h.cls, h.level, h.tier, h.stats.vit);
+}
+export function heroMaxManaOf(h: Hero): number {
+  return heroMaxMana(h.cls, h.stats.int);
+}
+export function heroManaRegenOf(h: Hero): number {
+  return heroManaRegen(h.cls, h.stats.int);
 }
 
 /**
@@ -127,7 +166,7 @@ function skillEffectiveMult(cls: HeroClass): number {
  * tier (all weights are non-negative and each input term is monotonic).
  */
 export function combatPower(h: Hero): number {
-  const atk = heroAtkOf(h);
+  const atk = heroBaseAtkOf(h);
   const basicDps = atk / heroAtkSpeedOf(h);
   const skillDps = (atk * skillEffectiveMult(h.cls)) / SKILL_TYPES[h.cls].cd;
   const offense = basicDps + skillDps;

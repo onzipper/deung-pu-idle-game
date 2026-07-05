@@ -22,13 +22,10 @@ import { soloSave, makeParty, runUntil, makeStubEnemy } from "./helpers";
 /** A solo hero strong enough (by level) to win the stage-1 boss while still being
  * observed alive inside its enrage band — level 30 lands the damage per hit low
  * enough to cross the 0.3-HP threshold rather than leap it. */
-const strongSave = (): SaveData => ({
-  version: 4,
-  stage: 1,
-  gold: 0,
-  hero: { cls: "swordsman", level: 30, xp: 0, tier: 1 },
-  lastSeen: 0,
-});
+const strongSave = (): SaveData => {
+  const base = soloSave("swordsman", 1);
+  return { ...base, hero: { ...base.hero, level: 30 } };
+};
 
 /** Run `n` steps, concatenating every step's events into one flat stream. */
 function collectEvents(
@@ -129,9 +126,14 @@ describe("combat events", () => {
     const s = makeParty(7);
     // Arrow rain needs a foe within archer range (guard).
     s.enemies = [makeStubEnemy(1, s.heroes[1].x + 220)];
-    step(s, { castSkills: [1] }); // archer arrow rain
+    step(s, { castSkills: [{ slot: 1, skillId: "archer_rain" }] }); // archer arrow rain
     const cast = s.events.find((e) => e.type === "skillCast");
-    expect(cast).toMatchObject({ type: "skillCast", heroClass: "archer", slot: 1 });
+    expect(cast).toMatchObject({
+      type: "skillCast",
+      heroClass: "archer",
+      slot: 1,
+      skillId: "archer_rain",
+    });
     // Arrow rain spawns falling rainArrow drops this step.
     expect(
       s.events.some((e) => e.type === "projectileSpawn" && e.kind === "rainArrow"),
@@ -147,11 +149,11 @@ describe("combat events", () => {
       s,
       (st) =>
         st.boss != null &&
-        st.heroes[0].skillCd <= 0 &&
+        (st.heroes[0].skillCds["sword_whirl"] ?? 0) <= 0 &&
         Math.abs(st.boss.x - st.heroes[0].x) < radius,
       3000,
     );
-    step(s, { castSkills: [0] });
+    step(s, { castSkills: [{ slot: 0, skillId: "sword_whirl" }] });
     expect(
       s.events.some((e) => e.type === "hit" && e.source === "skill" && e.target === "boss"),
     ).toBe(true);
@@ -201,7 +203,7 @@ describe("boss lifecycle events", () => {
 describe("determinism", () => {
   function scriptedInput(i: number): Parameters<typeof step>[1] {
     const input: Parameters<typeof step>[1] = {};
-    if (i % 53 === 3) input.castSkills = [0];
+    if (i % 53 === 3) input.castSkills = [{ slot: 0, skillId: "sword_whirl" }];
     if (i % 601 === 23) input.challengeBoss = true;
     if (i % 601 === 400) input.advanceStage = true;
     if (i % 337 === 11) input.evolveHero = 0;

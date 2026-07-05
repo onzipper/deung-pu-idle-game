@@ -25,8 +25,14 @@
   "panels": {
     "skillsLabel": "สกิล",
     "heroDeadBadge": "ตาย",
-    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (ตาย)} cooldown { (คูลดาวน์ {seconds} วิ)} other {}}",
+    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (ตาย)} cooldown { (คูลดาวน์ {seconds} วิ)} nomana { (มานาไม่พอ)} other {}}",
     "autoSkillToggle": "✨ Auto สกิล: {state, select, on {เปิด} other {ปิด}}",
+    "skillManaCost": "{cost} มานา",
+    "manaLabel": "มานา {mana}/{max}",
+    "autoSlotAdd": "+ อัตโนมัติ",
+    "autoSlotAssigned": "ช่อง {slot}",
+    "autoSlotToggleHint": "แตะเพื่อใส่สกิลนี้ลงช่องร่ายอัตโนมัติที่ว่าง",
+    "autoSlotNextUnlock": "เพิ่มช่องอัตโนมัติที่ Lv.{level}",
     "upgradesLabel": "อัพเกรด",
     "upgradeAriaLabel": "{name} เลเวล {level}{costState, select, capped { สูงสุดแล้ว} other {, ราคา {cost} ทอง}}",
     "autoUpgradeToggle": "💰 Auto อัป: {state, select, on {เปิด} other {ปิด}}",
@@ -179,9 +185,82 @@
     "skills": {
       "swordsman": { "name": "หมุนฟัน", "desc": "หมุนดาบฟันศัตรูรอบตัว" },
       "archer": { "name": "ฝนลูกธนู", "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม" },
-      "mage": { "name": "อุกกาบาต", "desc": "เรียกอุกกาบาตถล่มพื้นที่" }
+      "mage": { "name": "อุกกาบาต", "desc": "เรียกอุกกาบาตถล่มพื้นที่" },
+      "sword_whirl": { "name": "หมุนฟัน", "desc": "หมุนดาบฟันศัตรูรอบตัว" },
+      "sword_warcry": { "name": "ตะโกนศึก", "desc": "ตะโกนปลุกใจ เพิ่มพลังโจมตีชั่วขณะ" },
+      "sword_quake": { "name": "แผ่นดินไหว", "desc": "ทุบพื้นสร้างความเสียหายเป็นวงกว้างด้านหน้า" },
+      "archer_rain": { "name": "ฝนลูกธนู", "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม" },
+      "archer_powershot": { "name": "ธนูทรงพลัง", "desc": "ยิงลูกธนูนัดเดียวรุนแรง เหมาะกับบอส" },
+      "archer_barrage": { "name": "ธนูระเบิด", "desc": "ลูกธนูระเบิดใส่กลุ่มศัตรู" },
+      "mage_meteor": { "name": "อุกกาบาต", "desc": "เรียกอุกกาบาตถล่มพื้นที่" },
+      "mage_frostnova": { "name": "เกล็ดน้ำแข็ง", "desc": "ระเบิดน้ำแข็งเร็วและถูก เหมาะเคลียร์มอน" },
+      "mage_cataclysm": { "name": "มหาวินาศ", "desc": "อุกกาบาตลูกมหึมา สกิลไม้ตาย" }
     },
     "quests": {},
     "items": {}
+  },
+  "characters": {
+    "pageTitle": "ตัวละครของคุณ",
+    "pageSubtitle": "เลือกตัวละครที่จะเล่น หรือสร้างตัวใหม่ (สูงสุด 3 ตัวต่อบัญชี)",
+    "slotCount": "{count}/3 ตัวละคร",
+    "loading": "กำลังโหลดตัวละคร...",
+    "loadError": "โหลดข้อมูลตัวละครไม่สำเร็จ",
+    "retryButton": "ลองใหม่",
+    "emptyTitle": "ยังไม่มีตัวละคร",
+    "emptyBody": "สร้างตัวละครตัวแรกของคุณเพื่อเริ่มผจญภัย!",
+    "createButton": "+ สร้างตัวใหม่",
+    "backToRosterButton": "← กลับไปหน้าตัวละคร",
+    "hudLink": "สลับตัวละคร",
+    "card": {
+      "powerLabel": "พลังต่อสู้",
+      "createdAtLabel": "สร้างเมื่อ {date}",
+      "playButton": "เลือกเล่น",
+      "selecting": "กำลังเข้าเกม...",
+      "deleteButton": "ลบ",
+      "selectError": "เลือกตัวละครไม่สำเร็จ ลองใหม่อีกครั้ง"
+    },
+    "delete": {
+      "title": "ลบตัวละคร \"{name}\"?",
+      "warning": "การลบไม่สามารถย้อนกลับได้ ตัวละครและความคืบหน้าทั้งหมดจะหายไปถาวร",
+      "confirmInstruction": "พิมพ์ชื่อ \"{name}\" ให้ตรงกันเพื่อยืนยันการลบ",
+      "confirmPlaceholder": "พิมพ์ชื่อตัวละครที่นี่",
+      "cancelButton": "ยกเลิก",
+      "confirmButton": "ลบตัวละครนี้ถาวร",
+      "deleting": "กำลังลบ...",
+      "error": "ลบไม่สำเร็จ ลองใหม่อีกครั้ง"
+    },
+    "create": {
+      "title": "สร้างตัวละครใหม่",
+      "classPickerLabel": "เลือกอาชีพเริ่มต้น",
+      "affinityLabel": "สายหลัก",
+      "classes": {
+        "swordsman": {
+          "tagline": "นักบุกตะลุยระยะประชิด",
+          "playstyle": "ถือดาบเข้าปะทะตรงหน้าศัตรู ทนทานและโจมตีหนักหน่วง"
+        },
+        "archer": {
+          "tagline": "นักแม่นธนูระยะไกล",
+          "playstyle": "ยิงธนูใส่ศัตรูจากด้านหลังทีม ว่องไวและแม่นยำ"
+        },
+        "mage": {
+          "tagline": "นักเวทพลังทำลายล้างเป็นวงกว้าง",
+          "playstyle": "ร่ายเวทมนตร์ถล่มศัตรูที่มากันเป็นกลุ่มได้ดี"
+        }
+      },
+      "nameLabel": "ชื่อตัวละคร",
+      "namePlaceholder": "ตั้งชื่อตัวละครของคุณ",
+      "nameHint": "2-24 ตัวอักษร ไทยหรืออังกฤษ/ตัวเลขเท่านั้น (ห้ามเว้นวรรคหรือสัญลักษณ์)",
+      "nameError": {
+        "empty": "กรุณาตั้งชื่อตัวละคร",
+        "tooShort": "ชื่อต้องมีอย่างน้อย 2 ตัวอักษร",
+        "tooLong": "ชื่อต้องไม่เกิน 24 ตัวอักษร",
+        "invalidChars": "ใช้ได้เฉพาะตัวอักษรไทย/อังกฤษและตัวเลขเท่านั้น"
+      },
+      "submitButton": "สร้างตัวละคร",
+      "submitting": "กำลังสร้าง...",
+      "limitError": "สร้างตัวละครได้สูงสุด 3 ตัวต่อบัญชีแล้ว",
+      "duplicateError": "ชื่อนี้ถูกใช้แล้ว ลองชื่ออื่น",
+      "genericError": "สร้างตัวละครไม่สำเร็จ ลองใหม่อีกครั้ง"
+    }
   }
 }

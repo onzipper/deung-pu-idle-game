@@ -7,9 +7,10 @@
  * save in place without going through here.
  */
 
-import { CONFIG } from "@/engine/config";
+import { CONFIG, SIGNATURE_SKILL } from "@/engine/config";
+import { heroMaxMana } from "@/engine/systems/stats";
 import type { SaveData, CharacterSave } from "@/engine/state";
-import type { HeroClass, HeroStats } from "@/engine/entities";
+import type { HeroClass, HeroStats, SkillId } from "@/engine/entities";
 
 // v1 -> v2 (M5): added per-hero `heroes: {level,xp}[]` (Character XP + Level).
 // v2 -> v3 (M5): added per-hero `tier` (class advancement / evolution).
@@ -23,7 +24,11 @@ import type { HeroClass, HeroStats } from "@/engine/entities";
 //   (unallocated — no one loses progression), with `stats` seeded to the class
 //   base block. (Organic play grants `(level-1) * pointsPerLevel`; the migrate is
 //   a deliberately generous one-time retro grant.)
-export const SAVE_VERSION = 5;
+// v5 -> v6 (M5 "mana + skill framework v2"): the hero gains `mana` (current, INT-
+//   derived pool) + `autoSlots` (the auto-cast loadout). Learned skills are DERIVED
+//   from level/tier and NOT persisted. Older saves default mana to a FULL pool and
+//   the auto-slot loadout to the class default (signature in slot 0).
+export const SAVE_VERSION = 6;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -37,8 +42,14 @@ export interface UnknownSave {
   stage?: number;
   gold?: number;
   lastSeen?: number;
-  // v4/v5 single-character shape (v5 adds statPoints + stats):
-  hero?: Partial<CharacterSave> & { statPoints?: number; stats?: UnknownStats };
+  // v4/v5/v6 single-character shape (v5 adds statPoints + stats; v6 adds mana +
+  // autoSlots):
+  hero?: Partial<CharacterSave> & {
+    statPoints?: number;
+    stats?: UnknownStats;
+    mana?: number;
+    autoSlots?: (SkillId | null)[];
+  };
   // pre-v4 team shape:
   unlocked?: string[];
   heroes?: UnknownHeroProgress[];
@@ -56,6 +67,12 @@ function asStat(v: number | undefined, fallback: number): number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : fallback;
 }
 
+/** A finite non-negative mana amount clamped into `[0, maxMana]`, else full pool. */
+function clampMana(v: number | undefined, maxMana: number): number {
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return maxMana;
+  return Math.min(v, maxMana);
+}
+
 /**
  * Normalise a possibly-partial stat block to the v5 shape, defaulting each axis to
  * the class base (so a missing field never zeroes a hero's identity).
@@ -68,6 +85,32 @@ function normalizeStats(cls: HeroClass, stats: UnknownStats | undefined): HeroSt
     int: asStat(stats?.int, base.int),
     vit: asStat(stats?.vit, base.vit),
   };
+}
+
+/** Default auto-slot loadout for a migrated save: signature in slot 0, rest empty. */
+function defaultAutoSlotsFor(cls: HeroClass): (SkillId | null)[] {
+  const slots: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  slots[0] = SIGNATURE_SKILL[cls];
+  return slots;
+}
+
+/**
+ * Normalise a possibly-partial auto-slot array to the current length (v6). A
+ * missing/malformed array falls back to the class default; unknown entries are
+ * cleared to null. The full pool is used as the mana default (a generous top-up).
+ */
+function normalizeAutoSlots(
+  cls: HeroClass,
+  saved: (SkillId | null)[] | undefined,
+): (SkillId | null)[] {
+  const fallback = defaultAutoSlotsFor(cls);
+  if (!Array.isArray(saved)) return fallback;
+  const out: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  for (let i = 0; i < out.length; i++) {
+    const id = saved[i];
+    out[i] = typeof id === "string" ? id : id === null ? null : fallback[i];
+  }
+  return out;
 }
 
 /**
@@ -91,6 +134,8 @@ export function migrate(save: UnknownSave): SaveData {
     // v4/v5 single-character shape.
     const cls = asClass(save.hero.cls);
     const level = save.hero.level ?? 1;
+    const stats = normalizeStats(cls, save.hero.stats);
+    const maxMana = heroMaxMana(cls, stats.int);
     hero = {
       cls,
       level,
@@ -98,7 +143,10 @@ export function migrate(save: UnknownSave): SaveData {
       tier: save.hero.tier === 2 ? 2 : 1,
       // v5 keeps the saved points; a v4 save (no statPoints) gets the retro grant.
       statPoints: asStat(save.hero.statPoints, level * PPL),
-      stats: normalizeStats(cls, save.hero.stats),
+      stats,
+      // v6 keeps the saved mana (clamped into the pool); a v5 save defaults to full.
+      mana: clampMana(save.hero.mana, maxMana),
+      autoSlots: normalizeAutoSlots(cls, save.hero.autoSlots),
     };
   } else {
     // Pre-v4 team save: adopt the highest-level unlocked hero, then grant stats.
@@ -116,13 +164,16 @@ export function migrate(save: UnknownSave): SaveData {
     const p = progress[bestIdx];
     const cls = asClass(unlocked[bestIdx]);
     const level = p?.level ?? 1;
+    const stats = normalizeStats(cls, undefined);
     hero = {
       cls,
       level,
       xp: p?.xp ?? 0,
       tier: p?.tier === 2 ? 2 : 1,
       statPoints: level * PPL,
-      stats: normalizeStats(cls, undefined),
+      stats,
+      mana: heroMaxMana(cls, stats.int),
+      autoSlots: defaultAutoSlotsFor(cls),
     };
   }
 

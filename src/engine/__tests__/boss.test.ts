@@ -199,7 +199,7 @@ describe("boss-phase ranged coverage (ตัวตีไกลไม่ตีบ
       // Mute the swordsman entirely: only the ranged heroes can damage the boss, so
       // any boss-hp loss PROVES the backline reached it.
       sword.cd = 999;
-      sword.skillCd = 999;
+      sword.skillCds["sword_whirl"] = 999;
       step(s, {});
     }
 

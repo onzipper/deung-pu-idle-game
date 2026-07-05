@@ -13,9 +13,17 @@
 
 import { CONFIG } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
-import { makeHero } from "@/engine/entities";
-import type { Hero, Enemy, Boss, Projectile, HeroClass, HeroStats } from "@/engine/entities";
-import { baseStats, heroMaxHpOf } from "@/engine/systems/stats";
+import { makeHero, defaultAutoSlots } from "@/engine/entities";
+import type {
+  Hero,
+  Enemy,
+  Boss,
+  Projectile,
+  HeroClass,
+  HeroStats,
+  SkillId,
+} from "@/engine/entities";
+import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
 
@@ -84,6 +92,14 @@ export interface CharacterSave {
   statPoints: number;
   /** Allocated base-stat block (absolute values, M5 "Base stats", SAVE v5). */
   stats: HeroStats;
+  /** Current mana (M5 "mana", SAVE v6). Clamped to the derived pool on load. */
+  mana: number;
+  /**
+   * Auto-cast slot loadout (M5 skill framework v2, SAVE v6): skill id per slot,
+   * or null. Learned skills are DERIVED from level/tier (not persisted); only the
+   * player's slot assignments are saved.
+   */
+  autoSlots: (SkillId | null)[];
 }
 
 export interface SaveData {
@@ -113,6 +129,10 @@ export function initHeroes(state: GameState): void {
       prev?.tier ?? 1,
       prev?.statPoints,
       prev ? { ...prev.stats } : undefined,
+      // A battlefield reset (stage advance) refills mana to full; the auto-slot
+      // loadout (player config) is preserved across the reset.
+      undefined,
+      prev ? [...prev.autoSlots] : undefined,
     ),
   ];
 }
@@ -168,8 +188,32 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     h.statPoints = Math.max(0, save.hero.statPoints ?? 0);
     h.maxHp = heroMaxHpOf(h);
     h.hp = h.maxHp;
+    // Restore mana pool + auto-slot loadout (M5 "mana + skill framework v2",
+    // SAVE v6). maxMana is derived from int; current mana is clamped into it.
+    h.maxMana = heroMaxManaOf(h);
+    h.mana = clamp(save.hero.mana ?? h.maxMana, 0, h.maxMana);
+    h.autoSlots = normalizeAutoSlots(h.cls, save.hero.autoSlots);
   }
   return state;
+}
+
+/**
+ * Coerce a saved auto-slot array to the current `autoSlots.max` length, dropping
+ * unknown/foreign skill ids. A missing/short array is backfilled from the class
+ * default (signature in slot 0). Defensive — a well-formed v6 save is exact.
+ */
+function normalizeAutoSlots(
+  cls: HeroClass,
+  saved: (SkillId | null)[] | undefined,
+): (SkillId | null)[] {
+  const fallback = defaultAutoSlots(cls);
+  if (!Array.isArray(saved)) return fallback;
+  const out: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  for (let i = 0; i < out.length; i++) {
+    const id = saved[i];
+    out[i] = typeof id === "string" || id === null ? (id ?? null) : fallback[i];
+  }
+  return out;
 }
 
 /**
@@ -191,6 +235,10 @@ export function toSaveData(state: GameState): SaveData {
       tier: h.tier,
       statPoints: h.statPoints,
       stats: { ...h.stats },
+      // Persist current mana (cheap resource snapshot) + the auto-slot loadout
+      // (player config). Learned skills derive from level/tier — not persisted.
+      mana: h.mana,
+      autoSlots: [...h.autoSlots],
     },
     lastSeen: 0,
   };

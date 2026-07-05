@@ -359,6 +359,41 @@ export const CONFIG = {
     } satisfies Record<HeroClass, HeroStats>,
   },
 
+  // ---- mana (M5 "mana + skill framework v2", 86d3jv7m3) ----
+  // Skills cost mana AND keep cooldowns (GDD: both). The pool + regen scale off
+  // INT above the class base (`stats.base[cls].int`), giving the mage — whose
+  // PRIMARY is int, so auto-allocate funnels every point into it — a real caster
+  // identity (a deep pool + fast regen it can sustain multiple skills on), while
+  // the str/dex classes live on the flat base pool + base regen and must be
+  // economical with their one signature cast. CRITICAL (idle guarantee): base
+  // regen alone MUST sustain each class's SIGNATURE skill at ~its cooldown
+  // cadence, so a mana-starved hero never hard-stalls — a skipped skill is fine,
+  // basic attacks (which cost NO mana) always continue and keep banking kills/XP.
+  // NO RNG (deterministic). Sim-tuned — see docs/balance-m5.md.
+  mana: {
+    base: 60, // flat pool every class starts with (before INT scaling)
+    perIntPoint: 3.5, // +max mana per INT point above the class base
+    // Base regen is sized to sustain each class's SIGNATURE cast (idle guarantee)
+    // with only a THIN margin — so a str/dex class (flat base regen) is genuinely
+    // mana-gated on its EXTRA skills and can't spam its whole kit (that's the DPS
+    // cut mana is meant to impose). The mage's INT-fed regen lifts it clear of the
+    // gate, so it sustains its full kit — the caster identity.
+    baseRegen: 7, // mana/sec every class regenerates (sustains the signature cast)
+    regenPerIntPoint: 0.15, // +mana/sec per INT point above base (caster identity)
+  },
+
+  // ---- auto-cast slots (M5 "skill framework v2") ----
+  // Up to `max` skills can sit in auto-cast slots; a slot at index i only fires
+  // once the hero reaches `unlockLevels[i]`. Auto-cast walks the slots IN ORDER
+  // (deterministic priority) and casts each slotted skill that is learned, off
+  // cooldown, and affordable. The player assigns skills to slots (setAutoSlot
+  // intent); slot 0 defaults to the class signature so a fresh hero auto-casts it.
+  autoSlots: {
+    max: 3,
+    // Level thresholds that unlock slot 0 / 1 / 2 (length MUST equal `max`).
+    unlockLevels: [1, 15, 30] as const,
+  },
+
   // ---- combat power ("พลังต่อสู้") — the HOF metric + boss-hint gauge ----
   // A single scalar from a hero's EFFECTIVE DPS (basic + skill, so it no longer
   // under-reads the skill-heavy ranged classes the way raw summed atk did) plus a
@@ -576,34 +611,153 @@ export const ENEMY_TYPES: Record<EnemyKind, EnemyType> = {
   },
 };
 
+/**
+ * How a skill resolves (M5 "skill framework v2"). All reuse EXISTING combat
+ * mechanics — no new ProjectileKind is introduced (footgun #6):
+ *  - `nova`   : instant AoE centred on the HERO (swordsman whirl).
+ *  - `strike` : instant AoE centred on the nearest in-range target's x (a ground
+ *               slam / frost burst — the ranged counterpart of `nova`).
+ *  - `meteor` : a single falling point-projectile AoE (mage meteor).
+ *  - `rain`   : many small falling point-projectiles over the cluster (arrow rain).
+ *  - `bolt`   : a single high-damage HOMING arrow at the nearest target (nuke).
+ *  - `buff`   : a self ATK buff for a duration (no damage; war-cry).
+ */
+export type SkillKind = "nova" | "strike" | "meteor" | "rain" | "bolt" | "buff";
+
 export interface SkillType {
+  /** Unique, class-namespaced id (the key into `SKILLS`). */
+  id: string;
+  cls: HeroClass;
+  /** Hero TIER required to have learned this skill (1 = base kit, 2 = evolution). */
+  tier: 1 | 2;
+  /** Hero LEVEL required to have learned it (unlock-by-level within the tier). */
+  unlockLevel: number;
+  kind: SkillKind;
+  /** Mana cost to cast. */
+  cost: number;
   cd: number;
-  /** AoE radius: swordsman spin / mage meteor blast / archer per-rain-drop splash. */
+  /** AoE radius: nova/strike blast, meteor blast, per-rain-drop splash (0 = none). */
   radius: number;
-  /** Damage multiplier on heroAtk. For the archer this is PER falling arrow. */
+  /** Damage multiplier on heroAtk (PER falling arrow for `rain`; 0 for `buff`). */
   mult: number;
-  /** For the archer ARROW RAIN this is the NUMBER OF DROPS; 0 for other classes. */
+  /** For `rain` this is the NUMBER OF DROPS; 0 otherwise. */
   targets: number;
-  /** Skill projectile speed (archer rain-drop fall / mage meteor); 0 for the spin. */
+  /** Skill projectile speed (rain-drop / meteor / bolt fall); 0 for instant kinds. */
   projSpeed: number;
+  /** Cast/guard range — the farthest a target may be for the skill to fire. */
+  range: number;
+  /** ATK buff multiplier for `buff` skills (1 = none). */
+  buffMult: number;
+  /** ATK buff duration in seconds for `buff` skills (0 = none). */
+  buffDuration: number;
 }
 
 /**
- * Per-class skill tuning. Skills stay COOLDOWN-ONLY in this task (mana is a later
- * task). For a SOLO hero the skill is a large slice of its effective DPS, so the
- * multipliers are rebaselined per class alongside the leveling curve — see
- * docs/balance-m5.md.
+ * The SKILL CATALOG (M5 "skill framework v2"): per class, a kit of skills
+ * unlocked by LEVEL within a TIER. The signature skill of each class (whirl /
+ * arrow rain / meteor) is kept as skill #1 with its established identity + fx —
+ * its numbers are unchanged from the solo rebaseline. Each class gains one new
+ * tier-1 skill (a distinct role using existing mechanics) and one tier-2 skill
+ * (an evolution reward). All numbers here are sim-tuned — see docs/balance-m5.md.
+ *
+ * The mage's pool/regen (INT-scaled) lets it sustain several skills; the str/dex
+ * classes run mostly their signature (base regen sustains it) and dip into their
+ * extra skills opportunistically.
+ */
+const SKILL_LIST = [
+  // ---- swordsman ----
+  // Signature: WHIRL SLASH — instant AoE spin around the swordsman (unchanged).
+  {
+    id: "sword_whirl", cls: "swordsman", tier: 1, unlockLevel: 1, kind: "nova",
+    cost: 24, cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0, range: 95,
+    buffMult: 1, buffDuration: 0,
+  },
+  // WAR CRY — self ATK buff (steroid). No damage; guarded on a nearby foe so it
+  // isn't wasted while idle. Cheap enough that the swordsman's spare mana sustains
+  // occasional uptime on top of the whirl.
+  {
+    id: "sword_warcry", cls: "swordsman", tier: 1, unlockLevel: 8, kind: "buff",
+    cost: 20, cd: 16, radius: 0, mult: 0, targets: 0, projSpeed: 0, range: 260,
+    buffMult: 1.4, buffDuration: 6,
+  },
+  // EARTHQUAKE (tier-2) — a heavy ground-slam AoE a short reach ahead (evolution
+  // burst). Bigger radius/mult than the whirl; costs more mana.
+  {
+    id: "sword_quake", cls: "swordsman", tier: 2, unlockLevel: 15, kind: "strike",
+    cost: 44, cd: 12, radius: 120, mult: 3.2, targets: 0, projSpeed: 0, range: 200,
+    buffMult: 1, buffDuration: 0,
+  },
+
+  // ---- archer ----
+  // Signature: ARROW RAIN — many drops fall over the cluster (unchanged).
+  {
+    id: "archer_rain", cls: "archer", tier: 1, unlockLevel: 1, kind: "rain",
+    cost: 24, cd: 7, radius: 44, mult: 0.5, targets: 9, projSpeed: 900, range: 760,
+    buffMult: 1, buffDuration: 0,
+  },
+  // POWER SHOT — a single high-damage homing arrow (single-target nuke; the
+  // archer's answer to a lone boss, where its rain AoE barely lands).
+  {
+    id: "archer_powershot", cls: "archer", tier: 1, unlockLevel: 8, kind: "bolt",
+    cost: 28, cd: 9, radius: 0, mult: 5.5, targets: 0, projSpeed: 1100, range: 700,
+    buffMult: 1, buffDuration: 0,
+  },
+  // EXPLOSIVE SHOT (tier-2) — an instant AoE burst at the nearest target
+  // (evolution wave-buster complementing the single-target power shot).
+  {
+    id: "archer_barrage", cls: "archer", tier: 2, unlockLevel: 15, kind: "strike",
+    cost: 46, cd: 11, radius: 90, mult: 2.4, targets: 0, projSpeed: 0, range: 700,
+    buffMult: 1, buffDuration: 0,
+  },
+
+  // ---- mage ----
+  // Signature: METEOR — a single falling AoE nuke (unchanged; the mage's burst).
+  {
+    id: "mage_meteor", cls: "mage", tier: 1, unlockLevel: 1, kind: "meteor",
+    cost: 40, cd: 10, radius: 90, mult: 5.5, targets: 0, projSpeed: 560, range: 330,
+    buffMult: 1, buffDuration: 0,
+  },
+  // FROST NOVA — a cheap, fast, short-cooldown AoE burst at the nearest cluster
+  // (sustained wave clear between meteors; the mage's INT-fed regen keeps it up).
+  {
+    id: "mage_frostnova", cls: "mage", tier: 1, unlockLevel: 8, kind: "strike",
+    cost: 20, cd: 6, radius: 85, mult: 1.5, targets: 0, projSpeed: 0, range: 330,
+    buffMult: 1, buffDuration: 0,
+  },
+  // CATACLYSM (tier-2) — a bigger, costlier meteor (evolution ultimate).
+  {
+    id: "mage_cataclysm", cls: "mage", tier: 2, unlockLevel: 15, kind: "meteor",
+    cost: 58, cd: 15, radius: 110, mult: 8.0, targets: 0, projSpeed: 560, range: 330,
+    buffMult: 1, buffDuration: 0,
+  },
+] as const satisfies readonly SkillType[];
+
+/** The skill catalog, keyed by id (the single source of truth for skill tuning). */
+export const SKILLS: Record<string, SkillType> = Object.fromEntries(
+  SKILL_LIST.map((s) => [s.id, s]),
+);
+
+/** Ordered skill-id list per class (signature first, then by unlock). */
+export const CLASS_SKILLS: Record<HeroClass, string[]> = {
+  swordsman: SKILL_LIST.filter((s) => s.cls === "swordsman").map((s) => s.id),
+  archer: SKILL_LIST.filter((s) => s.cls === "archer").map((s) => s.id),
+  mage: SKILL_LIST.filter((s) => s.cls === "mage").map((s) => s.id),
+};
+
+/** Each class's SIGNATURE skill id (slot-0 default; the HOF/combat-power skill). */
+export const SIGNATURE_SKILL: Record<HeroClass, string> = {
+  swordsman: "sword_whirl",
+  archer: "archer_rain",
+  mage: "mage_meteor",
+};
+
+/**
+ * Back-compat alias: the per-class SIGNATURE skill def. Render + the combat-power
+ * metric read a class's signature tuning through this (radius / projSpeed / cd /
+ * mult), unchanged from before the catalog existed.
  */
 export const SKILL_TYPES: Record<HeroClass, SkillType> = {
-  swordsman: { cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0 },
-  // ARROW RAIN (86d3k2t18): `targets` drops fall over the cluster, each a `radius`
-  // splash for `mult` * heroAtk. Blankets every enemy in its zone every cooldown
-  // (whole-field arc range, see skills.arrowRainRange), so per-drop `mult` is tuned
-  // well below a single-hit value to land the intended effective DPS.
-  archer: { cd: 7, radius: 44, mult: 0.5, targets: 9, projSpeed: 900 },
-  // Solo rebaseline: the meteor is the mage's single-target BURST — its only real
-  // answer to a lone boss (its AoE basic is wasted on one target). Bumped cd 12->10
-  // and mult 3.2->5.5 so a solo mage isn't walled at late-stage bosses (keeps S10
-  // within ~2x of sword/archer — sim-tuned, docs/balance-m5.md).
-  mage: { cd: 10, radius: 90, mult: 5.5, targets: 0, projSpeed: 560 },
+  swordsman: SKILLS[SIGNATURE_SKILL.swordsman],
+  archer: SKILLS[SIGNATURE_SKILL.archer],
+  mage: SKILLS[SIGNATURE_SKILL.mage],
 };

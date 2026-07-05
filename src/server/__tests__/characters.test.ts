@@ -173,7 +173,17 @@ describe("listCharacters + powerFromSave", () => {
 
   it("derives a positive, monotonic power from a save via the engine", () => {
     const base = CONFIG.stats.base.archer;
-    const low = powerFromSave({ cls: "archer", level: 1, xp: 0, tier: 1, statPoints: 0, stats: base });
+    const autoSlots = ["archer_rain", null, null];
+    const low = powerFromSave({
+      cls: "archer",
+      level: 1,
+      xp: 0,
+      tier: 1,
+      statPoints: 0,
+      stats: base,
+      mana: CONFIG.mana.base,
+      autoSlots,
+    });
     const high = powerFromSave({
       cls: "archer",
       level: 30,
@@ -181,6 +191,8 @@ describe("listCharacters + powerFromSave", () => {
       tier: 2,
       statPoints: 0,
       stats: { ...base, dex: base.dex + 50 },
+      mana: CONFIG.mana.base,
+      autoSlots,
     });
     expect(low).toBeGreaterThan(0);
     expect(high).toBeGreaterThan(low);

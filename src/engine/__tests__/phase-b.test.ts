@@ -5,7 +5,6 @@ import {
   bossHint,
   combatPower,
   SKILL_TYPES,
-  SAVE_VERSION,
   CONFIG,
   type GameState,
   type SaveData,
@@ -34,13 +33,10 @@ function runUntil(
 }
 
 /** A high-level solo hero that out-damages a stage-1 boss (levels are the power axis). */
-const strongSave = (): SaveData => ({
-  version: SAVE_VERSION,
-  stage: 1,
-  gold: 0,
-  hero: { cls: "swordsman", level: 45, xp: 0, tier: 1 },
-  lastSeen: 0,
-});
+const strongSave = (): SaveData => {
+  const base = soloSave("swordsman", 1);
+  return { ...base, hero: { ...base.hero, level: 45 } };
+};
 
 describe("skills", () => {
   it("auto-cast guard: never casts with no target in range", () => {
@@ -50,7 +46,7 @@ describe("skills", () => {
     // 95px, which won't happen this early. skillCd must stay 0 (no wasted cast).
     for (let i = 0; i < 60; i++) step(s, {});
     expect(s.enemies.length).toBeGreaterThan(0);
-    expect(s.heroes[0].skillCd).toBe(0);
+    expect(s.heroes[0].skillCds["sword_whirl"] ?? 0).toBe(0);
   });
 
   it("swordsman spin damages an in-range target and starts its cooldown", () => {
@@ -62,7 +58,7 @@ describe("skills", () => {
       s,
       (st) =>
         st.boss != null &&
-        st.heroes[0].skillCd <= 0 &&
+        (st.heroes[0].skillCds["sword_whirl"] ?? 0) <= 0 &&
         Math.abs(st.boss.x - st.heroes[0].x) < radius,
       3000,
     );
@@ -70,10 +66,10 @@ describe("skills", () => {
 
     const cast = clone(s);
     const noCast = clone(s);
-    step(cast, { castSkills: [0] });
+    step(cast, { castSkills: [{ slot: 0, skillId: "sword_whirl" }] });
     step(noCast, {});
 
-    expect(cast.heroes[0].skillCd).toBe(SKILL_TYPES.swordsman.cd);
+    expect(cast.heroes[0].skillCds["sword_whirl"]).toBe(SKILL_TYPES.swordsman.cd);
     expect(cast.boss!.hp).toBeLessThan(noCast.boss!.hp);
   });
 
@@ -87,10 +83,10 @@ describe("skills", () => {
 
     const cast = clone(s);
     const noCast = clone(s);
-    step(cast, { castSkills: [1] }); // slot 1 = archer
+    step(cast, { castSkills: [{ slot: 1, skillId: "archer_rain" }] }); // slot 1 = archer
     step(noCast, {});
 
-    expect(cast.heroes[1].skillCd).toBe(SKILL_TYPES.archer.cd);
+    expect(cast.heroes[1].skillCds["archer_rain"]).toBe(SKILL_TYPES.archer.cd);
     const drops = cast.projectiles.filter((p) => p.kind === "rainArrow");
     expect(drops.length).toBe(SKILL_TYPES.archer.targets);
     expect(cast.projectiles.length).toBeGreaterThan(noCast.projectiles.length);

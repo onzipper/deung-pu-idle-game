@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { CONFIG, SAVE_VERSION, initGameState, toSaveData, step } from "@/engine";
+import {
+  CONFIG,
+  SAVE_VERSION,
+  heroMaxMana,
+  initGameState,
+  toSaveData,
+  step,
+} from "@/engine";
 import { soloSave } from "./helpers";
 
 /**
@@ -24,6 +31,8 @@ describe("toSaveData (v4 single character)", () => {
       tier: 1,
       statPoints: 0,
       stats: { ...CONFIG.stats.base.swordsman },
+      mana: heroMaxMana("swordsman", CONFIG.stats.base.swordsman.int),
+      autoSlots: ["sword_whirl", null, null],
     });
   });
 
@@ -37,6 +46,9 @@ describe("toSaveData (v4 single character)", () => {
       tier: 2,
       statPoints: 6,
       stats: { str: 3, dex: 4, int: 30, vit: 10 },
+      // Mana (≤ the int-30 pool) + a fuller auto-slot loadout must round-trip.
+      mana: 100,
+      autoSlots: ["mage_meteor", "mage_frostnova", null],
     };
 
     const restored = toSaveData(initGameState(9, original));

@@ -57,6 +57,15 @@ export const saveDataSchema = z
         tier: z.number().int().min(1).max(2),
         statPoints: z.number().int().min(0).optional(),
         stats: statBlockSchema.optional(),
+        // M5 "mana + skill framework v2" (SAVE v6). Both OPTIONAL so a payload
+        // missing them is backfilled by `migrate()` (mana → full pool, autoSlots
+        // → class default), same resilience as the optional stats block above.
+        // Mana is finite/non-negative (re-clamped to the derived pool on load).
+        mana: z.number().min(0).finite().optional(),
+        // Auto-slot loadout: each slot is a skill id string or null (empty). The
+        // array length + skill validity are re-normalised on load; unknown ids
+        // are dropped, so a strict enum here would needlessly 400 a stale loadout.
+        autoSlots: z.array(z.string().nullable()).optional(),
       })
       .strict(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave

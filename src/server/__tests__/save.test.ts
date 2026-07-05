@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseSaveData } from "@/server/save";
-import { SAVE_VERSION, CONFIG } from "@/engine";
+import { SAVE_VERSION, CONFIG, SIGNATURE_SKILL } from "@/engine";
 
 /**
  * Validation is the server's trust boundary: `parseSaveData` is the pure gate
@@ -40,6 +40,10 @@ describe("parseSaveData — accepts", () => {
         tier: 2,
         statPoints: 4 * CONFIG.stats.pointsPerLevel,
         stats: { ...CONFIG.stats.base.archer },
+        // SAVE v6: mana omitted in the payload -> migrate backfills full pool +
+        // the class default auto-slot loadout.
+        mana: CONFIG.mana.base,
+        autoSlots: [SIGNATURE_SKILL.archer, null, null],
       });
     }
   });

@@ -119,9 +119,9 @@ life → XP). Future milestones extend progression past here.
 ## Notes for phase-2 M5 tasks
 
 - **Base stats (task 3): DONE** — see "Base stats — the STAT re-tune" below.
-- **Mana (task 4):** skills are cooldown-only here. A solo hero's skill is a large
-  slice of its DPS (esp. the mage meteor vs bosses); gating skills behind mana will
-  materially cut effective DPS and require a re-run.
+- **Mana + skill framework v2 (task 4): DONE** — see "Mana + skill framework v2"
+  at the bottom. Skills now cost mana AND keep per-skill cooldowns; each class has
+  a 2–3 skill kit unlocked by level/tier, with up to 3 auto-cast slots.
 - **Class-change quests (task 5):** they replace the current player-triggered
   `evolveHero` gold trigger; the tier-2 multipliers stay the power delta.
 - **Boss hint** (`bossHintPowerDivisor`, `teamPower`): **FIXED in task 3.**
@@ -215,3 +215,107 @@ budget, and only at the S11 soft grind. The **S12 content ceiling is intact**
 (0/5 — intended; extended by M6/M7). The tiny per-point atk-speed factor
 (`0.0004`) exists precisely so this archer effect stays in budget rather than
 blowing it.
+
+---
+
+## Mana + skill framework v2 (task 4, 86d3jv7m3)
+
+The single-skill-per-class model became a **kit** (2–3 skills/class), gated by
+**mana** on top of the existing per-skill cooldowns (GDD: both). This is the M5
+solo baseline's successor table — the pre-mana single-skill table above is
+superseded for S8+.
+
+### Mana model (`CONFIG.mana`, `systems/stats.heroMaxMana`/`heroManaRegen`)
+
+| knob | value | effect |
+|---|---|---|
+| `mana.base` | **60** | flat pool every class starts with (before INT) |
+| `mana.perIntPoint` | **3.5** | +max mana per INT point above the class base |
+| `mana.baseRegen` | **7** | mana/sec every class regenerates |
+| `mana.regenPerIntPoint` | **0.15** | +mana/sec per INT point above base |
+
+Pool = `base + max(0, int − baseInt)·perIntPoint`; regen scales the same way. INT
+is the mage's PRIMARY (auto-allocate funnels every point into it), so the mage
+grows a deep pool + fast regen and **sustains its whole kit** — the caster
+identity. The str/dex classes sit on the flat base pool + base regen: base regen
+is sized to sustain each **signature** cast at ~its cadence (the *idle guarantee*
+— a mana-broke hero never hard-stalls; basic attacks cost no mana and keep banking
+kills/XP), with only a thin margin, so their **extra** skills are genuinely
+mana-gated (that's the DPS cut mana imposes). Current mana persists (SAVE v6);
+maxMana is re-derived from INT on load. INT allocation tops mana up by the added
+headroom (feel-good, mirrors VIT→HP).
+
+### Skill kits (`CONFIG.SKILLS`; id / role / mana / cd / unlock)
+
+Signature skills keep their identity/fx + numbers; one new tier-1 skill and one
+tier-2 (evolution) skill per class, all reusing existing mechanics (no new
+`ProjectileKind`).
+
+| class | id | role | kind | mana | cd | tier·Lv |
+|---|---|---|---|---:|---:|---|
+| sword | `sword_whirl` | AoE spin (signature) | nova | 24 | 8 | 1·L1 |
+| sword | `sword_warcry` | self ATK buff (+40%/6s) | buff | 20 | 16 | 1·L8 |
+| sword | `sword_quake` | heavy ground-slam AoE | strike | 44 | 12 | 2·L15 |
+| archer | `archer_rain` | field-wide AoE (signature) | rain | 24 | 7 | 1·L1 |
+| archer | `archer_powershot` | single-target nuke (boss) | bolt | 28 | 9 | 1·L8 |
+| archer | `archer_barrage` | burst AoE at a cluster | strike | 46 | 11 | 2·L15 |
+| mage | `mage_meteor` | single/cluster burst (signature) | meteor | 40 | 10 | 1·L1 |
+| mage | `mage_frostnova` | cheap fast AoE clear | strike | 20 | 6 | 1·L8 |
+| mage | `mage_cataclysm` | ultimate burst | meteor | 58 | 15 | 2·L15 |
+
+Damage kinds: `nova`=AoE around hero, `strike`=instant AoE at nearest target,
+`meteor`=falling AoE, `rain`=many falling drops, `bolt`=one high-dmg homing arrow,
+`buff`=self ATK steroid. `sword_warcry` is the only non-damage skill.
+
+### Auto-cast slots (`CONFIG.autoSlots`)
+
+Max **3** slots, unlocked at level **1 / 15 / 30**. Slot 0 defaults to the
+signature. Auto-cast walks the slots **in order** (deterministic priority) and
+casts each slotted skill that is learned + off-cooldown + affordable. The player
+assigns skills via the `setAutoSlot` intent (a skill can sit in only one slot);
+non-slotted skills are manual (`castSkills`, once-per-click). The sim's auto-pilot
+mirrors a real idle player: it fills open unlocked slots with newly-learned skills.
+
+### Re-run (auto-slots ON, `SIM_SECONDS=2400`, 5 seeds)
+
+Mean time-to-clear (s). Auto-pilot: auto-cast + auto-allocate + auto-evolve +
+retry loop, now driving the auto-slot loadout.
+
+| stage | swordsman | archer | mage | spread |
+|------:|----------:|-------:|-----:|-------:|
+| 1  |  34 |  37 |  51 | 1.50× |
+| 2  |  54 |  50 |  60 | 1.19× |
+| 3  |  79 |  45 |  64 | 1.77× |
+| 4  |  93 |  51 |  73 | 1.83× |
+| 5  |  90 |  59 |  79 | 1.53× |
+| 6  | 100 |  63 |  85 | 1.60× |
+| 7  | 112 |  74 |  98 | 1.51× |
+| 8  |  88 |  92 | 102 | 1.16× |
+| 9  |  90 | 103 | 110 | 1.23× |
+| 10 | 107 | 116 | 122 | 1.15× |
+| 11 | 127 | 144 | 144 | 1.14× |
+| 12 | 439 | 158 | 159 | 2.78× |
+| 13 |  —  | 895 | 252 |   —   |
+
+**Targets met:** every class clears **S1–S12 on every seed (5/5)**, **0 boss wipes
+through S11**, spread **≤1.83× through S11** (within the ~2× guideline). Mana
+starvation never stalls (dedicated tests + long sims: heroes always kill *some*
+enemies per life via basic attacks).
+
+**Vs the pre-mana single-skill table:** S1–S7 are unchanged (the new tier-1 skills
+unlock at L8 and the tier-2 at L15, so early stages are pure signature). S8–S11 run
+~20–35 % faster because a levelled hero now fields 2–3 skills — an intentional
+progression reward, only partly offset by the mana gate (str/dex classes are
+gated on their extras; the mage sustains its full kit). The **content ceiling
+moved deeper** as a result: from S12 (old, all classes) to **S13 for the
+swordsman and S14 for archer/mage** — still a soft grind, not a freeze (respawn +
+retry loop keep banking XP). S12 is the swordsman's soft wall (2.78× spike); the
+ranged AoE classes push one stage further, thematically apt.
+
+**Mana as a real resource:** the tightened regen (base 7) means a tier-2 str/dex
+hero's full-kit demand slightly exceeds its regen, so it prioritises — the
+auto-slot order decides which skill fires when the pool is short. The mage's
+INT-fed regen lifts it clear of the gate (caster identity). Tuned knobs vs the
+first pass: `baseRegen` 9→7, `regenPerIntPoint` 0.18→0.15, and the tier-1/2 extra
+skills' costs nudged up (powershot 22→28, quake 42→44, barrage 40→46, cataclysm
+52→58) to keep the extras gated and the mid-game inside ~2× spread.

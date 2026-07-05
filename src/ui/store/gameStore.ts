@@ -24,13 +24,48 @@
 import { create } from "zustand";
 import type { BossHint, HeroClass, HeroStats, Phase, SpeedMultiplier, StatKey } from "@/engine";
 
+/**
+ * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
+ * snapshot builder so the store carries only display-ready values (no engine
+ * logic runs in React).
+ */
+export interface SkillSummary {
+  /** Engine skill id (key into the `content.skills.<id>` i18n + `SKILL_ICONS`). */
+  id: string;
+  /** Remaining cooldown, seconds (0 = ready). */
+  cd: number;
+  /** The skill's full cooldown, seconds (for the CSS sweep duration). */
+  maxCd: number;
+  /** Mana cost to cast. */
+  cost: number;
+  /** Off cooldown AND mana-affordable AND the hero is alive (castable now). */
+  ready: boolean;
+  /** Mana-affordable right now (drives the disabled/greyed cost readout). */
+  affordable: boolean;
+  /** Which auto-cast slot index this skill occupies, or null (not slotted). */
+  autoSlot: number | null;
+}
+
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
 export interface HeroSummary {
   cls: HeroClass;
   hp: number;
   maxHp: number;
-  /** Skill cooldown remaining, seconds (0 = ready). */
+  /**
+   * SIGNATURE skill cooldown remaining, seconds (0 = ready). Kept for the
+   * onboarding "you cast a skill" detector (`ui/onboarding`); the full per-skill
+   * kit lives in `skills` below.
+   */
   skillCd: number;
+  /** Current mana + pool (M5 "mana"). Drives the mana bar. */
+  mana: number;
+  maxMana: number;
+  /** The learned skill kit (M5 skill framework v2), ordered signature-first. */
+  skills: SkillSummary[];
+  /** Auto-cast slot loadout: skill id per slot, or null (empty). */
+  autoSlots: (string | null)[];
+  /** How many auto-cast slots are unlocked at this hero's level. */
+  unlockedSlots: number;
   dead: boolean;
   /** Hero level (M5), 1..`CONFIG.leveling.levelCap`. */
   level: number;
@@ -78,7 +113,10 @@ export interface EngineSnapshot {
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
 export interface PendingInput {
-  castSkills: number[];
+  /** Manual skill casts this frame (M5): hero slot + specific skill id. */
+  castSkills: { slot: number; skillId: string }[];
+  /** Auto-cast slot assignments this frame (M5), solo hero (slot 0). */
+  setAutoSlots: { slot: number; skillId: string | null }[];
   challengeBoss: boolean;
   advanceStage: boolean;
   /** Hero slot index to evolve (M5), or `null` (last-wins per frame — a big
@@ -92,6 +130,7 @@ export interface PendingInput {
 function emptyPendingInput(): PendingInput {
   return {
     castSkills: [],
+    setAutoSlots: [],
     challengeBoss: false,
     advanceStage: false,
     evolveHero: null,
@@ -276,8 +315,11 @@ export interface HudState {
    * mount) since the overlay renders directly off `onboardingStepIndex`. */
   resetOnboarding: () => void;
 
-  /** Queue a skill cast for hero slot `i` (deduped; consumed on next drain). */
-  castSkill: (slot: number) => void;
+  /** Queue a manual cast of `skillId` for the solo hero (deduped by skill id;
+   * consumed on next drain — a click casts exactly once at any speed). */
+  castSkill: (skillId: string) => void;
+  /** Queue an auto-cast slot assignment for the solo hero (last-wins per slot). */
+  setAutoSlot: (slot: number, skillId: string | null) => void;
   challengeBoss: () => void;
   advanceStage: () => void;
   /** Queue an evolve attempt for hero slot `i` (last-wins per frame, same as
@@ -338,11 +380,26 @@ export const useGameStore = create<HudState>((set, get) => ({
     set({ ftueCompleted: false, onboardingStepIndex: 0 });
   },
 
-  castSkill: (slot) =>
+  castSkill: (skillId) =>
     set((s) => ({
-      pendingInput: s.pendingInput.castSkills.includes(slot)
+      pendingInput: s.pendingInput.castSkills.some((c) => c.skillId === skillId)
         ? s.pendingInput
-        : { ...s.pendingInput, castSkills: [...s.pendingInput.castSkills, slot] },
+        : {
+            ...s.pendingInput,
+            castSkills: [...s.pendingInput.castSkills, { slot: 0, skillId }],
+          },
+    })),
+
+  setAutoSlot: (slot, skillId) =>
+    set((s) => ({
+      pendingInput: {
+        ...s.pendingInput,
+        // Last-wins per slot: replace any pending assignment for the same slot.
+        setAutoSlots: [
+          ...s.pendingInput.setAutoSlots.filter((a) => a.slot !== slot),
+          { slot, skillId },
+        ],
+      },
     })),
 
   challengeBoss: () =>

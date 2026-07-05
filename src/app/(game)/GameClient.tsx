@@ -41,6 +41,7 @@ import { useEffect, useRef } from "react";
 import {
   CONFIG,
   FIXED_DT,
+  SIGNATURE_SKILL,
   bossHint,
   canEvolveHero,
   combatPower,
@@ -48,13 +49,17 @@ import {
   drainAccumulator,
   evolutionCost,
   initGameState,
+  learnedSkills,
   migrate,
   primaryStat,
+  skillCdOf,
   step,
   toSaveData,
+  unlockedAutoSlotCount,
   type FrameInput,
   type GameEvent,
   type GameState,
+  type Hero,
   type SaveData,
 } from "@/engine";
 import { AudioController } from "@/render/audio";
@@ -64,6 +69,7 @@ import {
   useGameStore,
   type EngineSnapshot,
   type HeroSummary,
+  type SkillSummary,
 } from "@/ui/store/gameStore";
 import { TimeDirector } from "./timeDirector";
 
@@ -124,6 +130,24 @@ async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void
   }
 }
 
+/** Precompute the learned-skill kit's display state (M5 skill framework v2). */
+function buildSkillSummaries(h: Hero): SkillSummary[] {
+  return learnedSkills(h).map((def): SkillSummary => {
+    const cd = skillCdOf(h, def.id);
+    const affordable = h.mana >= def.cost;
+    const autoSlot = h.autoSlots.indexOf(def.id);
+    return {
+      id: def.id,
+      cd,
+      maxCd: def.cd,
+      cost: def.cost,
+      ready: cd <= 0 && affordable && !h.dead,
+      affordable,
+      autoSlot: autoSlot >= 0 ? autoSlot : null,
+    };
+  });
+}
+
 function buildSnapshot(state: GameState): EngineSnapshot {
   const heroes: HeroSummary[] = state.heroes.map((h) => {
     const atLevelCap = h.level >= CONFIG.leveling.levelCap;
@@ -138,7 +162,13 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       cls: h.cls,
       hp: h.hp,
       maxHp: h.maxHp,
-      skillCd: h.skillCd,
+      // Signature skill cooldown (onboarding's "you cast a skill" detector).
+      skillCd: skillCdOf(h, SIGNATURE_SKILL[h.cls]),
+      mana: h.mana,
+      maxMana: h.maxMana,
+      skills: buildSkillSummaries(h),
+      autoSlots: [...h.autoSlots],
+      unlockedSlots: unlockedAutoSlotCount(h.level),
       dead: h.dead,
       level: h.level,
       xpProgress,
@@ -277,6 +307,7 @@ export function GameClient() {
       const pending = store.drainPendingInput();
       const firstInput: FrameInput = {
         castSkills: pending.castSkills.length ? pending.castSkills : undefined,
+        setAutoSlots: pending.setAutoSlots.length ? pending.setAutoSlots : undefined,
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
         evolveHero: pending.evolveHero ?? undefined,

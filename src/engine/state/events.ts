@@ -45,7 +45,7 @@ export type GameEvent =
   | { type: "levelUp"; id: number; cls: HeroClass; level: number }
   | { type: "evolve"; id: number; cls: HeroClass; tier: number }
   | { type: "statAllocated"; id: number; stat: StatKey; amount: number }
-  | { type: "skillCast"; heroClass: HeroClass; slot: number }
+  | { type: "skillCast"; heroClass: HeroClass; slot: number; skillId: string }
   | { type: "projectileSpawn"; kind: ProjectileKind; x: number; y: number }
   | { type: "bossSlamTelegraph"; x: number; y: number }
   | { type: "bossSlamLand"; x: number; y: number }

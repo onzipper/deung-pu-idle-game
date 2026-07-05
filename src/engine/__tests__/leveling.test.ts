@@ -9,6 +9,7 @@ import {
   CONFIG,
   HERO_TYPES,
   SAVE_VERSION,
+  SIGNATURE_SKILL,
   type GameState,
 } from "@/engine";
 import { runUntil, clone, soloSave } from "./helpers";
@@ -187,12 +188,19 @@ describe("migrate pre-v5 team/single -> v5 base stats", () => {
       tier: 2,
       statPoints: 7 * CONFIG.stats.pointsPerLevel,
       stats: { ...CONFIG.stats.base.archer },
+      mana: CONFIG.mana.base,
+      autoSlots: [SIGNATURE_SKILL.archer, null, null],
     });
   });
 
   it("grants retro base stats to a v4 single-character save (no stats field)", () => {
     // A v4 save has the hero shape but no statPoints/stats — migrate backfills them.
-    const v4 = { version: 4, stage: 2, gold: 0, hero: { cls: "mage", level: 10, xp: 0, tier: 1 } };
+    const v4: Parameters<typeof migrate>[0] = {
+      version: 4,
+      stage: 2,
+      gold: 0,
+      hero: { cls: "mage", level: 10, xp: 0, tier: 1 },
+    };
     const v5 = migrate(v4);
     expect(v5.hero.statPoints).toBe(10 * CONFIG.stats.pointsPerLevel);
     expect(v5.hero.stats).toEqual({ ...CONFIG.stats.base.mage });
@@ -206,6 +214,9 @@ describe("migrate pre-v5 team/single -> v5 base stats", () => {
       tier: 2 as const,
       statPoints: 3,
       stats: { str: 3, dex: 4, int: 20, vit: 8 },
+      // v6: mana (≤ the int-20 pool) + auto-slot loadout round-trip unchanged.
+      mana: 50,
+      autoSlots: [SIGNATURE_SKILL.mage, null, null] as (string | null)[],
     };
     const once = migrate({ version: SAVE_VERSION, hero });
     expect(migrate(once)).toEqual(once);

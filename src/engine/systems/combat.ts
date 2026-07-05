@@ -16,7 +16,12 @@
 import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
-import { heroAtkOf, heroAtkSpeedOf } from "@/engine/systems/stats";
+import {
+  heroAtkOf,
+  heroAtkSpeedOf,
+  heroManaRegenOf,
+  heroMaxManaOf,
+} from "@/engine/systems/stats";
 import { applyDamage, isHero } from "@/engine/systems/damage";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
@@ -39,7 +44,11 @@ const L = CONFIG.layout;
 // Timers
 // ---------------------------------------------------------------------------
 
-/** Tick hero revive + skill cooldown timers (POC top of update loop). */
+/**
+ * Tick hero revive, per-skill cooldowns, the self ATK buff, and mana regen
+ * (M5 "mana + skill framework v2"). Runs at the top of `step()` before skills
+ * cast, so a freshly-regenerated point can fund a cast the same step.
+ */
 export function decayHeroTimers(state: GameState): void {
   for (const h of state.heroes) {
     if (h.dead) {
@@ -56,7 +65,23 @@ export function decayHeroTimers(state: GameState): void {
         });
       }
     }
-    if (h.skillCd > 0) h.skillCd = Math.max(0, h.skillCd - FIXED_DT);
+    // Per-skill cooldowns (M5 skill framework v2).
+    for (const id in h.skillCds) {
+      if (h.skillCds[id] > 0) h.skillCds[id] = Math.max(0, h.skillCds[id] - FIXED_DT);
+    }
+    // Self ATK buff (war cry) countdown.
+    if (h.atkBuffTimer > 0) {
+      h.atkBuffTimer = Math.max(0, h.atkBuffTimer - FIXED_DT);
+      if (h.atkBuffTimer === 0) h.atkBuffMult = 1;
+    }
+    // Mana regen toward the (INT-derived) pool. Refresh the cached max first so a
+    // just-allocated INT point is reflected immediately.
+    h.maxMana = heroMaxManaOf(h);
+    if (h.mana < h.maxMana) {
+      h.mana = Math.min(h.maxMana, h.mana + heroManaRegenOf(h) * FIXED_DT);
+    } else if (h.mana > h.maxMana) {
+      h.mana = h.maxMana;
+    }
   }
 }
 

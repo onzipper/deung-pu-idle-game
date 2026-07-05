@@ -20,7 +20,7 @@
  */
 
 import { CONFIG, PRIMARY_STAT } from "@/engine/config";
-import { heroMaxHpOf } from "@/engine/systems/stats";
+import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { Hero, StatKey } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -29,6 +29,19 @@ function refreshMaxHp(hero: Hero): void {
   const newMax = heroMaxHpOf(hero);
   hero.hp += newMax - hero.maxHp;
   hero.maxHp = newMax;
+}
+
+/** Re-derive max mana after an int change and top up by the added headroom. */
+function refreshMaxMana(hero: Hero): void {
+  const newMax = heroMaxManaOf(hero);
+  hero.mana += newMax - hero.maxMana;
+  hero.maxMana = newMax;
+}
+
+/** Apply the derived-stat fix-up for a stat that changed (vit → HP, int → mana). */
+function refreshDerived(hero: Hero, stat: StatKey): void {
+  if (stat === "vit") refreshMaxHp(hero);
+  else if (stat === "int") refreshMaxMana(hero);
 }
 
 /**
@@ -50,7 +63,7 @@ export function allocateStat(
 
   hero.statPoints -= amount;
   hero.stats[stat] += amount;
-  if (stat === "vit") refreshMaxHp(hero);
+  refreshDerived(hero, stat);
 
   state.events.push({ type: "statAllocated", id: hero.id, stat, amount });
   return true;
@@ -69,9 +82,9 @@ export function autoAllocateStats(state: GameState): void {
     if (amount <= 0) continue;
     hero.statPoints -= amount;
     hero.stats[stat] += amount;
-    // Primary is never vit for the current classes, but keep HP consistent if a
-    // future class's primary were vit.
-    if (stat === "vit") refreshMaxHp(hero);
+    // Primary is int for the mage (→ mana) and str/dex for the others; keep the
+    // derived pool consistent (also handles a hypothetical vit-primary class).
+    refreshDerived(hero, stat);
   }
 }
 

@@ -4,10 +4,17 @@
  * fresh `id` and (for enemies) the seeded RNG whose stream they own.
  */
 
-import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
+import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL } from "@/engine/config";
 import type { Rng } from "@/engine/core/rng";
-import { baseStats, heroMaxHp } from "@/engine/systems/stats";
-import type { Hero, Enemy, Boss, HeroClass, HeroStats, EnemyKind } from "@/engine/entities";
+import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
+import type { Hero, Enemy, Boss, HeroClass, HeroStats, EnemyKind, SkillId } from "@/engine/entities";
+
+/** The default auto-slot loadout: signature in slot 0, the rest empty. */
+export function defaultAutoSlots(cls: HeroClass): (SkillId | null)[] {
+  const slots: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  slots[0] = SIGNATURE_SKILL[cls];
+  return slots;
+}
 
 /**
  * Build a hero at its formation home position, at full HP. `level` / `xp` / `tier`
@@ -24,9 +31,12 @@ export function makeHero(
   tier: 1 | 2 = 1,
   statPoints: number = (level - 1) * CONFIG.stats.pointsPerLevel,
   stats: HeroStats = baseStats(cls),
+  mana?: number,
+  autoSlots: (SkillId | null)[] = defaultAutoSlots(cls),
 ): Hero {
   const t = HERO_TYPES[cls];
   const maxHp = heroMaxHp(cls, level, tier, stats.vit);
+  const maxMana = heroMaxMana(cls, stats.int);
   return {
     id,
     cls,
@@ -37,12 +47,19 @@ export function makeHero(
     cd: 0,
     dead: false,
     reviveTimer: 0,
-    skillCd: 0,
+    skillCds: {},
+    // Default to a FULL pool (a fresh hero can immediately cast); a loaded save
+    // overrides with its persisted current mana.
+    mana: mana ?? maxMana,
+    maxMana,
+    atkBuffMult: 1,
+    atkBuffTimer: 0,
     level,
     xp,
     tier,
     statPoints,
     stats,
+    autoSlots,
   };
 }
 
