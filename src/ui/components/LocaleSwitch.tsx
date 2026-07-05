@@ -13,18 +13,16 @@
  *
  * Labels are plain text ("ไทย"/"EN"), not flag emoji, to match the rest of
  * the HUD's typography (and sidestep the Windows-10 emoji-glyph footgun
- * entirely — see CLAUDE.md).
+ * entirely — see CLAUDE.md). Button text comes from `settings.localeTh` /
+ * `settings.localeEn` — always the plain language name in its OWN language
+ * (never translated per the active locale), so it stays a stable index of
+ * available languages regardless of which one is currently selected.
  */
 
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { LOCALE_COOKIE_NAME, locales, type AppLocale } from "@/i18n/config";
-
-const LOCALE_BUTTON_LABEL: Record<AppLocale, string> = {
-  th: "ไทย",
-  en: "EN",
-};
 
 /**
  * Plain module-level helper (not inline in the component) so the
@@ -74,7 +72,7 @@ export function LocaleSwitch() {
                 : "bg-transparent text-ddp-ink-muted hover:text-ddp-ink"
             }`}
           >
-            {LOCALE_BUTTON_LABEL[l]}
+            {l === "th" ? t("localeTh") : t("localeEn")}
           </button>
         ))}
       </div>

@@ -36,6 +36,7 @@
  * the relevant `GameState` fields back out.
  */
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import {
   CONFIG,
@@ -150,6 +151,13 @@ function buildSnapshot(state: GameState): EngineSnapshot {
 
 export function GameClient() {
   const arenaRef = useRef<HTMLDivElement | null>(null);
+  const t = useTranslations("common");
+  // Captured in a ref (not read directly inside the mount-only effect below)
+  // so a mid-session locale switch (`router.refresh()` — no remount, see
+  // `LocaleSwitch.tsx`) still updates the string this rare fatal-error path
+  // would show, without re-running the boot/rAF-loop effect itself.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -223,7 +231,7 @@ export function GameClient() {
           "absolute inset-0 z-10 flex items-center justify-center p-4 text-center text-sm font-medium text-red-300";
         arenaEl.appendChild(errorEl);
       }
-      errorEl.textContent = `ไม่สามารถเริ่มเกมได้: ${reason}`;
+      errorEl.textContent = tRef.current("fatalError", { reason });
     }
 
     function frame(now: number) {

@@ -1,7 +1,36 @@
 {
-  "common": {},
-  "hud": {},
-  "panels": {},
+  "common": {
+    "appTitle": "ดึ๋งปุ๊ Idle Game",
+    "appDescription": "เกมไอเดิลผจญภัยฮีโร่ 3 คลาส ปราบเวฟศัตรู ท้าบอส อัพเกรดไม่หยุด",
+    "levelBadge": "Lv.{level}",
+    "maxLabel": "MAX",
+    "fatalError": "ไม่สามารถเริ่มเกมได้: {reason}"
+  },
+  "hud": {
+    "stageLabel": "ด่าน",
+    "waveLabel": "เวฟ",
+    "killProgressLabel": "kill สู่บอส",
+    "victoryTitle": "🎉 ชนะด่าน {stage}!",
+    "nextStageButton": "ด่านถัดไป →",
+    "bossHpLabel": "HP บอส",
+    "bossAtkLabel": "พลังโจมตี",
+    "recommendedPowerLabel": "พลังทีมแนะนำ",
+    "yourPowerLabel": "พลังทีมคุณ",
+    "bossReadyYes": "✅ พร้อมสู้",
+    "bossReadyNo": "⚠ พลังอาจไม่พอ",
+    "challengeBossButton": "⚔ ท้าบอส",
+    "challengeBossAriaReady": "ท้าบอส",
+    "challengeBossAriaNotReady": "ท้าบอส (ยังท้าไม่ได้ตอนนี้)"
+  },
+  "panels": {
+    "skillsLabel": "สกิล",
+    "heroDeadBadge": "ตาย",
+    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (ตาย)} cooldown { (คูลดาวน์ {seconds} วิ)} other {}}",
+    "autoSkillToggle": "✨ Auto สกิล: {state, select, on {เปิด} other {ปิด}}",
+    "upgradesLabel": "อัพเกรด",
+    "upgradeAriaLabel": "{name} เลเวล {level}{costState, select, capped { สูงสุดแล้ว} other {, ราคา {cost} ทอง}}",
+    "autoUpgradeToggle": "💰 Auto อัป: {state, select, on {เปิด} other {ปิด}}"
+  },
   "settings": {
     "speedLabel": "ความเร็ว",
     "soundOn": "เปิดเสียง",
@@ -9,5 +38,24 @@
     "localeLabel": "ภาษา",
     "localeTh": "ไทย",
     "localeEn": "EN"
+  },
+  "content": {
+    "classes": {
+      "swordsman": { "name": "นักดาบ" },
+      "archer": { "name": "นักธนู" },
+      "mage": { "name": "นักเวท" }
+    },
+    "skills": {
+      "swordsman": { "name": "หมุนฟัน", "desc": "หมุนดาบฟันศัตรูรอบตัว" },
+      "archer": { "name": "ฝนลูกธนู", "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม" },
+      "mage": { "name": "อุกกาบาต", "desc": "เรียกอุกกาบาตถล่มพื้นที่" }
+    },
+    "upgrades": {
+      "atk": { "name": "พลัง" },
+      "speed": { "name": "ความเร็ว" },
+      "hp": { "name": "พลังชีวิต" }
+    },
+    "quests": {},
+    "items": {}
   }
 }

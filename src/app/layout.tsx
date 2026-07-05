@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Chakra_Petch, Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,11 +28,17 @@ const chakraPetch = Chakra_Petch({
   weight: ["400", "500", "600", "700"],
 });
 
-export const metadata: Metadata = {
-  title: "ดึ๋งปุ๊ Idle Game",
-  description:
-    "เกมไอเดิลผจญภัยฮีโร่ 3 คลาส ปราบเวฟศัตรู ท้าบอส อัพเกรดไม่หยุด",
-};
+// Locale-aware (cookie-resolved, same as the rest of the app — see
+// `src/i18n/request.ts`) rather than the static `metadata` export, so the
+// browser tab title/description follow the `common` message catalog instead
+// of hardcoding Thai here.
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("common");
+  return {
+    title: t("appTitle"),
+    description: t("appDescription"),
+  };
+}
 
 // DEV-ONLY diagnostics: inline (not external-file) client error beacon.
 //

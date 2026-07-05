@@ -9,6 +9,7 @@
  * icon; stage/wave recede into small chip badges.
  */
 
+import { useTranslations } from "next-intl";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -18,6 +19,7 @@ export function HudBar() {
   const gold = useGameStore((s) => s.gold);
   const kills = useGameStore((s) => s.kills);
   const killGoal = useGameStore((s) => s.killGoal);
+  const t = useTranslations("hud");
 
   const pct = killGoal > 0 ? Math.min(100, (kills / killGoal) * 100) : 0;
   const goldPulse = usePulseOnIncrease(gold);
@@ -27,13 +29,13 @@ export function HudBar() {
       <div className="flex items-center gap-2">
         <span className="inline-flex items-baseline gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-1">
           <span className="text-[10px] font-semibold tracking-wide text-ddp-ink-muted uppercase">
-            ด่าน
+            {t("stageLabel")}
           </span>
           <span className="text-base font-bold text-emerald-300 tabular-nums">{stage}</span>
         </span>
         <span className="inline-flex items-baseline gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-1">
           <span className="text-[10px] font-semibold tracking-wide text-ddp-ink-muted uppercase">
-            เวฟ
+            {t("waveLabel")}
           </span>
           <span className="text-base font-bold text-ddp-ink tabular-nums">{wave}</span>
         </span>
@@ -58,7 +60,7 @@ export function HudBar() {
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between text-[11px] font-medium text-ddp-ink-muted">
           <span className="flex items-center gap-1">
-            <span aria-hidden>💀</span> kill สู่บอส
+            <span aria-hidden>💀</span> {t("killProgressLabel")}
           </span>
           <span className="tabular-nums">
             {kills} / {killGoal}

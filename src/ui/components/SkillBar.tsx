@@ -12,11 +12,12 @@
  * rest of the HUD's shared animation vocabulary.
  */
 
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { HeroClass } from "@/engine";
 import { SKILL_TYPES } from "@/engine";
 import type { HeroSummary } from "@/ui/store/gameStore";
-import { HERO_LABELS, SKILL_LABELS } from "@/ui/labels";
+import { SKILL_ICONS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
 /** Presentational-only per-class accent (mirrors src/render/theme.ts
@@ -47,8 +48,11 @@ function useCastKey(skillCd: number): number {
 function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const castSkill = useGameStore((s) => s.castSkill);
   const maxCd = SKILL_TYPES[hero.cls].cd;
-  const label = SKILL_LABELS[hero.cls];
-  const heroLabel = HERO_LABELS[hero.cls];
+  const tContent = useTranslations("content");
+  const tPanels = useTranslations("panels");
+  const skillName = tContent(`skills.${hero.cls}.name`);
+  const heroName = tContent(`classes.${hero.cls}.name`);
+  const skillIcon = SKILL_ICONS[hero.cls];
   const castKey = useCastKey(hero.skillCd);
   const accent = HERO_ACCENT[hero.cls];
 
@@ -56,12 +60,13 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const delay = -(maxCd - hero.skillCd);
   const hpPct = hero.maxHp > 0 ? Math.max(0, (hero.hp / hero.maxHp) * 100) : 0;
   const cdSeconds = Math.ceil(hero.skillCd);
+  const status = hero.dead ? "dead" : ready ? "none" : "cooldown";
 
   return (
     <div className="flex flex-col items-center gap-1">
       <div
         className="h-1.5 w-14 overflow-hidden rounded-full bg-black/50"
-        title={heroLabel.name}
+        title={heroName}
       >
         <div
           className={`h-full rounded-full transition-[width] duration-200 ${
@@ -74,13 +79,11 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
         type="button"
         disabled={!ready}
         onClick={() => castSkill(slot)}
-        aria-label={`${heroLabel.name}: ${label.name}${
-          hero.dead ? " (ตาย)" : ready ? "" : ` (คูลดาวน์ ${cdSeconds} วิ)`
-        }`}
+        aria-label={tPanels("skillAriaLabel", { heroName, skillName, status, seconds: cdSeconds })}
         style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
         className={`relative h-16 w-16 rounded-(--ddp-radius-md) border shadow-(--ddp-shadow-btn) transition-transform duration-100 active:translate-y-0.5 active:scale-[0.96] ${
           ready
-            ? "border-[color:var(--accent-soft)] before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_18px_3px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.4s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] hover:brightness-110"
+            ? "border-(--accent-soft) before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_18px_3px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.4s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] hover:brightness-110"
             : "border-ddp-border disabled:cursor-not-allowed"
         }`}
       >
@@ -89,8 +92,8 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
             !ready ? "grayscale" : ""
           }`}
         >
-          <span className="text-xl leading-none">{label.icon}</span>
-          <span className="mt-1 text-[9px] leading-none text-ddp-ink-muted">{label.name}</span>
+          <span className="text-xl leading-none">{skillIcon}</span>
+          <span className="mt-1 text-[9px] leading-none text-ddp-ink-muted">{skillName}</span>
           {hero.skillCd > 0 && !hero.dead && (
             <span
               key={castKey}
@@ -106,7 +109,7 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
           )}
           {hero.dead && (
             <span className="absolute inset-0 flex items-center justify-center bg-black/70 text-[10px] font-bold text-red-400">
-              ตาย
+              {tPanels("heroDeadBadge")}
             </span>
           )}
         </span>
@@ -119,11 +122,12 @@ export function SkillBar() {
   const heroes = useGameStore((s) => s.heroes);
   const autoCast = useGameStore((s) => s.autoCast);
   const toggleAutoCast = useGameStore((s) => s.toggleAutoCast);
+  const t = useTranslations("panels");
 
   return (
     <div className="flex flex-wrap items-center gap-3">
       <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
-        สกิล
+        {t("skillsLabel")}
       </span>
       <div className="flex gap-2">
         {heroes.map((hero, i) => (
@@ -146,7 +150,7 @@ export function SkillBar() {
           className={`h-1.5 w-1.5 rounded-full ${autoCast ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
         />
         {/* ✨ not 🪄: the magic-wand emoji (Unicode 13) has no glyph on Windows 10 */}
-        ✨ Auto สกิล: {autoCast ? "เปิด" : "ปิด"}
+        {t("autoSkillToggle", { state: autoCast ? "on" : "off" })}
       </button>
     </div>
   );

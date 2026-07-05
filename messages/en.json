@@ -1,7 +1,36 @@
 {
-  "common": {},
-  "hud": {},
-  "panels": {},
+  "common": {
+    "appTitle": "ดึ๋งปุ๊ Idle Game",
+    "appDescription": "An idle adventure with 3 hero classes — clear waves, challenge bosses, and keep upgrading.",
+    "levelBadge": "Lv.{level}",
+    "maxLabel": "MAX",
+    "fatalError": "Could not start the game: {reason}"
+  },
+  "hud": {
+    "stageLabel": "Stage",
+    "waveLabel": "Wave",
+    "killProgressLabel": "Kills to boss",
+    "victoryTitle": "🎉 Stage {stage} cleared!",
+    "nextStageButton": "Next Stage →",
+    "bossHpLabel": "Boss HP",
+    "bossAtkLabel": "Attack Power",
+    "recommendedPowerLabel": "Recommended Power",
+    "yourPowerLabel": "Your Power",
+    "bossReadyYes": "✅ Ready to fight",
+    "bossReadyNo": "⚠ Power may not be enough",
+    "challengeBossButton": "⚔ Challenge Boss",
+    "challengeBossAriaReady": "Challenge Boss",
+    "challengeBossAriaNotReady": "Challenge Boss (not available yet)"
+  },
+  "panels": {
+    "skillsLabel": "Skills",
+    "heroDeadBadge": "Dead",
+    "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (dead)} cooldown { (cooldown {seconds}s)} other {}}",
+    "autoSkillToggle": "✨ Auto Skill: {state, select, on {ON} other {OFF}}",
+    "upgradesLabel": "Upgrades",
+    "upgradeAriaLabel": "{name} Level {level}{costState, select, capped { (MAX)} other {, cost {cost} gold}}",
+    "autoUpgradeToggle": "💰 Auto Upgrade: {state, select, on {ON} other {OFF}}"
+  },
   "settings": {
     "speedLabel": "Speed",
     "soundOn": "Unmute",
@@ -9,5 +38,24 @@
     "localeLabel": "Language",
     "localeTh": "ไทย",
     "localeEn": "EN"
+  },
+  "content": {
+    "classes": {
+      "swordsman": { "name": "Swordsman" },
+      "archer": { "name": "Archer" },
+      "mage": { "name": "Mage" }
+    },
+    "skills": {
+      "swordsman": { "name": "Whirl Slash", "desc": "Spins the blade to hit every foe in range" },
+      "archer": { "name": "Arrow Rain", "desc": "Rains arrows across the whole battlefield" },
+      "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" }
+    },
+    "upgrades": {
+      "atk": { "name": "Power" },
+      "speed": { "name": "Speed" },
+      "hp": { "name": "Vitality" }
+    },
+    "quests": {},
+    "items": {}
   }
 }
