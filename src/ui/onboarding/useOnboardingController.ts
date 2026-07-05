@@ -23,27 +23,10 @@ import {
   ONBOARDING_STEPS,
   isFreshSave,
   resolveNextStepIndex,
+  toOnboardingSnapshot,
   type OnboardingSnapshot,
 } from "@/ui/onboarding/steps";
 import { readStoredFtueCompleted, useGameStore } from "@/ui/store/gameStore";
-
-function toSnapshot(s: {
-  gold: number;
-  stage: number;
-  kills: number;
-  phase: OnboardingSnapshot["phase"];
-  upgrades: OnboardingSnapshot["upgrades"];
-  heroes: { skillCd: number }[];
-}): OnboardingSnapshot {
-  return {
-    gold: s.gold,
-    stage: s.stage,
-    kills: s.kills,
-    phase: s.phase,
-    upgrades: s.upgrades,
-    heroes: s.heroes.map((h) => ({ skillCd: h.skillCd })),
-  };
-}
 
 export interface OnboardingController {
   /** -1 when inactive; otherwise the live index into `ONBOARDING_STEPS`. */
@@ -63,13 +46,26 @@ export function useOnboardingController(): OnboardingController {
   const kills = useGameStore((s) => s.kills);
   const phase = useGameStore((s) => s.phase);
   const upgrades = useGameStore((s) => s.upgrades);
+  const upgradeCosts = useGameStore((s) => s.upgradeCosts);
+  const autoUpgrade = useGameStore((s) => s.autoUpgrade);
+  const autoCast = useGameStore((s) => s.autoCast);
   const heroes = useGameStore((s) => s.heroes);
   const startOnboarding = useGameStore((s) => s.startOnboarding);
   const setOnboardingStepIndex = useGameStore((s) => s.setOnboardingStepIndex);
   const completeOnboarding = useGameStore((s) => s.completeOnboarding);
   const setFtueCompleted = useGameStore((s) => s.setFtueCompleted);
 
-  const snapshot = toSnapshot({ gold, stage, kills, phase, upgrades, heroes });
+  const snapshot = toOnboardingSnapshot({
+    gold,
+    stage,
+    kills,
+    phase,
+    upgrades,
+    upgradeCosts,
+    autoUpgrade,
+    autoCast,
+    heroes,
+  });
   const prevSnapshotRef = useRef<OnboardingSnapshot>(snapshot);
   const gatedRef = useRef(false);
 
@@ -104,7 +100,13 @@ export function useOnboardingController(): OnboardingController {
     const prev = prevSnapshotRef.current;
     prevSnapshotRef.current = snapshot;
     if (stepIndex < 0) return;
-    const nextIndex = resolveNextStepIndex(ONBOARDING_STEPS, stepIndex, prev, snapshot, false);
+    const nextIndex = resolveNextStepIndex(
+      ONBOARDING_STEPS,
+      stepIndex,
+      prev,
+      snapshot,
+      false,
+    );
     if (nextIndex === stepIndex) return;
     if (nextIndex >= ONBOARDING_STEPS.length) completeOnboarding();
     else setOnboardingStepIndex(nextIndex);
@@ -114,7 +116,13 @@ export function useOnboardingController(): OnboardingController {
   function tapNext(): void {
     if (stepIndex < 0) return;
     const prev = prevSnapshotRef.current;
-    const nextIndex = resolveNextStepIndex(ONBOARDING_STEPS, stepIndex, prev, snapshot, true);
+    const nextIndex = resolveNextStepIndex(
+      ONBOARDING_STEPS,
+      stepIndex,
+      prev,
+      snapshot,
+      true,
+    );
     if (nextIndex === stepIndex) return;
     if (nextIndex >= ONBOARDING_STEPS.length) completeOnboarding();
     else setOnboardingStepIndex(nextIndex);

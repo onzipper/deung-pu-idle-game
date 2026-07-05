@@ -14,7 +14,14 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     kills: 0,
     phase: "battle",
     upgrades: { atk: 0, speed: 0, hp: 0 },
-    heroes: [{ skillCd: 0 }, { skillCd: 0 }, { skillCd: 0 }],
+    upgradeCosts: { atk: 100, speed: 100, hp: 100 },
+    autoUpgrade: false,
+    autoCast: false,
+    heroes: [
+      { skillCd: 0, dead: false },
+      { skillCd: 0, dead: false },
+      { skillCd: 0, dead: false },
+    ],
     ...overrides,
   };
 }
@@ -70,9 +77,27 @@ describe("resolveNextStepIndex", () => {
 
   it("castSkill (action-kind) advances on a cooldown jump, ignores natural decay", () => {
     expect(idOf(3)).toBe("castSkill");
-    const prev = snapshot({ heroes: [{ skillCd: 4 }, { skillCd: 0 }, { skillCd: 0 }] });
-    const decayed = snapshot({ heroes: [{ skillCd: 3.9 }, { skillCd: 0 }, { skillCd: 0 }] });
-    const cast = snapshot({ heroes: [{ skillCd: 4 }, { skillCd: 8 }, { skillCd: 0 }] });
+    const prev = snapshot({
+      heroes: [
+        { skillCd: 4, dead: false },
+        { skillCd: 0, dead: false },
+        { skillCd: 0, dead: false },
+      ],
+    });
+    const decayed = snapshot({
+      heroes: [
+        { skillCd: 3.9, dead: false },
+        { skillCd: 0, dead: false },
+        { skillCd: 0, dead: false },
+      ],
+    });
+    const cast = snapshot({
+      heroes: [
+        { skillCd: 4, dead: false },
+        { skillCd: 8, dead: false },
+        { skillCd: 0, dead: false },
+      ],
+    });
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 3, prev, decayed, false)).toBe(3);
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 3, prev, cast, false)).toBe(4);
   });
@@ -105,7 +130,9 @@ describe("resolveNextStepIndex", () => {
 describe("isOnboardingComplete", () => {
   it("is only true once the index runs past the last step", () => {
     expect(isOnboardingComplete(ONBOARDING_STEPS, 0)).toBe(false);
-    expect(isOnboardingComplete(ONBOARDING_STEPS, ONBOARDING_STEPS.length - 1)).toBe(false);
+    expect(isOnboardingComplete(ONBOARDING_STEPS, ONBOARDING_STEPS.length - 1)).toBe(
+      false,
+    );
     expect(isOnboardingComplete(ONBOARDING_STEPS, ONBOARDING_STEPS.length)).toBe(true);
   });
 });

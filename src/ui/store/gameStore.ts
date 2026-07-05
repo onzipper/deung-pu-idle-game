@@ -124,6 +124,42 @@ function writeFtueCompleted(completed: boolean): void {
   }
 }
 
+/** localStorage key for contextual-tip "seen" ids (M4.8 card A) — same
+ * client-preference tier as `FTUE_STORAGE_KEY`: a flat array of tip ids
+ * already shown, so each `CONTEXTUAL_TIPS` entry (`src/ui/onboarding/tips.ts`)
+ * fires at most once ever, across reloads.
+ * // M5+: fold into server save (cross-device sync). */
+const TIPS_SEEN_STORAGE_KEY = "ddp-tips-seen";
+
+export function readStoredSeenTips(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TIPS_SEEN_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return []; // storage blocked/corrupt — tips just replay this session
+  }
+}
+
+/** Appends `id` to `seen` (no-op if already present) and persists the result.
+ * Returns the new array so the caller can update its own in-memory copy
+ * without a redundant `readStoredSeenTips()` round-trip. */
+export function writeSeenTip(id: string, seen: readonly string[]): string[] {
+  const next = seen.includes(id) ? seen.slice() : [...seen, id];
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(TIPS_SEEN_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage blocked — this tip just won't persist across reloads */
+    }
+  }
+  return next;
+}
+
 const emptyBossHint: BossHint = {
   stage: 1,
   bossHp: 0,

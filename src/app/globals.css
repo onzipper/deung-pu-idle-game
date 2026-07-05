@@ -181,3 +181,37 @@ body {
 .animate-onboarding-in {
   animation: ddp-onboarding-in 0.2s ease-out;
 }
+
+/* Mascot (M4.8 card B, `Mascot.tsx`) — idle bob + slow blink, the only two
+ * "alive" cues. Low-amplitude/slow by design (it presents, it doesn't
+ * distract): a few px of vertical drift and an occasional blink, nothing
+ * that competes with the tooltip text next to it. */
+@keyframes ddp-mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes ddp-mascot-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+.animate-mascot-bob {
+  animation: ddp-mascot-bob 2.4s ease-in-out infinite;
+}
+
+.animate-mascot-blink {
+  animation: ddp-mascot-blink 4.2s ease-in-out infinite;
+  transform-box: fill-box;
+}

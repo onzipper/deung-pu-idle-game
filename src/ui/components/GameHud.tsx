@@ -19,6 +19,7 @@ import { SkillBar } from "@/ui/components/SkillBar";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { SpeedSelector } from "@/ui/components/SpeedSelector";
 import { UpgradePanel } from "@/ui/components/UpgradePanel";
+import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 
 export interface GameHudProps {
@@ -38,8 +39,11 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
     <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
       {/* FTUE overlay (M4.8): fixed/viewport-anchored, reads its own store
           slice + `data-onboarding-anchor` DOM targets below — see
-          src/ui/onboarding/. Renders null once onboarding isn't active. */}
+          src/ui/onboarding/. Renders null once onboarding isn't active.
+          ContextualTipOverlay (M4.8 card A/B) is its progressive-disclosure
+          sibling — gated so the two are never active at the same time. */}
       <OnboardingOverlay />
+      <ContextualTipOverlay />
       <HudBar />
 
       <div

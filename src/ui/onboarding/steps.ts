@@ -14,28 +14,63 @@
  */
 
 import type { Phase, Upgrades } from "@/engine";
+import type { MascotMood } from "@/ui/onboarding/mascotMood";
 
 /** Narrow, engine-decoupled view of the throttled HUD snapshot — just the
  * fields any onboarding trigger/advance predicate might need. Deliberately
  * NOT `EngineSnapshot` itself so this module has zero store/engine coupling
- * beyond the two shared type aliases above. */
+ * beyond the two shared type aliases above.
+ *
+ * Also the SHARED snapshot type for the contextual-tips registry (`./tips.ts`,
+ * M4.8 card A) — per that task's "extend the type, don't fork it" rule,
+ * `upgradeCosts`/`autoUpgrade`/`autoCast`/`heroes[].dead` were added here
+ * (rather than a second, parallel snapshot type) purely for tip predicates;
+ * the FTUE steps below simply ignore them. */
 export interface OnboardingSnapshot {
   gold: number;
   stage: number;
   kills: number;
   phase: Phase;
   upgrades: Upgrades;
-  heroes: { skillCd: number }[];
+  upgradeCosts: Upgrades;
+  autoUpgrade: boolean;
+  autoCast: boolean;
+  heroes: { skillCd: number; dead: boolean }[];
+}
+
+/** Builds the shared snapshot shape above from raw store/engine fields — the
+ * ONE place that knows how to project the throttled HUD snapshot down to
+ * what trigger/advance predicates need. Both `useOnboardingController.ts`
+ * (FTUE) and `useContextualTips.ts` (tips) call this instead of re-deriving
+ * the shape themselves. */
+export function toOnboardingSnapshot(s: {
+  gold: number;
+  stage: number;
+  kills: number;
+  phase: Phase;
+  upgrades: Upgrades;
+  upgradeCosts: Upgrades;
+  autoUpgrade: boolean;
+  autoCast: boolean;
+  heroes: { skillCd: number; dead: boolean }[];
+}): OnboardingSnapshot {
+  return {
+    gold: s.gold,
+    stage: s.stage,
+    kills: s.kills,
+    phase: s.phase,
+    upgrades: s.upgrades,
+    upgradeCosts: s.upgradeCosts,
+    autoUpgrade: s.autoUpgrade,
+    autoCast: s.autoCast,
+    heroes: s.heroes.map((h) => ({ skillCd: h.skillCd, dead: h.dead })),
+  };
 }
 
 /** CSS selector target (`data-onboarding-anchor="<value>"`) a step spotlights.
  * Omitted for steps that aren't anchored to a control (welcome/outro). */
 export type OnboardingAnchor =
-  | "kill-progress"
-  | "upgrade-panel"
-  | "skill-bar"
-  | "boss-panel"
-  | "settings-row";
+  "kill-progress" | "upgrade-panel" | "skill-bar" | "boss-panel" | "settings-row";
 
 /** Player intents the "action" advance rule can detect via a snapshot diff.
  * Add a case here + in `didActionOccur` when a later step needs a new one. */
@@ -57,26 +92,38 @@ export interface OnboardingStepDef {
   /** i18n keys: `onboarding.steps.<id>.title` / `.body` (namespace "onboarding"). */
   anchor?: OnboardingAnchor;
   advance: OnboardingAdvanceRule;
+  /** Optional mascot pose for this step's dialogue (M4.8 card B, see
+   * `Mascot.tsx`); omitted defaults to "neutral". */
+  mood?: MascotMood;
 }
 
 /** The FTUE sequence (task M4.8). Kept short by design — 7 steps, one beat
  * per core-loop stage (kill -> gold -> upgrade -> skill -> boss -> settings). */
 export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
-  { id: "welcome", advance: { kind: "next" } },
+  { id: "welcome", advance: { kind: "next" }, mood: "excited" },
   {
     id: "watchFight",
     anchor: "kill-progress",
     advance: { kind: "auto", predicate: (s) => s.kills >= 1 },
   },
-  { id: "buyUpgrade", anchor: "upgrade-panel", advance: { kind: "action", action: "buyUpgrade" } },
-  { id: "castSkill", anchor: "skill-bar", advance: { kind: "action", action: "castSkill" } },
+  {
+    id: "buyUpgrade",
+    anchor: "upgrade-panel",
+    advance: { kind: "action", action: "buyUpgrade" },
+  },
+  {
+    id: "castSkill",
+    anchor: "skill-bar",
+    advance: { kind: "action", action: "castSkill" },
+  },
   {
     id: "bossChallenge",
     anchor: "boss-panel",
     advance: { kind: "action", action: "challengeBoss" },
+    mood: "warning",
   },
   { id: "settingsTour", anchor: "settings-row", advance: { kind: "next" } },
-  { id: "outro", advance: { kind: "next" } },
+  { id: "outro", advance: { kind: "next" }, mood: "excited" },
 ];
 
 /** Fresh-save heuristic (part of the "don't show returning players the

@@ -40,8 +40,10 @@
     "localeEn": "EN"
   },
   "onboarding": {
+    "mascotName": "Deung",
     "nextButton": "Next →",
     "skipAllButton": "Skip all",
+    "tipDismissButton": "Got it",
     "stepProgress": "{current} / {total}",
     "steps": {
       "welcome": {
@@ -71,6 +73,28 @@
       "outro": {
         "title": "You're ready!",
         "body": "That's the whole core loop: kill → bank gold → upgrade → grow stronger, on repeat. Enjoy the adventure!"
+      }
+    },
+    "tips": {
+      "heroDeathRespawn": {
+        "title": "Don't worry when a hero goes down!",
+        "body": "A downed hero auto-revives after a short timer — no button to tap, just wait for the team to get back up and keep fighting."
+      },
+      "autoUpgradeAvailable": {
+        "title": "Let auto-upgrade handle it",
+        "body": "You've got enough gold for an upgrade now. Try flipping on \"Auto upgrade\" — it buys the next level the instant you can afford it, no more manual tapping."
+      },
+      "autoCastAvailable": {
+        "title": "Try auto-cast for your skills",
+        "body": "A hero's skill is ready. Flip on \"Auto skill\" and heroes will cast automatically the instant their cooldown ends."
+      },
+      "stageClear": {
+        "title": "Boss down! Stage cleared.",
+        "body": "Tap \"Next stage\" to unlock a new hero slot and push into a tougher stage."
+      },
+      "bossWipe": {
+        "title": "The team got wiped — but it's not over!",
+        "body": "Your heroes revive and go back to normal waves. Grind a bit more power, then challenge the boss again."
       }
     }
   },
@@ -139,8 +163,14 @@
       "mage": { "name": "Mage" }
     },
     "skills": {
-      "swordsman": { "name": "Whirl Slash", "desc": "Spins the blade to hit every foe in range" },
-      "archer": { "name": "Arrow Rain", "desc": "Rains arrows across the whole battlefield" },
+      "swordsman": {
+        "name": "Whirl Slash",
+        "desc": "Spins the blade to hit every foe in range"
+      },
+      "archer": {
+        "name": "Arrow Rain",
+        "desc": "Rains arrows across the whole battlefield"
+      },
       "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" }
     },
     "upgrades": {
