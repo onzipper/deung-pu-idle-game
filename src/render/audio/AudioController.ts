@@ -29,6 +29,7 @@ import {
   playHit,
   playKill,
   playLevelUp,
+  playMobAggroed,
   playSkillCast,
   playStageAdvanced,
 } from "@/render/audio/sfxMap";
@@ -136,8 +137,15 @@ export class AudioController {
             playEvolve(this.engine);
           }
           break;
+        case "mobAggroed":
+          // Shared (not per-mob) throttle key — several mobs aggroing the
+          // same instant on a busy field collapse into one short bark.
+          if (this.engine.allow("mobAggroed", SFX_MIN_INTERVAL_MS.mobAggroed)) {
+            playMobAggroed(this.engine);
+          }
+          break;
         default:
-          break; // waveSpawn / projectileSpawn / stageCleared / zoneEntered /
+          break; // projectileSpawn / stageCleared / zoneEntered /
           // zoneUnlocked / mapUnlocked: silent by design — the same
           // high-frequency-event fatigue reasoning as waveSpawn (zoneEntered
           // fires every zone-to-zone hop), and zoneUnlocked/mapUnlocked

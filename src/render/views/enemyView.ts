@@ -142,6 +142,16 @@ interface EnemyAnimState {
   armAngle: number;
   spawnT: number;
   attack: AttackAnim | null;
+  /**
+   * Rig-flip state (open hunting field, 86d3jv7m3 follow-up): every rig below
+   * is drawn assuming its target sits at -x (the old always-hero-on-the-left
+   * assumption). `1` = default/unflipped (front-facing -x); `-1` = mirrored
+   * (front-facing +x). Derived from the entity's OWN recent movement delta
+   * (the view has no reference to the hero's actual position) and HELD
+   * through stationary beats — melee holding station to swing, ranged holding
+   * to aim — rather than re-derived every frame off a near-zero velocity.
+   */
+  facing: 1 | -1;
 }
 
 export interface EnemyFrameContext {
@@ -181,6 +191,7 @@ export function createEnemyView(): EnemyView {
     armAngle: 0,
     spawnT: 0,
     attack: null,
+    facing: 1,
   };
   return view;
 }
@@ -398,6 +409,14 @@ export function updateEnemyView(view: EnemyView, enemy: Enemy, ctx: EnemyFrameCo
   const speedFrac = clamp01(Math.abs(velocity) / Math.max(1, enemy.speed));
   const stationary = speedFrac < AIM_SPEED_THRESHOLD;
 
+  // Rig flip: only re-derive while actually moving with intent (see the
+  // `EnemyAnimState.facing` doc comment) — holds its last value while
+  // stationary (e.g. mid-swing, or ranged holding its AIM pose).
+  if (!stationary) {
+    anim.facing = velocity < 0 ? 1 : -1;
+  }
+  const facing = anim.facing;
+
   anim.walkPhase += dt * (1.2 + speedFrac * 3.5) * params.freqMult;
 
   const pose =
@@ -456,14 +475,25 @@ export function updateEnemyView(view: EnemyView, enemy: Enemy, ctx: EnemyFrameCo
   }
 
   // ---- compose transforms ---------------------------------------------------
-  view.body.position.set(attackOffX, GROUND_Y + pose.offY + spawnHop);
-  view.body.scale.set(pose.scaleX, pose.scaleY);
+  // `dirOffX` mirrors the melee-lunge/ranged-recoil kick (baked assuming -x)
+  // to whichever side `facing` currently points. `body`/`legs` flip about
+  // their own local x=0 (already the entity's anchor — see `buildRig`'s
+  // absolute-coordinate doc comment), so a plain `scale.x` sign flip mirrors
+  // the silhouette with no path/pivot changes. `limbArm`'s pivot is BAKED at
+  // build time to the unflipped `frontPoint` — mirroring its own `position`
+  // by the same `facing` (in addition to its `scale.x`) keeps the shoulder
+  // anchor + swing direction consistent instead of drifting off the body.
+  const dirOffX = attackOffX * facing;
+  view.body.position.set(dirOffX, GROUND_Y + pose.offY + spawnHop);
+  view.body.scale.set(pose.scaleX * facing, pose.scaleY);
 
-  view.legs.position.set(attackOffX * 0.6 + shuffleX, pose.offY * 0.5 + spawnHop);
+  view.legs.position.set(dirOffX * 0.6 + shuffleX * facing, pose.offY * 0.5 + spawnHop);
+  view.legs.scale.x = facing;
 
   const front = frontPoint(enemy.kind, Math.max(0.1, enemy.size));
+  view.limbArm.scale.x = facing;
   view.limbArm.rotation = anim.armAngle + attackArmDelta;
-  view.limbArm.position.set(front.x + attackOffX, front.y + pose.offY + spawnHop);
+  view.limbArm.position.set(front.x * facing + dirOffX, front.y + pose.offY + spawnHop);
 
   view.position.set(enemy.x, 0);
 

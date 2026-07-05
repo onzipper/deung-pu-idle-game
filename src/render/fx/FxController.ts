@@ -568,12 +568,36 @@ export class FxController {
           this.onBossDefeated(ev);
           break;
         case "mobAggroed":
-          // M6 "สนามล่ามอน": an aggressive mob just aggroed onto the hero — a small
-          // alert puff at the mob (a placeholder for a fuller growl/alert beat).
+          // M6 "สนามล่ามอน" follow-up (open hunting field): an aggressive mob just
+          // aggroed onto the hero — a small "alert" beat at the mob: a brief,
+          // localized flash-ring (NOT the full-arena `flash` — this can fire
+          // often on a busy field, so it stays a small local pulse) + a tiny
+          // upward "!" spark (reuses the same pooled text the damage numbers/
+          // kill-gold use) on top of the original puff, all kept subtle/short
+          // per the render brief. Aggro's growl SFX lives in `audio/sfxMap.ts`.
           burst(this.particles, ev.x, GROUND_Y - 18, 5, PALETTE.enrageAura, {
             speed: 55,
             life: 0.28,
             radius: 2,
+          });
+          this.rings.spawn({
+            x: ev.x,
+            y: GROUND_Y - 18,
+            r0: 3,
+            r1: 16,
+            duration: 0.22,
+            width: 1.5,
+            color: PALETTE.enrageAura,
+          });
+          this.eventText.spawn({
+            x: ev.x,
+            y: GROUND_Y - 30,
+            label: "!",
+            color: PALETTE.warn,
+            fontSize: 15,
+            duration: 0.35,
+            rise: 12,
+            driftX: 0,
           });
           break;
         case "stageAdvanced":

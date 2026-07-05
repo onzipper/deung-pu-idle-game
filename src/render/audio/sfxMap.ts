@@ -12,10 +12,6 @@
  * coin shower) never clip together.
  *
  * Intentionally SILENT event types (no entry / no case in AudioController):
- *  - `mobAggroed` (M6 "สนามล่ามอน") — fires whenever an aggressive mob aggros,
- *    constantly on a busy field; a game-y idle-exposure context makes even a
- *    "subtle" tick fatiguing over a long session (its visual alert puff in
- *    `FxController` carries the beat). (Replaced the retired march-model `waveSpawn`.)
  *  - `projectileSpawn` — fires per-shot, far too high frequency for a discrete
  *    sound without machine-gunning even with throttling.
  *  - `stageCleared` — fires in the same instant as `bossDefeated` (see
@@ -79,6 +75,14 @@ export const SFX_PARAMS = {
     noiseGain: 0.28,
   },
   bossEnraged: { freq: 140, freqEnd: 85, decay: 0.3, gain: 0.26, detune: 14 },
+  /** Mob aggro growl (M6 "สนามล่ามอน" follow-up, open hunting field): a small,
+   * SHORT snarl — deliberately higher/quicker/quieter than `bossEnraged`'s
+   * growl (which is lower, longer, and much louder — a boss-fight moment)
+   * and a different timbre than `hit`'s tick (sawtooth vs. triangle/square)
+   * so the two never get confused on a busy field. Heavily throttled (see
+   * `SFX_MIN_INTERVAL_MS`) — several mobs aggroing in the same instant
+   * collapse into one bark, never a machine-gun. */
+  mobAggroed: { freq: 210, freqEnd: 130, decay: 0.12, gain: 0.09, detune: 10 },
   bossDefeated: {
     arpeggio: [523.25, 659.25, 783.99, 1046.5], // C5 E5 G5 C6
     noteGap: 0.09,
@@ -149,6 +153,7 @@ export const SFX_MIN_INTERVAL_MS = {
   bossSlamTelegraph: 400,
   bossSlamLand: 300,
   bossEnraged: 400,
+  mobAggroed: 700,
   bossDefeated: 800,
   bossRoomEntered: 800,
   stageAdvanced: 500,
@@ -310,6 +315,21 @@ export function playBossEnraged(engine: AudioEngine): void {
     freqEnd: p.freqEnd * 1.01,
     detune: -p.detune,
     delay: 0.012,
+  });
+}
+
+/** Mob aggro growl: one short, quiet, detuned sawtooth snarl — see
+ * `SFX_PARAMS.mobAggroed`'s doc comment for how this stays distinct from
+ * `playBossEnraged`/`playHit`. */
+export function playMobAggroed(engine: AudioEngine): void {
+  const p = SFX_PARAMS.mobAggroed;
+  engine.tone(p.freq, {
+    shape: "sawtooth",
+    attack: 0.002,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.freqEnd,
+    detune: p.detune,
   });
 }
 

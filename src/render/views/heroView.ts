@@ -63,6 +63,9 @@ const BREATH_SPEED = Math.PI * 0.9;
 const BREATH_SCALE_AMPLITUDE = 0.018;
 const IDLE_SWAY = 0.02;
 const LEAN_SMOOTH = 8; // per-second lerp rate toward the lean target
+/** Below this normalized speed, a facing re-derive is skipped (holds the last
+ * value) — mirrors `enemyView.ts`'s `AIM_SPEED_THRESHOLD` convention. */
+const FACING_SPEED_THRESHOLD = 0.08;
 
 // ---------------------------------------------------------------------------
 // Per-class resting weapon-arm / off-arm angles (radians).
@@ -168,6 +171,16 @@ interface HeroAnimState {
    * only ever increases (single evolution path in M5), so this never needs
    * to un-build anything. */
   tierBuilt: 1 | 2;
+  /**
+   * Rig-flip state (open hunting field, 86d3jv7m3 follow-up): the whole rig
+   * is drawn facing +x (bow/blade/staff all built on the +x side — see
+   * `buildRig`). `1` = default/unflipped (facing +x); `-1` = mirrored (facing
+   * -x). Derived from the hero's OWN recent movement delta (this view has no
+   * reference to its current target's position) and HELD through stationary
+   * beats (holding position to swing/shoot/cast) rather than re-derived every
+   * frame off a near-zero velocity.
+   */
+  facing: 1 | -1;
 }
 
 export interface HeroView extends Container {
@@ -307,6 +320,7 @@ export function createHeroView(): HeroView {
     shotPoseIndex: 0,
     attackSeq: 0,
     tierBuilt: 1,
+    facing: 1,
   };
   return view;
 }
@@ -821,6 +835,15 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   const velocity = dt > 0 ? (hero.x - anim.lastX) / dt : 0;
   anim.lastX = hero.x;
   const speedFrac = clamp01(Math.abs(velocity) / CONFIG.heroMove);
+
+  // Rig flip: only re-derive while actually moving with intent — holds its
+  // last value while stationary (in range, holding station to attack/cast),
+  // frozen while dead (see `EnemyAnimState.facing`'s sibling doc comment for
+  // why this can't just key off a live target reference instead).
+  if (!hero.dead && speedFrac >= FACING_SPEED_THRESHOLD) {
+    anim.facing = velocity > 0 ? 1 : -1;
+  }
+  view.bodyRoot.scale.x = anim.facing;
 
   anim.walkPhase += dt * (WALK_FREQ_BASE + speedFrac * WALK_FREQ_RANGE);
   anim.breathPhase += dt * BREATH_SPEED;
