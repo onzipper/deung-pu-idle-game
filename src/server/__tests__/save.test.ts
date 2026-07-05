@@ -16,6 +16,10 @@ function validSave(overrides: Record<string, unknown> = {}) {
     gold: 500,
     unlocked: ["swordsman", "archer"],
     upgrades: { atk: 2, speed: 1, hp: 3 },
+    heroes: [
+      { level: 1, xp: 0 },
+      { level: 4, xp: 12 },
+    ],
     lastSeen: 0,
     ...overrides,
   };

@@ -11,7 +11,7 @@ import { CONFIG, SLOT_ORDER } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
 import { makeHero } from "@/engine/entities";
 import type { Hero, Enemy, Boss, Projectile } from "@/engine/entities";
-import type { Upgrades } from "@/engine/systems/stats";
+import { heroMaxHp, type Upgrades } from "@/engine/systems/stats";
 import type { GameEvent } from "@/engine/state/events";
 import { SAVE_VERSION } from "@/engine/state/version";
 
@@ -63,6 +63,12 @@ export interface GameState {
  * Persisted save shape. Keep this small and JSON-serialisable — it goes into
  * `save_states.data`. Anything derivable from these fields is NOT stored.
  */
+/** Per-hero progression (M5). Aligned by slot index with `unlocked`. */
+export interface HeroProgress {
+  level: number;
+  xp: number;
+}
+
 export interface SaveData {
   version: number;
   stage: number;
@@ -71,15 +77,27 @@ export interface SaveData {
   unlocked: string[];
   /** Upgrade levels per stat line. */
   upgrades: Upgrades;
+  /** Per-hero level/xp, index-aligned with `unlocked` (M5). */
+  heroes: HeroProgress[];
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
 
-/** Build a fresh set of heroes for the currently unlocked slots. */
+/**
+ * Build a fresh set of heroes for the currently unlocked slots. Per-hero level/xp
+ * (M5) is PRESERVED across a rebuild: a hero at slot `i` keeps the progression of
+ * whoever occupied slot `i` before (slots are class-stable via `SLOT_ORDER`), so
+ * `nextStage`'s battlefield reset no longer wipes levels. A newly unlocked slot
+ * starts fresh at level 1.
+ */
 export function initHeroes(state: GameState): void {
+  const prev = state.heroes;
   state.heroes = [];
   for (let i = 0; i < state.heroSlots; i++) {
-    state.heroes.push(makeHero(state.nextId++, SLOT_ORDER[i], state.upgrades));
+    const p = prev[i];
+    state.heroes.push(
+      makeHero(state.nextId++, SLOT_ORDER[i], state.upgrades, p?.level ?? 1, p?.xp ?? 0),
+    );
   }
 }
 
@@ -119,6 +137,19 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     events: [],
   };
   initHeroes(state);
+  // Restore per-hero level/xp from the save (M5). `initHeroes` built level-1
+  // heroes; overlay the saved progression and re-derive max HP for the level.
+  if (save?.heroes) {
+    for (let i = 0; i < state.heroes.length; i++) {
+      const p = save.heroes[i];
+      if (!p) continue;
+      const h = state.heroes[i];
+      h.level = clamp(p.level, 1, CONFIG.leveling.levelCap);
+      h.xp = Math.max(0, p.xp);
+      h.maxHp = heroMaxHp(state.upgrades, h.level);
+      h.hp = h.maxHp;
+    }
+  }
   return state;
 }
 
@@ -138,6 +169,7 @@ export function toSaveData(state: GameState): SaveData {
     gold: state.gold,
     unlocked: SLOT_ORDER.slice(0, state.heroSlots),
     upgrades: { ...state.upgrades },
+    heroes: state.heroes.map((h) => ({ level: h.level, xp: h.xp })),
     lastSeen: 0,
   };
 }

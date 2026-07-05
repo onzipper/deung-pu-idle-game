@@ -681,3 +681,64 @@ all reach).
   is ever fired from beyond all-hero reach, and the shooter is eventually damaged.
 - BUG 2: a foe behind both ranged heroes but inside their ranges draws an archer
   volley **and** a mage orb (no idling) and takes damage.
+
+---
+
+## M5 — Character XP + Level system (86d3jv7m3)
+
+Per-hero level + XP as a second progression axis (the GDD's "immediate" 30-second
+goal tier). XP comes deterministically from **kills** (no RNG draw — the seeded
+stream stays wave-composition-only): every ALIVE hero gains equal XP per enemy
+kill, boss kills grant a larger amount, dead heroes earn nothing. Levels grant a
+per-level stat multiplier that **compounds multiplicatively** with the three
+upgrade lines (`systems/stats`). Progression is preserved across stage resets
+(`initHeroes` carries slot-indexed level/xp) and persisted (SAVE_VERSION 1→2).
+
+### Chosen knobs (`CONFIG.leveling`)
+
+| Knob | Value | Note |
+|---|---|---|
+| `levelCap` | `50` | Generous; the evolution card keys off level thresholds. |
+| `xpPerKill(n)` | `4 + n` | Per normal kill, per alive hero (S1=5 … S9=13). |
+| `xpPerBossKill(n)` | `30 + 10n` | Boss milestone (a level or two). |
+| `xpToLevel(level)` | `round(20 · 1.15^(level−1))` | Strictly increasing; early levels pop fast, later ones slow. |
+| `atkPerLevel` | **`0.001`** (+0.1%/level) | Token — see below. |
+| `hpPerLevel` | **`0.015`** (+1.5%/level) | Carries the felt "small win". |
+
+### Why the split is asymmetric (the balance finding)
+
+Team **attack** gates the boss (`teamPower = Σ heroAtk` vs `bossHp/26`), and the
+stage-9 wall is a structural knife-edge where `team ≈ rec`. By S9 the auto-pilot's
+heroes reach ~level 26, so a naïve **+1%/level** atk bonus (≈+22% by S9) or even
+**+0.15%/level** (≈+4%) *dissolved* the ~5x prestige gate:
+
+| `atkPerLevel` | S9 meanDur | gate (S9/S8) | vs baseline 627.8s |
+|---|---|---|---|
+| 0.10 % | 633 s | 4.9x | +1 % ✅ |
+| 0.15 % | 418 s | 3.3x | −33 % ❌ |
+| 0.30 % | 312 s | 2.5x | −50 % ❌ |
+| 1.00 % | 128 s | ~1x (wall → S10) | −80 % ❌ |
+
+Closing the gate to budget with a bigger atk bonus would require retuning the M4
+atk/HP curves (forbidden). So **atk is held to a token +0.1%/level** (provably in
+budget) and **HP carries the progression feel** at +1.5%/level: waves are
+DPS-gated with 0 wipes, so extra HP does *not* speed clears — it is pacing-neutral
+survivability. A level-up also heals by the added HP headroom (a small bump).
+
+### Resulting sim deltas (5 seeds, 1800 s, vs pre-M5 baseline)
+
+| Stage | Pre-M5 | With M5 | Δ |
+|---|---|---|---|
+| 1 | 86.4 | 86.8 | +0.5 % |
+| 2 | 51.8 | 51.8 | 0 % |
+| 3 | 71.1 | 71.0 | −0.1 % |
+| 4 | 75.3 | 75.6 | +0.4 % |
+| 5 | 89.8 | 93.9 | +4.6 % |
+| 6 | 94.7 | 99.4 | +5.0 % |
+| 7 | 108.8 | 106.4 | −2.2 % |
+| 8 | 126.5 | 128.7 | +1.7 % |
+| 9 | 627.8 | 633.4 | +0.9 % |
+
+Every stage within ±15 %; **S9 prestige gate 4.92x (~5x) preserved, 0 wipes**,
+same final stages. A transient `levelUp` event (`{id, cls, level}`) is emitted for
+render/UI juice (nothing in the engine consumes it).

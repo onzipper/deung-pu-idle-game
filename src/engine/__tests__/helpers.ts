@@ -13,6 +13,7 @@ export const threeHeroSave = (stage = 3): SaveData => ({
   gold: 0,
   unlocked: ["swordsman", "archer", "mage"],
   upgrades: { atk: 0, speed: 0, hp: 0 },
+  heroes: [],
   lastSeen: 0,
 });
 

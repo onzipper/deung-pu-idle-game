@@ -39,6 +39,7 @@ const strongSave = (): SaveData => ({
   gold: 0,
   unlocked: ["swordsman"],
   upgrades: { atk: 100, speed: 0, hp: 20 },
+  heroes: [],
   lastSeen: 0,
 });
 
@@ -48,6 +49,7 @@ const threeHeroSave = (): SaveData => ({
   gold: 0,
   unlocked: ["swordsman", "archer", "mage"],
   upgrades: { atk: 0, speed: 0, hp: 0 },
+  heroes: [],
   lastSeen: 0,
 });
 

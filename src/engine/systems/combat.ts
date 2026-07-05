@@ -18,6 +18,7 @@ import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
 import { heroAtk, heroAtkSpeed } from "@/engine/systems/stats";
 import { applyDamage, isHero } from "@/engine/systems/damage";
+import { grantKillXp } from "@/engine/systems/leveling";
 import { onBossKilled, bossRetreat } from "@/engine/systems/boss";
 import {
   aliveHeroes,
@@ -211,7 +212,7 @@ export function updateHeroes(state: GameState): void {
             nearestWithin(targets, h.x, t.range));
       if (tgt) {
         h.cd = heroAtkSpeed(h.cls, state.upgrades);
-        const dmg = heroAtk(h.cls, state.upgrades);
+        const dmg = heroAtk(h.cls, state.upgrades, h.level);
         if (t.attack === "melee") {
           applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {
@@ -364,6 +365,8 @@ export function resolveDeaths(state: GameState): void {
         state.kills++;
         const goldGained = CONFIG.goldPerKill(state.stage);
         state.gold += goldGained;
+        // Every alive hero banks kill XP (dead heroes earn nothing).
+        grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
         state.events.push({
           type: "kill",
           kind: e.kind,

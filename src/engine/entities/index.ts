@@ -51,6 +51,13 @@ export interface Hero {
   reviveTimer: number;
   /** Active skill cooldown, seconds (Phase B — decays here already). */
   skillCd: number;
+  /**
+   * Per-hero level (M5). Starts at 1, capped at `CONFIG.leveling.levelCap`. Grants
+   * a small atk/hp bonus that compounds with the upgrade lines. Persisted per hero.
+   */
+  level: number;
+  /** XP banked toward the NEXT level (resets on level-up by `xpToLevel(level)`). */
+  xp: number;
 }
 
 export interface Enemy {

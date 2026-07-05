@@ -38,6 +38,8 @@ function makeHero(cls: Hero["cls"]): Hero {
     dead: false,
     reviveTimer: 0,
     skillCd: 0,
+    level: 1,
+    xp: 0,
   };
 }
 

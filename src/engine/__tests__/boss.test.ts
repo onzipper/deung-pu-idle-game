@@ -233,6 +233,7 @@ describe("hero unlock ordering", () => {
       gold: 0,
       unlocked: ["a", "b", "c", "d", "e"], // bogus extra entries
       upgrades: { atk: 0, speed: 0, hp: 0 },
+      heroes: [],
       lastSeen: 0,
     };
     const s = initGameState(1, save);

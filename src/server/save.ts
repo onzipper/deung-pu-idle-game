@@ -65,6 +65,19 @@ export const saveDataSchema = z
         hp: z.number().int().min(0),
       })
       .strict(),
+    // Per-hero level/xp (M5). Index-aligned with `unlocked`, so at most one entry
+    // per hero slot. Level is bounded by the engine cap; xp is a non-negative
+    // finite amount (engine keeps it integral but we don't hard-require int()).
+    heroes: z
+      .array(
+        z
+          .object({
+            level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
+            xp: z.number().min(0).finite(),
+          })
+          .strict(),
+      )
+      .max(CONFIG.maxHeroes),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

@@ -255,6 +255,43 @@ export const CONFIG = {
     arrowRainRange: 760,
   },
 
+  // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
+  // Per-hero level is a SECOND power axis layered on top of the three global
+  // upgrade lines. Kills feed XP to every ALIVE hero (dead heroes earn nothing);
+  // enough XP levels the hero, which grants a small per-level atk/hp bonus that
+  // COMPOUNDS MULTIPLICATIVELY with the upgrade lines (see systems/stats.ts).
+  // These knobs are deliberately conservative: levels must give "constant small
+  // wins" (the 30-second goal tier) WITHOUT re-tuning the M4 curves — the balance
+  // sim has to stay within ±15% of the docs/balance-m4.md table per stage, keep
+  // the ~5x stage-9 prestige gate, and 0 wipes. NO RNG is drawn here (kills are
+  // deterministic); the seeded stream stays wave-composition-only.
+  leveling: {
+    // Generous cap; the evolution card keys off level thresholds below this.
+    levelCap: 50,
+    // Per-level stat multipliers, compounded MULTIPLICATIVELY onto the upgrade-line
+    // multiplier (systems/stats). The split is deliberately ASYMMETRIC and was
+    // forced by the sim: team ATTACK is what gates the boss, and the stage-9 wall
+    // is a structural knife-edge where team power ≈ the recommended floor, so even
+    // a +0.15%/level atk bonus (≈+4% by S9, where heroes reach ~level 26) COLLAPSED
+    // the ~5x prestige gate from 628s to 418s (-33%) — outside the ±15% budget and
+    // it would require retuning the M4 atk/HP curves (forbidden). atk is therefore
+    // held to a token +0.1%/level (S9 stays 633s / 4.9x gate, +1% — sim-verified),
+    // and HP carries the felt "small win": +1.5%/level survivability, which does
+    // NOT speed clears (waves are DPS-gated, 0 wipes) so it is pacing-neutral. See
+    // the M5 section in docs/balance-m4.md for the sweep.
+    atkPerLevel: 0.001,
+    hpPerLevel: 0.015,
+    // XP granted to each alive hero per NORMAL enemy kill; scales gently with
+    // stage so deeper (tougher) kills are worth a touch more.
+    xpPerKill: (n: number): number => 4 + n,
+    // XP granted per BOSS kill — a chunky milestone reward (a level or two).
+    xpPerBossKill: (n: number): number => 30 + n * 10,
+    // XP needed to advance FROM `level` TO `level+1`. Strictly increasing so early
+    // levels pop fast (small wins) and later ones slow down. round() of a geometric
+    // curve: L1->2 = 20, doubling roughly every ~4-5 levels.
+    xpToLevel: (level: number): number => Math.round(20 * Math.pow(1.15, level - 1)),
+  },
+
   // ---- flow / progression ----
   bossHintPowerDivisor: 26, // recommendedPower = round(bossHp / this)
   bossRetreatWaveGap: 1.0, // waveGap after a boss retreat (team wipe)

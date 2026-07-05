@@ -17,6 +17,7 @@ import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { makeBoss } from "@/engine/entities";
 import { heroAtk } from "@/engine/systems/stats";
+import { grantKillXp } from "@/engine/systems/leveling";
 import { applyDamage } from "@/engine/systems/damage";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
@@ -87,6 +88,9 @@ export function updateBoss(state: GameState): void {
 export function onBossKilled(state: GameState): void {
   const goldGained = CONFIG.goldPerBoss(state.stage);
   state.gold += goldGained;
+  // Boss kills grant a larger XP milestone to every alive hero (before payout /
+  // phase flip, while the winning team is still on the field).
+  grantKillXp(state, CONFIG.leveling.xpPerBossKill(state.stage));
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;
@@ -131,7 +135,7 @@ export function bossHint(state: GameState): BossHint {
   const bossAtk = CONFIG.bossAtk(state.stage);
   const recommendedPower = Math.round(bossHp / CONFIG.bossHintPowerDivisor);
   const teamPower = state.heroes.reduce(
-    (sum, h) => sum + heroAtk(h.cls, state.upgrades),
+    (sum, h) => sum + heroAtk(h.cls, state.upgrades, h.level),
     0,
   );
   return {

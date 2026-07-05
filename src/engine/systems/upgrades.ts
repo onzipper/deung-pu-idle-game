@@ -28,8 +28,10 @@ export function buyUpgrade(state: GameState, stat: keyof Upgrades): boolean {
   state.events.push({ type: "upgradeBought", line: stat, level: state.upgrades[stat] });
 
   if (stat === "hp") {
-    const m = heroMaxHp(state.upgrades);
+    // Per-hero now: each hero's max HP folds in its own level bonus (M5), so the
+    // heal-on-buy delta must be computed against that hero's recomputed max.
     for (const h of state.heroes) {
+      const m = heroMaxHp(state.upgrades, h.level);
       const delta = m - h.maxHp;
       h.maxHp = m;
       h.hp += delta;

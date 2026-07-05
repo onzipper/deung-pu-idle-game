@@ -24,7 +24,13 @@ const strongSave = (): SaveData => ({
   stage: 1,
   gold: 0,
   unlocked: ["swordsman"],
-  upgrades: { atk: 100, speed: 0, hp: 20 },
+  // atk 60 (was 100): decisively wins the fight, but small enough per-hit that the
+  // boss is observed ALIVE inside its enrage band (< 0.3 HP) instead of being
+  // one-shot straight through it. The M5 per-level atk bonus nudged the old atk-100
+  // fixture's damage so the killing blow leapt the threshold in a single step,
+  // skipping the enrage event this test asserts — a knife's-edge that 60 removes.
+  upgrades: { atk: 60, speed: 0, hp: 20 },
+  heroes: [],
   lastSeen: 0,
 });
 
@@ -267,6 +273,7 @@ describe("events are transient (never persisted)", () => {
       "gold",
       "unlocked",
       "upgrades",
+      "heroes",
       "lastSeen",
     ]);
   });
