@@ -292,6 +292,41 @@ export const CONFIG = {
     xpToLevel: (level: number): number => Math.round(20 * Math.pow(1.15, level - 1)),
   },
 
+  // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----
+  // A THIRD power axis on top of upgrades + levels: the player pays gold to evolve
+  // a hero to tier 2, granting a PERMANENT atk/hp multiplier that compounds
+  // MULTIPLICATIVELY with both (systems/stats tierAtkMult/tierHpMult). It is
+  // PLAYER-TRIGGERED (evolveHero intent), not automatic. Requirements: hero
+  // level >= levelRequired AND gold >= cost(classIndex). Rejected (no-op) if unmet
+  // or the hero is already tier 2. Single evolution path per class in M5 (branches
+  // are the M7 card). NO RNG (deterministic); the seeded stream stays
+  // wave-composition-only.
+  evolution: {
+    // Level gate. Sized so evolution is a late-mid milestone: the auto-pilot's
+    // heroes clear L15 well before S9, so the LEVEL gate is met early and the GOLD
+    // gate (below) is what actually times the evolution — landing all three heroes
+    // at tier 2 by ~S8, right before the S9 prestige wall ("evolve to break it").
+    levelRequired: 15,
+    // Gold gate, scaling by SLOT_ORDER index (swordsman 0 / archer 1 / mage 2) so
+    // later-unlocked heroes cost more — ONE clear knob (base * (index+1)). At 800
+    // the auto-upgrade drain still lets each hero evolve on a gold burst by ~S7-S8
+    // in the sim, WITHOUT starving the atk upgrades that gate the boss.
+    cost: (classIndex: number): number => Math.round(800 * (classIndex + 1)),
+    // Permanent tier-2 multipliers, compounding MULTIPLICATIVELY on upgrades +
+    // levels. atk is held at EXACTLY 1.0 (no offense) on purpose: the S9 wall is an
+    // atk knife-edge — the pre-M5 baseline already sits at team power == the boss
+    // floor (66 == rec 66) at ~633s, so ANY atk that rounds a single hero up by 1
+    // tips the boss-challenge one expensive upgrade-level early and drops S9 ~20%
+    // (out of the ±15% budget) — even +1% did in the sim. The felt "big evolution"
+    // power therefore lives ENTIRELY in hpMult: +50% survivability, which is
+    // pacing-neutral for wave clears (DPS-gated, 0 wipes) and only gently softens
+    // the S9 boss fight (gate 4.92x -> 4.73x, still ~5x). The atkMult knob stays
+    // wired for the prestige half of M5 / the M7 branch card, where the relaxed
+    // gate can afford real offense. Sim-tuned — see docs/balance-m4.md (M5 evolution).
+    atkMult: 1.0,
+    hpMult: 1.5,
+  },
+
   // ---- flow / progression ----
   bossHintPowerDivisor: 26, // recommendedPower = round(bossHp / this)
   bossRetreatWaveGap: 1.0, // waveGap after a boss retreat (team wipe)

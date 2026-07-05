@@ -40,6 +40,7 @@ function makeHero(cls: Hero["cls"]): Hero {
     skillCd: 0,
     level: 1,
     xp: 0,
+    tier: 1,
   };
 }
 

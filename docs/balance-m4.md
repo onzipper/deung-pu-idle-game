@@ -742,3 +742,72 @@ survivability. A level-up also heals by the added HP headroom (a small bump).
 Every stage within ±15 %; **S9 prestige gate 4.92x (~5x) preserved, 0 wipes**,
 same final stages. A transient `levelUp` event (`{id, cls, level}`) is emitted for
 render/UI juice (nothing in the engine consumes it).
+
+## M5 — Class advancement / evolution (86d3jv7m3)
+
+A THIRD per-hero power axis (the GDD's mid-tier "ปลดคลาส evolution" goal), on top
+of upgrades + levels. **Player-triggered**: the `evolveHero` FrameInput intent
+flips a hero from `tier 1` to `tier 2` (single path in M5) once it meets **both**
+`hero.level >= levelRequired` **and** `gold >= cost(classIndex)`; the intent is a
+no-op if unmet or the hero is already tier 2, and is applied once per drained
+input (a click evolves exactly once at any speed). Tier 2 grants a **permanent
+multiplier** (`tierAtkMult`/`tierHpMult`) that compounds MULTIPLICATIVELY with the
+upgrade lines and the per-level bonus. NO RNG (deterministic; the seeded stream
+stays wave-composition-only). A transient `evolve` event (`{id, cls, tier}`) is
+emitted for render/UI juice. Persisted via **SAVE_VERSION 2 → 3** (`tier` per hero;
+`migrate()` defaults tier 1).
+
+### Chosen knobs (`CONFIG.evolution`)
+
+| Knob | Value | Note |
+|---|---|---|
+| `levelRequired` | `15` | Met well before S9, so the GOLD gate times the evolution. |
+| `cost(classIndex)` | `round(800 · (index+1))` | 800 / 1600 / 2400 (sword/archer/mage). One clear knob family; later heroes cost more. |
+| `atkMult` | **`1.0`** (no offense) | Forced by the S9 knife-edge — see below. |
+| `hpMult` | **`1.5`** (+50 % HP) | Carries the entire felt "big evolution" power. |
+
+### Why atk is held at exactly 1.0 (the balance finding)
+
+The S9 wall is an **atk knife-edge**: the pre-M5 (leveling) baseline already sits
+at `teamPower == rec == 66` at ~633 s, so the auto-pilot challenges the boss the
+instant one more atk point lands. Evolution fires **before** the S9 crossing, so
+**any** atkMult that rounds a single hero's atk up by 1 tips the challenge one
+(geometrically expensive) upgrade-level early and collapses S9:
+
+| `atkMult` | S9 meanDur | gate (S9/S8) | vs baseline 633 s |
+|---|---|---|---|
+| 1.04 | 508 s | 3.95x | −20 % ❌ |
+| 1.02 | 508 s | 3.95x | −20 % ❌ |
+| 1.01 | 509 s | 3.95x | −20 % ❌ |
+| **1.00** | **608 s** | **4.73x** | **−4 % ✅** |
+
+Even +1 % tips it (discrete crossing). Closing the gate back to budget with any
+offense would require retuning the M4 atk/HP curves (forbidden). So **atk is held
+at 1.0** and the felt power lives entirely in **hpMult = +50 %**: waves are
+DPS-gated with 0 wipes, so extra HP does *not* speed wave clears; it only gently
+softens the S9 boss fight (heroes survive longer), nudging the gate 4.92x → 4.73x
+(still ~5x). The `atkMult` knob stays wired for the prestige half of M5 / the M7
+branch card, where the relaxed gate can afford real offense.
+
+### Auto-play + sim deltas (5 seeds, 1800 s, vs the M5-leveling baseline)
+
+The harness auto-evolves the first eligible hero each step (deterministic; over
+successive steps all three evolve — first ~534 s, all tier 2 by ~S8). Evolution
+gold competes with auto-upgrade exactly as a real player's spend would.
+
+| Stage | Baseline | With evolution | Δ |
+|---|---|---|---|
+| 1 | 86.8 | 86.8 | 0 % |
+| 2 | 51.8 | 51.8 | 0 % |
+| 3 | 71.0 | 71.0 | 0 % |
+| 4 | 75.6 | 75.6 | 0 % |
+| 5 | 93.9 | 93.9 | 0 % |
+| 6 | 99.4 | 99.4 | 0 % |
+| 7 | 106.4 | 106.4 | 0 % |
+| 8 | 128.7 | 128.7 | 0 % |
+| 9 | 633.4 | 608.3 | −4.0 % |
+
+Every stage within ±15 %; **S9 prestige gate 4.73x (~5x) preserved, 0 wipes**, same
+final stages (all seeds reach S10). Stages 1–8 are byte-identical because they are
+kill-goal/DPS-gated (evolution's HP is neutral there and its atk is 1.0); only the
+power-gated S9 moves, and only via HP survivability.

@@ -31,15 +31,31 @@ export function levelHpMult(level: number): number {
 }
 
 /**
- * Attack damage for a hero of class `cls` at the given upgrade levels and hero
- * `level` (defaults to 1 = no level bonus, preserving pre-M5 behaviour).
+ * Per-hero TIER multipliers (M5 class evolution). Tier 1 yields exactly 1.0
+ * (float-exact), so a non-evolved hero is bit-identical to the pre-evolution stat
+ * — every call site that omits `tier` keeps its old value. Tier 2 applies the
+ * permanent evolution multipliers, compounding MULTIPLICATIVELY on top of the
+ * upgrade lines AND the per-level bonus.
  */
-export function heroAtk(cls: HeroClass, up: Upgrades, level = 1): number {
+export function tierAtkMult(tier: 1 | 2): number {
+  return tier === 2 ? CONFIG.evolution.atkMult : 1;
+}
+export function tierHpMult(tier: 1 | 2): number {
+  return tier === 2 ? CONFIG.evolution.hpMult : 1;
+}
+
+/**
+ * Attack damage for a hero of class `cls` at the given upgrade levels, hero
+ * `level`, and `tier` (both default to the base value = no bonus, preserving
+ * pre-M5 behaviour).
+ */
+export function heroAtk(cls: HeroClass, up: Upgrades, level = 1, tier: 1 | 2 = 1): number {
   return Math.round(
     CONFIG.heroBaseAtk *
       (1 + up.atk * UPGRADES.atk.per) *
       HERO_TYPES[cls].dmgMult *
-      levelAtkMult(level),
+      levelAtkMult(level) *
+      tierAtkMult(tier),
   );
 }
 
@@ -50,11 +66,14 @@ export function heroAtkSpeed(cls: HeroClass, up: Upgrades): number {
 }
 
 /**
- * Max HP for a hero at the given upgrade levels and hero `level` (defaults to
- * 1 = no level bonus). Now per-hero (not shared) because levels differ per hero.
+ * Max HP for a hero at the given upgrade levels, hero `level`, and `tier` (both
+ * default to the base value = no bonus). Per-hero (not shared) because levels and
+ * tiers differ per hero.
  */
-export function heroMaxHp(up: Upgrades, level = 1): number {
-  return Math.round(CONFIG.heroBaseHp * (1 + up.hp * UPGRADES.hp.per) * levelHpMult(level));
+export function heroMaxHp(up: Upgrades, level = 1, tier: 1 | 2 = 1): number {
+  return Math.round(
+    CONFIG.heroBaseHp * (1 + up.hp * UPGRADES.hp.per) * levelHpMult(level) * tierHpMult(tier),
+  );
 }
 
 /** Cost of the next level of an upgrade line (Phase B economy; pure helper). */

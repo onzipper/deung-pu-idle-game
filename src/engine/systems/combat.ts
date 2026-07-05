@@ -212,7 +212,7 @@ export function updateHeroes(state: GameState): void {
             nearestWithin(targets, h.x, t.range));
       if (tgt) {
         h.cd = heroAtkSpeed(h.cls, state.upgrades);
-        const dmg = heroAtk(h.cls, state.upgrades, h.level);
+        const dmg = heroAtk(h.cls, state.upgrades, h.level, h.tier);
         if (t.attack === "melee") {
           applyDamage(state, tgt, dmg, "attack");
         } else if (t.attack === "arrow") {

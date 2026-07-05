@@ -19,6 +19,11 @@ export * from "@/engine/state/version";
 export * from "@/engine/systems/stats";
 export * from "@/engine/systems/targeting";
 
+// Class-advancement (evolution) helpers: `canEvolveHero` / `evolutionCost` let the
+// UI derive a per-hero `canEvolve` flag for its snapshot; `evolveHero` is applied
+// only through `step()` via the `evolveHero` FrameInput intent.
+export { canEvolveHero, evolveHero, evolutionCost } from "@/engine/systems/evolution";
+
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";

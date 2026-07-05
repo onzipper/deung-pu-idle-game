@@ -17,8 +17,8 @@ function validSave(overrides: Record<string, unknown> = {}) {
     unlocked: ["swordsman", "archer"],
     upgrades: { atk: 2, speed: 1, hp: 3 },
     heroes: [
-      { level: 1, xp: 0 },
-      { level: 4, xp: 12 },
+      { level: 1, xp: 0, tier: 1 },
+      { level: 4, xp: 12, tier: 2 },
     ],
     lastSeen: 0,
     ...overrides,
@@ -81,6 +81,11 @@ describe("parseSaveData — rejects", () => {
     expect(
       parseSaveData(validSave({ upgrades: { atk: 0, speed: SPEED_UPGRADE_CAP + 1, hp: 0 } })).ok,
     ).toBe(false);
+  });
+
+  it("rejects a hero tier outside 1..2", () => {
+    expect(parseSaveData(validSave({ heroes: [{ level: 1, xp: 0, tier: 0 }] })).ok).toBe(false);
+    expect(parseSaveData(validSave({ heroes: [{ level: 1, xp: 0, tier: 3 }] })).ok).toBe(false);
   });
 
   it("rejects an unknown hero class", () => {

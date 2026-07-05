@@ -131,8 +131,8 @@ describe("save round-trip", () => {
       gold: 0,
       unlocked: ["swordsman"],
       upgrades: { atk: 0, speed: 0, hp: 0 },
-      // v1->v2: one unlocked hero defaults to level 1 / xp 0.
-      heroes: [{ level: 1, xp: 0 }],
+      // v1->v2: one unlocked hero defaults to level 1 / xp 0; v2->v3: tier 1.
+      heroes: [{ level: 1, xp: 0, tier: 1 }],
       lastSeen: 0,
     });
   });

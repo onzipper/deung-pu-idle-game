@@ -19,6 +19,7 @@ import { updateWaveSpawns } from "@/engine/systems/waves";
 import { processSkills } from "@/engine/systems/skills";
 import { buyUpgrade, processAutoUpgrade } from "@/engine/systems/upgrades";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
+import { evolveHero } from "@/engine/systems/evolution";
 import { nextStage } from "@/engine/systems/flow";
 import {
   decayHeroTimers,
@@ -38,6 +39,12 @@ export interface FrameInput {
   challengeBoss?: boolean;
   /** Advance to the next stage (only honoured when phase "victory"). */
   advanceStage?: boolean;
+  /**
+   * Evolve the hero at this slot index (M5 class advancement). Honoured across
+   * phases; a no-op if the hero is already tier 2 or the level/gold requirement
+   * is unmet. Applied once per drained input (a click evolves exactly once).
+   */
+  evolveHero?: number;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -49,6 +56,7 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
 
   // --- discrete player actions (valid across phases) ---
   if (input.buyUpgrade) buyUpgrade(state, input.buyUpgrade);
+  if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
   if (input.advanceStage && state.phase === "victory") nextStage(state);
   if (input.challengeBoss && state.bossReady && state.phase === "battle") {
     startBossFight(state);

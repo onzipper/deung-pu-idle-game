@@ -26,6 +26,8 @@ import {
   step,
   bossHint,
   upgradeCost,
+  canEvolveHero,
+  evolutionCost,
   FIXED_DT,
   type FrameInput,
   type Upgrades,
@@ -87,6 +89,7 @@ function runSeed(seed: number): SeedResult {
   let prevStage = s.stage;
   let prevGold = s.gold;
   let prevUp: Upgrades = { ...s.upgrades };
+  let prevTiers = s.heroes.map((h) => h.tier);
   let prevKills = s.kills;
 
   let firstUpgradeTime: number | null = null;
@@ -107,6 +110,14 @@ function runSeed(seed: number): SeedResult {
       input.advanceStage = true;
     }
 
+    // Auto-evolve (M5 class advancement): the player would evolve as soon as a
+    // hero meets the level + gold requirement, so the auto-pilot fires the
+    // evolveHero intent for the first eligible hero (deterministic — one per step;
+    // over successive steps every eligible hero evolves). Competes for gold with
+    // auto-upgrade, exactly as a real player's spend would.
+    const evolveIdx = s.heroes.findIndex((h) => canEvolveHero(s, h));
+    if (evolveIdx >= 0) input.evolveHero = evolveIdx;
+
     step(s, input);
 
     // --- upgrade spend + first-upgrade detection ---
@@ -117,6 +128,13 @@ function runSeed(seed: number): SeedResult {
         spend += upgradeCost(line, prevUp[line] + g);
       }
       if (gained > 0 && firstUpgradeTime === null) firstUpgradeTime = s.time;
+    }
+    // Evolution is also a gold spend — fold it in so the income identity holds
+    // (a hero whose tier rose this step paid its class cost).
+    for (let hi = 0; hi < s.heroes.length; hi++) {
+      if ((prevTiers[hi] ?? 1) < s.heroes[hi].tier) {
+        spend += evolutionCost(s.heroes[hi].cls);
+      }
     }
 
     // --- income this step: gold_new = gold_old + income - spend  =>
@@ -152,6 +170,7 @@ function runSeed(seed: number): SeedResult {
     prevStage = s.stage;
     prevGold = s.gold;
     prevUp = { ...s.upgrades };
+    prevTiers = s.heroes.map((h) => h.tier);
     prevKills = s.kills;
   }
 

@@ -58,6 +58,13 @@ export interface Hero {
   level: number;
   /** XP banked toward the NEXT level (resets on level-up by `xpToLevel(level)`). */
   xp: number;
+  /**
+   * Class-advancement tier (M5 "ปลดคลาส evolution"). 1 = base, 2 = evolved. A
+   * PLAYER-TRIGGERED evolution flips this to 2 once the hero meets the level+gold
+   * requirement (see systems/evolution); it grants a permanent atk/hp multiplier
+   * that compounds with upgrades + levels. Persisted per hero. Single path in M5.
+   */
+  tier: 1 | 2;
 }
 
 export interface Enemy {

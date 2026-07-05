@@ -162,7 +162,7 @@ describe("progression persists across stage resets and saves", () => {
 });
 
 describe("migrate v1 -> v2", () => {
-  it("defaults every unlocked hero to level 1 / xp 0", () => {
+  it("defaults every unlocked hero to level 1 / xp 0 / tier 1", () => {
     const v1 = {
       version: 1,
       stage: 4,
@@ -174,13 +174,13 @@ describe("migrate v1 -> v2", () => {
     const v2 = migrate(v1);
     expect(v2.version).toBe(SAVE_VERSION);
     expect(v2.heroes).toEqual([
-      { level: 1, xp: 0 },
-      { level: 1, xp: 0 },
+      { level: 1, xp: 0, tier: 1 },
+      { level: 1, xp: 0, tier: 1 },
     ]);
   });
 
-  it("preserves an already-v2 heroes array (idempotent)", () => {
-    const heroes = [{ level: 6, xp: 5 }];
+  it("preserves an already-current heroes array (idempotent)", () => {
+    const heroes = [{ level: 6, xp: 5, tier: 2 as const }];
     const once = migrate({ version: SAVE_VERSION, unlocked: ["swordsman"], heroes });
     expect(migrate(once)).toEqual(once);
     expect(once.heroes).toEqual(heroes);

@@ -11,8 +11,8 @@ import type { Hero, Enemy, Boss, HeroClass, EnemyKind } from "@/engine/entities"
 
 /**
  * Build a hero at its formation home position, at full (upgraded) HP. `level` /
- * `xp` carry per-hero M5 progression forward across stage resets and save loads;
- * both default to a fresh level-1 hero.
+ * `xp` / `tier` carry per-hero M5 progression forward across stage resets and save
+ * loads; they default to a fresh level-1, tier-1 hero.
  */
 export function makeHero(
   id: number,
@@ -20,9 +20,10 @@ export function makeHero(
   up: Upgrades,
   level = 1,
   xp = 0,
+  tier: 1 | 2 = 1,
 ): Hero {
   const t = HERO_TYPES[cls];
-  const maxHp = heroMaxHp(up, level);
+  const maxHp = heroMaxHp(up, level, tier);
   return {
     id,
     cls,
@@ -36,6 +37,7 @@ export function makeHero(
     skillCd: 0,
     level,
     xp,
+    tier,
   };
 }
 

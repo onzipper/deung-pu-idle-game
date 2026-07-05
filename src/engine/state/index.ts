@@ -67,6 +67,8 @@ export interface GameState {
 export interface HeroProgress {
   level: number;
   xp: number;
+  /** Class-advancement tier (1 = base, 2 = evolved). Defaults to 1 pre-v3. */
+  tier: 1 | 2;
 }
 
 export interface SaveData {
@@ -85,10 +87,10 @@ export interface SaveData {
 
 /**
  * Build a fresh set of heroes for the currently unlocked slots. Per-hero level/xp
- * (M5) is PRESERVED across a rebuild: a hero at slot `i` keeps the progression of
- * whoever occupied slot `i` before (slots are class-stable via `SLOT_ORDER`), so
- * `nextStage`'s battlefield reset no longer wipes levels. A newly unlocked slot
- * starts fresh at level 1.
+ * /tier (M5) is PRESERVED across a rebuild: a hero at slot `i` keeps the
+ * progression of whoever occupied slot `i` before (slots are class-stable via
+ * `SLOT_ORDER`), so `nextStage`'s battlefield reset no longer wipes levels or
+ * evolution. A newly unlocked slot starts fresh at level 1, tier 1.
  */
 export function initHeroes(state: GameState): void {
   const prev = state.heroes;
@@ -96,7 +98,14 @@ export function initHeroes(state: GameState): void {
   for (let i = 0; i < state.heroSlots; i++) {
     const p = prev[i];
     state.heroes.push(
-      makeHero(state.nextId++, SLOT_ORDER[i], state.upgrades, p?.level ?? 1, p?.xp ?? 0),
+      makeHero(
+        state.nextId++,
+        SLOT_ORDER[i],
+        state.upgrades,
+        p?.level ?? 1,
+        p?.xp ?? 0,
+        p?.tier ?? 1,
+      ),
     );
   }
 }
@@ -146,7 +155,8 @@ export function initGameState(seed: number, save?: SaveData): GameState {
       const h = state.heroes[i];
       h.level = clamp(p.level, 1, CONFIG.leveling.levelCap);
       h.xp = Math.max(0, p.xp);
-      h.maxHp = heroMaxHp(state.upgrades, h.level);
+      h.tier = p.tier === 2 ? 2 : 1;
+      h.maxHp = heroMaxHp(state.upgrades, h.level, h.tier);
       h.hp = h.maxHp;
     }
   }
@@ -169,7 +179,7 @@ export function toSaveData(state: GameState): SaveData {
     gold: state.gold,
     unlocked: SLOT_ORDER.slice(0, state.heroSlots),
     upgrades: { ...state.upgrades },
-    heroes: state.heroes.map((h) => ({ level: h.level, xp: h.xp })),
+    heroes: state.heroes.map((h) => ({ level: h.level, xp: h.xp, tier: h.tier })),
     lastSeen: 0,
   };
 }

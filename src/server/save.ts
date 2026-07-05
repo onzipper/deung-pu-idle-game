@@ -65,15 +65,17 @@ export const saveDataSchema = z
         hp: z.number().int().min(0),
       })
       .strict(),
-    // Per-hero level/xp (M5). Index-aligned with `unlocked`, so at most one entry
-    // per hero slot. Level is bounded by the engine cap; xp is a non-negative
+    // Per-hero level/xp/tier (M5). Index-aligned with `unlocked`, so at most one
+    // entry per hero slot. Level is bounded by the engine cap; xp is a non-negative
     // finite amount (engine keeps it integral but we don't hard-require int()).
+    // `tier` is the class-advancement tier (1 = base, 2 = evolved).
     heroes: z
       .array(
         z
           .object({
             level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
             xp: z.number().min(0).finite(),
+            tier: z.number().int().min(1).max(2),
           })
           .strict(),
       )
