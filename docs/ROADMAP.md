@@ -28,17 +28,16 @@
 - [x] เมืองหลัก + NPC shops: ยาเลือด/ยามานา/ยันกลับเมือง (+ ของวาปปาร์ตี้ เปิดใช้ตอน M8) — ราคา scale ตามความลึก lastFarmZone, auto-use 35%HP/25%mana, gold sink แรกของเกม, SAVE v9; catalog ต่อขยายได้ (M8 warp = union append)
 - [x] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง) — AutoReturnToggle + engine honor + auto-potion thresholds; จะขยายเป็น settings panel เต็มตอน goal-ladder UI
 - [x] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม) — biomeForZone ต่อ map family ไล่เข้ม/ระอุเข้าหาห้องบอส, เมืองอบอุ่น (หลังคา/ตะเกียง/ควันไฟ/เงา NPC), whoosh ตอนย้าย zone
-- [ ] **Combat rework "สนามล่ามอน"** (เคาะ 2026-07-05): มอนสุ่มเกิดกระจายใน zone (cap+respawn config), hero auto-hunt ไล่เป้า, มอน passive เป็นหลัก + aggressive (aggro radius) ใกล้ห้องบอส, กล้องนิ่งต่อ zone (เผื่อ config zone กว้าง), rebalance ใหม่
+- [x] **Combat rework "สนามล่ามอน"** (เคาะ 2026-07-05): มอนสุ่มเกิดกระจายใน zone (cap+respawn config), hero auto-hunt ไล่เป้า, มอน passive เป็นหลัก + aggressive (aggro radius) ใกล้ห้องบอส, กล้องนิ่งต่อ zone (เผื่อ config zone กว้าง), rebalance ใหม่ — aggro ไล่ระดับ 0→60% เข้าหาบอส, ความตายย้ายไป belt มอนดุ+บอสตามแผน, s15 wall อยู่, formation core เก็บไว้ให้ M8 · เหลือ cosmetic: facing flip (คิวงาน render)
 - [ ] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …)
 
-## 🎨 M6.5 — Art & Game-feel (เคาะแล้ว 2026-07-05)
+## 🎨 M6.5 — Art & Game-feel (ปิดการทดลอง 2026-07-06)
 
-> เรนเดอร์เนียน (pixel ตกรอบ) · ฉากหลังแบบ /proto ผ่าน · ฟอนต์ Chakra Petch + Kanit · ตัวละครอนิเมะ/RO คนจริงย่อส่วน · จุดว้าว = ของสวมใส่ (ดู GDD Art Direction)
+> ผลสรุป: ทดลอง pixel-MMX3 (v1-3) และตัวละคร SVG อนิเมะ/RO (v4-5) ใน /proto แล้ว **เจ้าของไม่ชอบทั้งคู่ → คงสไตล์ procedural เดิมของเกม (M4.5-4.6) ไว้** · /proto ถูกลบแล้ว · จุดว้าว "ของสวมใส่" ยังอยู่ — จะสร้างบนริกสไตล์เดิมตอน M7 (มี precedent: tier-2 gold accents ทำแล้วได้ผลดี)
 
-- [x] เจ้าของเคาะ art direction — เนียน/อนิเมะ-RO/procedural/ฟอนต์ เคาะครบ (decision log 2026-07-05)
-- [ ] ตัวละครใหม่แนวอนิเมะ/RO: ตัวใหญ่ ดีเทลจริง + animation — **มัดรวมกับ paper-doll ใน M7** (พึ่งกัน)
-- [ ] UI skin ทั้งเกม: title/login scene, หน้าเลือกตัวละคร, HUD กรอบเกม 9-slice + ฟอนต์
-- [ ] ลบ /proto + สครินช็อตเวิร์กโฟลว์คงไว้ (proto-shot.mjs ใช้ตรวจงาน visual ต่อ)
+- [x] ทดลอง art direction ใน /proto → ปิด: คงสไตล์เดิม (decision log 2026-07-06)
+- [ ] ~~ตัวละครใหม่~~ ยกเลิก — gear visuals M7 ทำบนริกเดิม
+- [ ] UI skin (title/หน้าเลือกตัว/HUD กรอบเกม + ฟอนต์) — แขวนไว้ รอเจ้าของอยากหยิบขึ้นมาอีกครั้ง
 
 ## M7 — Gear & Drops ⭐ (+ visual gear)
 
