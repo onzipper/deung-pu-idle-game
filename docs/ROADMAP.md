@@ -30,6 +30,8 @@
 - [x] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม) — biomeForZone ต่อ map family ไล่เข้ม/ระอุเข้าหาห้องบอส, เมืองอบอุ่น (หลังคา/ตะเกียง/ควันไฟ/เงา NPC), whoosh ตอนย้าย zone
 - [x] **Combat rework "สนามล่ามอน"** (เคาะ 2026-07-05): มอนสุ่มเกิดกระจายใน zone (cap+respawn config), hero auto-hunt ไล่เป้า, มอน passive เป็นหลัก + aggressive (aggro radius) ใกล้ห้องบอส, กล้องนิ่งต่อ zone (เผื่อ config zone กว้าง), rebalance ใหม่ — aggro ไล่ระดับ 0→60% เข้าหาบอส, ความตายย้ายไป belt มอนดุ+บอสตามแผน, s15 wall อยู่, formation core เก็บไว้ให้ M8 · เหลือ cosmetic: facing flip (คิวงาน render)
 - [ ] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …)
+- [ ] Hunt follow-up (engine): archer ตัน s13 เพราะ AoE ปลุกมอน passive ทั้งฝูงในสนามแน่น + spawnBurst เต็มก้อนตอนกลับเข้า zone — ต้องการ gradual re-entry fill / กติกา AoE-aggro (flag จาก balance 2026-07-06)
+- [ ] Hunt follow-up (engine): spawn แบบ uniform random ทำมอนซ้อนกันได้ — ใส่ min-spacing placement
 
 ## 🎨 M6.5 — Art & Game-feel (ปิดการทดลอง 2026-07-06)
 
