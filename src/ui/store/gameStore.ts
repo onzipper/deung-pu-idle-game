@@ -32,6 +32,17 @@ export interface HeroSummary {
   /** Skill cooldown remaining, seconds (0 = ready). */
   skillCd: number;
   dead: boolean;
+  /** Hero level (M5), 1..`CONFIG.leveling.levelCap`. */
+  level: number;
+  /** Progress toward the NEXT level, precomputed 0..1 float (never the raw
+   * xp/curve numbers — see `GameClient.tsx`'s `buildSnapshot`, which keeps the
+   * xp-curve math (`CONFIG.leveling.xpToLevel`) out of the throttled store).
+   * `1` once at `levelCap` (nothing left to progress toward). */
+  xpProgress: number;
+  /** `true` once the hero is at `CONFIG.leveling.levelCap` — the store never
+   * ships the cap number itself, just this precomputed flag (same "no raw
+   * curve math in the store" rule as `xpProgress`). */
+  atLevelCap: boolean;
 }
 
 /** Gold cost of the next level of each upgrade line, at the current levels. */

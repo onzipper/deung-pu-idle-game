@@ -33,6 +33,7 @@ import { FloatingTextPool } from "@/render/fx/floatingText";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
+import { LevelUpBurstPool } from "@/render/fx/levelUp";
 import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
 import { burst, burstDirectional, burstInward, ParticlePool, shower } from "@/render/fx/particles";
@@ -183,6 +184,24 @@ const REVIVE_PILLAR_HEAD_MARGIN = 26; // px above HERO_TOP_Y the beam starts
 const REVIVE_PILLAR_WIDTH = 16;
 const REVIVE_PILLAR_DURATION = 0.35;
 
+// ---- hero level-up (M5 "Character XP + Level system", 86d3jv7m3) ----------
+// Golden, jewel-tone-against-desaturated-scenery beat (README art direction):
+// a starburst pop (bespoke shape, `levelUp.ts`) + a quick golden ring pulse +
+// a small upward sparkle burst + a rising "LEVEL UP" label, all at the
+// leveling hero's own position. Deliberately NOT a shake/arena-flash — this
+// fires per-hero, potentially several times a minute early in a run, so it
+// stays a contained, readable pop rather than competing with combat's own
+// juice budget.
+const LEVEL_UP_BURST_DURATION = 0.5;
+const LEVEL_UP_RING_R0 = 14;
+const LEVEL_UP_RING_R1 = 50;
+const LEVEL_UP_RING_DURATION = 0.5;
+const LEVEL_UP_PARTICLE_COUNT = 12;
+const LEVEL_UP_PARTICLE_SPEED = 85;
+const LEVEL_UP_PARTICLE_LIFE = 0.5;
+const LEVEL_UP_TEXT_DURATION = 0.9;
+const LEVEL_UP_TEXT_RISE = 42;
+
 // ---- boss entrance (state.boss null -> object): dust + dark tint + shake --
 const BOSS_ENTRANCE_DUST_COUNT = 16;
 const BOSS_ENTRANCE_DUST_SPEED = 90;
@@ -247,6 +266,7 @@ export class FxController {
   private readonly corpseEcho: CorpseEchoPool;
   private readonly bossEcho = new BossEcho();
   private readonly rings: RingPool;
+  private readonly levelUpBursts: LevelUpBurstPool;
   private readonly particles: ParticlePool;
   private readonly damageNumbers: FloatingTextPool;
   private readonly eventText: FloatingTextPool;
@@ -381,6 +401,7 @@ export class FxController {
     this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer);
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.rings = new RingPool(this.ringsLayer);
+    this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
     this.soulWisps = new SoulWispPool(this.particlesLayer);
@@ -448,6 +469,9 @@ export class FxController {
           break;
         case "skillCast":
           this.onSkillCast(ev, state);
+          break;
+        case "levelUp":
+          this.onLevelUp(ev, state);
           break;
         case "bossSlamTelegraph":
           this.rings.spawn({
@@ -528,6 +552,7 @@ export class FxController {
     this.groundArrows.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
+    this.levelUpBursts.update(dt);
     this.lightPillars.update(dt);
     this.crescents.update(dt);
     this.ghostBlades.update(dt);
@@ -570,6 +595,7 @@ export class FxController {
     this.castAura.destroy();
     this.impactFilters.destroy();
     this.rings.destroy();
+    this.levelUpBursts.destroy();
     this.lightPillars.destroy();
     this.particles.destroy();
     this.soulWisps.destroy();
@@ -784,6 +810,51 @@ export class FxController {
       color: colors.light,
       duration: REVIVE_PILLAR_DURATION,
       width: REVIVE_PILLAR_WIDTH,
+    });
+  }
+
+  /** Hero level-up (M5): golden starburst + ring pulse + sparkle burst +
+   * rising "LEVEL UP" label at the hero's own position — see the
+   * `LEVEL_UP_*` knobs block above for timings/magnitudes. `state.heroes`
+   * still contains the hero this same step (levels are applied in-place, the
+   * hero entity is never removed), so a lookup miss here would only mean a
+   * genuinely stale id and is skipped rather than guessed at. */
+  private onLevelUp(ev: Extract<GameEvent, { type: "levelUp" }>, state: GameState): void {
+    const hero = state.heroes.find((h) => h.id === ev.id);
+    if (!hero) return;
+    const x = hero.x;
+    const y = HERO_TOP_Y;
+
+    this.levelUpBursts.spawn({ x, y, color: PALETTE.gold, duration: LEVEL_UP_BURST_DURATION });
+    this.rings.spawn({
+      x,
+      y,
+      r0: LEVEL_UP_RING_R0,
+      r1: LEVEL_UP_RING_R1,
+      duration: LEVEL_UP_RING_DURATION,
+      width: 3,
+      color: PALETTE.gold,
+    });
+    burst(this.particles, x, y, LEVEL_UP_PARTICLE_COUNT, PALETTE.gold, {
+      speed: LEVEL_UP_PARTICLE_SPEED,
+      life: LEVEL_UP_PARTICLE_LIFE,
+      radius: 2.5,
+      gravity: -30, // slight upward drift — "rising" energy, not falling debris
+      drag: 0.3,
+    });
+    // "Lv." is a literal, locale-invariant prefix in this game's own i18n
+    // (see messages/th.json + en.json's `common.levelBadge`: identical in
+    // both) — render/ has no i18n hookup at all (canvas text elsewhere is
+    // numeric-only, e.g. damage/gold labels), so this stays consistent with
+    // that convention instead of hardcoding an English "LEVEL UP" phrase.
+    this.eventText.spawn({
+      x,
+      y: y - 14,
+      label: `Lv.${ev.level} ▲`,
+      color: PALETTE.gold,
+      fontSize: 14,
+      duration: LEVEL_UP_TEXT_DURATION,
+      rise: LEVEL_UP_TEXT_RISE,
     });
   }
 

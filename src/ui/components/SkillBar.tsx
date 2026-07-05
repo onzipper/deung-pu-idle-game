@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { HeroClass } from "@/engine";
 import { SKILL_TYPES } from "@/engine";
+import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import type { HeroSummary } from "@/ui/store/gameStore";
 import { SKILL_ICONS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -50,20 +51,35 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const maxCd = SKILL_TYPES[hero.cls].cd;
   const tContent = useTranslations("content");
   const tPanels = useTranslations("panels");
+  const tCommon = useTranslations("common");
   const skillName = tContent(`skills.${hero.cls}.name`);
   const heroName = tContent(`classes.${hero.cls}.name`);
   const skillIcon = SKILL_ICONS[hero.cls];
   const castKey = useCastKey(hero.skillCd);
   const accent = HERO_ACCENT[hero.cls];
+  // M5 "Character XP + Level system": brief scale/glow pulse the instant this
+  // hero's level increments (same one-shot CSS pattern `UpgradePanel.tsx`
+  // uses for a bought upgrade) — the FX-layer starburst/chime lives in
+  // `render/fx/levelUp.ts`/`audio/sfxMap.ts`, this is purely the HUD-side echo.
+  const leveledUpPulse = usePulseOnIncrease(hero.level, 320);
 
   const ready = hero.skillCd <= 0 && !hero.dead;
   const delay = -(maxCd - hero.skillCd);
   const hpPct = hero.maxHp > 0 ? Math.max(0, (hero.hp / hero.maxHp) * 100) : 0;
+  const xpPct = Math.max(0, Math.min(1, hero.xpProgress)) * 100;
   const cdSeconds = Math.ceil(hero.skillCd);
   const status = hero.dead ? "dead" : ready ? "none" : "cooldown";
 
   return (
     <div className="flex flex-col items-center gap-1">
+      <span
+        title={heroName}
+        className={`rounded-full border border-ddp-border-soft bg-black/60 px-1.5 text-[9px] font-bold tabular-nums ${
+          hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
+        } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
+      >
+        {hero.atLevelCap ? tCommon("maxLabel") : tCommon("levelBadge", { level: hero.level })}
+      </span>
       <div
         className="h-1.5 w-14 overflow-hidden rounded-full bg-black/50"
         title={heroName}
@@ -73,6 +89,15 @@ function SkillButton({ hero, slot }: { hero: HeroSummary; slot: number }) {
             hpPct > 35 ? "bg-emerald-400" : "bg-red-500"
           }`}
           style={{ width: `${hpPct}%` }}
+        />
+      </div>
+      {/* Slim XP bar (M5) — gold to read as "progress currency", distinct
+          from the hp bar's green/red health read. Full+static at level cap
+          (no MAX pill here; the badge above already carries that state). */}
+      <div className="h-1 w-14 overflow-hidden rounded-full bg-black/50" title={heroName}>
+        <div
+          className="h-full rounded-full bg-ddp-gold transition-[width] duration-300"
+          style={{ width: `${hero.atLevelCap ? 100 : xpPct}%` }}
         />
       </div>
       <button

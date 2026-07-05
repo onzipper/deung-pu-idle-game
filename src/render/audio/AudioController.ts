@@ -26,6 +26,7 @@ import {
   playHeroRevived,
   playHit,
   playKill,
+  playLevelUp,
   playSkillCast,
   playStageAdvanced,
   playUpgradeBought,
@@ -118,6 +119,11 @@ export class AudioController {
         case "stageAdvanced":
           if (this.engine.allow("stageAdvanced", SFX_MIN_INTERVAL_MS.stageAdvanced)) {
             playStageAdvanced(this.engine);
+          }
+          break;
+        case "levelUp":
+          if (this.engine.allow("levelUp", SFX_MIN_INTERVAL_MS.levelUp)) {
+            playLevelUp(this.engine);
           }
           break;
         case "upgradeBought":

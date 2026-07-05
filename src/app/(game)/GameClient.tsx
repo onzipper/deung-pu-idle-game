@@ -122,13 +122,26 @@ async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void
 }
 
 function buildSnapshot(state: GameState): EngineSnapshot {
-  const heroes: HeroSummary[] = state.heroes.map((h) => ({
-    cls: h.cls,
-    hp: h.hp,
-    maxHp: h.maxHp,
-    skillCd: h.skillCd,
-    dead: h.dead,
-  }));
+  const heroes: HeroSummary[] = state.heroes.map((h) => {
+    const atLevelCap = h.level >= CONFIG.leveling.levelCap;
+    // Precompute the 0..1 progress float HERE (the one place the xp-curve
+    // math is allowed to run) so the throttled store only ever carries a
+    // display-ready number, never raw xp/`xpToLevel()` (see HeroSummary's
+    // doc comment).
+    const xpProgress = atLevelCap
+      ? 1
+      : Math.max(0, Math.min(1, h.xp / CONFIG.leveling.xpToLevel(h.level)));
+    return {
+      cls: h.cls,
+      hp: h.hp,
+      maxHp: h.maxHp,
+      skillCd: h.skillCd,
+      dead: h.dead,
+      level: h.level,
+      xpProgress,
+      atLevelCap,
+    };
+  });
 
   return {
     gold: state.gold,

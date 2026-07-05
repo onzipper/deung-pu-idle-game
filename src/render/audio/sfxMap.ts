@@ -85,6 +85,12 @@ export const SFX_PARAMS = {
     noteDecay: 0.14,
     noteGain: 0.2,
   },
+  levelUp: {
+    notes: [659.25, 830.61], // E5 G#5 — short, bright, distinct from stageAdvanced's 3-note fanfare
+    noteGap: 0.08,
+    noteDecay: 0.18,
+    noteGain: 0.16,
+  },
   upgradeBought: {
     clickDuration: 0.02,
     clickFilterFreq: 2400,
@@ -113,6 +119,7 @@ export const SFX_MIN_INTERVAL_MS = {
   bossDefeated: 800,
   bossRetreat: 250,
   stageAdvanced: 500,
+  levelUp: 200,
   upgradeBought: 40,
 } as const;
 
@@ -294,6 +301,23 @@ export function playStageAdvanced(engine: AudioEngine): void {
   p.notes.forEach((freq, i) => {
     engine.tone(freq, {
       shape: "square",
+      attack: 0.003,
+      decay: p.noteDecay,
+      gain: p.noteGain,
+      delay: i * p.noteGap,
+    });
+  });
+}
+
+/** Hero level-up (M5): a short, bright 2-note chime — distinct from
+ * `stageAdvanced`'s longer 3-note fanfare so the two "progress" beats never
+ * get confused, and throttled per `SFX_MIN_INTERVAL_MS.levelUp` since several
+ * heroes can level in the same instant off one big kill's XP grant. */
+export function playLevelUp(engine: AudioEngine): void {
+  const p = SFX_PARAMS.levelUp;
+  p.notes.forEach((freq, i) => {
+    engine.tone(freq, {
+      shape: "triangle",
       attack: 0.003,
       decay: p.noteDecay,
       gain: p.noteGain,
