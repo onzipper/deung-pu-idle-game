@@ -13,6 +13,10 @@ export * from "@/engine/config";
 export * from "@/engine/entities";
 export * from "@/engine/state";
 export * from "@/engine/state/version";
+// Incoming-save payload zod schema (SAVE-shape boundary contract). Colocated with
+// the SaveData shape so a future SAVE_VERSION bump is one self-contained engine
+// edit; the server layer (src/server/save.ts) only IMPORTS it.
+export * from "@/engine/state/saveSchema";
 
 // Derived-stat helpers and positional queries the render/ui layers need
 // (e.g. team power for the boss hint, target lists for drawing).

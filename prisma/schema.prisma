@@ -46,10 +46,9 @@ model Character {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete: slot freed, row kept for audit
-  // 1:N now only because `SaveState.characterId` is not yet UNIQUE (additive stage).
-  // Becomes an effective 1:1 the moment the cutover push adds `@unique` — at which
-  // point this may be tightened to `save SaveState?`.
-  saves     SaveState[]
+  // CUTOVER APPLIED: `SaveState.characterId` is now @unique, so this is an
+  // effective 1:1 — a character has AT MOST one save row.
+  save      SaveState?
 
   @@index([userId]) // list an account's characters
   @@index([userId, deletedAt]) // count/enumerate LIVE slots (<=3 rule)
@@ -64,26 +63,26 @@ model Character {
 // `persistSave` upsert by userId (Prisma upsert needs a unique field in `where`).
 // A unique constraint also provides the index, so no separate @@index is needed.
 //
-// M5 evolution -> per-character saves. STAGED ADDITIVELY: `characterId` is added
-// NULLABLE + plain-indexed now, and every existing row keeps it NULL, so the
-// current one-slot flow (upsert by userId) is untouched. It is intentionally NOT
-// `@unique` yet — adding a unique constraint is what triggers a destructive-schema
-// prompt on the shared host, and the one-save-per-character invariant only becomes
-// true after backfill. The `@unique` lands in the deliberate cutover push (step 3).
+// M5 CUTOVER APPLIED (see docs/persistence-m5.md): saves are now PER CHARACTER.
+// `characterId` is @unique (one save per character) and `userId @unique` is
+// DROPPED — an account may hold up to 3 saves (one per live character). `userId`
+// keeps a plain @@index for account-scoped queries + the cascade relation.
+// `persistSave`/`loadSave` key off `characterId`; the active character is chosen
+// via the `activeCharacterId` cookie (src/server/activeCharacter.ts).
 //
-// CUTOVER (owned by the backend task, later push — see docs/persistence-m5.md):
-//   1. Backfill: create 1 Character per existing user from its save.
-//   2. Set SaveState.characterId to that Character.id.
-//   3. Add `@unique` to characterId (tighten Character.saves -> save SaveState?),
-//      flip persistSave to upsert by characterId, and DROP `userId @unique`
-//      (a user may then hold up to 3 saves) — keep the plain userId index for
-//      account-scoped queries + cascade. That constraint flip is a separate push.
+// Cutover sequence that produced this state:
+//   1. Backfill (prisma/backfill-characters.ts): 1 Character per existing save.
+//   2. Set SaveState.characterId to that Character.id (verified distinct+non-null).
+//   3. This push: characterId -> @unique, DROP userId @unique. (--accept-data-loss)
 model SaveState {
-  id          String     @id @default(cuid())
-  userId      String     @unique
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // Nullable + plain-indexed during the additive stage; gains @unique at cutover.
-  characterId String?
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // One save per character: @unique makes the load/persist path key off it and
+  // provides the index (so no separate @@index needed). Nullable is retained so a
+  // soft-deleted character's orphaned save can keep the (now-dangling-but-audited)
+  // link; a live save always has it set.
+  characterId String?    @unique
   character   Character? @relation(fields: [characterId], references: [id], onDelete: Cascade)
   version     Int
   data        Json
@@ -91,5 +90,5 @@ model SaveState {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  @@index([characterId]) // per-character load path (additive; becomes @unique at cutover)
+  @@index([userId]) // account-scoped queries + cascade (was covered by @unique before)
 }

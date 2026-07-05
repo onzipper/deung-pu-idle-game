@@ -17,66 +17,22 @@
  * bounded earn rate) and clamp/reject anything beyond it.
  */
 
-import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import {
-  CONFIG,
-  SAVE_VERSION,
-  SLOT_ORDER,
   migrate,
-  type HeroClass,
+  saveDataSchema,
   type SaveData,
   type UnknownSave,
 } from "@/engine";
 import { prisma } from "@/lib/db";
 import { computeOfflineTime, type OfflineResult } from "@/server/offline";
+import { powerFromSave } from "@/server/characters";
 
-// SLOT_ORDER is the authoritative list of known hero classes.
-const KNOWN_CLASSES = [...SLOT_ORDER] as [HeroClass, ...HeroClass[]];
-
-/** A base-stat block: four non-negative integer axes (M5 "Base stats", SAVE v5). */
-const statAxis = z.number().int().min(0).max(CONFIG.stats.cap);
-const statBlockSchema = z
-  .object({ str: statAxis, dex: statAxis, int: statAxis, vit: statAxis })
-  .strict();
-
-/**
- * The accepted incoming-save contract (M5 v4 single character). Anything that
- * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
- * a conforming shape. NOTE: the account -> characters(≤3) multi-slot model is a
- * later DB/backend task; the engine save payload stays one-state here.
- */
-export const saveDataSchema = z
-  .object({
-    // Must be the current version. Old clients must migrate client-side first;
-    // the server does not silently up-convert a POSTed payload of another shape.
-    version: z.literal(SAVE_VERSION),
-    stage: z.number().int().min(1),
-    // Gold is a non-negative finite amount (engine keeps it integral, but we
-    // don't hard-require int() so rounding never spuriously 400s a real save).
-    gold: z.number().min(0).finite(),
-    // The single active character (M5): chosen class + level/xp/tier + base stats.
-    // `tier` is the class-advancement tier (1 = base, 2 = evolved). `statPoints`
-    // (unspent) and `stats` (allocated block) are the M5 "Base stats" (SAVE v5);
-    // both are OPTIONAL so a payload missing them is backfilled by `migrate()`
-    // (retro grant), same resilience as the optional server-owned `lastSeen`.
-    hero: z
-      .object({
-        cls: z.enum(KNOWN_CLASSES),
-        level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
-        xp: z.number().min(0).finite(),
-        tier: z.number().int().min(1).max(2),
-        statPoints: z.number().int().min(0).optional(),
-        stats: statBlockSchema.optional(),
-      })
-      .strict(),
-    // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
-    // re-stamps it from the server clock. Optional so a client may omit it.
-    lastSeen: z.number().optional(),
-  })
-  .strict();
-
-export type ValidSaveInput = z.infer<typeof saveDataSchema>;
+// HANDOFF: the incoming-save payload zod (`saveDataSchema`) now lives in the
+// engine (`src/engine/state/saveSchema.ts`, colocated with the SAVE_VERSION shape)
+// and is re-exported from `@/engine`. A future SAVE_VERSION bump is therefore a
+// self-contained engine edit and does NOT touch this file. This module owns the
+// trust boundary AROUND that schema (migrate, persistence, offline, anti-cheat).
 
 export type ParseResult =
   | { ok: true; data: SaveData }
@@ -106,15 +62,17 @@ export interface LoadResult {
 }
 
 /**
- * Load a user's save. The stored JSON is ALWAYS migrated before returning, and
+ * Load an ACTIVE CHARACTER's save (M5: per-character, keyed by the unique
+ * `characterId` — the caller resolves it from the identity cookie + active-
+ * character selection). The stored JSON is ALWAYS migrated before returning, and
  * offline time is computed from the server-stamped `lastSeen` vs `now` (server
  * wall-clock — never a client-supplied timestamp).
  */
 export async function loadSave(
-  userId: string,
+  characterId: string,
   now: number = Date.now(),
 ): Promise<LoadResult> {
-  const row = await prisma.saveState.findUnique({ where: { userId } });
+  const row = await prisma.saveState.findUnique({ where: { characterId } });
   if (!row) {
     return { save: null, offline: { creditedSeconds: 0, capped: false } };
   }
@@ -134,10 +92,18 @@ export type PersistResult =
   | { ok: false; error: string };
 
 /**
- * Validate and upsert a user's save (one slot per user for MVP).
- * The server stamps `lastSeen` — the client timestamp is discarded.
+ * Validate and upsert an ACTIVE CHARACTER's save (M5: one save row per character,
+ * keyed by the unique `characterId`). `userId` is the owning account, needed to
+ * stamp the row on first create (kept for account-scoped queries + cascade). The
+ * server stamps `lastSeen` — the client timestamp is discarded.
+ *
+ * ALSO refreshes the `Character.level` + `Character.power` denormalised caches
+ * from the validated payload (power re-derived via the engine's `combatPower` —
+ * see `powerFromSave`) in the SAME transaction as the save write, so a Hall-of-
+ * Fame read never sees a save/cache skew.
  */
 export async function persistSave(
+  characterId: string,
   userId: string,
   input: unknown,
   now: Date = new Date(),
@@ -152,12 +118,20 @@ export async function persistSave(
 
   const data: SaveData = { ...parsed.data, lastSeen: now.getTime() };
   const jsonData = data as unknown as Prisma.InputJsonObject;
+  const power = powerFromSave(data.hero);
 
-  await prisma.saveState.upsert({
-    where: { userId },
-    create: { userId, version: data.version, data: jsonData, lastSeen: now },
-    update: { version: data.version, data: jsonData, lastSeen: now },
-  });
+  await prisma.$transaction([
+    prisma.saveState.upsert({
+      where: { characterId },
+      create: { userId, characterId, version: data.version, data: jsonData, lastSeen: now },
+      update: { version: data.version, data: jsonData, lastSeen: now },
+    }),
+    // Refresh the HOF caches (source of truth stays the save blob above).
+    prisma.character.update({
+      where: { id: characterId },
+      data: { level: data.hero.level, power },
+    }),
+  ]);
 
   return { ok: true, lastSeen: now.toISOString() };
 }
