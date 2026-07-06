@@ -129,6 +129,8 @@ function CoreLoopCard() {
   const advanceStage = useGameStore((s) => s.advanceStage);
   const kills = useGameStore((s) => s.kills);
   const killGoal = useGameStore((s) => s.killGoal);
+  const world = useGameStore((s) => s.world);
+  const unlockedZones = useGameStore((s) => s.unlockedZones);
   const t = useTranslations("ladder");
   const tHud = useTranslations("hud");
 
@@ -163,10 +165,14 @@ function CoreLoopCard() {
     // Recommended-vs-your-power comparison, now a single glanceable ratio bar
     // instead of four raw numbers (fixes the old bossHp-only toLocaleString
     // inconsistency too — every number below is consistently formatted).
-    const pct =
+    // Display-capped: post-M7.7 skill power can dwarf the per-stage
+    // recommendation — "999%+" reads as "overwhelming", an uncapped 4-digit
+    // percent reads as a rendering bug.
+    const rawPct =
       bossHint.recommendedPower > 0
         ? Math.round((bossHint.teamPower / bossHint.recommendedPower) * 100)
         : 100;
+    const pct = Math.min(999, rawPct);
     const barPct = Math.min(100, pct);
     return (
       <div className="flex flex-wrap items-center gap-3">
@@ -206,8 +212,26 @@ function CoreLoopCard() {
     );
   }
 
-  // "farming": the zone-unlock kill bar — integrated here (moved from
-  // `HudBar.tsx`, never duplicated).
+  // "farming": context-aware (2026-07-07 fix — the quota bar used to render
+  // in TOWN with a meaningless 0/N, and in already-cleared zones as if they
+  // needed unlocking again):
+  //  - town → a rest hint, no quota bar (nothing to unlock from town);
+  //  - a farm zone whose NEXT zone is already unlocked → free-farm hint.
+  if (world.kind === "town") {
+    return (
+      <span data-onboarding-anchor="kill-progress" className="text-sm font-medium text-ddp-ink-muted">
+        {t("zoneBoss.townHint")}
+      </span>
+    );
+  }
+  const nextUnlocked = world.zoneIdx + 1 < (unlockedZones[world.mapId] ?? 0);
+  if (nextUnlocked) {
+    return (
+      <span data-onboarding-anchor="kill-progress" className="text-sm font-medium text-ddp-ink-muted">
+        {t("zoneBoss.freeFarmHint")}
+      </span>
+    );
+  }
   const pct = killGoal > 0 ? Math.min(100, (kills / killGoal) * 100) : 0;
   return (
     <div data-onboarding-anchor="kill-progress" className="flex flex-col gap-1.5">

@@ -45,6 +45,8 @@
       "farmingHint": "Kill enemies to unlock the next zone",
       "readyHint": "Your power is ready — challenge the boss!",
       "fightingHint": "⚔ Fighting the boss…",
+        "townHint": "Resting in town - head out to hunt toward the next unlock",
+        "freeFarmHint": "This zone is already cleared - free-farm for loot and levels",
       "victoryHint": "Push into the next stage to keep growing stronger."
     },
     "powerRatioLabel": "Power {pct}%",
