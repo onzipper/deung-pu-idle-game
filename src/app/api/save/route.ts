@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server";
 import { getOrCreateUserId } from "@/server/identity";
 import { resolveActiveCharacterId } from "@/server/activeCharacter";
+import { getOwnedLiveCharacterClass } from "@/server/characters";
 import { loadSave, persistSave } from "@/server/save";
 import { loadInventory, equippedLoadoutFrom } from "@/server/items";
 
@@ -30,6 +31,7 @@ export async function GET() {
         save: null,
         offline: { creditedSeconds: 0, capped: false },
         activeCharacterId: null,
+        baseClass: null,
         inventory: [],
         equipped: { weapon: null, armor: null },
       });
@@ -39,14 +41,20 @@ export async function GET() {
     // AUTHORITATIVE over any equipped cache serialized in the save blob — the
     // client must hydrate gear from `inventory`/`equipped` here, not from the
     // save's own copy (an item is not re-derivable from the save; persistence-m7).
-    const [{ save, offline }, inventory] = await Promise.all([
+    const userId2 = userId; // (identity already resolved above)
+    const [{ save, offline }, inventory, character] = await Promise.all([
       loadSave(characterId),
       loadInventory(characterId),
+      getOwnedLiveCharacterClass(userId2, characterId),
     ]);
+    // `baseClass` is the AUTHORITATIVE class (immutable at creation) — the
+    // client must correct/seed the save's `hero.cls` from it (the 2026-07-06
+    // "everyone is a swordsman" repair; see engine `repairHeroClass`).
     return NextResponse.json({
       save,
       offline,
       activeCharacterId: characterId,
+      baseClass: character?.baseClass ?? null,
       inventory,
       equipped: equippedLoadoutFrom(inventory),
     });

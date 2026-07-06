@@ -332,12 +332,47 @@ function cloneQuest(q: HeroQuest | null): HeroQuest | null {
 }
 
 /**
+ * Repair a save whose `hero.cls` disagrees with the ACCOUNT's authoritative
+ * character class (`Character.baseClass` — immutable at creation; evolution
+ * only changes `tier`). This healed the 2026-07-06 "everyone is a swordsman"
+ * bug: a fresh character had no save row, the boot defaulted to swordsman, and
+ * the first autosave then locked the wrong class in permanently. On mismatch
+ * the class is corrected and the allocated stat block is RESET to the true
+ * class's base with every earned point refunded (they were auto-dumped into
+ * the WRONG primary stat) — level/xp/gold/tier/world progress all survive.
+ * Identity (===) when nothing is wrong, so callers can apply it untangled.
+ */
+export function repairHeroClass(save: SaveData, trueClass: HeroClass): SaveData {
+  if (save.hero.cls === trueClass) return save;
+  const level = save.hero.level;
+  return {
+    ...save,
+    hero: {
+      ...save.hero,
+      cls: trueClass,
+      stats: { ...CONFIG.stats.base[trueClass] },
+      statPoints: Math.max(0, (level - 1) * CONFIG.stats.pointsPerLevel),
+      // Wrong-class slotted skills can never be learned by the true class —
+      // reset the loadout to the class defaults (the quest is re-derived
+      // against the corrected class by initGameState's normalizeHeroQuest).
+      autoSlots: defaultAutoSlots(trueClass),
+    },
+  };
+}
+
+/**
  * Construct a live `GameState` from a seed and (optionally) a loaded save.
  * A save restores stage / gold / chosen class / character progression; the
  * battlefield always starts fresh at wave 0 of the saved stage.
+ * `fallbackClass` seeds a FRESH state (no save yet — a just-created character's
+ * first boot) with the account's true class instead of the swordsman default.
  */
-export function initGameState(seed: number, save?: SaveData): GameState {
-  const heroClass: HeroClass = save?.hero.cls ?? "swordsman";
+export function initGameState(
+  seed: number,
+  save?: SaveData,
+  fallbackClass?: HeroClass,
+): GameState {
+  const heroClass: HeroClass = save?.hero.cls ?? fallbackClass ?? "swordsman";
 
   // World position (M6). A save restores its location; a fresh start begins in the
   // first farm zone (map1, stage 1). `state.stage` is DERIVED from the location's

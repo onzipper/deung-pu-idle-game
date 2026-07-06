@@ -57,6 +57,7 @@ import {
   isClassChangeQuestOffered,
   learnedSkills,
   migrate,
+  repairHeroClass,
   primaryStat,
   shopPriceAt,
   shopStageOf,
@@ -69,6 +70,7 @@ import {
   type GameEvent,
   type GameState,
   type Hero,
+  type HeroClass,
   type SaveData,
 } from "@/engine";
 import { AudioController } from "@/render/audio";
@@ -681,6 +683,7 @@ export function GameClient() {
     const boot = async (): Promise<void> => {
       // ---- load the server-authoritative save (before initGameState) ----
       let loaded: SaveData | undefined;
+      let bootClass: HeroClass | undefined; // fresh-character first boot class
       let offlineSeconds = 0;
       let offlineCapped = false;
       try {
@@ -697,10 +700,19 @@ export function GameClient() {
             // present (possibly empty arrays/nulls pre-character).
             inventory?: ItemInstanceWire[];
             equipped?: { weapon: string | null; armor: string | null };
+            /** Authoritative character class (Character.baseClass) — corrects
+             * a save whose hero.cls drifted + seeds a first boot (2026-07-06
+             * "everyone is a swordsman" fix). */
+            baseClass?: HeroClass | null;
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
           if (json.save) loaded = migrate(json.save);
+          // Class repair (2026-07-06): the account's baseClass is authoritative
+          // over the save blob's hero.cls — a corrupted save gets its class
+          // corrected + wrong-primary stat points refunded (engine helper).
+          if (loaded && json.baseClass) loaded = repairHeroClass(loaded, json.baseClass);
+          if (json.baseClass) bootClass = json.baseClass;
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
@@ -731,6 +743,9 @@ export function GameClient() {
       if (cancelled) return;
 
       if (loaded) state = initGameState(seed, loaded);
+      // No save yet (a just-created character): seed the fresh state with the
+      // TRUE class instead of the swordsman default.
+      else if (bootClass) state = initGameState(seed, undefined, bootClass);
 
       // ---- offline-idle catch-up ----
       // Replay the capped offline seconds through the SAME fixed-step primitive
