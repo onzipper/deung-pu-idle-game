@@ -10,19 +10,25 @@
  *    non-integer amounts, over-spend, and the per-stat cap. Emits a `statAllocated`
  *    event ONLY on manual allocation (UI feedback; render draws nothing from it).
  *
- *  - AUTO: when the UI-owned `autoAllocate` toggle is on, every hero's unspent
- *    points are dumped into its class PRIMARY stat, so an idle player never drowns
- *    in unspent points. Emits NO event (silent, mirrors auto-cast).
+ *  - AUTO (v2, M7.7): when the UI-owned `autoAllocate` toggle is on, every hero's
+ *    unspent points are distributed toward its class RATIO
+ *    (`CONFIG.stats.autoAllocRatio`) — each point to the ratio stat farthest below
+ *    its target — so an idle player never drowns in unspent points AND the squishy
+ *    ranged classes bank the VIT that breaks the map3 frontier wall. Emits NO event
+ *    (silent, mirrors auto-cast). See `autoAllocateStats` for the distributor.
  *
  * Allocating VIT recomputes max HP and heals by the added headroom (a level-up /
  * evolution style feel-good bump); the other stats change derived atk/atk-speed on
  * read, so they need no state fix-up.
  */
 
-import { CONFIG, PRIMARY_STAT } from "@/engine/config";
+import { CONFIG } from "@/engine/config";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { Hero, StatKey } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
+
+/** Fixed stat order — the deterministic tie-break for the auto-allocate v2 ratio. */
+const STAT_ORDER: readonly StatKey[] = ["str", "dex", "int", "vit"];
 
 /** Re-derive max HP after a vit change and heal by the added headroom. */
 function refreshMaxHp(hero: Hero): void {
@@ -70,21 +76,51 @@ export function allocateStat(
 }
 
 /**
- * Auto-allocate: dump every hero's unspent points into its class PRIMARY stat
- * (clamped to the cap). Silent (no event). Idempotent once points are drained.
+ * Auto-allocate v2 (M7.7): distribute every hero's unspent points toward its class
+ * RATIO (`CONFIG.stats.autoAllocRatio[cls]`) instead of dumping them all into the
+ * primary. Each point goes to the ratio stat FARTHEST BELOW its target — the one
+ * minimising `stats[s] / weight[s]` against the hero's CURRENT stats — with a
+ * deterministic tie-break by the fixed str→dex→int→vit order. This self-corrects
+ * around manual allocations + differing class bases and converges to the ratio, so
+ * it needs no persisted counter. A capped stat (`CONFIG.stats.cap`) drops out of the
+ * distribution; if every ratio stat is capped the points stay unspent (mirrors the
+ * old room≤0 behaviour). Silent (no event). Idempotent once points are drained.
+ *
+ * NO RNG (deterministic) — the seeded stream stays wave-composition-only. The
+ * per-point loop is O(points × |ratio stats|); statPoints is at most a few hundred,
+ * so this is cheap. Derived pools (vit→HP, int→mana) are re-derived ONCE per changed
+ * stat at the end (`refreshMaxHp/Mana` recompute from the final stat value, so a
+ * single call heals/tops-up by the whole added headroom — identical to per-point).
  */
 export function autoAllocateStats(state: GameState): void {
+  const cap = CONFIG.stats.cap;
   for (const hero of state.heroes) {
     if (hero.statPoints <= 0) continue;
-    const stat = PRIMARY_STAT[hero.cls];
-    const room = CONFIG.stats.cap - hero.stats[stat];
-    const amount = Math.min(hero.statPoints, room);
-    if (amount <= 0) continue;
-    hero.statPoints -= amount;
-    hero.stats[stat] += amount;
-    // Primary is int for the mage (→ mana) and str/dex for the others; keep the
-    // derived pool consistent (also handles a hypothetical vit-primary class).
-    refreshDerived(hero, stat);
+    const ratio = CONFIG.stats.autoAllocRatio[hero.cls];
+    // The ratio stats with a positive weight, in the fixed tie-break order.
+    const stats = STAT_ORDER.filter((s) => (ratio[s] ?? 0) > 0);
+    if (stats.length === 0) continue;
+
+    const changed = new Set<StatKey>();
+    while (hero.statPoints > 0) {
+      // Pick the ratio stat with room that is farthest below its target
+      // (min stats[s]/weight[s]); STAT_ORDER iteration order breaks ties.
+      let pick: StatKey | null = null;
+      let best = Infinity;
+      for (const s of stats) {
+        if (hero.stats[s] >= cap) continue;
+        const score = hero.stats[s] / (ratio[s] as number);
+        if (score < best) {
+          best = score;
+          pick = s;
+        }
+      }
+      if (pick === null) break; // every ratio stat capped → leave points unspent
+      hero.stats[pick] += 1;
+      hero.statPoints -= 1;
+      changed.add(pick);
+    }
+    for (const s of changed) refreshDerived(hero, s);
   }
 }
 

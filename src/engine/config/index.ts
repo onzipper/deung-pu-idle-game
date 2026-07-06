@@ -621,6 +621,43 @@ export const CONFIG = {
       archer: { str: 4, dex: 8, int: 3, vit: 5 },
       mage: { str: 3, dex: 4, int: 8, vit: 4 },
     } satisfies Record<HeroClass, HeroStats>,
+    // ---- auto-allocate v2 ratios (M7.7 "Auto-allocate v2") ----
+    // Auto-allocate no longer DUMPS every point into the class primary (which left
+    // the squishy ranged classes wall-deep in deaths at the map3 frontier — the
+    // dump-primary sim showed the archer drowning: s11→s15 farm deaths 12→87, s15
+    // clear ~306s from the death-respawn loop). Instead each class targets a FIXED
+    // ratio: the distributor gives each next point to the ratio stat FARTHEST BELOW
+    // its target, measured as stats[s]/weight[s] against the hero's CURRENT stats
+    // (deterministic tie-break by the fixed str→dex→int→vit order). This converges to
+    // the ratio, self-corrects around manual allocations + differing class bases, and
+    // needs NO persisted counter. Off-ratio (weight-absent) + capped stats drop out;
+    // if every ratio stat is capped the points stay unspent (old room≤0 behaviour).
+    //
+    // The RATIOS below are SIM-CHOSEN, not the ROADMAP draft — the M7.7-world sim
+    // (denser fields + เบิ้ม skills) overruled the 3/2:1/2:1 draft (see the sweep table
+    // in docs/balance-m7.md "Auto-allocate v2"). Verdict per class:
+    //  - swordsman 4 STR : 1 VIT — a light VIT trickle collapses the melee's boss-gate
+    //    death loop (dump-primary: 183 deaths / 162 boss wipes → 24 / 2) at ~+7% clear
+    //    time. 4:1 edged 3:1 (fewer deaths, more retained DPS), so it keeps most of the
+    //    class's damage identity while curing the wipe spiral its hpMult(1.5) couldn't.
+    //  - archer PURE DEX — the sweep DISPROVED the draft: the archer is a DPS-race
+    //    kiter (DEX is its damage AND atk-speed), so diverting to VIT strictly LOWERS
+    //    throughput → longer field exposure → MORE deaths (2:1 → 263 & a NEW s15-farm
+    //    soft-wall; 4:1 → 269; pure DEX → 238, all farm 5/5). Every VIT share regressed,
+    //    so the archer's optimum genuinely is pure primary. Its frontier squishiness is
+    //    a content-balance matter (docs/balance-m6.md), not fixable by allocation.
+    //  - mage 3 INT : 1 VIT — INT is damage AND the mana pool/regen that fuels the
+    //    skill-uptime the caster SURVIVES on, so the mage's safety scales with INT, not
+    //    HP: 3:1 (20 deaths / 0 boss wipes) beat both 2:1 (43 / 26) and dump-primary
+    //    (50 / 34). A light VIT third adds a little floor without starving mana.
+    // The primary/damage stat stays the MAJORITY (or all) for every class, so no single
+    // build is trivialised and the leveling→power trajectory (class-change s5, s15
+    // soft-wall) holds. Sweepable: the sim reads this table directly.
+    autoAllocRatio: {
+      swordsman: { str: 4, vit: 1 },
+      archer: { dex: 1 },
+      mage: { int: 3, vit: 1 },
+    } as Record<HeroClass, Partial<Record<StatKey, number>>>,
   },
 
   // ---- mana (M5 "mana + skill framework v2", 86d3jv7m3) ----

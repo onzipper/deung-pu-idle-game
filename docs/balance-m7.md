@@ -330,3 +330,43 @@ s14/s15 farm).
 - **Archer s12 is heavy (683 s).** Survivor-retaliation on a spammy AoE kiter is inherently
   punishing (the exact interaction the M6 cap addressed); further trimming would blunt the
   "เบิ้ม" intent. Held; gear/refine (M7/M7.6) are the relief.
+
+## Auto-allocate v2 (M7.7 last item, 2026-07-07)
+
+Replaces "dump every point into the class primary" with a **per-class fixed ratio**
+(`CONFIG.stats.autoAllocRatio`). Distributor: each unspent point goes to the ratio stat
+with the lowest `stats[s] / weight[s]` measured on the hero's **current** stats (tie-break
+by fixed str→dex→int→vit order). Deterministic, no RNG, no persisted counter, no
+`SAVE_VERSION` bump — it self-corrects around manual allocation and differing class bases.
+Capped stats drop out; all-capped → points stay unspent.
+
+Swept on the M7.7 world sim (`SIM_SECONDS=1800`, seeds `1,2,3,42,1337`), no-gear. The
+draft (sword 3:1, bow 2:1, mage 2:1) was **overruled** by the data. Totals over 5 seeds:
+
+| class | ratio | total deaths | boss wipes | s15 farm clears | verdict |
+|---|---|---:|---:|:--:|---|
+| sword | dump STR (baseline) | 183 | 162 | 5/5 | boss-gate death loop |
+| sword | 3 STR : 1 VIT | 27 | 3 | 5/5 | fixes the loop |
+| **sword** | **4 STR : 1 VIT** ✅ | **24** | **2** | **5/5** | chosen — fewer deaths, more retained DPS (+~7% clear vs baseline) |
+| archer | dump DEX (baseline) | 238 | 34 | 5/5 | best; DPS-race kiter |
+| archer | 4 DEX : 1 VIT | 269 | 48 | 5/5 | worse (less throughput → more exposure) |
+| archer | 2 DEX : 1 VIT | 263 | 5 | **3/5** | worse + new s15-farm soft-wall |
+| **archer** | **PURE DEX** ✅ | **238** | **34** | **5/5** | chosen — every VIT share regressed; DEX = damage AND atk-speed |
+| mage | dump INT (baseline) | 50 | 34 | 5/5 | fine but wipe-heavy |
+| mage | 2 INT : 1 VIT | 43 | 26 | 5/5 | marginal |
+| **mage** | **3 INT : 1 VIT** ✅ | **20** | **0** | **5/5** | chosen — mage survives on skill uptime (INT→mana), not HP |
+
+**Chosen ratios:** sword `{str:4, vit:1}` · archer `{dex:1}` · mage `{int:3, vit:1}`.
+
+**Gates (all held on the chosen set):** class-change quest completes ~**s5** (all classes,
+all seeds) · **s15 boss soft-wall intact** (0/5, every class) · **0 stalls** (every farm
+zone clears 5/5). The primary/damage stat stays the majority (or all) of allocated points,
+so no single build is trivialised.
+
+- **Archer stays pure primary** — the sweep disproved the VIT draft. A DPS-race kiter that
+  clears the field slower stays exposed longer and dies *more*, so any VIT share strictly
+  regressed (and 2:1 opened a fresh s15-farm wall). Its frontier squishiness is a
+  content-balance matter (docs/balance-m6.md / gear / M7.6 refine), not an allocation fix.
+- **Mage safety scales with INT, not VIT** — more INT deepens the mana pool that sustains
+  the skill uptime the caster survives on, so the *less*-VIT 3:1 both out-survived and
+  out-cleared the heavier 2:1 (0 boss wipes vs 26).
