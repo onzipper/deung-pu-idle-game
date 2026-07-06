@@ -49,6 +49,26 @@
 - [x] **Paper-doll บนริกเดิม** (ตามมติ M6.5 — ไม่ใช่ตัวละครอนิเมะ/RO): อาวุธโตตาม tier จน t6 อลัง+ออร่าเปลวไฟซุปเปอร์ไซย่า (solid บน normal blend กัน white-out), เกราะ trim/gem + t5+ ระยิบ; pooled/capped คุม GPU; rig tests ครอบ geared bounds
 - [x] โยงเข้า codex/collection — หมวด gear ใน codex, grid 27 ชิ้น ยังไม่เจอ = เงาจาง (v1 derive จาก inventory ปัจจุบัน)
 
+## M7.5 — Sell, Bots & Inventory UX (เคาะ scope 2026-07-06 กับเจ้าของ)
+
+> ดีไซน์ที่เคาะแล้ว: **ขายได้เฉพาะในเมือง** (บอทวาปขายจึงมีความหมาย) · บอทใช้ **ยันกลับเมือง** วาป (ไม่มีต่อคิวเดินกลับเอง; บอทตั้งซื้อยันสำรองได้) · **กระเป๋า 100 ช่อง** (trigger บอท + กัน DB โต) · บอททำงานเฉพาะออนไลน์ v1 (offline idle เดิม) — trigger เป็น deterministic ฝั่ง engine ตามแพทเทิร์น autoReturn/auto-potion, ตัว transaction ซื้อ/ขายเป็น server ยิงเมื่อถึงเมือง
+
+- [ ] ขายร้าน NPC (ในเมืองเท่านั้น): endpoint ขาย = destroyItem (soft) + credit ทอง ใน tx เดียว + ItemEvent destroyed(meta ราคา); ราคาตาม tier/rarity ต่ำกว่ารายได้ล่า (กันเฟ้อ) — sink ต่อจากยา
+- [ ] Auto-sell rules (ตั้งใน Settings): เช่น "ขาย common ต่ำกว่า tier ของที่ใส่" + ปุ่ม bulk "ขาย common ทั้งหมด" — ประมวลผลตอนตัวถึงเมือง
+- [ ] บอทวาปขาย: กระเป๋าเต็ม (100) → ใช้ยันวาปเมือง → ขายตามกฎ → กลับไปฟาร์ม (autoReturn เดิม); ตั้งค่าได้ว่าขายอะไรบ้าง
+- [ ] บอทซื้อยา: ตั้ง stock เป้าหมาย HP/มานา + งบสูงสุด → ยาใกล้หมดวาปไปเติม (รวมทริปกับขายของถ้า trigger พร้อมกัน) + ซื้อยันสำรองตามตั้งค่า
+- [ ] Inventory UX ยกเครื่อง: stack ของซ้ำ (badge ×N) + grid ช่องแบบ RO (ไอคอน CSS-drawn, ขอบสี tier, เรือง rarity) + เทียบ delta กับของที่ใส่ (เขียว/แดง) + tab weapon/armor + sort tier + toggle "คลาสฉันใส่ได้" + badge NEW + แถบ 100 ช่อง
+- [ ] Fast travel ข้าม zone (คำขอเจ้าของ 2026-07-06): หน้าเลือกโซน → วาปไปโซนที่**ปลดแล้ว**ได้เลย ฟรี แต่มี cast time สั้น + ห้ามมีมอน aggro ติดตัว (ยันกลับเมือง = วาปทันทีแม้โดนรุม จึงยังมีค่า + บอทใช้); เดินเท้าเดิมคงไว้สำหรับโซนติดกัน/ปลดโซนใหม่ — engine: transit แบบ instant หลัง cast, deterministic; อัปเดต GDD หัวข้อโลกและการเดินด้วย
+
+## M7.6 — ตีบวก (Refine, RO แท้)
+
+> เคาะแล้ว: **มีลุ้นแตก** — +1-3 ปลอดภัย / +4-7 พลาดลดขั้น / +8-10 พลาดแตก (ItemEvent destroyed) · ย่อยของซ้ำเป็นวัสดุ → ใช้วัสดุ+ทองตีบวก · DB: เพิ่มคอลัมน์ `refineLevel` (additive db push) + ItemEvent `refined`/`salvaged` · SAVE v11 (equipped ต้องพก refine) · stat ต่อบวกและอัตราพลาดต้องผ่าน sim + คิดผลต่อ HOF power
+
+- [ ] Salvage: ย่อยของเป็นวัสดุตาม tier/rarity (server tx: destroy + mint material — โมเดลวัสดุเป็น counter ต่อ character ไม่ใช่ instance)
+- [ ] Refine core: server-authoritative roll (กันโกง — ห้าม client ทอย), ItemEvent ทุกครั้ง, engine รับ refineLevel เข้า stat/power
+- [ ] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ
+- [ ] Sim ผลต่อ curve: ของ +10 ต้องไม่ทะลุ s15 wall เร็วกว่าที่ตั้งใจ; อัตราแตกคุมเงินเฟ้อวัสดุ
+
 ## M8 — Party
 
 - [ ] Websocket infra spike: ประเมิน VPS/Node server + ห้องปาร์ตี้ (ตัดสินใจ infra ก่อนเริ่ม)
