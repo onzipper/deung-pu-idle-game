@@ -21,6 +21,7 @@ import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossRoomCleared } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
+import { rollBossDrop } from "@/engine/systems/gear";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
 
@@ -96,6 +97,9 @@ export function onBossKilled(state: GameState): void {
   // Count the boss defeat toward the solo hero's class-change quest (M5 task 5),
   // while the winning hero is still on the field (before the phase flip).
   advanceQuestObjective(state, "killBoss");
+  // M7: a boss is a GUARANTEED drop (stateless hash; never the wave RNG). Rolled
+  // while the boss is still on the field so the drop position/id are real.
+  if (state.boss) rollBossDrop(state, state.boss);
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;

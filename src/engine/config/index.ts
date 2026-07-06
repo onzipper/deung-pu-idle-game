@@ -590,6 +590,21 @@ export const CONFIG = {
   power: {
     dpsWeight: 6,
     hpWeight: 0.5,
+    // M7 gear DEF axis weight in the combat-power scalar. Small: DEF is flat
+    // per-hit mitigation, not a big HOF mover, but it must register (monotonic).
+    defWeight: 3,
+  },
+
+  // ---- gear / drops (M7 "ของดรอปและ Gear", ROADMAP M7) ----
+  // Equipped weapon/armor apply FLAT atk/def/hp (systems/stats `equip*Of`).
+  // Stats live in `config/items.ts` (pure TS; never the DB). A no-gear hero
+  // contributes 0 on every axis, so unarmored combat is byte-identical to pre-M7
+  // (the balance-m6 curves are untouched — docs/balance-m7.md). DEF is FLAT
+  // per-hit mitigation applied in systems/damage; a hit is floored so armor can
+  // never make a hero unkillable. Sim-swept.
+  gear: {
+    /** A mitigated hero hit never drops below this many points (armor floor). */
+    minDamage: 1,
   },
 
   // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----

@@ -12,7 +12,9 @@
  */
 
 import { CONFIG } from "@/engine/config";
+import { emptyEquipped, type EquippedGear } from "@/engine/config/items";
 import { clamp } from "@/engine/core/math";
+import { splitmix32 } from "@/engine/core/hash";
 import { makeHero, defaultAutoSlots } from "@/engine/entities";
 import type {
   Hero,
@@ -146,6 +148,20 @@ export interface GameState {
   /** Monotonic id source for entities/projectiles. */
   nextId: number;
   /**
+   * M7 drop-roll salt: a per-save constant that decorrelates one character's drop
+   * stream from another's. Combined with `lootCounter` in a STATELESS hash (core/
+   * hash.ts) — NEVER the wave RNG. Persisted (SAVE v10) so rolls are stable across
+   * a reload; a fresh (save-less) start seeds it from the init seed.
+   */
+  lootSalt: number;
+  /**
+   * M7 drop-roll counter: monotonic, one tick per kill-roll. The value used for a
+   * roll is that roll's `rollId` (server claim key `${characterId}:${rollId}`).
+   * Persisted (SAVE v10) so an offline replay reproduces the same rolls and a
+   * reload never re-rolls a claimed drop (idempotency covers retries).
+   */
+  lootCounter: number;
+  /**
    * Per-step event buffer for render/audio juice. Cleared at the START of each
    * `step()`, filled during the step, drained by the outside layers after it.
    * Deterministic, one-way (engine never reads it), and NEVER persisted.
@@ -201,6 +217,17 @@ export interface SaveData {
   /** Held NPC-consumable stack counts (M6 "เมืองหลัก", SAVE v9). Non-tradable,
    * fungible COUNTS (not M7 item-instances — see entities `ShopItemId`). */
   consumables: ConsumableCounts;
+  /**
+   * Equipped gear loadout (M7, SAVE v10): weapon/armor templateId or null. A SIM
+   * CACHE — the DB `ItemInstance` ledger is authoritative (docs/persistence-m7.md),
+   * so the boot payload's server-resolved loadout WINS on load; this persisted copy
+   * lets an offline/pre-boot session still compute geared power.
+   */
+  equipped: EquippedGear;
+  /** M7 drop-roll salt (SAVE v10) — decorrelates the drop stream per character. */
+  lootSalt: number;
+  /** M7 monotonic drop-roll counter (SAVE v10) — anti-dupe rollId source. */
+  lootCounter: number;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -229,6 +256,9 @@ export function initHeroes(state: GameState): void {
       // Quest progress MUST survive a stage reset — the boss-defeat objective
       // completes as the stage clears, then nextStage rebuilds the hero.
       prev ? cloneQuest(prev.quest) : null,
+      // Equipped gear (M7) survives a battlefield reset (stage advance) — makeHero
+      // folds its armor HP into the rebuilt hero's max HP.
+      prev ? { weapon: prev.equipped.weapon, armor: prev.equipped.armor } : emptyEquipped(),
     ),
   ];
 }
@@ -300,6 +330,15 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     bossReady: false,
     rngState: seed >>> 0,
     nextId: 1,
+    // M7 drop rolls (SAVE v10). A loaded save restores its salt + counter so rolls
+    // are stable/monotonic across a reload; a fresh start seeds the salt from the
+    // init seed (persisted on first save). Defensive `??` covers a save built
+    // without the v10 fields (e.g. a raw pre-v10 literal handed to initGameState).
+    lootSalt:
+      typeof save?.lootSalt === "number" && Number.isFinite(save.lootSalt)
+        ? save.lootSalt >>> 0
+        : splitmix32(seed >>> 0),
+    lootCounter: Math.max(0, Math.floor(save?.lootCounter ?? 0)),
     events: [],
   };
   initHeroes(state);
@@ -321,6 +360,13 @@ export function initGameState(seed: number, save?: SaveData): GameState {
       vit: Math.max(0, save.hero.stats?.vit ?? base.vit),
     };
     h.statPoints = Math.max(0, save.hero.statPoints ?? 0);
+    // Restore equipped gear (M7, SAVE v10) BEFORE deriving max HP so armor HP is
+    // folded in. The DB ledger is authoritative (boot payload overrides this cache
+    // upstream); a missing/foreign field defaults to an empty loadout.
+    h.equipped = {
+      weapon: typeof save.equipped?.weapon === "string" ? save.equipped.weapon : null,
+      armor: typeof save.equipped?.armor === "string" ? save.equipped.armor : null,
+    };
     h.maxHp = heroMaxHpOf(h);
     h.hp = h.maxHp;
     // Restore mana pool + auto-slot loadout (M5 "mana + skill framework v2",
@@ -396,6 +442,9 @@ export function toSaveData(state: GameState): SaveData {
     // NPC consumable stacks (M6, SAVE v9). Use-cooldowns + auto-use toggles are
     // transient/UI-owned — not persisted.
     consumables: { ...state.consumables },
+    // Equipped gear cache (M7, SAVE v10). Authoritative copy is the DB item ledger
+    // (boot payload wins on load); this persists the loadout for offline power.
+    equipped: { weapon: h.equipped.weapon, armor: h.equipped.armor },
     hero: {
       cls: h.cls,
       level: h.level,
@@ -411,6 +460,9 @@ export function toSaveData(state: GameState): SaveData {
       // quest is meaningful; null otherwise (offer is re-derived, tier 2 consumed).
       quest: h.quest ? { id: h.quest.id, accepted: h.quest.accepted, progress: [...h.quest.progress] } : null,
     },
+    // M7 drop-roll bookkeeping (SAVE v10): monotonic counter + per-save salt.
+    lootCounter: state.lootCounter,
+    lootSalt: state.lootSalt,
     lastSeen: 0,
   };
 }

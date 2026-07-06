@@ -9,6 +9,7 @@
  */
 
 import { CONFIG } from "@/engine/config";
+import { equipDefOf } from "@/engine/systems/stats";
 import type { Hero, Enemy, Boss } from "@/engine/entities";
 import type { GameState, HitSource, HitTargetKind } from "@/engine/state";
 
@@ -41,6 +42,14 @@ export function applyDamage(
   source: HitSource,
   wakePassive = true,
 ): void {
+  // M7 gear DEF: FLAT per-hit mitigation on heroes only, floored so armor can't
+  // make a hero unkillable. Guarded on `def > 0` so an UNARMORED hero's incoming
+  // damage (and the emitted `hit` amount) is byte-identical to pre-M7 — the
+  // balance-m6 curves are untouched when no gear is equipped.
+  if (isHero(target)) {
+    const def = equipDefOf(target);
+    if (def > 0) amount = Math.max(CONFIG.gear.minDamage, amount - def);
+  }
   target.hp -= amount;
   // Passive-mob RETALIATION (M6 "สนามล่ามอน"): a mob that is HIT starts fighting
   // back, even if it never initiated. Aggressive mobs latch the same flag on aggro

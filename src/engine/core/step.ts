@@ -15,6 +15,8 @@ import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
 import type { ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
+import type { GearSlot } from "@/engine/config/items";
+import { equipItem } from "@/engine/systems/gear";
 import {
   applyReturnScroll,
   buyShopItem,
@@ -124,6 +126,13 @@ export interface FrameInput {
    * input (a tap teleports once).
    */
   useReturnScroll?: boolean;
+  /**
+   * Equip (or, with `templateId: null`, UNEQUIP) a gear slot on the solo hero
+   * (M7). Validated for template existence + slot + classReq (a mismatch is a
+   * no-op); OWNERSHIP is server-enforced (the engine trusts the id). Honoured
+   * across phases; applied once per drained input (a click equips exactly once).
+   */
+  equip?: { slot: GearSlot; templateId: string | null };
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -140,6 +149,8 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // --- discrete player actions (valid across phases) ---
   if (input.acceptQuest !== undefined) acceptQuest(state, input.acceptQuest);
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
+  // Equip / unequip gear on the solo hero (M7) — validated inside equipItem.
+  if (input.equip) equipItem(state, state.heroes[0], input.equip.slot, input.equip.templateId);
   // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
   if (input.setAutoSlots) {
     for (const a of input.setAutoSlots) setAutoSlot(state, state.heroes[0], a.slot, a.skillId);

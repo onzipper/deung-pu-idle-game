@@ -23,6 +23,7 @@ import {
   heroMaxManaOf,
 } from "@/engine/systems/stats";
 import { applyDamage, applyAoeDamage, damageInRadius, isHero } from "@/engine/systems/damage";
+import { rollEnemyDrop } from "@/engine/systems/gear";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossKilled } from "@/engine/systems/boss";
@@ -411,6 +412,8 @@ export function resolveDeaths(state: GameState): void {
         });
         // Count the kill toward the solo hero's class-change quest (M5 task 5).
         advanceQuestObjective(state, "kill");
+        // M7: roll a farm drop for this kill (stateless hash; NEVER the wave RNG).
+        rollEnemyDrop(state, e);
         return false;
       }
       return true;

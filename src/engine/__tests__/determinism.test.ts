@@ -133,7 +133,9 @@ describe("save round-trip", () => {
 
   it("migrate() fills every default field for a bare/old save shape", () => {
     const migrated = migrate({});
-    expect(migrated).toEqual({
+    // toMatchObject (not toEqual) so the derived, content-hashed `lootSalt` — a
+    // deterministic uint32 asserted separately below — doesn't need a magic literal.
+    expect(migrated).toMatchObject({
       version: SAVE_VERSION,
       stage: 1,
       gold: 0,
@@ -156,8 +158,15 @@ describe("save round-trip", () => {
       lastFarmZone: { mapId: "map1", zoneIdx: 1 },
       // M6 v9 NPC consumables: a bare save backfills to zeros.
       consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+      // M7 v10 gear: empty loadout + zeroed counter (DB ledger is authoritative).
+      equipped: { weapon: null, armor: null },
+      lootCounter: 0,
       lastSeen: 0,
     });
+    // Salt is a deterministic uint32 derived from the (bare) save content.
+    expect(typeof migrated.lootSalt).toBe("number");
+    expect(Number.isInteger(migrated.lootSalt)).toBe(true);
+    expect(migrated.lootSalt).toBeGreaterThanOrEqual(0);
   });
 
   it("migrate() only fills missing fields, preserving present ones", () => {

@@ -8,8 +8,13 @@
 export * from "@/engine/core/loop";
 export * from "@/engine/core/rng";
 export * from "@/engine/core/math";
+export * from "@/engine/core/hash";
 export * from "@/engine/core/step";
 export * from "@/engine/config";
+// M7 gear catalog + drop tables (config/items is NOT re-exported by config/index —
+// it's a pinned contract module). render/ui read templates + the EquippedGear type
+// through here; the server imports it directly (@/engine/config/items).
+export * from "@/engine/config/items";
 export * from "@/engine/entities";
 export * from "@/engine/state";
 export * from "@/engine/state/version";

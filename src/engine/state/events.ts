@@ -96,4 +96,18 @@ export type GameEvent =
   // return scroll teleported the hero to town (render may hook a warp fx later).
   | { type: "shopPurchase"; item: ShopItemId; qty: number; cost: number }
   | { type: "consumableUsed"; item: ShopItemId }
-  | { type: "townReturned"; mapId: string };
+  | { type: "townReturned"; mapId: string }
+  // M7 gear DROP (systems/gear): a kill rolled an item. `rollId` is the stable,
+  // per-save monotonic loot-counter value used for this roll (the server claim
+  // key is `${characterId}:${rollId}`, docs/persistence-m7.md); `templateId` is a
+  // key into `ITEM_TEMPLATES`; `mobId` is the enemy/boss that dropped it. One-way
+  // (render pops a pickup; the ui queues a server claim). Deterministic (hashed,
+  // no RNG draw — the seeded stream stays wave-composition only).
+  | {
+      type: "itemDrop";
+      rollId: string;
+      templateId: string;
+      x: number;
+      y: number;
+      mobId: number;
+    };

@@ -29,12 +29,14 @@ import {
   worldNav,
   zoneAt,
   SIGNATURE_SKILL,
+  ITEM_TEMPLATES,
   FIXED_DT,
   type FrameInput,
   type Hero,
   type GameState,
   type HeroClass,
   type SaveData,
+  type ItemTemplate,
 } from "@/engine";
 
 const SIM_SECONDS = Number(process.env.SIM_SECONDS ?? 1800);
@@ -47,6 +49,10 @@ const CLASSES: HeroClass[] = (process.env.CLASSES ?? "swordsman,archer,mage")
   .split(",")
   .map((s) => s.trim())
   .filter((s): s is HeroClass => s === "swordsman" || s === "archer" || s === "mage");
+// GEAR=1 → the autopilot auto-equips the best-for-class drop it sees (M7 drop-
+// equilibrium run). Default (unset) → drops are ignored (NO-GEAR run: must match
+// the balance-m6 tables, since unarmored combat is byte-identical to pre-M7).
+const GEAR = process.env.GEAR === "1";
 
 // ---------------------------------------------------------------------------
 // Per-run metrics — keyed by the zone's STAGE (each farm zone / boss room owns one).
@@ -75,19 +81,27 @@ interface SeedResult {
   totalDeaths: number;
   totalWipes: number;
   zones: ZoneMetric[];
+  /** M7: total drops rolled + the final equipped loadout (GEAR run). */
+  drops: number;
+  finalWeapon: string | null;
+  finalArmor: string | null;
 }
 
-function makeSave(cls: HeroClass): SaveData {
+function makeSave(cls: HeroClass, seed: number): SaveData {
   // A cold-start save at stage 1 (first farm zone). Built directly; the world
   // fields are what initGameState fills for a fresh start, mirrored here.
   return {
-    version: 9,
+    version: 10,
     stage: 1,
     gold: 0,
     location: { mapId: "map1", zoneIdx: 1 },
     unlockedZones: { map1: 2 },
     lastFarmZone: { mapId: "map1", zoneIdx: 1 },
     consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+    // M7: cold start owns no gear; deterministic salt + zero counter.
+    equipped: { weapon: null, armor: null },
+    lootSalt: (seed * 2654435761) >>> 0,
+    lootCounter: 0,
     hero: {
       cls,
       level: 1,
@@ -159,6 +173,31 @@ function navInput(s: GameState): Partial<FrameInput> {
  * `buyShopItem` is partial (buys as many as gold + stack room allow). One item type
  * per visit (one intent/step); frequent frontier deaths top both over time.
  */
+/**
+ * M7 gear autopilot (GEAR=1): the hero "owns" whatever drops (the server would
+ * mint it) and wears the best-scoring class-compatible item per slot. Weapon score
+ * = atk; armor score = def·4 + hp (a rough survivability blend). Desired loadout is
+ * the best owned item seen so far; the loop equips toward it one slot per step.
+ */
+function gearCompatible(t: ItemTemplate, cls: HeroClass): boolean {
+  return t.classReq === null || t.classReq === cls;
+}
+function gearScore(t: ItemTemplate): number {
+  return t.slot === "weapon"
+    ? (t.stats.atk ?? 0)
+    : (t.stats.def ?? 0) * 4 + (t.stats.hp ?? 0);
+}
+interface OwnedBest {
+  weapon: string | null;
+  armor: string | null;
+}
+function considerDrop(best: OwnedBest, templateId: string, cls: HeroClass): void {
+  const t = ITEM_TEMPLATES[templateId];
+  if (!t || !gearCompatible(t, cls)) return;
+  const cur = best[t.slot];
+  if (!cur || gearScore(t) > gearScore(ITEM_TEMPLATES[cur])) best[t.slot] = t.id;
+}
+
 const RESTOCK_TARGET = 15;
 function shopInput(s: GameState): Partial<FrameInput> {
   if (zoneAt(s.location).kind !== "town") return {};
@@ -172,7 +211,7 @@ function shopInput(s: GameState): Partial<FrameInput> {
 }
 
 function runSeed(cls: HeroClass, seed: number): SeedResult {
-  const s = initGameState(seed, makeSave(cls));
+  const s = initGameState(seed, makeSave(cls, seed));
   s.autoCast = true;
   s.autoAllocate = true;
   s.autoReturn = true;
@@ -193,6 +232,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let evolveStage: number | null = null;
   let totalDeaths = 0;
   let totalWipes = 0;
+  const bestOwned: OwnedBest = { weapon: null, armor: null };
+  let drops = 0;
 
   for (let i = 0; i < STEPS; i++) {
     const input: FrameInput = { ...navInput(s), ...shopInput(s) };
@@ -200,11 +241,24 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
     const slots = fillAutoSlots(s.heroes[0]);
     if (slots.length) input.setAutoSlots = slots;
+    // Equip toward the best owned item (one slot/step). Weapon first, then armor.
+    if (GEAR && !input.walkToZone) {
+      const eq = s.heroes[0].equipped;
+      if (bestOwned.weapon && eq.weapon !== bestOwned.weapon) {
+        input.equip = { slot: "weapon", templateId: bestOwned.weapon };
+      } else if (bestOwned.armor && eq.armor !== bestOwned.armor) {
+        input.equip = { slot: "armor", templateId: bestOwned.armor };
+      }
+    }
 
     step(s, input);
 
     // Zone clear signals (from events, deterministic).
     for (const e of s.events) {
+      if (e.type === "itemDrop") {
+        drops++;
+        if (GEAR) considerDrop(bestOwned, e.templateId, cls);
+      }
       if (e.type === "zoneUnlocked" && cur.kind === "farm" && cur.clearTime === null) {
         cur.clearTime = s.time;
         cur.levelAtClear = s.heroes[0].level;
@@ -256,6 +310,9 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     totalDeaths,
     totalWipes,
     zones,
+    drops,
+    finalWeapon: s.heroes[0].equipped.weapon,
+    finalArmor: s.heroes[0].equipped.armor,
   };
 }
 
@@ -353,6 +410,12 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
       `deaths: ${results.reduce((a, r) => a + r.totalDeaths, 0)} | ` +
       `boss wipes: ${results.reduce((a, r) => a + r.totalWipes, 0)}`,
   );
+  if (GEAR) {
+    console.log(
+      `  - drops: ${results.map((r) => r.drops).join(",")} | ` +
+        `final gear: ${results.map((r) => `${r.finalWeapon ?? "-"}/${r.finalArmor ?? "-"}`).join(" ")}`,
+    );
+  }
   // Frontier flag: which zones did NOT clear on every seed (a wall/soft-wall).
   const walls = agg.filter((a) => a.clears < n).map((a) => `${a.mapId}/s${a.stage}(${a.kind})`);
   if (walls.length) console.log(`  - not cleared on every seed (frontier): ${walls.join(", ")}`);
@@ -360,8 +423,8 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
 
 function main(): void {
   console.log(
-    `[balance-sim M6 world] ${SIM_SECONDS}s (${STEPS} steps) per seed, ` +
-      `${SEEDS.length} seeds, classes: ${CLASSES.join("/")}`,
+    `[balance-sim ${GEAR ? "M7 GEAR" : "M6 world / M7 no-gear"}] ${SIM_SECONDS}s ` +
+      `(${STEPS} steps) per seed, ${SEEDS.length} seeds, classes: ${CLASSES.join("/")}`,
   );
   const byClass = new Map<HeroClass, ZoneAgg[]>();
   for (const cls of CLASSES) {

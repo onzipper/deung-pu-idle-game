@@ -20,6 +20,8 @@
  */
 
 import { CONFIG, HERO_TYPES, PRIMARY_STAT, SKILL_TYPES } from "@/engine/config";
+import { ITEM_TEMPLATES } from "@/engine/config/items";
+import type { EquippedGear } from "@/engine/config/items";
 import type { Hero, HeroClass, HeroStats, StatKey } from "@/engine/entities";
 
 const ST = CONFIG.stats;
@@ -118,16 +120,44 @@ export function heroManaRegen(cls: HeroClass, intValue: number = ST.base[cls].in
 }
 
 // ---------------------------------------------------------------------------
-// Live-hero convenience wrappers (read the hero's allocated stats).
+// Equipped-gear stat readers (M7). Flat additive on top of level/stat/tier.
+// A no-gear hero (empty loadout) contributes exactly 0 on every axis, so an
+// unarmored hero's combat math is byte-identical to pre-M7 (balance untouched).
+// ---------------------------------------------------------------------------
+
+function equipStatSum(equipped: EquippedGear, key: "atk" | "def" | "hp"): number {
+  let sum = 0;
+  const w = equipped.weapon ? ITEM_TEMPLATES[equipped.weapon] : undefined;
+  const a = equipped.armor ? ITEM_TEMPLATES[equipped.armor] : undefined;
+  if (w) sum += w.stats[key] ?? 0;
+  if (a) sum += a.stats[key] ?? 0;
+  return sum;
+}
+
+/** Flat ATK from equipped gear (weapon + armor). 0 when nothing is equipped. */
+export function equipAtkOf(h: Hero): number {
+  return equipStatSum(h.equipped, "atk");
+}
+/** Flat DEF (per-hit flat mitigation) from equipped gear. 0 when unarmored. */
+export function equipDefOf(h: Hero): number {
+  return equipStatSum(h.equipped, "def");
+}
+/** Flat max-HP from equipped gear. 0 when unarmored. */
+export function equipHpOf(h: Hero): number {
+  return equipStatSum(h.equipped, "hp");
+}
+
+// ---------------------------------------------------------------------------
+// Live-hero convenience wrappers (read the hero's allocated stats + gear).
 // ---------------------------------------------------------------------------
 
 /**
- * Base attack of a live hero (level + primary stat + tier), WITHOUT any transient
- * self ATK buff. Used by the combat-power metric so the HOF number doesn't
- * flicker with a war-cry.
+ * Base attack of a live hero (level + primary stat + tier + equipped weapon),
+ * WITHOUT any transient self ATK buff. Used by the combat-power metric so the
+ * HOF number doesn't flicker with a war-cry. Gear ATK is flat-additive.
  */
 export function heroBaseAtkOf(h: Hero): number {
-  return heroAtk(h.cls, h.level, h.tier, h.stats[PRIMARY_STAT[h.cls]]);
+  return heroAtk(h.cls, h.level, h.tier, h.stats[PRIMARY_STAT[h.cls]]) + equipAtkOf(h);
 }
 /** Live attack INCLUDING the active self ATK buff (used by combat/skills). */
 export function heroAtkOf(h: Hero): number {
@@ -138,7 +168,7 @@ export function heroAtkSpeedOf(h: Hero): number {
   return heroAtkSpeed(h.cls, h.stats.dex);
 }
 export function heroMaxHpOf(h: Hero): number {
-  return heroMaxHp(h.cls, h.level, h.tier, h.stats.vit);
+  return heroMaxHp(h.cls, h.level, h.tier, h.stats.vit) + equipHpOf(h);
 }
 export function heroMaxManaOf(h: Hero): number {
   return heroMaxMana(h.cls, h.stats.int);
@@ -170,5 +200,12 @@ export function combatPower(h: Hero): number {
   const basicDps = atk / heroAtkSpeedOf(h);
   const skillDps = (atk * skillEffectiveMult(h.cls)) / SKILL_TYPES[h.cls].cd;
   const offense = basicDps + skillDps;
-  return Math.round(offense * CONFIG.power.dpsWeight + heroMaxHpOf(h) * CONFIG.power.hpWeight);
+  // heroBaseAtkOf + heroMaxHpOf already fold in equipped weapon/armor ATK/HP;
+  // the flat DEF axis (per-hit mitigation) adds its own survivability term so
+  // gear DEF shows up in the "พลังต่อสู้" scalar too. Monotonic (defWeight ≥ 0).
+  return Math.round(
+    offense * CONFIG.power.dpsWeight +
+      heroMaxHpOf(h) * CONFIG.power.hpWeight +
+      equipDefOf(h) * CONFIG.power.defWeight,
+  );
 }

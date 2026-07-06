@@ -111,6 +111,17 @@ export const saveDataSchema = z
     // trimmed) payload is backfilled to zeros by `migrate()` — same resilience as
     // the world fields above.
     consumables: consumablesSchema.optional(),
+    // M7 gear (SAVE v10). All OPTIONAL so a pre-v10 (or trimmed) payload is
+    // backfilled by `migrate()` (equipped → empty, counter → 0, salt → derived) —
+    // same resilience as the fields above. `equipped` is a weapon/armor templateId
+    // cache (nullable strings; validity re-checked at equip time, so a stale/foreign
+    // id never needlessly 400s). The DB item ledger is authoritative regardless.
+    equipped: z
+      .object({ weapon: z.string().nullable(), armor: z.string().nullable() })
+      .strict()
+      .optional(),
+    lootCounter: z.number().int().min(0).optional(),
+    lootSalt: z.number().int().min(0).optional(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

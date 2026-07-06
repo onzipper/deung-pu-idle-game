@@ -6,6 +6,8 @@
  * target id or a fixed ground-target point. Factories live in `./factory`.
  */
 
+import type { EquippedGear } from "@/engine/config/items";
+
 /** Player hero classes (POC: sword / archer / mage). */
 export type HeroClass = "swordsman" | "archer" | "mage";
 
@@ -225,6 +227,14 @@ export interface Hero {
    * (so a fresh, unallocated hero sits exactly on its class baseline). Persisted.
    */
   stats: HeroStats;
+  /**
+   * Equipped gear loadout (M7): one weapon + one armor templateId, or null.
+   * Stats (atk/def/hp) resolve through `ITEM_TEMPLATES` and apply while equipped
+   * (systems/stats `equip*Of`, combat def mitigation). classReq is enforced at
+   * the equip intent (a class-mismatch is rejected). Persisted per save (SAVE
+   * v10) as a SIM CACHE — the DB item ledger is authoritative, boot payload wins.
+   */
+  equipped: EquippedGear;
 }
 
 export interface Enemy {
