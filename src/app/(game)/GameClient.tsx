@@ -313,7 +313,13 @@ async function performAutoSell(): Promise<void> {
     sellRare: store.autoSellRare,
     keepBetterStat: store.autoSellKeepBetterStat,
   });
-  if (ids.length === 0) return;
+  if (ids.length === 0) {
+    // Bag full but the rules matched nothing — the engine latches its sell-trip
+    // watermark and stops tripping; tell the player WHY the bot gave up (fix =
+    // loosen the rules in Settings or sell manually).
+    store.pushNotice("autoSellNothing");
+    return;
+  }
   const result = await executeSell(ids);
   if (result.ok && result.soldCount > 0) {
     useGameStore.getState().pushNotice("autoSellDone", {

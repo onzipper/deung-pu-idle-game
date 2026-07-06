@@ -225,6 +225,13 @@ export const CONFIG = {
       scrollReserve: 3,
       goldReserve: 0,
     },
+    // How long a SELL trip waits in town (s) for the client's async sell API to
+    // shrink the fed `inventoryCount` below the cap before giving up and walking
+    // home. On give-up the count is latched as a watermark and no new sell trip
+    // starts until the count drops below it (or the settings change) — the
+    // anti-warp-loop guard (2026-07-06 bug: bot looped town trips burning
+    // scrolls whenever the auto-sell rules matched nothing).
+    sellDwellSeconds: 6,
   },
   travel: {
     // Fast-travel channel time (s). The hero stands still (no hunt/skills) and any

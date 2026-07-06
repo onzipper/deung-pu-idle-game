@@ -22,6 +22,7 @@
 
 import { CONFIG } from "@/engine/config";
 import { INVENTORY_CAP } from "@/engine/config/items";
+import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
 import {
   buyShopItem,
@@ -80,6 +81,10 @@ export function normalizeBotSettings(saved: Partial<BotSettings> | undefined): B
  */
 export function setBotSettings(state: GameState, patch: Partial<BotSettings>): void {
   state.bot = normalizeBotSettings({ ...state.bot, ...patch });
+  // A settings change is the player adjusting the automation (e.g. fixing
+  // auto-sell rules after a gave-up trip) — drop the failure latch so the next
+  // full-bag check may trip again.
+  state.sellTripWatermark = null;
 }
 
 /**
@@ -91,6 +96,16 @@ export function setBotSettings(state: GameState, patch: Partial<BotSettings>): v
  * doesn't track it) — the sell-trip trigger.
  */
 export function updateBots(state: GameState, inventoryCount?: number): void {
+  // In-town SELL-trip dwell (anti-warp-loop, 2026-07-06): stand in town until the
+  // client's async sell shrinks the fed count below the cap (success — return
+  // early) or the dwell times out (give up — latch the watermark so a
+  // rules-match-nothing sweep can't re-trip forever). Runs BEFORE the enabled
+  // gate: even if the player disables the bot mid-dwell, the trip still walks home.
+  if (state.botDwell !== null) {
+    tickSellDwell(state, inventoryCount);
+    return;
+  }
+
   const bot = state.bot;
   if (!bot.enabled && !bot.sellTripEnabled) return;
   if (state.traveling || state.fastTravelCast) return;
@@ -98,6 +113,17 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
   if (zoneAt(state.location).kind !== "farm") return; // trips initiate from farming
   const hero = state.heroes[0];
   if (!hero || hero.dead) return;
+
+  // A prior sell trip gave up with the bag still at `sellTripWatermark` items —
+  // stay latched until the count actually drops below it (a manual/late sell
+  // landed) so we never loop scroll-burning trips that sell nothing.
+  if (
+    state.sellTripWatermark !== null &&
+    typeof inventoryCount === "number" &&
+    inventoryCount < state.sellTripWatermark
+  ) {
+    state.sellTripWatermark = null;
+  }
 
   // Restock is due only if a potion is below target AND the hero can afford at least
   // ONE of the short potions within the gold floor. The affordability gate prevents a
@@ -115,10 +141,44 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
   const needSell =
     bot.sellTripEnabled &&
     typeof inventoryCount === "number" &&
-    inventoryCount >= INVENTORY_CAP;
+    inventoryCount >= INVENTORY_CAP &&
+    state.sellTripWatermark === null; // latched = a prior trip sold nothing
   if (!needRestock && !needSell) return;
 
   beginBotTrip(state, needRestock, needSell);
+}
+
+/** One fixed-dt tick of the in-town sell dwell (see `updateBots`). */
+function tickSellDwell(state: GameState, inventoryCount?: number): void {
+  // Defensive: a dwell only means something while standing in town. If the state
+  // was force-moved (death, manual walk queued the same frame), just drop it.
+  if (state.traveling || zoneAt(state.location).kind !== "town") {
+    state.botDwell = null;
+    return;
+  }
+  const count = typeof inventoryCount === "number" ? inventoryCount : null;
+  if (count !== null && count < INVENTORY_CAP) {
+    // The client's sell landed — bag has room again. Success: no latch.
+    state.botDwell = null;
+    state.sellTripWatermark = null;
+    botReturnToFarm(state);
+    return;
+  }
+  state.botDwell = (state.botDwell ?? 0) - FIXED_DT;
+  if (state.botDwell <= 0) {
+    // Gave up: bag still full. Latch the count so we don't re-trip until it drops.
+    state.botDwell = null;
+    if (count !== null) state.sellTripWatermark = count;
+    botReturnToFarm(state);
+  }
+}
+
+/** Walk home to the last farm zone (shared by restock-only arrival + dwell end). */
+function botReturnToFarm(state: GameState): void {
+  const back = state.lastFarmZone;
+  if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
+    beginTransit(state, back, CONFIG.world.transitSeconds, "walk");
+  }
 }
 
 /**
@@ -156,10 +216,15 @@ export function onBotTownArrival(state: GameState): void {
     pending.restock && pending.sell ? "restockSell" : pending.sell ? "sell" : "restock";
   state.events.push({ type: "townArrived", reason });
 
-  const back = state.lastFarmZone;
-  if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
-    beginTransit(state, back, CONFIG.world.transitSeconds, "walk");
+  if (pending.sell) {
+    // The sell is a CLIENT-side async API call fired off the townArrived event —
+    // dwell in town for it instead of walking home in this same step (the
+    // original walk-home-immediately behavior warp-looped: bag never shrank
+    // before the next full-bag trigger back at the farm).
+    state.botDwell = CONFIG.bot.sellDwellSeconds;
+    return;
   }
+  botReturnToFarm(state);
 }
 
 /** Buy potions up to their targets, then scrolls up to the reserve, all within the

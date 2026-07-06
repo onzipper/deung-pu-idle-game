@@ -118,6 +118,22 @@ export interface GameState {
    */
   botPending: { restock: boolean; sell: boolean } | null;
   /**
+   * Seconds left of a SELL trip's in-town dwell (M7.5 anti-warp-loop fix), or null.
+   * While non-null the bot stands in town waiting for the client's async sell to
+   * shrink the fed `inventoryCount` below the cap (then returns early) or for the
+   * timer to run out (then returns and latches `sellTripWatermark`). Transient —
+   * NEVER persisted.
+   */
+  botDwell: number | null;
+  /**
+   * The fed `inventoryCount` at which the last sell trip GAVE UP (dwell timeout with
+   * the bag still full), or null. Suppresses new sell trips until the count drops
+   * below it (something actually sold) or the bot settings change — without it a
+   * rules-match-nothing auto-sell warp-loops town trips forever. Transient — NEVER
+   * persisted (a reload retries once, which is fine).
+   */
+  sellTripWatermark: number | null;
+  /**
    * An in-flight FAST-TRAVEL channel (M7.5), or null. The hero stands still while it
    * counts down; damage cancels it, completion warps to the target's gate-side x.
    * `lastHp` tracks the hero's HP to detect a mid-channel hit. Transient — NEVER
@@ -353,6 +369,8 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     // (unchanged behaviour for a fresh/pre-v12 start).
     autoHunt: typeof save?.autoHunt === "boolean" ? save.autoHunt : true,
     botPending: null,
+    botDwell: null,
+    sellTripWatermark: null,
     fastTravelCast: null,
     // NPC consumables (M6, SAVE v9): restore saved stacks, else empty. Use-cooldowns
     // are transient (rebuilt empty). Auto-use toggles/thresholds seed from config

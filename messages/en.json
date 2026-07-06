@@ -540,6 +540,7 @@
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
+    "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",

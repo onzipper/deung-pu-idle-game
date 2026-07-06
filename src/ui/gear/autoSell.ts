@@ -64,8 +64,12 @@ export function selectAutoSellItemIds(
     if (t.rarity === "common" && !rules.sellCommon) continue;
     if (t.rarity === "rare" && !rules.sellRare) continue;
     if (rules.keepBetterStat) {
-      const baseline = equippedStatSum[t.slot] ?? 0;
-      if (statSum(t.stats) > baseline) continue; // keep: it beats what's worn
+      // Guard only when something IS worn in that slot. An empty slot must NOT
+      // baseline to 0 — that kept every item (all have positive stats), the
+      // auto-sell matched nothing, and the sell-trip bot warp-looped town trips
+      // (2026-07-06 bug). With nothing to compare, the rarity rule alone decides.
+      const baseline = equippedStatSum[t.slot];
+      if (baseline !== undefined && statSum(t.stats) > baseline) continue;
     }
     out.push(item.instanceId);
   }

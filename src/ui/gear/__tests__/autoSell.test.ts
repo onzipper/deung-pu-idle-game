@@ -91,6 +91,21 @@ describe("selectAutoSellItemIds", () => {
     expect(ids).toEqual([]); // "better" is kept, "equipped" is never touched
   });
 
+  it("REGRESSION keep-guard: an EMPTY slot keeps nothing (rarity rule alone decides)", () => {
+    // 2026-07-06 bug: an empty slot baselined to 0, so EVERY item "beat" it and
+    // was kept — auto-sell matched nothing and the sell-trip bot warp-looped.
+    const items = [
+      item({ instanceId: "w1", templateId: "common_sword" }),
+      item({ instanceId: "a1", templateId: "common_armor" }),
+    ]; // NOTHING equipped in either slot
+    const ids = selectAutoSellItemIds(items, TEMPLATES, {
+      sellCommon: true,
+      sellRare: false,
+      keepBetterStat: true,
+    });
+    expect(ids.sort()).toEqual(["a1", "w1"]);
+  });
+
   it("keep-guard: still sells a candidate that does NOT beat the equipped item", () => {
     const items = [
       item({ instanceId: "equipped", templateId: "rare_sword", equippedSlot: "weapon" }),

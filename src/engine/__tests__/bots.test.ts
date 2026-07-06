@@ -269,6 +269,89 @@ describe("sell-trip bot (inventoryCount trigger)", () => {
     // Restock still happened as part of the coalesced trip.
     expect(s.consumables.hpPotion).toBeGreaterThan(0);
   });
+
+  // ── anti-warp-loop regression (2026-07-06 bug) ─────────────────────────────
+  // Original behavior: arrival emitted townArrived and walked home the SAME
+  // step; a sell that never landed (rules matched nothing / async in flight)
+  // left the bag full, so the bot re-tripped forever, burning scrolls.
+
+  /** Step `n` times feeding `count`, tallying townArrived events (cleared each step). */
+  function stepCounting(s: GameState, n: number, count: number): number {
+    let arrivals = 0;
+    for (let i = 0; i < n; i++) {
+      step(s, { inventoryCount: count });
+      if (s.events.some((e) => e.type === "townArrived")) arrivals++;
+    }
+    return arrivals;
+  }
+
+  function sellBotState(): GameState {
+    const s = initGameState(1, soloSave("archer", 4));
+    unlockAll(s);
+    s.bot = { ...defaultBotSettings(), sellTripEnabled: true };
+    s.consumables.returnScroll = 5; // warp trips = the fast loop the bug produced
+    return s;
+  }
+
+  it("REGRESSION: a sell that never lands makes exactly ONE trip, then latches (no warp loop)", () => {
+    const s = sellBotState();
+    // 6000 steps ≈ 100s — room for many loops under the old behavior (dwell 6s
+    // + walk home ≈ 8s per round trip). The watermark must hold it to one.
+    const arrivals = stepCounting(s, 6000, INVENTORY_CAP);
+    expect(arrivals).toBe(1);
+    expect(s.sellTripWatermark).toBe(INVENTORY_CAP);
+    expect(s.consumables.returnScroll).toBe(4); // exactly one scroll spent
+  });
+
+  it("dwells in town until the fed count drops (sell landed), then returns unlatched", () => {
+    const s = sellBotState();
+    // Reach town (warp = same-step arrival).
+    const arrived = runUntilInput(
+      s,
+      { inventoryCount: INVENTORY_CAP },
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      600,
+    );
+    expect(arrived).toBe(true);
+    expect(s.botDwell).not.toBeNull(); // waiting for the client's sell
+    expect(s.traveling).toBeNull();
+    // The client's sell lands: count drops → the dwell ends, no latch.
+    step(s, { inventoryCount: INVENTORY_CAP - 40 });
+    expect(s.botDwell).toBeNull();
+    expect(s.sellTripWatermark).toBeNull();
+    expect(s.traveling).not.toBeNull(); // walking home
+    // Back at the farm and refilled later → a SECOND trip is allowed.
+    const second = runUntilInput(
+      s,
+      { inventoryCount: INVENTORY_CAP },
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      3000,
+    );
+    expect(second).toBe(true);
+  });
+
+  it("releases the latch when the count finally drops below the watermark", () => {
+    const s = sellBotState();
+    stepCounting(s, 6000, INVENTORY_CAP); // one trip, latched, back at the farm
+    expect(s.sellTripWatermark).toBe(INVENTORY_CAP);
+    // Still full → suppressed.
+    expect(stepCounting(s, 1200, INVENTORY_CAP)).toBe(0);
+    // A manual sell shrinks the bag below the watermark → latch clears...
+    step(s, { inventoryCount: INVENTORY_CAP - 10 });
+    expect(s.sellTripWatermark).toBeNull();
+    // ...and a refill trips again.
+    expect(stepCounting(s, 1200, INVENTORY_CAP)).toBe(1);
+  });
+
+  it("releases the latch on a bot-settings change (player fixed the rules)", () => {
+    const s = sellBotState();
+    stepCounting(s, 6000, INVENTORY_CAP); // latched
+    expect(s.sellTripWatermark).toBe(INVENTORY_CAP);
+    // The settings intent clears the latch EARLY in the same step, so with a
+    // scroll held the re-trip warps + arrives within this very step.
+    step(s, { inventoryCount: INVENTORY_CAP, setBotSettings: {} });
+    expect(s.events.some((e) => e.type === "townArrived")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
