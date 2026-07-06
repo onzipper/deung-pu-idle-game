@@ -88,9 +88,11 @@ describe("event buffer lifecycle", () => {
 describe("combat events", () => {
   it("emits mobAggroed when an aggressive mob's radius triggers (M6 สนามล่ามอน)", () => {
     // A map3 farm zone mixes in aggressive mobs (aggro ramp) — hunting toward them
-    // trips at least one aggro radius, emitting mobAggroed.
+    // trips at least one aggro radius, emitting mobAggroed. Window sized for the
+    // gradual re-entry fill (M6 hunt follow-up): the field seeds at a fraction of the
+    // cap and trickles up, so aggressive mobs take a few seconds to populate.
     const s = initGameState(1, soloSave("swordsman", 12));
-    const evs = collectEvents(s, 1500);
+    const evs = collectEvents(s, 4000);
     const aggro = evs.find((e) => e.type === "mobAggroed");
     expect(aggro).toBeDefined();
     expect(aggro).toMatchObject({ type: "mobAggroed" });

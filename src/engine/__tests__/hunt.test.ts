@@ -13,7 +13,7 @@ import {
 const HERO_MELEE_RANGE = HERO_TYPES.swordsman.range;
 import { updateEnemies } from "@/engine/systems/combat";
 import { zoneSpawnParams } from "@/engine/systems/waves";
-import { applyDamage } from "@/engine/systems/damage";
+import { applyDamage, applyAoeDamage } from "@/engine/systems/damage";
 import { makeStubEnemy, soloSave, worldAutopilot } from "./helpers";
 
 /**
@@ -44,18 +44,26 @@ function aggressiveMob(id: number, x: number, aggroRadius: number): Enemy {
 }
 
 describe("spawn pool (M6)", () => {
-  it("bursts to the map's maxAlive on entry, scattered across the field", () => {
+  it("gradual re-entry fill: bursts only a fraction on entry, then trickles up to the cap", () => {
     const s = initGameState(1);
-    step(s, {}); // one step: burst fill
+    step(s, {}); // one step: PARTIAL burst (not the full swarm)
     const sp = zoneSpawnParams(zoneAt(s.location));
-    expect(s.enemies.length).toBe(sp.maxAlive);
-    const xs = s.enemies.map((e) => e.x);
-    for (const x of xs) {
+    const seed = Math.max(1, Math.ceil(sp.maxAlive * CONFIG.hunt.reentryBurstFrac));
+    expect(s.enemies.length).toBe(seed);
+    expect(seed).toBeLessThan(sp.maxAlive); // genuinely a ramp, not an instant re-swarm
+    const xs0 = s.enemies.map((e) => e.x);
+    for (const x of xs0) {
       expect(x).toBeGreaterThanOrEqual(sp.spawnMinX - 1e-6);
       expect(x).toBeLessThanOrEqual(sp.spawnMaxX + 1e-6);
     }
-    // Genuinely spread out (not stacked on one spawn edge).
-    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(40);
+    expect(Math.max(...xs0) - Math.min(...xs0)).toBeGreaterThan(40); // scattered
+    // The respawn cadence refills the field all the way up to the alive-field cap.
+    let maxSeen = s.enemies.length;
+    for (let i = 0; i < 60 * 25; i++) {
+      step(s, {});
+      maxSeen = Math.max(maxSeen, s.enemies.length);
+    }
+    expect(maxSeen).toBe(sp.maxAlive);
   });
 
   it("is spawn-DETERMINISTIC: same seed => identical kinds + positions", () => {
@@ -138,6 +146,78 @@ describe("temperament (M6)", () => {
 
     for (let i = 0; i < 60; i++) updateEnemies(s);
     expect(mob.engaged).toBe(false);
+  });
+});
+
+describe("AoE-aggro rule (M6 hunt follow-up)", () => {
+  const HP0 = 1_000_000;
+
+  it("one AoE damages the whole passive cluster but wakes at most aoeWakeCap of them", () => {
+    const s = initGameState(1);
+    s.spawnPaused = true;
+    // A tight passive cluster straddling the impact centre (all inside the wake radius).
+    const mobs = [0, 1, 2, 3, 4, 5].map((i) => passiveMob(i + 1, 400 + i * 6));
+    s.enemies = mobs;
+
+    applyAoeDamage(s, s.enemies, 415, 90, 5, "skill"); // radius 90 covers all 6
+
+    // Damage is unaffected — every mob in the blast took the hit.
+    expect(mobs.every((m) => m.hp === HP0 - 5)).toBe(true);
+    // ...but retaliation is capped: only aoeWakeCap of them turned hostile.
+    expect(mobs.filter((m) => m.engaged).length).toBe(CONFIG.hunt.aoeWakeCap);
+  });
+
+  it("passives outside the inner wake radius take damage but stay passive", () => {
+    const s = initGameState(1);
+    s.spawnPaused = true;
+    // radius 100 -> wake radius 60. The near mob (d0) wakes; the edge mob (d85, still
+    // inside the 100 blast) takes damage but stays passive — it keeps its retreat room.
+    const near = passiveMob(1, 400);
+    const edge = passiveMob(2, 485);
+    s.enemies = [near, edge];
+
+    applyAoeDamage(s, s.enemies, 400, 100, 7, "skill");
+
+    expect(near.hp).toBe(HP0 - 7);
+    expect(edge.hp).toBe(HP0 - 7); // damaged
+    expect(near.engaged).toBe(true); // at the impact -> woke
+    expect(edge.engaged).toBe(false); // edge of blast -> stayed passive
+  });
+
+  it("does not draw from the RNG — an AoE wake is byte-identical on replay", () => {
+    const run = (): string => {
+      const s = initGameState(55);
+      s.spawnPaused = true;
+      s.enemies = [0, 1, 2, 3].map((i) => passiveMob(i + 1, 380 + i * 10));
+      applyAoeDamage(s, s.enemies, 400, 80, 4, "skill");
+      return JSON.stringify(s.enemies);
+    };
+    expect(run()).toBe(run());
+  });
+});
+
+describe("min-spacing spawn placement (M6 hunt follow-up)", () => {
+  it("a filled field is spread out — no two mobs stacked on a point", () => {
+    // best-candidate placement keeps each spawn away from the nearest existing mob,
+    // so even a dense (15-18) field never stacks mobs. Check a few seeds.
+    for (const seed of [1, 2, 3, 42]) {
+      const s = initGameState(seed);
+      for (let i = 0; i < 60 * 20; i++) step(s, {});
+      const xs = [...s.enemies.map((e) => e.x)].sort((a, b) => a - b);
+      let minGap = Infinity;
+      for (let i = 1; i < xs.length; i++) minGap = Math.min(minGap, xs[i] - xs[i - 1]);
+      expect(minGap).toBeGreaterThan(4); // no visual stack
+    }
+  });
+
+  it("placement stays deterministic (same seed => identical positions)", () => {
+    const a = initGameState(321);
+    const b = initGameState(321);
+    for (let i = 0; i < 400; i++) {
+      step(a, {});
+      step(b, {});
+    }
+    expect(a.enemies.map((e) => e.x)).toEqual(b.enemies.map((e) => e.x));
   });
 });
 

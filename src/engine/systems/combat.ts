@@ -22,7 +22,7 @@ import {
   heroManaRegenOf,
   heroMaxManaOf,
 } from "@/engine/systems/stats";
-import { applyDamage, isHero } from "@/engine/systems/damage";
+import { applyDamage, applyAoeDamage, damageInRadius, isHero } from "@/engine/systems/damage";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossKilled } from "@/engine/systems/boss";
@@ -357,9 +357,12 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
     const d = Math.hypot(dx, dy);
     if (d <= arrive) {
       const src = projHitSource(p.kind);
-      for (const target of list) {
-        if (Math.abs(target.x - p.tx) < p.aoe) applyDamage(state, target, p.damage, src);
-      }
+      // AoE-aggro rule (M6 hunt follow-up). Arrow-rain decided its capped wake ONCE
+      // at cast (skills.ts), so its 9 drops deal NO-WAKE damage — otherwise each drop
+      // would re-aggro the field. Single-impact AoEs (mage basic orb, meteor) wake the
+      // capped nearest set per impact.
+      if (p.kind === "rainArrow") damageInRadius(state, list, p.tx, p.aoe, p.damage, src);
+      else applyAoeDamage(state, list, p.tx, p.aoe, p.damage, src);
       return true;
     }
     p.x += (dx / d) * p.speed * FIXED_DT;

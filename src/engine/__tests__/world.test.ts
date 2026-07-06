@@ -242,10 +242,21 @@ describe("offline replay across a death (never stalls)", () => {
 
     for (let i = 0; i < 20_000; i++) step(s, {}); // offline replay: input-free
 
-    expect(s.heroes[0].dead).toBe(false); // alive again
+    // The replay cutoff can land mid death-cycle (walking home / reviving) — the
+    // anti-stall guarantee is that it ALWAYS recovers within a bounded window (one
+    // revive + a transit hop), not that it's alive on an arbitrary frame. Bank
+    // signals below prove it kept farming, not livelocking.
+    expect(runUntil(s, (st) => !st.heroes[0].dead, 2_000)).toBe(true); // always revives
     expect(zoneAt(s.location).kind).not.toBe("boss"); // not stuck mid boss room
     expect(s.gold).toBeGreaterThan(goldStart); // banked earnings after returning
-    expect(s.kills).toBeGreaterThan(0);
+    // Resumes hunting after recovery (s.kills resets on the death->town->zone trip,
+    // so tally fresh kill EVENTS rather than the reset counter).
+    let resumed = 0;
+    for (let i = 0; i < 3_000 && resumed === 0; i++) {
+      step(s, {});
+      for (const e of s.events) if (e.type === "kill") resumed++;
+    }
+    expect(resumed).toBeGreaterThan(0);
   });
 
   it("the world autopilot progresses across maps without stalling", () => {

@@ -132,6 +132,33 @@ export const CONFIG = {
     /** Hero field bounds: left clamp (don't back off-screen) + right margin. */
     heroMinX: 55,
     fieldRightMargin: 24,
+
+    // ---- M6 hunt follow-ups (engine, 2026-07-06 — flagged in docs/balance-m6.md) ----
+    // (1) Gradual RE-ENTRY fill. Entering/re-entering a farm zone used to BURST the
+    // field to `maxAlive` in one step — on a death respawn that re-swarmed the
+    // returning hero instantly (no retreat room; the squishy archer's AoE-aggro
+    // death-spiral walled it at s13). Instead the field bursts only THIS FRACTION of
+    // `maxAlive` on entry, then the normal respawn cadence (`respawnDelay`) trickles
+    // it up to the cap over a few seconds — so a returning kiter gets breathing room
+    // while the field refills. Still ends up FULL (the owner's "alive field" intent
+    // is preserved; only the first seconds after each entry ramp). Deterministic.
+    reentryBurstFrac: 0.35,
+    // (2) Min-spacing spawn PLACEMENT (best-candidate). A spawn draws THIS many
+    // candidate x's (a FIXED count so the RNG draw-count per spawn stays BOUNDED +
+    // deterministic — spawn placement legitimately uses the seeded stream) and keeps
+    // the one FARTHEST from the nearest existing mob, so a dense field reads spread
+    // out instead of stacking mobs on a point. 1 = plain uniform random (old behaviour).
+    spawnCandidates: 5,
+    // (3) AoE-AGGRO rule. A single AoE (arrow rain / meteor / whirl / frost) DAMAGES
+    // every mob in its blast (unchanged), but must NOT wake the whole passive cluster
+    // — the archer's rain used to aggro every passive it clipped, swarming its kite in
+    // a dense field. Retaliation is limited to the mobs NEAREST the impact, within
+    // `aoeWakeRadiusFrac × blastRadius`, capped at `aoeWakeCap` per impact
+    // (deterministic nearest-first + id tie-break; NO RNG — combat never draws from the
+    // stream). Edge-of-blast passives take damage but stay passive, so an AoE farmer
+    // keeps retreat room. The directly-targeted mob (at the impact centre) always wakes.
+    aoeWakeRadiusFrac: 0.6,
+    aoeWakeCap: 2,
   },
 
   // ---- NPC shop / consumables (M6 "เมืองหลัก + NPC shops", ROADMAP task) ----

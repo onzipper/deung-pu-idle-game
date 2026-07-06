@@ -346,7 +346,11 @@ Farm-zone clear time per stage (mean s), new vs the task-3 baseline:
 
 ### Flagged (systemic / for follow-up)
 
-- **Archer frontier wall shifted s15 → s13.** The squishy archer **self-aggros the
+> **Both items below RESOLVED 2026-07-06 — see "M6 task 5 — Hunt follow-ups" at the
+> bottom of this doc** (engine-side gradual re-entry fill + AoE-aggro rule + min-spacing
+> placement). Kept here for the trail of *why* they were engine work, not knobs.
+
+- **[RESOLVED]** **Archer frontier wall shifted s15 → s13.** The squishy archer **self-aggros the
   passive field via its AoE arrow-rain** (passives retaliate once hit) and, in an
   15-20-mob field, its kite has **no retreat room** → it gets swarmed at the frontier.
   This is a **systemic interaction with density**, not a knob: cutting aggro fractions
@@ -357,7 +361,7 @@ Farm-zone clear time per stage (mean s), new vs the task-3 baseline:
   a **gradual re-entry fill** instead of the full `spawnBurst` (the burst re-swarms the
   hero the instant it respawns back into a farmed zone), and/or a temperament/ AoE-aggro
   rule so a single AoE doesn't wake the whole cluster.
-- **Spawn placement is uncollided uniform random**, so a 15-18-mob field **will visually
+- **[RESOLVED]** **Spawn placement is uncollided uniform random**, so a 15-18-mob field **will visually
   overlap** at points (mobs can stack on a position). Acceptable for now; the band was
   widened (0.22-0.98) to lower overlap density. A min-spacing/Poisson placement is an
   engine follow-up if it reads badly.
@@ -370,3 +374,90 @@ Farm-zone clear time per stage (mean s), new vs the task-3 baseline:
   EVENTS (s.kills resets on the death→town trip an unsustained lvl-1 melee now takes in
   a dense field); `archer-volley.test.ts` + `phase-b.test.ts` scenarios now set
   `spawnPaused` to isolate their single hand-placed target from the denser/wider burst.
+
+---
+
+## M6 task 5 — Hunt follow-ups (engine, 2026-07-06)
+
+Closes the two items flagged in task 4. All THREE mechanisms are **engine-side, pure,
+deterministic** (no RNG drawn in combat — the seeded stream stays spawn-composition
+only; spawn PLACEMENT legitimately uses it), **SAVE unchanged** (the whole spawn/hunt
+state is transient), `state.events` untouched. Files: `engine/config`, `engine/systems/{damage,combat,skills,waves}.ts`.
+
+### Mechanisms
+
+1. **Gradual re-entry fill** (`waves.updateSpawns`). Entering/re-entering a farm zone
+   used to `spawnBurst` the field to `maxAlive` in ONE step — on a death respawn that
+   re-swarmed the returning kiter instantly (no retreat room → the archer's AoE-aggro
+   death-spiral). Now the burst seeds only `reentryBurstFrac × maxAlive`; the normal
+   `respawnDelay` cadence trickles it up to the cap over a few seconds. The field still
+   ends up FULL (the "alive field" intent holds) — only the first seconds after each
+   entry ramp, which is exactly when a returning hero needs room.
+
+2. **AoE-aggro rule** (`damage.wakeNearestPassives` / `damageInRadius` / `applyAoeDamage`).
+   An AoE still **damages every mob in its blast** (unchanged), but **retaliation** is
+   limited: only the passive mobs NEAREST the impact — within `aoeWakeRadiusFrac ×
+   radius`, at most `aoeWakeCap` — wake; edge-of-blast passives take damage but stay
+   passive. Selection is deterministic (nearest-first, LOWER-id tie-break; no RNG).
+   Single-impact AoEs (mage basic orb, meteor, whirl, frost) cap the wake **per impact**.
+   The archer's **arrow rain is the special case**: its 9 drops would each re-aggro the
+   field, so the volley decides its capped wake **ONCE at cast** (near the cluster
+   centroid) and the drops then deal **no-wake** damage. The directly-targeted mob (at
+   the impact centre) always wakes, so basic single-target attacks are unaffected.
+
+3. **Min-spacing spawn placement** (`waves.pickSpawnX`). Best-candidate: each spawn draws
+   a FIXED `spawnCandidates` count of candidate x's and keeps the one FARTHEST from the
+   nearest existing mob. The fixed count keeps the per-spawn RNG draw-count **bounded +
+   deterministic**. A dense field now reads spread out instead of stacking mobs on a
+   point (no more visual overlap piles).
+
+### Knobs (all new, in `CONFIG.hunt`)
+
+| knob | value | effect |
+|---|---:|---|
+| `reentryBurstFrac` | 0.35 | fraction of `maxAlive` burst on zone entry; rest trickles in |
+| `aoeWakeRadiusFrac` | 0.6 | inner wake radius as a fraction of the blast radius |
+| `aoeWakeCap` | 2 | max passives an AoE impact (or one rain cast) may wake |
+| `spawnCandidates` | 5 | best-candidate count for min-spacing placement (fixed RNG draws) |
+
+Tuned FIRST (no existing curve touched): the ×1.6 `killGoal` / `xpPerKill` / `goldPerKill`
+retune and the per-map `maxAlive` / `respawnDelay` / aggro knobs from task 4 are **unchanged**.
+
+### Sim (`pnpm sim`, `SIM_SECONDS=2400`, 5 seeds) — archer frontier (the flagged range)
+
+Farm-zone clear time (mean s) / clears, **before** = task-4 baseline (wall at s13),
+**after** = this follow-up:
+
+| stage | archer before | archer after |
+|---:|---|---|
+| s10 | 173 (5/5) | **116 (5/5)** |
+| s11 | 456 (wall) | **300 (5/5)** |
+| s12 | 610 (wall) | **317 (5/5)** |
+| s13 | wall (0/5) | **422 (2/5)** |
+| s14 | wall (0/5) | wall (0/5) — now **reached** |
+| s15 | wall | not reached |
+
+The archer's frontier wall **moved back s13 → s14**: it now clears s11 + s12 in full and
+pushes into s13/s14 (deaths at the belt roughly HALVED — s11 12 vs the old swarm-outs).
+Sword + mage frontiers also smoothed from the same AoE-aggro + gradual-fill relief
+(sword s13 387→275, s14 584→294; mage s13 364→309) without breaking their walls.
+
+### Acceptance — met
+
+| criterion | result |
+|---|---|
+| archer wall moves back from s13 → s14/s15 | ✅ clears s12 5/5, s13 2/5, reaches s14 |
+| **s15 soft-wall INTACT (no class beats the s15 boss)** | ✅ s15 farm 0/5 for every class that reaches it; no class reaches the s15 boss |
+| map1 + map2 = 0 permanent walls / 0 boss wipes, all classes | ✅ all farm + both boss rooms 5/5, **0 wipes** (sword/archer/mage) |
+| class change lands at stage 5 | ✅ 5/5 all classes, all seeds |
+| autopilot never stalls | ✅ long-run + pure-farm anti-stall tests green (324 tests) |
+
+### Tests
+
+`hunt.test.ts`: gradual-fill test (partial burst → trickles to cap), AoE-aggro rule
+(whole cluster damaged but ≤`aoeWakeCap` wake; edge-of-blast passives stay passive;
+byte-identical replay = no RNG), min-spacing (no stacked mobs across seeds; deterministic).
+`events.test.ts` mobAggroed window widened for the ramped fill. `world.test.ts` offline-replay
+assertion made robust to landing mid death-cycle (bounded revive + fresh kill events) —
+the RNG-stream shift from min-spacing moves which frame the hero is dead on; progress
+(gold banked, kills resumed) is what's asserted.

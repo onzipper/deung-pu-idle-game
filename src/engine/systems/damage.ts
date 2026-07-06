@@ -27,18 +27,25 @@ function targetKind(t: Hero | Enemy | Boss): HitTargetKind {
  * Apply `amount` damage; start a hero's revive timer when it drops. Emits a
  * `hit` event (and `heroDown` on a fresh hero death) tagged with `source` so the
  * render layer can flavour the reaction.
+ *
+ * `wakePassive` (default true) controls the passive-mob RETALIATION latch: a
+ * direct/targeted hit always wakes its victim, but AoE callers (see
+ * `applyAoeDamage`) pass false for collateral splash so one blast can't aggro a
+ * whole passive cluster (M6 hunt follow-up). No RNG; the seeded stream is
+ * spawn-composition only.
  */
 export function applyDamage(
   state: GameState,
   target: Hero | Enemy | Boss,
   amount: number,
   source: HitSource,
+  wakePassive = true,
 ): void {
   target.hp -= amount;
   // Passive-mob RETALIATION (M6 "สนามล่ามอน"): a mob that is HIT starts fighting
   // back, even if it never initiated. Aggressive mobs latch the same flag on aggro
   // (combat.updateEnemies). The boss has no `engaged` field (its own AI).
-  if (!isHero(target) && "engaged" in target) target.engaged = true;
+  if (wakePassive && !isHero(target) && "engaged" in target) target.engaged = true;
   state.events.push({
     type: "hit",
     target: targetKind(target),
@@ -59,4 +66,66 @@ export function applyDamage(
       y: target.y,
     });
   }
+}
+
+/**
+ * The AoE-aggro rule (M6 hunt follow-up): WAKE only the passive mobs NEAREST the
+ * blast centre — within `aoeWakeRadiusFrac × radius`, at most `aoeWakeCap` of them —
+ * so one AoE never aggroes an entire dense passive cluster (which used to swarm the
+ * kiting archer at the frontier). Damage is applied SEPARATELY (see `damageInRadius`
+ * / `applyAoeDamage`); this only latches retaliation. Already-engaged mobs and the
+ * boss are ignored (nothing to wake). Deterministic: nearest-first with a LOWER-id
+ * tie-break; NO RNG draw (the seeded stream is spawn-composition only). Returns the
+ * ids it woke so a caller can decide the wake ONCE per cast (arrow rain's 9 drops).
+ */
+export function wakeNearestPassives(
+  targets: readonly (Hero | Enemy | Boss)[],
+  centerX: number,
+  radius: number,
+): void {
+  const { aoeWakeRadiusFrac, aoeWakeCap } = CONFIG.hunt;
+  const wakeRadius = radius * aoeWakeRadiusFrac;
+  const candidates = targets
+    .filter(
+      (t): t is Enemy =>
+        !isHero(t) && "engaged" in t && !(t as Enemy).engaged && Math.abs(t.x - centerX) < wakeRadius,
+    )
+    .sort((a, b) => {
+      const da = Math.abs(a.x - centerX);
+      const db = Math.abs(b.x - centerX);
+      return da !== db ? da - db : a.id - b.id;
+    });
+  for (let i = 0; i < candidates.length && i < aoeWakeCap; i++) candidates[i].engaged = true;
+}
+
+/** Damage every target within `radius` of `centerX` WITHOUT waking any passive. */
+export function damageInRadius(
+  state: GameState,
+  targets: readonly (Hero | Enemy | Boss)[],
+  centerX: number,
+  radius: number,
+  amount: number,
+  source: HitSource,
+): void {
+  for (const t of targets) {
+    if (Math.abs(t.x - centerX) < radius) applyDamage(state, t, amount, source, false);
+  }
+}
+
+/**
+ * A SINGLE-IMPACT AoE (mage basic orb, meteor, whirl, frost): damage all in radius
+ * and wake the capped nearest set in one shot. Multi-drop arrow rain does NOT use
+ * this — it decides its wake ONCE at cast (skills.ts) so its 9 drops can't each
+ * re-wake the field; the drops then deal no-wake damage via `damageInRadius`.
+ */
+export function applyAoeDamage(
+  state: GameState,
+  targets: readonly (Hero | Enemy | Boss)[],
+  centerX: number,
+  radius: number,
+  amount: number,
+  source: HitSource,
+): void {
+  wakeNearestPassives(targets, centerX, radius);
+  damageInRadius(state, targets, centerX, radius, amount, source);
 }
