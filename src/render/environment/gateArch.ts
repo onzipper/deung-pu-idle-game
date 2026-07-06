@@ -44,6 +44,15 @@ export function buildZoneGateArch(
     case "map3":
       buildFrontierArch(view, biome);
       break;
+    case "map4":
+      buildIceArch(view, biome);
+      break;
+    case "map5":
+      buildRuinsArch(view, biome);
+      break;
+    case "map6":
+      buildHellArch(view, biome);
+      break;
     case "town":
       buildTownGate(view, biome);
       break;
@@ -168,6 +177,157 @@ function buildFrontierArch(view: Container, biome: BiomeDef): void {
     .lineTo(-w / 2 + 4, -POST_HEIGHT + 8)
     .stroke({ width: 2, color: accent, alpha: 0.4 });
   view.addChild(beam);
+}
+
+/** map4 — pale ice-block posts capped with a jagged icicle fringe hanging
+ * from the lintel; cold blue-white glow accent. */
+function buildIceArch(view: Container, biome: BiomeDef): void {
+  const accent = biome.far.glowRim ?? biome.ground.accent;
+  for (const side of ["left", "right"] as const) {
+    const g = new Graphics();
+    const px = postX(side);
+    g.roundRect(px, -POST_HEIGHT, safeRadius(POST_WIDTH), safeRadius(POST_HEIGHT), 2).fill({
+      color: biome.ground.band,
+      alpha: 0.82,
+    });
+    // A faceted ice-block look: a couple of diagonal crack lines.
+    g.moveTo(px + 2, -POST_HEIGHT + 10)
+      .lineTo(px + POST_WIDTH - 2, -POST_HEIGHT + 24)
+      .stroke({ width: 1, color: accent, alpha: 0.3 });
+    g.circle(px + POST_WIDTH / 2, -POST_HEIGHT + 8, safeRadius(3)).fill({ color: accent, alpha: 0.35 });
+    view.addChild(g);
+  }
+  const lintel = new Graphics();
+  const w = POST_GAP + POST_WIDTH * 2 + 6;
+  lintel
+    .roundRect(-w / 2, -POST_HEIGHT - LINTEL_HEIGHT, safeRadius(w), safeRadius(LINTEL_HEIGHT + 6), 4)
+    .fill({ color: biome.ground.band, alpha: 0.85 });
+  // Hanging icicle fringe — a row of small downward triangles under the lintel.
+  const icicles = 5;
+  for (let i = 0; i < icicles; i++) {
+    const t = i / (icicles - 1);
+    const x = -w / 2 + 8 + t * (w - 16);
+    const len = 8 + (i % 2 === 0 ? 6 : 0);
+    lintel.poly([x - 3, -POST_HEIGHT - 2, x + 3, -POST_HEIGHT - 2, x, -POST_HEIGHT - 2 + len], true).fill({
+      color: accent,
+      alpha: 0.55,
+    });
+  }
+  view.addChild(lintel);
+}
+
+/** map5 — weathered sandstone columns (fluted seams, chipped edges) under a
+ * shallow stone arch — reads as "ancient ruin", not a fresh-built gate. */
+function buildRuinsArch(view: Container, biome: BiomeDef): void {
+  const accent = biome.far.glowRim ?? biome.ground.accent;
+  for (const side of ["left", "right"] as const) {
+    const g = new Graphics();
+    const px = postX(side);
+    g.rect(px, -POST_HEIGHT, safeRadius(POST_WIDTH), safeRadius(POST_HEIGHT)).fill({
+      color: biome.ground.band,
+      alpha: 0.85,
+    });
+    // Fluted column seams (vertical, unlike the horizontal courses of map1).
+    for (let i = 1; i < 3; i++) {
+      const x = px + (POST_WIDTH / 3) * i;
+      g.rect(x, -POST_HEIGHT, 1.5, safeRadius(POST_HEIGHT)).fill({
+        color: biome.ground.speckle,
+        alpha: 0.4,
+      });
+    }
+    // A chipped notch near the top — asymmetric wear, built once.
+    const notchSide = side === "left" ? 1 : -1;
+    g.poly(
+      [
+        px + POST_WIDTH / 2,
+        -POST_HEIGHT + 6,
+        px + POST_WIDTH / 2 + notchSide * 5,
+        -POST_HEIGHT + 2,
+        px + POST_WIDTH / 2 + notchSide * 5,
+        -POST_HEIGHT + 12,
+      ],
+      true,
+    ).fill({ color: biome.ground.base, alpha: 0.6 });
+    view.addChild(g);
+  }
+  const lintel = new Graphics();
+  const w = POST_GAP + POST_WIDTH * 2 + 8;
+  // A shallow rounded arch instead of a flat beam (sampled points, never a
+  // bare `arc().fill()` — the same footgun-2 discipline as `heroView.ts`).
+  const archPts: number[] = [];
+  const steps = 8;
+  const archH = 14;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = -w / 2 + t * w;
+    const y = -POST_HEIGHT - archH * Math.sin(t * Math.PI);
+    archPts.push(x, y);
+  }
+  for (let i = steps; i >= 0; i--) {
+    const t = i / steps;
+    const x = -w / 2 + t * w;
+    const y = -POST_HEIGHT - LINTEL_HEIGHT - archH * Math.sin(t * Math.PI);
+    archPts.push(x, y);
+  }
+  lintel.poly(archPts, true).fill({ color: biome.ground.band, alpha: 0.82 });
+  // Sun-baked accent crack along the arch's underside.
+  lintel.rect(-w / 2 + 6, -POST_HEIGHT - 3, safeRadius(w - 12), safeRadius(2)).fill({
+    color: accent,
+    alpha: 0.35,
+  });
+  view.addChild(lintel);
+}
+
+/** map6 — dark iron-and-bone infernal gate: spiked posts + an ember-glow
+ * banner strung between them (never additive-blend — flat color + a darker
+ * outline per footgun 10). */
+function buildHellArch(view: Container, biome: BiomeDef): void {
+  const accent = biome.far.glowRim ?? biome.ground.accent;
+  for (const side of ["left", "right"] as const) {
+    const g = new Graphics();
+    const sign = side === "left" ? -1 : 1;
+    const px = postX(side);
+    g.rect(px, -POST_HEIGHT, safeRadius(POST_WIDTH), safeRadius(POST_HEIGHT)).fill({
+      color: biome.ground.band,
+      alpha: 0.92,
+    });
+    g.rect(px, -POST_HEIGHT, safeRadius(POST_WIDTH), safeRadius(POST_HEIGHT)).stroke({
+      width: 1,
+      color: 0x050101,
+      alpha: 0.7,
+    });
+    // A single upward spike topping each post.
+    const spikeBase = side === "left" ? px : px + POST_WIDTH;
+    g.poly(
+      [spikeBase - 4, -POST_HEIGHT, spikeBase + 4, -POST_HEIGHT, spikeBase + sign, -POST_HEIGHT - 14],
+      true,
+    ).fill({ color: biome.ground.speckle, alpha: 0.85 });
+    view.addChild(g);
+  }
+  const banner = new Graphics();
+  const w = POST_GAP + POST_WIDTH * 2;
+  // Sagging banner: a shallow downward curve (sampled points, footgun-2 safe).
+  const pts: number[] = [];
+  const steps = 6;
+  const sag = 10;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = -w / 2 + t * w;
+    const y = -POST_HEIGHT + sag * Math.sin(t * Math.PI);
+    pts.push(x, y);
+  }
+  for (let i = steps; i >= 0; i--) {
+    const t = i / steps;
+    const x = -w / 2 + t * w;
+    const y = -POST_HEIGHT - 6 + sag * Math.sin(t * Math.PI);
+    pts.push(x, y);
+  }
+  banner.poly(pts, true).fill({ color: biome.ground.base, alpha: 0.75 });
+  banner.rect(-w / 2 + 4, -POST_HEIGHT - 2, safeRadius(w - 8), safeRadius(1.5)).fill({
+    color: accent,
+    alpha: 0.5,
+  });
+  view.addChild(banner);
 }
 
 /** Town — warm, welcoming lantern-post gate. */

@@ -97,6 +97,78 @@ function rooftopSkyline(g: Graphics, opts: SilhouetteChunkOptions): void {
   }
 }
 
+/** map5 (desert ruins) far layer: broken civilization — a row of column
+ * stumps (varying height, some snapped off jagged) plus the occasional
+ * shallow arch remnant connecting two columns. Randomized-but-built-once,
+ * same convention as the jagged shapes. */
+function ruinsSkyline(g: Graphics, opts: SilhouetteChunkOptions): void {
+  const { chunkWidth, baselineY, far } = opts;
+  const featureWidth = 100 / Math.max(0.2, far.density);
+  const count = Math.max(2, Math.round(chunkWidth / featureWidth));
+  const stepX = chunkWidth / count;
+  const colW = Math.max(4, stepX * 0.28);
+  let prevTopX = -1;
+  let prevTopY = 0;
+  let prevStanding = false;
+  for (let i = 0; i < count; i++) {
+    const x = i * stepX + stepX * 0.3;
+    const standing = Math.random() < 0.7;
+    const h = far.amplitude * (standing ? 0.7 + Math.random() * 0.3 : 0.25 + Math.random() * 0.3);
+    const topY = baselineY - h;
+    // Column shaft — broken (jagged) top when not "standing" tall.
+    if (standing) {
+      g.rect(x, topY, colW, h).fill({ color: far.color, alpha: far.alpha });
+    } else {
+      g.poly(
+        [x, topY + h * 0.15, x + colW * 0.4, topY, x + colW, topY + h * 0.1, x + colW, topY + h, x, topY + h],
+        true,
+      ).fill({ color: far.color, alpha: far.alpha });
+    }
+    // Arch remnant linking this column to the previous one, roughly every
+    // other pair, only when both are tall enough to plausibly have spanned.
+    if (prevTopX >= 0 && standing && prevStanding && Math.random() < 0.5) {
+      const midX = (prevTopX + x) / 2;
+      const archTop = Math.min(prevTopY, topY) - far.amplitude * 0.18;
+      g.poly(
+        [prevTopX, prevTopY, midX, archTop, x + colW, topY, x + colW - colW * 0.5, topY + 4, midX, archTop + 6, prevTopX + colW * 0.5, prevTopY + 4],
+        true,
+      ).fill({ color: far.color, alpha: far.alpha * 0.85 });
+    }
+    prevTopX = x;
+    prevTopY = topY;
+    prevStanding = standing;
+  }
+}
+
+/** map6 (hell city) far layer: dark twisted city towers — thin rectangular
+ * spires of varying height with jagged/crenellated tops and a scattering of
+ * ember "window" glints along their faces. Reads as architecture, not raw
+ * terrain, distinguishing it from `jaggedSpikes`. */
+function infernalSkyline(g: Graphics, opts: SilhouetteChunkOptions): void {
+  const { chunkWidth, baselineY, far } = opts;
+  const featureWidth = 100 / Math.max(0.2, far.density);
+  const count = Math.max(2, Math.round(chunkWidth / featureWidth));
+  const stepX = chunkWidth / count;
+  for (let i = 0; i < count; i++) {
+    const x = i * stepX + stepX * 0.2;
+    const w = Math.max(5, stepX * 0.45);
+    const h = far.amplitude * (0.55 + Math.random() * 0.45);
+    const topY = baselineY - h;
+    const jag = Math.min(6, w * 0.3);
+    g.poly(
+      [x, baselineY, x, topY + jag, x + w * 0.3, topY, x + w * 0.6, topY + jag * 0.6, x + w, topY + jag * 0.3, x + w, baselineY],
+      true,
+    ).fill({ color: far.color, alpha: far.alpha });
+    // A couple of ember-glint windows, low alpha-flat dots, never a gradient.
+    if (far.glowRim && Math.random() < 0.6) {
+      g.rect(x + w * 0.3, topY + jag + h * 0.3, 2, 2).fill({ color: far.glowRim, alpha: 0.55 });
+    }
+    if (far.glowRim && Math.random() < 0.4) {
+      g.rect(x + w * 0.55, topY + jag + h * 0.55, 2, 2).fill({ color: far.glowRim, alpha: 0.45 });
+    }
+  }
+}
+
 function withGlowRim(g: Graphics, opts: SilhouetteChunkOptions): void {
   // Re-trace just the top edge with a thin, brighter stroke — a cheap "glow"
   // that stays within the "no hand-built gradients" rule (plain stroke on a
@@ -132,6 +204,12 @@ export function buildSilhouetteChunk(opts: SilhouetteChunkOptions): Graphics {
       break;
     case "rooftops":
       rooftopSkyline(g, opts);
+      break;
+    case "ruins":
+      ruinsSkyline(g, opts);
+      break;
+    case "infernal-skyline":
+      infernalSkyline(g, opts);
       break;
   }
   withGlowRim(g, opts);

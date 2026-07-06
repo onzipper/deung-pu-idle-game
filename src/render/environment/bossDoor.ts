@@ -49,6 +49,18 @@ function paletteFor(family: GateFamily, biome: BiomeDef): DoorPalette {
   if (family === "map3") {
     return { frame: biome.ground.band, leaf: biome.ground.base, leafDark: 0x1a120a, glow };
   }
+  if (family === "map4") {
+    // Ice — pale frame/leaf, near-white icy seam lines instead of a dark char.
+    return { frame: biome.ground.band, leaf: biome.ground.base, leafDark: 0xdff3ff, glow };
+  }
+  if (family === "map5") {
+    // Desert ruins — sandstone leaves, dark weathered seam cracks.
+    return { frame: biome.ground.band, leaf: biome.ground.base, leafDark: 0x1a1208, glow };
+  }
+  if (family === "map6") {
+    // Hell city — near-black iron leaves, embers bleeding through the seams.
+    return { frame: biome.ground.band, leaf: biome.ground.base, leafDark: 0x050101, glow };
+  }
   // map1 (and any frontier-overflow biome reusing map1's family) — carved
   // stone; town never routes here (boss doors only exist on farm zones).
   return { frame: biome.ground.band, leaf: biome.ground.base, leafDark: PALETTE.outline, glow };

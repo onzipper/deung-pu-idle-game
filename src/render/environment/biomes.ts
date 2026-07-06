@@ -38,14 +38,28 @@ export type SilhouetteShape =
   | "jagged-rock"
   | "volcanic-ridge"
   | "frost-peaks"
-  | "rooftops";
+  | "rooftops"
+  // M7.9 "Grand Expansion" — map5 broken-civilization columns/arches, map6
+  // infernal city towers (see `silhouettes.ts`'s `ruins`/`infernal-skyline`).
+  | "ruins"
+  | "infernal-skyline";
 
 export type AmbientKind = "mote" | "leaf" | "dust" | "ember" | "snow" | "smoke";
 
 /** Which shared prop vocabulary `groundProps.ts` draws for this biome's near
  * layer — decoupled from `id` so many map-specific biome ids can reuse the
  * same handful of hand-built prop shapes instead of a per-id switch. */
-export type PropStyle = "grass" | "bush" | "rock" | "crystal" | "ember" | "town";
+export type PropStyle =
+  | "grass"
+  | "bush"
+  | "rock"
+  | "crystal"
+  | "ember"
+  | "town"
+  // M7.9 — map4 snow drifts, map5 ruin rubble, map6 dark ground cracks.
+  | "snow"
+  | "rubble"
+  | "cracks";
 
 export interface BiomeDef {
   /** Stable id (also used as the base React/Pixi key before variant suffixing). */
@@ -497,6 +511,304 @@ const MAP3_BOSS: BiomeDef = {
   scrollSpeed: { far: 9, near: 24 },
 };
 
+// ---- map4: ทุนดราน้ำแข็ง (ice tundra, s16-20) — ทุ่งน้ำแข็งเปิดโล่ง -> ป่าสนแช่แข็ง ->
+// หุบเขาน้ำแข็ง -> พายุหิมะ -> ธารน้ำแข็งอันตราย -> (boss) บัลลังก์น้ำแข็งนิรันดร์.
+// Frozen ground, snow-drift near layer, pale cold light deepening toward a
+// blue-white glacial glow. ----
+
+const MAP4_FARM: readonly BiomeDef[] = [
+  {
+    id: "map4-zone1",
+    nameTh: "ทุ่งน้ำแข็งเปิดโล่ง",
+    sky: { top: 0x1c2838, bottom: 0x2e4258, horizon: 0xbfe0f5 },
+    far: { color: 0x25384c, alpha: 0.55, shape: "frost-peaks", amplitude: 30, density: 0.7 },
+    ground: { base: 0x28323e, band: 0x37485a, speckle: 0x4c6072, accent: 0xdff3ff, propStyle: "snow" },
+    particle: { kind: "snow", color: 0xf2fbff, density: 10 },
+    scrollSpeed: { far: 7, near: 19 },
+  },
+  {
+    id: "map4-zone2",
+    nameTh: "ป่าสนแช่แข็ง",
+    sky: { top: 0x18222f, bottom: 0x263a4e, horizon: 0xaad4f0 },
+    far: { color: 0x1e2d3c, alpha: 0.6, shape: "treeline", amplitude: 40, density: 0.9 },
+    ground: { base: 0x232e39, band: 0x30414f, speckle: 0x455868, accent: 0xcdeaff, propStyle: "snow" },
+    particle: { kind: "snow", color: 0xeaf6ff, density: 10 },
+    weatherTint: { color: 0x1f3242, alpha: 0.08 },
+    scrollSpeed: { far: 8, near: 20 },
+  },
+  {
+    id: "map4-zone3",
+    nameTh: "หุบเขาน้ำแข็ง",
+    sky: { top: 0x121a24, bottom: 0x1f2f3f, horizon: 0x8fc4e8 },
+    far: {
+      color: 0x18232e,
+      alpha: 0.68,
+      shape: "jagged-rock",
+      amplitude: 50,
+      density: 1.1,
+      glowRim: 0xbfe6ff,
+    },
+    ground: { base: 0x1c2530, band: 0x28323f, speckle: 0x3c4d5c, accent: 0xbfe6ff, propStyle: "crystal" },
+    particle: { kind: "dust", color: 0xb9d8ec, density: 9 },
+    weatherTint: { color: 0x1a2836, alpha: 0.1 },
+    scrollSpeed: { far: 8, near: 21 },
+  },
+  {
+    id: "map4-zone4",
+    nameTh: "พายุหิมะ",
+    sky: { top: 0x0e141c, bottom: 0x1a2836, horizon: 0xdff3ff },
+    far: {
+      color: 0x162230,
+      alpha: 0.74,
+      shape: "frost-peaks",
+      amplitude: 58,
+      density: 1.2,
+      glowRim: 0xeaf8ff,
+    },
+    ground: { base: 0x1a232d, band: 0x263241, speckle: 0x3a4a5c, accent: 0xeaf8ff, propStyle: "snow" },
+    particle: { kind: "snow", color: 0xf5fbff, density: 13 },
+    weatherTint: { color: 0x2a3a4a, alpha: 0.2 },
+    scrollSpeed: { far: 9, near: 23 },
+  },
+  {
+    id: "map4-zone5",
+    nameTh: "ธารน้ำแข็งอันตราย",
+    sky: { top: 0x0a0f16, bottom: 0x141f2c, horizon: 0x9fdfff },
+    far: {
+      color: 0x101a24,
+      alpha: 0.78,
+      shape: "frost-peaks",
+      amplitude: 64,
+      density: 1.3,
+      glowRim: 0x9fdfff,
+    },
+    ground: { base: 0x161f28, band: 0x212c38, speckle: 0x34455a, accent: 0x9fdfff, propStyle: "crystal" },
+    particle: { kind: "snow", color: 0xdff3ff, density: 12 },
+    weatherTint: { color: 0x16222e, alpha: 0.14 },
+    scrollSpeed: { far: 9, near: 24 },
+  },
+];
+
+const MAP4_BOSS: BiomeDef = {
+  id: "map4-boss",
+  nameTh: "บัลลังก์น้ำแข็งนิรันดร์",
+  special: "bossRoom",
+  sky: { top: 0x05080d, bottom: 0x0f1a24, horizon: 0x7fd4ff },
+  far: {
+    color: 0x0b131a,
+    alpha: 0.84,
+    shape: "frost-peaks",
+    amplitude: 70,
+    density: 1.4,
+    glowRim: 0x7fd4ff,
+  },
+  ground: { base: 0x0e161d, band: 0x18232d, speckle: 0x2c3c4c, accent: 0x7fd4ff, propStyle: "crystal" },
+  particle: { kind: "snow", color: 0xcdeeff, density: 15 },
+  weatherTint: { color: 0x0c1822, alpha: 0.22 },
+  scrollSpeed: { far: 9, near: 24 },
+};
+
+// ---- map5: ทะเลทรายซากอารยธรรม (desert ruins, s21-25) — ทะเลทรายเริ่มต้น ->
+// ซากปรักคาราวาน -> ซุ้มประตูโบราณ -> พายุทรายซากเมือง -> ประตูสู่นครฝังทราย ->
+// (boss) บัลลังก์นครโบราณ. Dunes + broken civilization silhouettes (columns/
+// arches), warm heat-haze palette thickening toward the buried city. ----
+
+const MAP5_FARM: readonly BiomeDef[] = [
+  {
+    id: "map5-zone1",
+    nameTh: "ทะเลทรายเริ่มต้น",
+    sky: { top: 0x2a2018, bottom: 0x40301f, horizon: 0xe8a748 },
+    far: { color: 0x33281c, alpha: 0.5, shape: "rolling-hills", amplitude: 26, density: 0.6 },
+    ground: { base: 0x3a2e1e, band: 0x4a3a24, speckle: 0x5c4830, accent: 0xd6a24a, propStyle: "rubble" },
+    particle: { kind: "dust", color: 0xe0c07a, density: 10 },
+    scrollSpeed: { far: 7, near: 19 },
+  },
+  {
+    id: "map5-zone2",
+    nameTh: "ซากปรักคาราวาน",
+    sky: { top: 0x241c15, bottom: 0x392c1d, horizon: 0xd89a3c },
+    far: { color: 0x2c2318, alpha: 0.58, shape: "rolling-hills", amplitude: 34, density: 0.8 },
+    ground: { base: 0x332619, band: 0x413221, speckle: 0x53422c, accent: 0xc79148, propStyle: "rubble" },
+    particle: { kind: "dust", color: 0xd6b171, density: 11 },
+    weatherTint: { color: 0x3a2c1a, alpha: 0.1 },
+    scrollSpeed: { far: 8, near: 20 },
+  },
+  {
+    id: "map5-zone3",
+    nameTh: "ซุ้มประตูโบราณ",
+    sky: { top: 0x1e1712, bottom: 0x30251a, horizon: 0xc9843a },
+    far: { color: 0x261d15, alpha: 0.65, shape: "ruins", amplitude: 46, density: 0.9 },
+    ground: { base: 0x2c2116, band: 0x392c1d, speckle: 0x4a3a26, accent: 0xb8853e, propStyle: "rubble" },
+    particle: { kind: "dust", color: 0xcaa06a, density: 12 },
+    weatherTint: { color: 0x3c2c18, alpha: 0.14 },
+    scrollSpeed: { far: 8, near: 21 },
+  },
+  {
+    id: "map5-zone4",
+    nameTh: "พายุทรายซากเมือง",
+    sky: { top: 0x191310, bottom: 0x281e15, horizon: 0xe0aa4a },
+    far: {
+      color: 0x201810,
+      alpha: 0.7,
+      shape: "ruins",
+      amplitude: 54,
+      density: 1.05,
+      glowRim: 0xffcf7a,
+    },
+    ground: { base: 0x241b12, band: 0x30251a, speckle: 0x413020, accent: 0xe0aa4a, propStyle: "rubble" },
+    particle: { kind: "dust", color: 0xe8c27e, density: 14 },
+    weatherTint: { color: 0x4a3418, alpha: 0.22 },
+    scrollSpeed: { far: 9, near: 22 },
+  },
+  {
+    id: "map5-zone5",
+    nameTh: "ประตูสู่นครฝังทราย",
+    sky: { top: 0x140f0b, bottom: 0x201811, horizon: 0xffcf7a },
+    far: {
+      color: 0x1a130d,
+      alpha: 0.76,
+      shape: "ruins",
+      amplitude: 60,
+      density: 1.15,
+      glowRim: 0xffcf7a,
+    },
+    ground: { base: 0x1e1610, band: 0x2a2015, speckle: 0x3c2e1c, accent: 0xffcf7a, propStyle: "rubble" },
+    particle: { kind: "ember", color: 0xffcf7a, density: 12 },
+    weatherTint: { color: 0x3a2814, alpha: 0.18 },
+    scrollSpeed: { far: 9, near: 23 },
+  },
+];
+
+const MAP5_BOSS: BiomeDef = {
+  id: "map5-boss",
+  nameTh: "บัลลังก์นครโบราณ",
+  special: "bossRoom",
+  sky: { top: 0x0d0906, bottom: 0x1a130d, horizon: 0xff9a3d },
+  far: {
+    color: 0x120d08,
+    alpha: 0.82,
+    shape: "ruins",
+    amplitude: 66,
+    density: 1.3,
+    glowRim: 0xff9a3d,
+  },
+  ground: { base: 0x160f09, band: 0x20160d, speckle: 0x362513, accent: 0xff9a3d, propStyle: "rubble" },
+  particle: { kind: "ember", color: 0xffab4d, density: 15 },
+  weatherTint: { color: 0x3a2410, alpha: 0.2 },
+  scrollSpeed: { far: 9, near: 24 },
+};
+
+// ---- map6: นครนรก (hell city, s26-30) — ประตูเมืองไฟนรก -> ถนนเถ้าถ่าน ->
+// ตรอกวิญญาณ -> จัตุรัสเปลวเพลิง -> ประตูสู่บัลลังก์อสูรร้าย -> (boss)
+// บัลลังก์อสูรจอมเพลิง. Infernal city skyline, ember glow, dark ground
+// cracks deepening to near-black + hottest ember accent. ----
+
+const MAP6_FARM: readonly BiomeDef[] = [
+  {
+    id: "map6-zone1",
+    nameTh: "ประตูเมืองไฟนรก",
+    sky: { top: 0x140508, bottom: 0x220a0d, horizon: 0xff5a1e },
+    far: {
+      color: 0x1a070a,
+      alpha: 0.6,
+      shape: "infernal-skyline",
+      amplitude: 50,
+      density: 0.8,
+      glowRim: 0xff5a1e,
+    },
+    ground: { base: 0x1c0a0a, band: 0x2a1010, speckle: 0x3f1614, accent: 0xff5a1e, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xff6a2a, density: 11 },
+    scrollSpeed: { far: 8, near: 21 },
+  },
+  {
+    id: "map6-zone2",
+    nameTh: "ถนนเถ้าถ่าน",
+    sky: { top: 0x120406, bottom: 0x1e080a, horizon: 0xff4a1e },
+    far: {
+      color: 0x170608,
+      alpha: 0.66,
+      shape: "infernal-skyline",
+      amplitude: 56,
+      density: 0.95,
+      glowRim: 0xff4a1e,
+    },
+    ground: { base: 0x190808, band: 0x260d0d, speckle: 0x3a1412, accent: 0xff4a1e, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xff5a22, density: 12 },
+    weatherTint: { color: 0x2c0808, alpha: 0.12 },
+    scrollSpeed: { far: 8, near: 22 },
+  },
+  {
+    id: "map6-zone3",
+    nameTh: "ตรอกวิญญาณ",
+    sky: { top: 0x0f0304, bottom: 0x1a0608, horizon: 0xff3a1a },
+    far: {
+      color: 0x140506,
+      alpha: 0.72,
+      shape: "infernal-skyline",
+      amplitude: 60,
+      density: 1.1,
+      glowRim: 0xff3a1a,
+    },
+    ground: { base: 0x160707, band: 0x220a0a, speckle: 0x361211, accent: 0xff3a1a, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xff4a1e, density: 13 },
+    weatherTint: { color: 0x330808, alpha: 0.15 },
+    scrollSpeed: { far: 9, near: 23 },
+  },
+  {
+    id: "map6-zone4",
+    nameTh: "จัตุรัสเปลวเพลิง",
+    sky: { top: 0x0c0203, bottom: 0x160406, horizon: 0xff2e14 },
+    far: {
+      color: 0x110304,
+      alpha: 0.77,
+      shape: "infernal-skyline",
+      amplitude: 64,
+      density: 1.2,
+      glowRim: 0xff2e14,
+    },
+    ground: { base: 0x130505, band: 0x1e0808, speckle: 0x321010, accent: 0xff2e14, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xff3a18, density: 14 },
+    weatherTint: { color: 0x3c0808, alpha: 0.18 },
+    scrollSpeed: { far: 9, near: 23 },
+  },
+  {
+    id: "map6-zone5",
+    nameTh: "ประตูสู่บัลลังก์อสูรร้าย",
+    sky: { top: 0x090103, bottom: 0x120305, horizon: 0xff220f },
+    far: {
+      color: 0x0d0203,
+      alpha: 0.8,
+      shape: "infernal-skyline",
+      amplitude: 68,
+      density: 1.3,
+      glowRim: 0xff220f,
+    },
+    ground: { base: 0x100404, band: 0x1a0606, speckle: 0x2e0e0e, accent: 0xff220f, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xff2e12, density: 15 },
+    weatherTint: { color: 0x460606, alpha: 0.2 },
+    scrollSpeed: { far: 9, near: 24 },
+  },
+];
+
+const MAP6_BOSS: BiomeDef = {
+  id: "map6-boss",
+  nameTh: "บัลลังก์อสูรจอมเพลิง",
+  special: "bossRoom",
+  sky: { top: 0x060001, bottom: 0x0e0203, horizon: 0xff1a0a },
+  far: {
+    color: 0x080102,
+    alpha: 0.86,
+    shape: "infernal-skyline",
+    amplitude: 72,
+    density: 1.4,
+    glowRim: 0xff1a0a,
+  },
+  ground: { base: 0x0b0303, band: 0x150505, speckle: 0x280c0c, accent: 0xff1a0a, propStyle: "cracks" },
+  particle: { kind: "ember", color: 0xff260e, density: 17 },
+  weatherTint: { color: 0x520606, alpha: 0.24 },
+  scrollSpeed: { far: 9, near: 24 },
+};
+
 interface MapTheme {
   town?: BiomeDef;
   farm: readonly BiomeDef[];
@@ -507,6 +819,9 @@ const MAP_THEMES: Record<string, MapTheme> = {
   map1: { town: MAP1_TOWN, farm: MAP1_FARM, boss: MAP1_BOSS },
   map2: { farm: MAP2_FARM, boss: MAP2_BOSS },
   map3: { farm: MAP3_FARM, boss: MAP3_BOSS },
+  map4: { farm: MAP4_FARM, boss: MAP4_BOSS },
+  map5: { farm: MAP5_FARM, boss: MAP5_BOSS },
+  map6: { farm: MAP6_FARM, boss: MAP6_BOSS },
 };
 
 /** Darken a resolved biome a touch further for a same-map hue-loop repeat
