@@ -44,6 +44,7 @@ import { useEffect, useRef } from "react";
 import {
   CONFIG,
   FIXED_DT,
+  ITEM_TEMPLATES,
   SIGNATURE_SKILL,
   bossHint,
   canEvolveHero,
@@ -73,6 +74,10 @@ import {
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
+import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
+import { postClaimBatch } from "@/ui/gear/api";
+import { toInventoryItem } from "@/ui/gear/types";
+import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
 import {
   useGameStore,
   type EngineSnapshot,
@@ -82,6 +87,12 @@ import {
   type SkillSummary,
 } from "@/ui/store/gameStore";
 import { TimeDirector } from "./timeDirector";
+
+/** Mirrors `server/items.ts`'s `MAX_CLAIM_BATCH` (server zone, not importable
+ * from here — the cap is a plain contract number, duplicated deliberately
+ * rather than reached into `@/server/**`). A buffer bigger than this flushes
+ * across multiple autosave-cadence ticks instead of being truncated. */
+const MAX_CLAIM_BATCH = 64;
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
@@ -218,6 +229,10 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       stats: { ...h.stats },
       primaryStat: primaryStat(h.cls),
       combatPower: combatPower(h),
+      // M7 Gear & Drops: the sim's own applied loadout (see `HeroSummary.equipped`
+      // doc — distinct from, but kept in sync with, the DB-hydrated `inventory`
+      // store slice). Shallow-copied like `stats` above (never alias engine state).
+      equipped: { ...h.equipped },
     };
   });
 
@@ -226,7 +241,14 @@ function buildSnapshot(state: GameState): EngineSnapshot {
   // throttled store carries only plain data.
   const nav = worldNav(state);
   const neighbor = (n: typeof nav.left) =>
-    n ? { mapId: n.zone.mapId, zoneIdx: n.zone.zoneIdx, kind: n.zone.kind, unlocked: n.unlocked } : null;
+    n
+      ? {
+          mapId: n.zone.mapId,
+          zoneIdx: n.zone.zoneIdx,
+          kind: n.zone.kind,
+          unlocked: n.unlocked,
+        }
+      : null;
 
   // NPC shop + consumables (M6). Prices scale by farming depth (shopStageOf), not
   // the town's stage; readiness is the precomputed quick-use guard.
@@ -336,6 +358,13 @@ export function GameClient() {
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
 
+    // ---- M7 Gear & Drops: drop-claim buffer (closure state, NOT React/Zustand
+    // — same "never per-frame state in React" rule as engine state itself).
+    // `itemDrop` events are collected here every frame and flushed as a batch
+    // on the autosave cadence + tab-hide (see `flushClaims`/`onVisibility`). ----
+    let pendingClaims: ClaimBufferEntry[] = [];
+    let claimInFlight = false;
+
     /**
      * Never fail silently: any init error becomes a visible Thai message inside
      * the arena slot plus a real console.error. This is the safety net that
@@ -390,6 +419,7 @@ export function GameClient() {
         buyShopItem: pending.buyShopItem ?? undefined,
         useConsumable: pending.useConsumable ?? undefined,
         useReturnScroll: pending.useReturnScroll || undefined,
+        equip: pending.equip ?? undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -414,6 +444,20 @@ export function GameClient() {
 
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
+
+      // M7 Gear & Drops: buffer every `itemDrop` this frame for the batched
+      // server claim (flushed on the autosave cadence / tab-hide below). The
+      // engine's roll is already deterministic + monotonic (rollId), so this
+      // is a plain append — no on-the-spot dedup needed in the common case.
+      for (const ev of frameEvents) {
+        if (ev.type === "itemDrop") {
+          pendingClaims.push({
+            rollId: ev.rollId,
+            templateId: ev.templateId,
+            stage: state.stage,
+          });
+        }
+      }
 
       uiSyncAccum += elapsed;
       if (uiSyncAccum >= UI_SYNC_INTERVAL) {
@@ -443,6 +487,52 @@ export function GameClient() {
       }).catch(() => {
         /* offline / transient failure — next autosave retries */
       });
+      // Same cadence as the save POST (see the drop-claim flush's own doc below).
+      flushClaims();
+    }
+
+    // ---- M7 Gear & Drops: batched drop-claim flush (same cadence as autosave,
+    // see the call site below). Fire-and-forget; on a network failure the batch
+    // is RE-QUEUED (claims are server-side idempotent via claimKey — a retry
+    // can never double-mint, see `docs/persistence-m7.md`), so nothing here can
+    // lose a drop except the tab-hide beacon path (accepted v1 tradeoff — noted
+    // on `onVisibility` below and in the ui/README). One flush in flight at a
+    // time so two overlapping timers can't race the same buffer. ----
+    function applyClaimResults(results: ClaimItemResultWire[]): void {
+      const minted: ItemInstanceWire[] = [];
+      const rejectedCounts: Partial<Record<string, number>> = {};
+      for (const r of results) {
+        if (r.status === "rejected") {
+          rejectedCounts[r.reason] = (rejectedCounts[r.reason] ?? 0) + 1;
+          continue;
+        }
+        minted.push(r.item);
+        if (r.status === "minted") {
+          const template = ITEM_TEMPLATES[r.item.templateId];
+          useGameStore
+            .getState()
+            .pushDropFeed(r.item.templateId, template?.rarity ?? "common");
+        }
+      }
+      if (minted.length) useGameStore.getState().mergeInventory(minted);
+      if (Object.keys(rejectedCounts).length) {
+        console.warn("[GameClient] drop-claim rejections:", rejectedCounts);
+      }
+    }
+
+    function flushClaims(): void {
+      if (claimInFlight || pendingClaims.length === 0) return;
+      const { batch, remaining } = takeBatch(pendingClaims, MAX_CLAIM_BATCH);
+      pendingClaims = remaining;
+      claimInFlight = true;
+      void postClaimBatch(batch)
+        .then((res) => {
+          if (res) applyClaimResults(res.results);
+          else pendingClaims = [...batch, ...pendingClaims]; // network failure — retry next cadence
+        })
+        .finally(() => {
+          claimInFlight = false;
+        });
     }
 
     // On tab-hide (covers most real "closing the game" cases): sendBeacon is
@@ -453,6 +543,19 @@ export function GameClient() {
         type: "application/json",
       });
       navigator.sendBeacon("/api/save", blob);
+
+      // Best-effort drop-claim flush via the same fire-and-forget beacon
+      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
+      // accepted v1 loss (no response to merge into the inventory slice even
+      // if it lands) — documented tradeoff, see this function's doc comment.
+      if (pendingClaims.length > 0) {
+        const claimBlob = new Blob(
+          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+          { type: "application/json" },
+        );
+        navigator.sendBeacon("/api/items/claim", claimBlob);
+        pendingClaims = [];
+      }
     }
 
     // Browsers block audio output until a real user gesture — resume() is
@@ -482,6 +585,10 @@ export function GameClient() {
           const json = (await res.json()) as {
             save: SaveData | null;
             offline?: { creditedSeconds: number; capped: boolean };
+            // M7 boot payload (server: src/app/api/save/route.ts GET) — always
+            // present (possibly empty arrays/nulls pre-character).
+            inventory?: ItemInstanceWire[];
+            equipped?: { weapon: string | null; armor: string | null };
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -489,6 +596,16 @@ export function GameClient() {
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
+          }
+          // M7: the DB `ItemInstance` ledger is AUTHORITATIVE over the save
+          // blob's own `equipped` cache (precedence documented at the API) —
+          // overwrite it BEFORE `initGameState` derives max HP from it below.
+          if (loaded && json.equipped) loaded.equipped = { ...json.equipped };
+          // Seed the inventory store slice straight from the boot payload —
+          // this is the ONLY normal hydration path (InventoryPanel never
+          // fetches on its own mount, only on an equip-failure resync).
+          if (json.inventory) {
+            useGameStore.getState().setInventory(json.inventory.map(toInventoryItem));
           }
         }
       } catch {

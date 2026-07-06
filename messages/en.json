@@ -198,7 +198,12 @@
       "heroes": "Heroes",
       "boss": "Boss",
       "controls": "Controls",
-      "offlineIdle": "Offline Gold"
+      "offlineIdle": "Offline Gold",
+      "gear": "Gear"
+    },
+    "gear": {
+      "undiscovered": "???",
+      "ownedCount": "{owned}/{total} discovered"
     },
     "entries": {
       "coreLoop": {
@@ -245,6 +250,10 @@
       "offlineIdle": {
         "title": "Offline gold",
         "body": "Close the game and come back later — it automatically calculates the progress you would have made while away (capped at 8 hours per session) and hands you the banked gold as soon as you return."
+      },
+      "gear": {
+        "title": "Drops & Gear",
+        "body": "Enemies and bosses have a chance to drop weapons/armor to collect. Each item has a tier and rarity (common/rare/epic). Open your Inventory (🎒) to equip one weapon + one armor — some pieces require a matching class."
       }
     }
   },
@@ -326,7 +335,34 @@
       "returnScroll": {
         "name": "Return Scroll",
         "desc": "Teleports you back to town"
-      }
+      },
+      "w_sword_t1_rusty": { "name": "Rusty Sword" },
+      "w_sword_t2_iron": { "name": "Iron Sword" },
+      "w_sword_t3_knight": { "name": "Knight's Sword" },
+      "w_sword_t4_flame": { "name": "Flame Sword" },
+      "w_sword_t5_dragon": { "name": "Dragon Sword" },
+      "w_sword_t6_ragna": { "name": "Ragnarok Blade" },
+      "w_bow_t1_short": { "name": "Short Bow" },
+      "w_bow_t2_hunter": { "name": "Hunter's Bow" },
+      "w_bow_t3_composite": { "name": "Composite Bow" },
+      "w_bow_t4_storm": { "name": "Storm Bow" },
+      "w_bow_t5_phoenix": { "name": "Phoenix Bow" },
+      "w_bow_t6_ragna": { "name": "Ragnarok Bow" },
+      "w_staff_t1_apprentice": { "name": "Apprentice Staff" },
+      "w_staff_t2_oak": { "name": "Oak Staff" },
+      "w_staff_t3_arcane": { "name": "Arcane Staff" },
+      "w_staff_t4_inferno": { "name": "Inferno Staff" },
+      "w_staff_t5_astral": { "name": "Astral Staff" },
+      "w_staff_t6_ragna": { "name": "Ragnarok Staff" },
+      "a_cloth_t1_tunic": { "name": "Cloth Tunic" },
+      "a_leather_t2_vest": { "name": "Leather Vest" },
+      "a_chain_t3_mail": { "name": "Chain Mail" },
+      "a_plate_t4_guard": { "name": "Plate Guard" },
+      "a_rune_t5_ward": { "name": "Rune Ward" },
+      "a_aegis_t6_bulwark": { "name": "Aegis Bulwark" },
+      "a_sword_t4_fortress": { "name": "Fortress Plate" },
+      "a_archer_t4_windcloak": { "name": "Windcloak" },
+      "a_mage_t4_archrobe": { "name": "Archrobe" }
     },
     "maps": {
       "map1": {
@@ -433,5 +469,37 @@
     "autoUseAria": "Auto {name}: {state, select, on {on} other {off}}",
     "thresholdDownAria": "Lower the auto {name} threshold",
     "thresholdUpAria": "Raise the auto {name} threshold"
+  },
+  "inventory": {
+    "openButton": "🎒 Inventory",
+    "title": "Inventory",
+    "closeButton": "Close",
+    "loadoutLabel": "Equipped",
+    "emptySlotHint": "No items yet",
+    "equipButton": "Equip",
+    "unequipButton": "Unequip",
+    "equippedBadge": "Equipped",
+    "tierLabel": "Tier {tier}",
+    "statAtk": "ATK +{value}",
+    "statDef": "DEF +{value}",
+    "statHp": "HP +{value}",
+    "classReqBlocked": "{cls} only",
+    "slot": {
+      "weapon": "Weapon",
+      "armor": "Armor"
+    },
+    "rarity": {
+      "common": "Common",
+      "rare": "Rare",
+      "epic": "Epic"
+    },
+    "classNames": {
+      "swordsman": "Swordsman",
+      "archer": "Archer",
+      "mage": "Mage"
+    }
+  },
+  "dropFeed": {
+    "gotItem": "Item obtained: {name}"
   }
 }

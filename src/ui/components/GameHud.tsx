@@ -26,8 +26,11 @@
 import { forwardRef, type ReactNode } from "react";
 import { CodexButton } from "@/ui/components/CodexButton";
 import { ConsumableBar } from "@/ui/components/ConsumableBar";
+import { DropFeed } from "@/ui/components/DropFeed";
+import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
 import { GoalLadder } from "@/ui/components/GoalLadder";
 import { HudBar } from "@/ui/components/HudBar";
+import { InventoryButton } from "@/ui/components/InventoryButton";
 import { ShopPanel } from "@/ui/components/ShopPanel";
 import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
@@ -59,6 +62,9 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           sibling — gated so the two are never active at the same time. */}
       <OnboardingOverlay />
       <ContextualTipOverlay />
+      {/* M7 Gear & Drops: drop-notification toasts, store-driven off claim
+          results — sits above the arena, below the modal panels (z-70). */}
+      <DropFeed />
       <HudBar />
 
       <div
@@ -97,6 +103,9 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         <ConsumableBar />
         <div className="h-px bg-ddp-border-soft" />
         <StatPanel />
+        {/* M7 Gear & Drops: equipped weapon/armor summary, right by the stat
+            panel per the task brief. */}
+        <EquippedLoadout />
         <div className="h-px bg-ddp-border-soft" />
         {/* Settings row (tertiary tier): account/help on the left, the settings
             drawer (auto-behavior + audio/language, M6 settings-panel task) on
@@ -107,6 +116,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         >
           <SwitchCharacterLink />
           <div className="flex flex-wrap items-center gap-2">
+            <InventoryButton />
             <CodexButton />
             <SettingsButton />
           </div>

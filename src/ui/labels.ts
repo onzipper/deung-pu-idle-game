@@ -7,7 +7,7 @@
  * `src/ui/README.md`'s "Content i18n pattern" section.
  */
 
-import type { HeroClass } from "@/engine";
+import type { GearSlot, HeroClass, ItemRarity } from "@/engine";
 
 export const HERO_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F5E1}️", // 🗡️
@@ -39,4 +39,22 @@ export const SKILL_ICONS_BY_ID: Record<string, string> = {
   mage_meteor: "☄️", // ☄️ meteor
   mage_frostnova: "❄️", // ❄️ frost nova
   mage_cataclysm: "\u{1F525}", // 🔥 cataclysm
+};
+
+/** M7 Gear & Drops — per-slot icon (pre-2020 emoji, Win10-safe — footgun #4). */
+export const GEAR_SLOT_ICONS: Record<GearSlot, string> = {
+  weapon: "\u{2694}", // ⚔
+  armor: "\u{1F6E1}", // 🛡
+};
+
+/** Per-rarity Tailwind text/border color classes for gear cards + the drop-feed
+ * toast (M7). Epic gets the "stronger beat" the drop-feed juice task asks for
+ * (brighter gold + the ✨ marker), rare a cool blue, common a neutral grey. */
+export const RARITY_COLORS: Record<
+  ItemRarity,
+  { text: string; border: string; icon: string }
+> = {
+  common: { text: "text-ddp-ink", border: "border-ddp-border-soft", icon: "" },
+  rare: { text: "text-sky-300", border: "border-sky-400/60", icon: "" },
+  epic: { text: "text-ddp-gold-bright", border: "border-ddp-gold/70", icon: "\u{2728}" }, // ✨
 };

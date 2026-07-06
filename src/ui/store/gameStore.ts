@@ -29,14 +29,19 @@ import { CONFIG } from "@/engine";
 import type {
   BossHint,
   ConsumableCounts,
+  EquippedGear,
+  GearSlot,
   HeroClass,
   HeroStats,
+  ItemRarity,
   Phase,
   ShopItemId,
   StatKey,
   WorldLocation,
   ZoneKind,
 } from "@/engine";
+import { mergeClaimedItems } from "@/ui/gear/inventoryOps";
+import type { InventoryItem, ItemInstanceWire } from "@/ui/gear/types";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -130,6 +135,13 @@ export interface HeroSummary {
   /** Precomputed `combatPower(hero)` read ("พลังต่อสู้") — same one-way display
    * pattern as `canEvolve`: the engine computes it, the store just carries it. */
   combatPower: number;
+  /** M7 Gear & Drops: the hero's currently-equipped weapon/armor templateIds,
+   * read straight off the engine `Hero.equipped` (the sim's own authoritative
+   * loadout — distinct from the DB-hydrated `inventory` slice below, which
+   * tracks ownership/equippedSlot for the panel's per-item badges; the two
+   * stay in sync because the equip flow writes the DB THEN queues the engine
+   * intent, see `GameClient.tsx`). */
+  equipped: EquippedGear;
 }
 
 /** One adjacent zone's walk-arrow state (M6 "World & Town"). */
@@ -212,6 +224,12 @@ export interface PendingInput {
   useConsumable: ShopItemId | null;
   /** Use a return scroll to teleport to town (M6, once per frame). */
   useReturnScroll: boolean;
+  /** Equip (or, with `templateId: null`, unequip) a gear slot on the solo hero
+   * (M7), or `null` (last-wins per frame — a tap equips exactly once). Queued
+   * ONLY after the `/api/items/equip`|`/api/items/unequip` POST already
+   * succeeded server-side (see `InventoryPanel.tsx`) — this keeps the sim's
+   * applied stats and the server's item ledger from ever disagreeing. */
+  equip: { slot: GearSlot; templateId: string | null } | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -227,6 +245,7 @@ function emptyPendingInput(): PendingInput {
     buyShopItem: null,
     useConsumable: null,
     useReturnScroll: false,
+    equip: null,
   };
 }
 
@@ -346,6 +365,20 @@ const emptyShop: ShopSummary = {
   ready: { hpPotion: false, manaPotion: false },
 };
 
+/** One drop-feed toast entry (M7 juice, `DropFeed.tsx`) — pushed only for a
+ * FRESH mint (`status: "minted"` in a claim result), never for an idempotent
+ * "existing" reclaim, so a claim-retry never re-toasts the same drop. */
+export interface DropFeedEntry {
+  id: string;
+  templateId: string;
+  rarity: ItemRarity;
+}
+
+/** Cap on live toasts (oldest drop first out) — a burst of kills shouldn't
+ * pile up an unbounded stack. */
+const MAX_DROP_FEED = 4;
+let dropFeedSeq = 0;
+
 export interface HudState {
   // ---- throttled engine snapshot (~CONFIG.uiSyncHz) ----
   gold: number;
@@ -361,6 +394,18 @@ export interface HudState {
   world: WorldNavSummary;
   /** NPC shop + consumable state (M6 "เมืองหลัก"). */
   shop: ShopSummary;
+
+  // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
+  /** The active character's owned item instances (DB-authoritative — see
+   * `docs/persistence-m7.md`), seeded from the `/api/save` boot payload's
+   * `inventory` field and kept in sync by the claim/equip flows in
+   * `GameClient.tsx` / `InventoryPanel.tsx`. NOT part of the throttled engine
+   * snapshot (`syncFromEngine` never touches it) — it's its own, much
+   * lower-frequency, network-driven slice. */
+  inventory: InventoryItem[];
+  /** Live drop-notification toasts (M7 juice), oldest-first, capped at
+   * `MAX_DROP_FEED`. Pushed only for a freshly-minted claim result. */
+  dropFeed: DropFeedEntry[];
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   autoCast: boolean;
@@ -466,6 +511,25 @@ export interface HudState {
   useConsumable: (item: ShopItemId) => void;
   /** Queue a return-scroll teleport (M6, once per frame). */
   useReturnScroll: () => void;
+  /** Queue an equip/unequip intent for the solo hero (M7, once per frame) —
+   * call ONLY after the corresponding `/api/items/*` POST already succeeded
+   * (see `InventoryPanel.tsx`'s equip flow doc). */
+  queueEquip: (slot: GearSlot, templateId: string | null) => void;
+
+  // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
+  // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
+  // above) ----
+  /** Bulk-replace the inventory slice (boot hydration + the equip-failure
+   * resync in `InventoryPanel.tsx`). */
+  setInventory: (items: InventoryItem[]) => void;
+  /** Merge newly-claimed wire items into the slice without dropping any local
+   * row not present in `items` (the claim-flush path only ever ADDS — see
+   * `gear/inventoryOps.ts`'s `mergeClaimedItems`). */
+  mergeInventory: (claimed: ItemInstanceWire[]) => void;
+  /** Push a drop-feed toast (M7 juice) — capped, oldest evicted first. */
+  pushDropFeed: (templateId: string, rarity: ItemRarity) => void;
+  /** Dismiss one toast (called by `DropFeed.tsx` after its display timer). */
+  dismissDropFeed: (id: string) => void;
 
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
@@ -491,6 +555,9 @@ export const useGameStore = create<HudState>((set, get) => ({
     right: null,
   },
   shop: emptyShop,
+
+  inventory: [],
+  dropFeed: [],
 
   autoCast: false,
   autoAllocate: false,
@@ -586,6 +653,23 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   useReturnScroll: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, useReturnScroll: true } })),
+
+  queueEquip: (slot, templateId) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, equip: { slot, templateId } } })),
+
+  setInventory: (items) => set({ inventory: items }),
+  mergeInventory: (claimed) =>
+    set((s) => ({ inventory: mergeClaimedItems(s.inventory, claimed) })),
+
+  pushDropFeed: (templateId, rarity) =>
+    set((s) => ({
+      dropFeed: [
+        ...s.dropFeed,
+        { id: `drop-${++dropFeedSeq}`, templateId, rarity },
+      ].slice(-MAX_DROP_FEED),
+    })),
+  dismissDropFeed: (id) =>
+    set((s) => ({ dropFeed: s.dropFeed.filter((d) => d.id !== id) })),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;
