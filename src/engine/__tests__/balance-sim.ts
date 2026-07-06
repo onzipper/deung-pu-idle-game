@@ -288,9 +288,15 @@ function baseStatsOf(cls: HeroClass) {
       : { str: 3, dex: 4, int: 8, vit: 4 };
 }
 
-/** Idle-player auto-slot fill (unchanged from the M5 harness). */
+/** Idle-player auto-slot fill (unchanged from the M5 harness).
+ * M7.9 archer-friction pass FIX: pass hero.tier so the TIER-3-gated 4th auto-slot is
+ * counted — the pre-fix call defaulted tier=1, so the tier-3 ultimate (archer_storm /
+ * sword_skyfall / mage_apocalypse) was NEVER slotted or cast in the organic sim, and
+ * the balance-m79 numbers were measured against a phantom hero that never fired its
+ * tier-3 skill-4. The real UI passes tier (systems/skills unlockedAutoSlotCount); this
+ * aligns the harness with actual play. */
 function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
-  const unlocked = unlockedAutoSlotCount(hero.level);
+  const unlocked = unlockedAutoSlotCount(hero.level, hero.tier);
   const learned = learnedSkills(hero).map((s) => s.id);
   const slotted = new Set(hero.autoSlots.filter((id): id is string => id !== null));
   const out: { slot: number; skillId: string | null }[] = [];

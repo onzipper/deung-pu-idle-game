@@ -183,17 +183,14 @@ const CATALOG: ItemTemplate[] = [
   weapon("w_sword_t10_apocalypse", "swordsman", 10, "epic"),
   // ---- archer weapons ----
   weapon("w_bow_t7_frost", "archer", 7, "rare"),
-  weapon("w_bow_t8_dune", "archer", 8, "rare", 50),
-  // M7.9 "Archer friction pass": t9/t10 bows carry a class-specific ATK PREMIUM over
-  // the shared WEAPON_ATK curve (53/70). The archer's weak-mult small-radius arrow-rain
-  // WOUNDS (not one-shots) deep-field clusters, waking survivor-retaliation that
-  // attrition-kills it over its 1.5-2.4× clear times (s26-28 death spiral: 71/106/158).
-  // A bigger flat bow ATK pushes each rain/storm drop OVER the s26-30 mob one-shot
-  // threshold → fewer angry survivors → faster clear + far less soak. Class-locked
-  // (classReq=archer) so sword/mage are byte-unchanged; t9/t10 drop only at s23+ so
-  // s1-22 is byte-identical. Sim-tuned (docs/balance-m79.md "Archer friction pass").
-  weapon("w_bow_t9_obsidian", "archer", 9, "rare", 85),
-  weapon("w_bow_t10_apocalypse", "archer", 10, "epic", 115),
+  weapon("w_bow_t8_dune", "archer", 8, "rare"),
+  // M7.9 "Archer friction pass": t9/t10 bows carry a small class-specific ATK PREMIUM
+  // over the shared WEAPON_ATK curve (53/70). The archer's frontier deaths are boss
+  // wipes (its AoE storm scatters off a lone boss); flat bow ATK lifts its single-target
+  // basic+powershot boss DPS. Class-locked (classReq=archer) so sword/mage are
+  // byte-unchanged; t9/t10 drop only at s23+ so s1-22 is byte-identical.
+  weapon("w_bow_t9_obsidian", "archer", 9, "rare", 66),
+  weapon("w_bow_t10_apocalypse", "archer", 10, "epic", 88),
   // ---- mage weapons ----
   weapon("w_staff_t7_frost", "mage", 7, "rare"),
   weapon("w_staff_t8_dune", "mage", 8, "rare"),
