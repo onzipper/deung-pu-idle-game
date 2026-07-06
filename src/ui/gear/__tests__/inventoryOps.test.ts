@@ -3,9 +3,15 @@ import {
   applyEquipChange,
   applyUnequipChange,
   discoveredTemplateIds,
+  isNewTemplate,
   mergeClaimedItems,
+  removeSoldItems,
 } from "@/ui/gear/inventoryOps";
-import type { InventoryItem, ItemInstanceWire } from "@/ui/gear/types";
+import type {
+  InventoryItem,
+  ItemInstanceWire,
+  SellItemResultWire,
+} from "@/ui/gear/types";
 
 function item(over: Partial<InventoryItem> = {}): InventoryItem {
   return {
@@ -99,5 +105,40 @@ describe("discoveredTemplateIds", () => {
 
   it("is empty for an empty inventory", () => {
     expect(discoveredTemplateIds([]).size).toBe(0);
+  });
+});
+
+describe("removeSoldItems", () => {
+  const results: SellItemResultWire[] = [
+    { itemId: "sold1", status: "sold", price: 5 },
+    { itemId: "already1", status: "already", price: 0 },
+    { itemId: "rejected1", status: "rejected", reason: "equipped" },
+  ];
+
+  it("removes items with status sold or already", () => {
+    const items = [
+      item({ instanceId: "sold1" }),
+      item({ instanceId: "already1" }),
+      item({ instanceId: "rejected1" }),
+      item({ instanceId: "untouched" }),
+    ];
+    const result = removeSoldItems(items, results);
+    expect(result.map((i) => i.instanceId).sort()).toEqual(["rejected1", "untouched"]);
+  });
+
+  it("is a no-op copy when nothing sold/already", () => {
+    const items = [item({ instanceId: "rejected1" })];
+    expect(removeSoldItems(items, results)).toEqual(items);
+  });
+});
+
+describe("isNewTemplate", () => {
+  it("is true for a template not in the session baseline", () => {
+    expect(isNewTemplate("w_sword_t1_rusty", [])).toBe(true);
+    expect(isNewTemplate("w_sword_t1_rusty", ["a_cloth_t1_tunic"])).toBe(true);
+  });
+
+  it("is false for a template already in the session baseline", () => {
+    expect(isNewTemplate("w_sword_t1_rusty", ["w_sword_t1_rusty"])).toBe(false);
   });
 });

@@ -31,6 +31,7 @@ import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
 import { GoalLadder } from "@/ui/components/GoalLadder";
 import { HudBar } from "@/ui/components/HudBar";
 import { InventoryButton } from "@/ui/components/InventoryButton";
+import { NoticeToast } from "@/ui/components/NoticeToast";
 import { ShopPanel } from "@/ui/components/ShopPanel";
 import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
@@ -65,6 +66,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       {/* M7 Gear & Drops: drop-notification toasts, store-driven off claim
           results — sits above the arena, below the modal panels (z-70). */}
       <DropFeed />
+      <NoticeToast />
       <HudBar />
 
       <div

@@ -4,7 +4,11 @@
  */
 
 import type { GearSlot } from "@/engine";
-import type { InventoryItem, ItemInstanceWire } from "@/ui/gear/types";
+import type {
+  InventoryItem,
+  ItemInstanceWire,
+  SellItemResultWire,
+} from "@/ui/gear/types";
 import { toInventoryItem } from "@/ui/gear/types";
 
 /**
@@ -62,4 +66,38 @@ export function applyUnequipChange(
  */
 export function discoveredTemplateIds(items: readonly InventoryItem[]): Set<string> {
   return new Set(items.map((i) => i.templateId));
+}
+
+/**
+ * Applies a `/api/items/sell` batch result to the local inventory slice (M7.5).
+ * Removes instances the server confirms are GONE — `"sold"` (this call sold
+ * it) AND `"already"` (some earlier call already sold/deleted it; the local
+ * copy is stale either way) — and leaves `"rejected"` items untouched (still
+ * genuinely owned: equipped, or a not_found we don't otherwise act on).
+ */
+export function removeSoldItems(
+  items: readonly InventoryItem[],
+  results: readonly SellItemResultWire[],
+): InventoryItem[] {
+  const gone = new Set(
+    results
+      .filter((r) => r.status === "sold" || r.status === "already")
+      .map((r) => r.itemId),
+  );
+  if (gone.size === 0) return items.slice();
+  return items.filter((i) => !gone.has(i.instanceId));
+}
+
+/**
+ * NEW-badge derivation (M7.5 inventory grid): a templateId not present in the
+ * session's baseline set (captured once at boot — see `GameClient.tsx`'s
+ * `setSessionKnownTemplateIds` call) is "new this session" for the WHOLE
+ * session (never re-hidden mid-session, so the badge doesn't flicker in and
+ * out as the player re-opens the panel).
+ */
+export function isNewTemplate(
+  templateId: string,
+  sessionKnownTemplateIds: readonly string[],
+): boolean {
+  return !sessionKnownTemplateIds.includes(templateId);
 }

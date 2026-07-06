@@ -58,3 +58,27 @@ export const RARITY_COLORS: Record<
   rare: { text: "text-sky-300", border: "border-sky-400/60", icon: "" },
   epic: { text: "text-ddp-gold-bright", border: "border-ddp-gold/70", icon: "\u{2728}" }, // ✨
 };
+
+/**
+ * Per-TIER border color for the M7.5 inventory grid cell (ascending intensity
+ * 1..6) — layered UNDER the rarity glow (`RARITY_GLOW` below): tier reads at a
+ * glance ("how strong"), rarity reads as a highlight ("how special"). Tiers
+ * beyond 6 (none shipped v1) fall back to the tier-6 color in the component.
+ */
+export const TIER_BORDER_COLORS: Record<number, string> = {
+  1: "border-slate-500/50",
+  2: "border-slate-300/60",
+  3: "border-sky-400/60",
+  4: "border-indigo-400/60",
+  5: "border-fuchsia-400/60",
+  6: "border-ddp-gold/80",
+};
+
+/** Per-rarity glow (box-shadow) for the M7.5 inventory grid cell — plain rgba
+ * (no `theme()` arbitrary-value lookups, keeps this robust across the Tailwind
+ * v4 CSS-first config). Common gets no glow (tier border carries it alone). */
+export const RARITY_GLOW: Record<ItemRarity, string> = {
+  common: "",
+  rare: "shadow-[0_0_10px_2px_rgba(56,189,248,0.35)]",
+  epic: "shadow-[0_0_14px_3px_rgba(250,204,21,0.45)]",
+};

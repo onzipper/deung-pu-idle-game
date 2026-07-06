@@ -110,7 +110,25 @@
     "closeButton": "ปิด",
     "autoBehaviorGroup": "พฤติกรรมอัตโนมัติ",
     "audioLanguageGroup": "เสียง & ภาษา",
-    "deathBehaviorLabel": "เมื่อฮีโร่ตาย"
+    "deathBehaviorLabel": "เมื่อฮีโร่ตาย",
+    "bot": {
+      "title": "บอทผู้ช่วย",
+      "hint": "บอทวาปกลับเมืองเองเมื่อของครบ/ยาใกล้หมด แล้วกลับไปฟาร์มต่อให้อัตโนมัติ",
+      "restockToggle": "บอทซื้อยา",
+      "sellTripToggle": "บอทวาปขายของ",
+      "hpTarget": "เป้าหมายยาเลือด",
+      "mpTarget": "เป้าหมายยามานา",
+      "scrollReserve": "เป้าหมายยันกลับเมือง",
+      "goldReserve": "ทองสำรองขั้นต่ำ",
+      "goldReserveHint": "บอทจะเหลือทองไม่ต่ำกว่านี้เสมอ (ไม่ใช่งบใช้จ่าย)"
+    },
+    "autoSell": {
+      "title": "กฎขายอัตโนมัติ",
+      "sellCommon": "ขายของธรรมดา",
+      "sellRare": "ขายของหายาก",
+      "sellEpic": "ขายตำนาน (ล็อกปิด)",
+      "keepBetterStat": "เก็บของที่ stat ดีกว่าของที่ใส่"
+    }
   },
   "onboarding": {
     "mascotName": "น้องดึ๋ง",
@@ -451,7 +469,12 @@
     "enterBossRoom": "เข้าห้องบอส",
     "autoReturnOn": "อัตโนมัติ: กลับไปฟาร์ม",
     "autoReturnOff": "อัตโนมัติ: รอที่เมือง",
-    "frontier": "สุดเขตแดนตอนนี้"
+    "frontier": "สุดเขตแดนตอนนี้",
+    "fastTravelButton": "วาร์ป",
+    "fastTravelTitle": "วาร์ปข้ามโซน",
+    "fastTravelClose": "ปิด",
+    "fastTravelCurrent": "อยู่ตรงนี้",
+    "fastTravelChanneling": "กำลังวาร์ปไปยัง {map}…"
   },
   "shop": {
     "title": "ร้านค้าในเมือง",
@@ -497,9 +520,31 @@
       "swordsman": "นักดาบ",
       "archer": "นักธนู",
       "mage": "นักเวท"
-    }
+    },
+    "tierShort": "T{tier}",
+    "newBadge": "ใหม่",
+    "classOnlyToggle": "ใส่ได้เฉพาะคลาสฉัน",
+    "capacityLabel": "{count}/{cap} ช่อง",
+    "sellTownOnly": "ขายได้เฉพาะในเมือง",
+    "sellOneButton": "ขายชิ้นนี้",
+    "sellAllButton": "ขายทั้งหมด ({count})",
+    "sellAllCommonButton": "ขาย common ทั้งหมด",
+    "confirmSell": "ยืนยันขาย?"
   },
   "dropFeed": {
     "gotItem": "ได้ไอเทม: {name}"
+  },
+  "notices": {
+    "autoSellDone": "บอทขายของอัตโนมัติ {count} ชิ้น +{gold} ทอง",
+    "fastTravelBlocked": {
+      "locked": "โซนนั้นยังไม่ปลด",
+      "aggro": "มีมอนติดพันอยู่ วาร์ปไม่ได้",
+      "dead": "ฮีโร่ล้มอยู่ วาร์ปไม่ได้",
+      "same": "อยู่โซนนี้อยู่แล้ว",
+      "traveling": "กำลังเดินทางอยู่",
+      "boss": "อยู่ระหว่างสู้บอส วาร์ปไม่ได้",
+      "invalid": "วาร์ปไปโซนนั้นไม่ได้",
+      "damaged": "โดนโจมตี วาร์ปถูกยกเลิก"
+    }
   }
 }

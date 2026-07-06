@@ -13,12 +13,17 @@
  */
 
 import { useTranslations } from "next-intl";
+import { useState } from "react";
+import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
+import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
 import { useGameStore, type NavNeighborSummary } from "@/ui/store/gameStore";
 
 export function WalkControls() {
   const world = useGameStore((s) => s.world);
   const phase = useGameStore((s) => s.phase);
   const walkToZone = useGameStore((s) => s.walkToZone);
+  const channeling = useGameStore((s) => s.fastTravelChannel !== null);
+  const [fastTravelOpen, setFastTravelOpen] = useState(false);
   const t = useTranslations("world");
   const tMaps = useTranslations("content.maps");
 
@@ -38,23 +43,39 @@ export function WalkControls() {
           : t("zoneFarm", { stage: world.stage });
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
-      <WalkArrow
-        dir="left"
-        neighbor={world.left}
-        traveling={world.traveling}
-        onWalk={walkToZone}
-      />
-      <div className="flex min-w-0 flex-col items-center text-center">
-        <span className="truncate text-base font-bold text-emerald-300">{mapName}</span>
-        <span className="text-xs font-medium text-ddp-ink-muted">{zoneLabel}</span>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
+        <WalkArrow
+          dir="left"
+          neighbor={world.left}
+          traveling={world.traveling}
+          onWalk={walkToZone}
+        />
+        <div className="flex min-w-0 flex-col items-center text-center">
+          <span className="truncate text-base font-bold text-emerald-300">{mapName}</span>
+          <span className="text-xs font-medium text-ddp-ink-muted">{zoneLabel}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={world.traveling || channeling}
+            onClick={() => setFastTravelOpen(true)}
+            title={t("fastTravelButton")}
+            aria-label={t("fastTravelButton")}
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 text-lg text-sky-300 shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <span aria-hidden>🌀</span>
+          </button>
+          <WalkArrow
+            dir="right"
+            neighbor={world.right}
+            traveling={world.traveling}
+            onWalk={walkToZone}
+          />
+        </div>
       </div>
-      <WalkArrow
-        dir="right"
-        neighbor={world.right}
-        traveling={world.traveling}
-        onWalk={walkToZone}
-      />
+      <FastTravelChannelBar />
+      {fastTravelOpen && <FastTravelPicker onClose={() => setFastTravelOpen(false)} />}
     </div>
   );
 }
@@ -91,7 +112,9 @@ function WalkArrow({
       disabled={!enabled}
       title={label}
       aria-label={label}
-      onClick={() => neighbor && onWalk({ mapId: neighbor.mapId, zoneIdx: neighbor.zoneIdx })}
+      onClick={() =>
+        neighbor && onWalk({ mapId: neighbor.mapId, zoneIdx: neighbor.zoneIdx })
+      }
       className={`relative flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border px-3 py-2 text-lg font-black shadow-(--ddp-shadow-btn) transition-all duration-100 ${
         enabled
           ? isBossRoom

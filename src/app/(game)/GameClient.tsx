@@ -74,8 +74,10 @@ import {
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
+import { selectAutoSellItemIds } from "@/ui/gear/autoSell";
 import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
 import { postClaimBatch } from "@/ui/gear/api";
+import { executeSell } from "@/ui/gear/sellFlow";
 import { toInventoryItem } from "@/ui/gear/types";
 import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
 import {
@@ -287,7 +289,37 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       right: neighbor(nav.right),
     },
     shop,
+    // Idle-bot config (M7.5, read-only display source — see `HudState.bot`'s
+    // doc) + per-map unlocked-zone counts (M6 SAVE v8 field, surfaced for the
+    // fast-travel picker's lock read).
+    bot: { ...state.bot },
+    unlockedZones: { ...state.unlockedZones },
   };
+}
+
+/**
+ * M7.5 auto-sell executor — runs off a `townArrived` event (reason "sell" /
+ * "restockSell"): computes the sell list from the CURRENT inventory slice +
+ * persisted rules, then reuses the same POST-first sell flow the manual
+ * `InventoryPanel` sell buttons use (`executeSell`). Fire-and-forget: a
+ * dropped/failed auto-sell simply leaves the inventory full, so the NEXT trip
+ * (or a manual sell) retries it — never a stuck state.
+ */
+async function performAutoSell(): Promise<void> {
+  const store = useGameStore.getState();
+  const ids = selectAutoSellItemIds(store.inventory, ITEM_TEMPLATES, {
+    sellCommon: store.autoSellCommon,
+    sellRare: store.autoSellRare,
+    keepBetterStat: store.autoSellKeepBetterStat,
+  });
+  if (ids.length === 0) return;
+  const result = await executeSell(ids);
+  if (result.ok && result.soldCount > 0) {
+    useGameStore.getState().pushNotice("autoSellDone", {
+      count: result.soldCount,
+      gold: result.totalGold.toLocaleString(),
+    });
+  }
 }
 
 export function GameClient() {
@@ -420,6 +452,13 @@ export function GameClient() {
         useConsumable: pending.useConsumable ?? undefined,
         useReturnScroll: pending.useReturnScroll || undefined,
         equip: pending.equip ?? undefined,
+        setBotSettings: pending.setBotSettings ?? undefined,
+        fastTravel: pending.fastTravel ?? undefined,
+        goldCredit: pending.goldCredit ?? undefined,
+        // M7.5: the sell-trip bot's trigger — the engine knows nothing about
+        // item instances, so the client feeds this transient count every frame
+        // (see `FrameInput.inventoryCount`'s doc).
+        inventoryCount: store.inventory.length,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -456,6 +495,21 @@ export function GameClient() {
             templateId: ev.templateId,
             stage: state.stage,
           });
+        } else if (ev.type === "townArrived") {
+          // M7.5 sell-trip bot: the engine restocked already (engine-side);
+          // the CLIENT owns item instances, so a "sell"/"restockSell" arrival
+          // is where the auto-sell rules actually run (fire-and-forget — a
+          // dropped auto-sell just retries on the NEXT full-inventory trip).
+          if (ev.reason === "sell" || ev.reason === "restockSell") {
+            void performAutoSell();
+          }
+        } else if (ev.type === "fastTravelCastStart") {
+          useGameStore.getState().startFastTravelChannel(ev.mapId, ev.zoneIdx);
+        } else if (ev.type === "fastTravelArrive") {
+          useGameStore.getState().clearFastTravelChannel();
+        } else if (ev.type === "fastTravelBlocked") {
+          useGameStore.getState().clearFastTravelChannel();
+          useGameStore.getState().pushNotice(`fastTravelBlocked.${ev.reason}`);
         }
       }
 
@@ -606,6 +660,12 @@ export function GameClient() {
           // fetches on its own mount, only on an equip-failure resync).
           if (json.inventory) {
             useGameStore.getState().setInventory(json.inventory.map(toInventoryItem));
+            // M7.5 "NEW" badge baseline: everything owned AT BOOT is "known" —
+            // any templateId minted afterward reads as new for this session
+            // (see `sessionKnownTemplateIds`'s doc).
+            useGameStore
+              .getState()
+              .setSessionKnownTemplateIds(json.inventory.map((i) => i.templateId));
           }
         }
       } catch {

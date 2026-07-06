@@ -6,11 +6,20 @@
  */
 
 import type { GearSlot } from "@/engine";
-import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
+import type {
+  ClaimItemResultWire,
+  ItemInstanceWire,
+  SellItemResultWire,
+} from "@/ui/gear/types";
 
 export interface InventoryFetchResult {
   items: ItemInstanceWire[];
   equipped: { weapon: string | null; armor: string | null };
+  /** M7.5: non-deleted instance count + `INVENTORY_CAP` (server, `@/engine`
+   * re-exports the same constant so the capacity bar never hardcodes a second
+   * copy of the number). */
+  count?: number;
+  cap?: number;
 }
 
 /** GET /api/items — used for the equip-failure resync (and available for any
@@ -77,6 +86,27 @@ export async function postClaimBatch(
     });
     if (!res.ok) return null;
     return (await res.json()) as { results: ClaimItemResultWire[] };
+  } catch {
+    return null;
+  }
+}
+
+/** POST /api/items/sell (M7.5). Returns `null` on a network/parse failure so
+ * callers (manual sell button / the bot's auto-sell executor in `GameClient`)
+ * can leave the local inventory slice untouched rather than risk a bad merge —
+ * a retried sell is safe either way (the server's check-and-set is idempotent
+ * per instance, see `server/items.ts`'s `sellItems` doc). */
+export async function postSell(
+  itemIds: string[],
+): Promise<{ results: SellItemResultWire[]; totalGold: number } | null> {
+  try {
+    const res = await fetch("/api/items/sell", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { results: SellItemResultWire[]; totalGold: number };
   } catch {
     return null;
   }

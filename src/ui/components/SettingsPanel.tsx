@@ -15,6 +15,8 @@
 import { useTranslations } from "next-intl";
 import { AutoPotionToggles } from "@/ui/components/AutoPotionToggles";
 import { AutoReturnToggle } from "@/ui/components/AutoReturnToggle";
+import { AutoSellRulesSection } from "@/ui/components/AutoSellRulesSection";
+import { BotSettingsSection } from "@/ui/components/BotSettingsSection";
 import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -90,6 +92,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </div>
             <AutoPotionToggles />
           </section>
+
+          <div className="h-px bg-ddp-border-soft" />
+
+          <BotSettingsSection />
+          <AutoSellRulesSection />
 
           <div className="h-px bg-ddp-border-soft" />
 

@@ -50,3 +50,12 @@ export type ClaimItemResultWire =
       reason: "unknown_template" | "not_in_table" | "rate";
       rollId: string;
     };
+
+/** One NPC-sell result, mirroring `server/items.ts`'s `SellItemResult` (M7.5).
+ * "already" means the instance was already gone server-side (a stale local
+ * copy — also worth dropping locally); "rejected" leaves the local item as-is
+ * (still genuinely owned). */
+export type SellItemResultWire =
+  | { itemId: string; status: "sold"; price: number }
+  | { itemId: string; status: "already"; price: 0 }
+  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };

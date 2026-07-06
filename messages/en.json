@@ -110,7 +110,25 @@
     "closeButton": "Close",
     "autoBehaviorGroup": "Auto-behavior",
     "audioLanguageGroup": "Audio & language",
-    "deathBehaviorLabel": "When your hero dies"
+    "deathBehaviorLabel": "When your hero dies",
+    "bot": {
+      "title": "Helper bots",
+      "hint": "The bot warps to town on its own when your bags fill up or potions run low, then walks back to farming automatically.",
+      "restockToggle": "Auto-buy potions",
+      "sellTripToggle": "Auto sell-trip",
+      "hpTarget": "HP potion target",
+      "mpTarget": "Mana potion target",
+      "scrollReserve": "Return scroll target",
+      "goldReserve": "Minimum gold reserve",
+      "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)"
+    },
+    "autoSell": {
+      "title": "Auto-sell rules",
+      "sellCommon": "Sell common",
+      "sellRare": "Sell rare",
+      "sellEpic": "Sell epic (locked off)",
+      "keepBetterStat": "Keep items that beat what's equipped"
+    }
   },
   "onboarding": {
     "mascotName": "Deung",
@@ -451,7 +469,12 @@
     "enterBossRoom": "Enter Boss Room",
     "autoReturnOn": "Auto: return to farming",
     "autoReturnOff": "Auto: wait in town",
-    "frontier": "End of the frontier for now"
+    "frontier": "End of the frontier for now",
+    "fastTravelButton": "Warp",
+    "fastTravelTitle": "Fast Travel",
+    "fastTravelClose": "Close",
+    "fastTravelCurrent": "You're here",
+    "fastTravelChanneling": "Warping to {map}…"
   },
   "shop": {
     "title": "Town Shop",
@@ -497,9 +520,31 @@
       "swordsman": "Swordsman",
       "archer": "Archer",
       "mage": "Mage"
-    }
+    },
+    "tierShort": "T{tier}",
+    "newBadge": "New",
+    "classOnlyToggle": "My class only",
+    "capacityLabel": "{count}/{cap} slots",
+    "sellTownOnly": "Can only sell in town",
+    "sellOneButton": "Sell one",
+    "sellAllButton": "Sell all ({count})",
+    "sellAllCommonButton": "Sell all common",
+    "confirmSell": "Confirm sell?"
   },
   "dropFeed": {
     "gotItem": "Item obtained: {name}"
+  },
+  "notices": {
+    "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
+    "fastTravelBlocked": {
+      "locked": "That zone isn't unlocked yet",
+      "aggro": "A mob is engaged with you — can't warp",
+      "dead": "Your hero is down — can't warp",
+      "same": "You're already in that zone",
+      "traveling": "Already traveling",
+      "boss": "Mid boss fight — can't warp",
+      "invalid": "Can't warp there",
+      "damaged": "You took damage — warp cancelled"
+    }
   }
 }
