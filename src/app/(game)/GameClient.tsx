@@ -663,6 +663,9 @@ export function GameClient() {
         walkToZone: pending.walkToZone ?? undefined,
         evolveHero: pending.evolveHero ?? undefined,
         acceptQuest: pending.acceptQuest ?? undefined,
+        // M7.9 stat-tap-fix: a per-stat batch map (accumulated by the store,
+        // not last-wins — see `PendingInput.allocateStat`'s doc), passed
+        // straight through; the engine applies every entry in one step().
         allocateStat: pending.allocateStat ?? undefined,
         buyShopItem: pending.buyShopItem ?? undefined,
         useConsumable: pending.useConsumable ?? undefined,

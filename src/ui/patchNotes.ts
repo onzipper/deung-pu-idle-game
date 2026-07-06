@@ -38,6 +38,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-07.items.catchUp",
       "releases.2026-07-07.items.botFix",
       "releases.2026-07-07.items.kiteFix",
+      "releases.2026-07-07.items.statTapFix",
     ],
   },
 ];
