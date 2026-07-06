@@ -549,52 +549,79 @@ export async function sellItems(
   now: Date = new Date(),
 ): Promise<{ results: SellItemResult[]; totalGold: number }> {
   const uniqueIds = [...new Set(itemIds)];
-  const results: SellItemResult[] = [];
-  let totalGold = 0;
+  if (uniqueIds.length === 0) return { results: [], totalGold: 0 };
 
-  for (const itemId of uniqueIds) {
-    const result = await prisma.$transaction(async (tx): Promise<SellItemResult> => {
-      const item = await tx.itemInstance.findFirst({
-        where: { id: itemId, ownerId: characterId },
-        select: { templateId: true, deletedAt: true, equippedSlot: true },
+  // ONE interactive transaction for the whole (≤MAX_SELL_BATCH) request —
+  // 2026-07-06 optimization after a pre-cap 1,890-item sell-off hammered the
+  // shared MySQL host with a tx per item (3 statements + a commit each). Now:
+  // 1 batched read + ≤N single-row conditional writes + 1 createMany, one
+  // commit. The per-item `updateMany` conditional check-and-set is KEPT — it
+  // is the no-double-credit lock (invariant: a concurrent duplicate sell of
+  // the same instance yields exactly one "sold"); events are appended for
+  // exactly the won set in the SAME tx (invariants 1/7/9).
+  return prisma.$transaction(
+    async (tx) => {
+      const rows = await tx.itemInstance.findMany({
+        where: { id: { in: uniqueIds }, ownerId: characterId },
+        select: { id: true, templateId: true, deletedAt: true, equippedSlot: true },
       });
-      if (!item) return { itemId, status: "rejected", reason: "not_found" };
-      if (item.deletedAt !== null) return { itemId, status: "already", price: 0 };
-      // Equipped → reject; never auto-unequip on sell (owner-locked design).
-      if (item.equippedSlot !== null) return { itemId, status: "rejected", reason: "equipped" };
+      const byId = new Map(rows.map((r) => [r.id, r]));
 
-      // Price is captured at SELL TIME and recorded in the ledger (below).
-      const price = vendorPriceForTemplate(item.templateId);
+      const results: SellItemResult[] = [];
+      const sold: { itemId: string; price: number }[] = [];
+      for (const itemId of uniqueIds) {
+        const item = byId.get(itemId);
+        if (!item) {
+          results.push({ itemId, status: "rejected", reason: "not_found" });
+          continue;
+        }
+        if (item.deletedAt !== null) {
+          results.push({ itemId, status: "already", price: 0 });
+          continue;
+        }
+        // Equipped → reject; never auto-unequip on sell (owner-locked design).
+        if (item.equippedSlot !== null) {
+          results.push({ itemId, status: "rejected", reason: "equipped" });
+          continue;
+        }
 
-      // Atomic check-and-set (the deletedAt:null guard is the lock). equippedSlot
-      // is already NULL here, and the guard re-asserts it, so invariant 5
-      // (deletedAt set ⇒ equippedSlot NULL) holds without a separate write.
-      const res = await tx.itemInstance.updateMany({
-        where: { id: itemId, ownerId: characterId, deletedAt: null, equippedSlot: null },
-        data: { deletedAt: now },
-      });
-      if (res.count === 0) {
-        // Lost the race (concurrently sold/deleted between the read and the write)
-        // — do NOT credit. Retried/duplicated sell yields exactly one "sold".
-        return { itemId, status: "already", price: 0 };
+        // Price is captured at SELL TIME and recorded in the ledger (below).
+        const price = vendorPriceForTemplate(item.templateId);
+
+        // Atomic check-and-set (the deletedAt:null guard is the lock). equippedSlot
+        // is already NULL here, and the guard re-asserts it, so invariant 5
+        // (deletedAt set ⇒ equippedSlot NULL) holds without a separate write.
+        const res = await tx.itemInstance.updateMany({
+          where: { id: itemId, ownerId: characterId, deletedAt: null, equippedSlot: null },
+          data: { deletedAt: now },
+        });
+        if (res.count === 0) {
+          // Lost the race (concurrently sold/deleted between the read and the
+          // write) — do NOT credit. A duplicate sell yields exactly one "sold".
+          results.push({ itemId, status: "already", price: 0 });
+          continue;
+        }
+        sold.push({ itemId, price });
+        results.push({ itemId, status: "sold", price });
       }
 
-      await tx.itemEvent.create({
-        data: {
-          itemId,
-          type: "destroyed",
-          fromCharacterId: characterId,
-          meta: JSON.stringify({ sold: true, price, currency: "gold" }),
-        },
-      });
-      return { itemId, status: "sold", price };
-    });
+      if (sold.length > 0) {
+        await tx.itemEvent.createMany({
+          data: sold.map((s) => ({
+            itemId: s.itemId,
+            type: "destroyed",
+            fromCharacterId: characterId,
+            meta: JSON.stringify({ sold: true, price: s.price, currency: "gold" }),
+          })),
+        });
+      }
 
-    if (result.status === "sold") totalGold += result.price;
-    results.push(result);
-  }
-
-  return { results, totalGold };
+      return { results, totalGold: sold.reduce((acc, s) => acc + s.price, 0) };
+    },
+    // ≤100 indexed single-row writes on a shared host can outlast the 5s
+    // default interactive-tx window — give the batch real headroom.
+    { maxWait: 10_000, timeout: 20_000 },
+  );
 }
 
 /** Internal control-flow error so a tx callback can abort with a typed reason. */

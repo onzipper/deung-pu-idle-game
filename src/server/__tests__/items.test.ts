@@ -20,7 +20,7 @@ const { mockPrisma } = vi.hoisted(() => ({
       updateMany: vi.fn(),
       count: vi.fn(),
     },
-    itemEvent: { create: vi.fn() },
+    itemEvent: { create: vi.fn(), createMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -331,13 +331,18 @@ describe("claimBatch — inventory cap backstop (M7.5)", () => {
 
 describe("sellItems — NPC vendor (M7.5)", () => {
   beforeEach(() => {
-    mockPrisma.itemEvent.create.mockResolvedValue({});
+    mockPrisma.itemEvent.createMany.mockResolvedValue({ count: 0 });
   });
 
-  it("sells an unequipped item: atomic soft-delete + destroyed event, price from vendorPriceForTemplate", async () => {
-    mockPrisma.itemInstance.findFirst.mockResolvedValue(
-      instanceRow({ templateId: "w_sword_t3_knight", equippedSlot: null, deletedAt: null }),
+  /** The batched read now returns the rows for the whole request. */
+  function stockFindMany(rows: Record<string, unknown>[]): void {
+    mockPrisma.itemInstance.findMany.mockResolvedValue(
+      rows.map((r) => ({ id: "item_1", deletedAt: null, ...r })),
     );
+  }
+
+  it("sells an unequipped item: atomic soft-delete + destroyed event, price from vendorPriceForTemplate", async () => {
+    stockFindMany([{ templateId: "w_sword_t3_knight", equippedSlot: null }]);
     mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
     const now = new Date("2026-07-06T00:00:00Z");
     const { results, totalGold } = await sellItems(CHAR, ["item_1"], now);
@@ -352,32 +357,30 @@ describe("sellItems — NPC vendor (M7.5)", () => {
         data: { deletedAt: now },
       }),
     );
-    // ledger records the sell-time price
-    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+    // ledger records the sell-time price (single createMany for the batch)
+    expect(mockPrisma.itemEvent.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          type: "destroyed",
-          meta: JSON.stringify({ sold: true, price: expectedPrice, currency: "gold" }),
-        }),
+        data: [
+          expect.objectContaining({
+            type: "destroyed",
+            meta: JSON.stringify({ sold: true, price: expectedPrice, currency: "gold" }),
+          }),
+        ],
       }),
     );
   });
 
   it("rejects an equipped item (reason equipped) — never auto-unequips, no gold", async () => {
-    mockPrisma.itemInstance.findFirst.mockResolvedValue(
-      instanceRow({ equippedSlot: "weapon", deletedAt: null }),
-    );
+    stockFindMany([{ equippedSlot: "weapon" }]);
     const { results, totalGold } = await sellItems(CHAR, ["item_1"]);
     expect(results[0]).toEqual({ itemId: "item_1", status: "rejected", reason: "equipped" });
     expect(totalGold).toBe(0);
     expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
-    expect(mockPrisma.itemEvent.create).not.toHaveBeenCalled();
+    expect(mockPrisma.itemEvent.createMany).not.toHaveBeenCalled();
   });
 
   it("does not double-credit an already-deleted item (status already, price 0)", async () => {
-    mockPrisma.itemInstance.findFirst.mockResolvedValue(
-      instanceRow({ deletedAt: new Date("2026-01-01T00:00:00Z") }),
-    );
+    stockFindMany([{ equippedSlot: null, deletedAt: new Date("2026-01-01T00:00:00Z") }]);
     const { results, totalGold } = await sellItems(CHAR, ["item_1"]);
     expect(results[0]).toEqual({ itemId: "item_1", status: "already", price: 0 });
     expect(totalGold).toBe(0);
@@ -385,26 +388,22 @@ describe("sellItems — NPC vendor (M7.5)", () => {
   });
 
   it("credits at most once when the atomic write loses the race (count 0 → already)", async () => {
-    mockPrisma.itemInstance.findFirst.mockResolvedValue(
-      instanceRow({ equippedSlot: null, deletedAt: null }),
-    );
+    stockFindMany([{ equippedSlot: null }]);
     mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // concurrent seller won
     const { results, totalGold } = await sellItems(CHAR, ["item_1"]);
     expect(results[0]).toEqual({ itemId: "item_1", status: "already", price: 0 });
     expect(totalGold).toBe(0);
-    expect(mockPrisma.itemEvent.create).not.toHaveBeenCalled();
+    expect(mockPrisma.itemEvent.createMany).not.toHaveBeenCalled();
   });
 
   it("rejects a not-found item", async () => {
-    mockPrisma.itemInstance.findFirst.mockResolvedValue(null);
+    mockPrisma.itemInstance.findMany.mockResolvedValue([]);
     const { results } = await sellItems(CHAR, ["ghost"]);
     expect(results[0]).toEqual({ itemId: "ghost", status: "rejected", reason: "not_found" });
   });
 
   it("dedupes ids: a duplicated id sells/credits exactly once", async () => {
-    mockPrisma.itemInstance.findFirst.mockResolvedValue(
-      instanceRow({ templateId: "w_sword_t1_rusty", equippedSlot: null, deletedAt: null }),
-    );
+    stockFindMany([{ templateId: "w_sword_t1_rusty", equippedSlot: null }]);
     mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
     const { results, totalGold } = await sellItems(CHAR, ["item_1", "item_1", "item_1"]);
     expect(results).toHaveLength(1);
