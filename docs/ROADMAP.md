@@ -80,13 +80,13 @@
 - [x] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ — ตอกค้อน ~1s → สำเร็จ "+N!" เด้ง/ลดขั้นทึบ/แตกกระจาย+แฟลชขอบจอ (CSS+synth SFX), ตัวนับวัสดุใน HUD, stack แยกตาม +N, ออร่า step-up ที่ +7, desktop+mobile
 - [x] Sim ผลต่อ curve: **เลขร่างผ่านทุกเกตโดยไม่แก้** — s15 wall อยู่ 0/15 แม้ refine-stress, เปลี่ยนคลาส s5, วัสดุ sink จริง (ของใส่วน +1~4 ไม่นั่ง +10), ตี +10 ~359 ครั้ง, แตก ~1% ของดรอป; knobs REFINE=1/sweep/STRESS ใน balance-sim (ตาราง: balance-m7.md "M7.6 — Refine")
 
-## M7.8 — Manual Play (เคาะกับเจ้าของ 2026-07-06)
+## ✅ M7.8 — Manual Play (เสร็จ 2026-07-07)
 
 > เจ้าของอยากให้ผู้เล่นเล่นเองได้บ้าง — สไตล์ **RO แท้: แตะ/คลิกพื้นเดิน, แตะ/คลิกมอนตี** (ไม่ใช่ WASD) · ต่อยอดปุ่ม AUTO เดิม (M7.5): AUTO ปิด = ผู้เล่นสั่งเอง · ทุก input เป็น intent ผ่าน `pendingInput` (deterministic, ปูทาง lockstep M8 ฟรี) · **ต้องเล่นสะดวกทั้ง desktop และ mobile** (touch target ใหญ่, แตะเป็น input หลัก)
 
-- [ ] Engine: intent `moveTo(x)` / `attackTarget(id)` — AUTO ปิดให้ movement ฟังคำสั่งแทน seek, ล็อกเป้าที่สั่ง; กติกาชนกับ boss room (บังคับสู้) + aggro สวนกลับคงเดิม; deterministic ไม่แตะ RNG
-- [ ] UI/Render: Pixi hit-test แตะพื้น→เดิน แตะมอน→ตี + ปุ่มกดสกิลเอง (นอกเหนือ auto-cast) + ตัวชี้เป้า/วงใต้เท้ามอนที่ล็อก — desktop (เมาส์) + mobile (นิ้ว) เท่าเทียมกัน
-- [ ] ขัดเกลา game-feel: จังหวะตอบสนอง, ยกเลิกเป้า, สลับ AUTO ไหลลื่น
+- [x] Engine: intent `moveTo(x)` / `attackTarget(id)` / `cancelCommand` — Hero.command transient (ไม่ bump SAVE), boss บังคับสู้ชนะทุกคำสั่ง, ถึงโซนใหม่คำสั่งเคลียร์, AUTO เปิด = เสร็จคำสั่งกลับไปล่าต่อ, เส้นทาง auto เดิม byte-identical; events moveOrdered/targetLocked/commandCancelled ให้ render (13 tests)
+- [x] UI/Render: `hitTestPointer` ผ่าน baseTransform (กันจอสั่นทำเป้าเพี้ยน), มอนชนะพื้นเมื่อซ้อน + hit radius ใหญ่บนนิ้ว, ping วงแหวนจุดแตะ + reticle ค้างใต้เป้าที่ล็อก (pooled/flat-alpha), ชิพ "✕ ยกเลิกคำสั่ง" ข้าง AUTO — เมาส์+นิ้วเท่าเทียม · หมายเหตุ: ปุ่มกดสกิลเองยกไป backlog (สกิลยัง auto-cast; ทับซ้อน mana governor ต้องคิดต่อ)
+- [x] ขัดเกลา game-feel: tip สอนครั้งแรกที่ปิด AUTO ("แตะพื้นเพื่อเดิน แตะมอนเพื่อโจมตี"), cursor crosshair บน desktop, แตะพื้นระหว่างล็อกเป้า = สลับคำสั่งลื่น ๆ ไม่ต้องยกเลิกก่อน
 
 ## ⏸️ M6.5b — UI Skin (พักอีกรอบ 2026-07-07)
 
