@@ -17,9 +17,10 @@
 import { Container, Graphics } from "pixi.js";
 import { PALETTE, safeRadius } from "@/render/theme";
 
-// ---- falling-shadow markers (pooled, cap ~12 — 9 drops + a little slack for
-// 3x-speed overlap between casts; NOT the big rotating meteor rune) ---------
-const SHADOW_CAP = 12;
+// ---- falling-shadow markers (pooled, cap ~16 — the BARRAGE ultimate's 13
+// drops + a little slack for 3x-speed overlap between casts; NOT the big
+// rotating meteor rune) ------------------------------------------------------
+const SHADOW_CAP = 16;
 const SHADOW_MAX_R = 7;
 const SHADOW_MAX_ALPHA = 0.4;
 /** Fraction of the shadow's life spent easing alpha in/out — mirrors
@@ -107,8 +108,12 @@ export class RainShadowPool {
   }
 }
 
-// ---- ground-stuck arrow decal (pooled, cap ~10, ~0.6s fade) ----------------
-const GROUND_ARROW_CAP = 10;
+// ---- ground-stuck arrow decal (pooled, cap ~16, ~0.6s fade) ----------------
+// Bumped from 10 -> 16 (M7.7): the BARRAGE ultimate's 13 drops can land in a
+// tight real-time window (staggered spawn heights, not spawn TIMES), so the
+// signature rain's old headroom wasn't enough to avoid evicting an in-flight
+// decal mid-barrage.
+const GROUND_ARROW_CAP = 16;
 const GROUND_ARROW_LIFE = 0.6;
 const GROUND_ARROW_LEN = 14;
 /** Fraction of the decal's life spent fully visible before it eases out. */

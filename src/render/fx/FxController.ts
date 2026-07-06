@@ -29,11 +29,13 @@ import { CameraPunch } from "@/render/fx/cameraPunch";
 import { CastAuraController } from "@/render/fx/castAura";
 import { CorpseEchoPool } from "@/render/fx/corpseEcho";
 import { CrescentPool } from "@/render/fx/crescent";
+import { CurtainSweepPool } from "@/render/fx/curtainSweep";
 import { FlashLinePool } from "@/render/fx/flashLines";
 import { FloatingTextPool } from "@/render/fx/floatingText";
 import { GearAuraController } from "@/render/fx/gearAura";
 import { GearSparklePool } from "@/render/fx/gearSparkle";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
+import { GroundCrackPool } from "@/render/fx/groundCrack";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
 import { LevelUpBurstPool } from "@/render/fx/levelUp";
@@ -45,6 +47,7 @@ import { GroundArrowPool, RainShadowPool } from "@/render/fx/rainScene";
 import { RingPool } from "@/render/fx/rings";
 import { RuneGlyphPool } from "@/render/fx/runeGlyph";
 import { ScreenShake } from "@/render/fx/screenShake";
+import { SkyDarkenOverlay } from "@/render/fx/skyDarken";
 import { SoulWispPool } from "@/render/fx/soulWisp";
 import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
 import { TravelPortalController } from "@/render/fx/travelPortal";
@@ -118,11 +121,12 @@ const RAIN_LAUNCH_STREAK_COUNT = 4;
 const RAIN_LAUNCH_STREAK_HEIGHT = 30;
 const RAIN_LAUNCH_STREAK_SPREAD = 10;
 /** Clutter guard: at most this many drops are tracked for the falling-shadow
- * + landing sequence at once — 9 drops per cast + a little slack for 3x-speed
- * volley overlap; extra drops beyond the cap are silently skipped (the
- * pools underneath also cap+drop on their own, this just avoids growing an
- * unbounded tracking array). */
-const MAX_PENDING_RAIN_ARROWS = 12;
+ * + landing sequence at once — the BARRAGE ultimate's 13 drops per cast + a
+ * little slack for 3x-speed volley overlap (M7.7: bumped 12->16, matching
+ * `rainScene.ts`'s `SHADOW_CAP`/`GROUND_ARROW_CAP` bump); extra drops beyond
+ * the cap are silently skipped (the pools underneath also cap+drop on their
+ * own, this just avoids growing an unbounded tracking array). */
+const MAX_PENDING_RAIN_ARROWS = 16;
 /** Dirt + a few archer-tinted feather motes on landing (small, NOT the boss-
  * slam-sized impact burst — this is a hail of small arrows, not a nuke). */
 const RAIN_LAND_DIRT_COUNT = 4;
@@ -130,8 +134,11 @@ const RAIN_LAND_FEATHER_COUNT = 3;
 
 // ---- mage: meteor scene (item 11) ------------------------------------------
 /** At most 1-2 meteors are ever realistically in flight at once (12s skill
- * cooldown, <1s flight) — capped small regardless. */
-const MAX_PENDING_METEORS = 2;
+ * cooldown, <1s flight) — capped small regardless. Bumped 2->3 (M7.7): the
+ * cataclysm ultimate reuses the SAME `meteor` kind (footgun #6 — no new
+ * ProjectileKind), so a signature meteor's tail end can now briefly overlap
+ * a cataclysm cast. */
+const MAX_PENDING_METEORS = 3;
 const METEOR_RUNE_RADIUS = 46;
 const METEOR_RUNE_TICKS = 10;
 
@@ -356,6 +363,74 @@ function itemDropAccentColor(rarity: ItemRarity): number {
   return PALETTE.steel;
 }
 
+// ---------------------------------------------------------------------------
+// M7.7 "Skill Spectacle" — per-class SIGNATURE/UTILITY/ULTIMATE skill fx.
+// Every `skillCast` now routes by `ev.skillId` (see `onSkillCast()`), not
+// just `ev.heroClass` — the old per-class-only dispatch played the exact same
+// beat for a class's signature/utility/ultimate alike, which is exactly the
+// "current fx read too alike" gap this pass closes. Per-class VOCABULARY
+// (README-binding, jewel-tone-on-desaturated-scenery, footgun-10 flat-alpha):
+//   sword   -> crimson slash arcs + ground cracks, hot-metal palette
+//   archer  -> emerald/gold horizontal rain-curtain sweeps + feather glints
+//   mage    -> arcane violet/azure, sky-level events
+// Ultimates (tier-2, FIELD-WIDE) get the biggest shake/punch/sky-event beat
+// in the game; each capped at <=1.5s of total spectacle per the task brief.
+// Utility skills (warcry/powershot/frostnova) stay modest/legible — no big
+// shake, no field-wide dressing, just enough to read as "a different skill".
+// ---------------------------------------------------------------------------
+
+// ---- sword: WHIRL signature — a small ground crack under the spin ---------
+const WHIRL_CRACK_RADIUS = 55;
+const WHIRL_CRACK_LIFE = 0.4;
+const WHIRL_IMPACT_SHAKE = 3; // punchy, not disruptive — signature-tier only
+
+// ---- sword: WAR CRY utility (self buff) — modest, no AoE dressing ---------
+const WARCRY_RING_R1 = 46;
+const WARCRY_PARTICLE_COUNT = 10;
+
+// ---- sword: EARTHQUAKE ultimate (field-wide r460 shockwave) ---------------
+const QUAKE_SHAKE = 15; // biggest melee shake in the game (bossSlamLand is 8)
+const QUAKE_RING_R1 = 460; // matches SKILLS.sword_quake.radius
+const QUAKE_RING_DURATION = 0.6;
+/** A handful of extra ground cracks + dust columns scattered across the
+ * field (not just at the caster's feet) so the shockwave reads as
+ * TRAVELING, staggered over real time via `pendingFieldFx`. */
+const QUAKE_SCATTER_COUNT = 4;
+const QUAKE_SCATTER_SPAN = 380; // +/- px from the caster
+const QUAKE_SCATTER_DURATION = 0.5; // total real seconds the scatter plays over
+const QUAKE_DUST_PARTICLE_COUNT = 10;
+const QUAKE_CRACK_SCATTER_RADIUS = 90;
+
+// ---- archer: RAIN signature curtain — light dusting ------------------------
+const RAIN_CURTAIN_WIDTH = 2;
+const RAIN_CURTAIN_ALPHA = 0.5;
+
+// ---- archer: POWER SHOT utility (single nuke) — modest ---------------------
+const POWERSHOT_RING_R1 = 18;
+const POWERSHOT_STREAK_LEN = 50;
+
+// ---- archer: BARRAGE ultimate (field-wide 13-drop blanket) -----------------
+const BARRAGE_CAST_SHAKE = 11;
+const BARRAGE_LAND_SHAKE = 4; // a smaller re-punch per landing wave
+const BARRAGE_CURTAIN_WIDTH = 3.2;
+const BARRAGE_CURTAIN_ALPHA = 0.72;
+const BARRAGE_LAND_RING_R1 = 30;
+const BARRAGE_LAND_PARTICLE_COUNT = 7;
+
+// ---- mage: FROST NOVA utility (cheap sustained clear) — modest ------------
+const FROSTNOVA_RING_R1 = 62;
+const FROSTNOVA_PARTICLE_COUNT = 10;
+
+// ---- mage: CATACLYSM ultimate (field-wide r460 sky-fall) -------------------
+const CATACLYSM_SHAKE = 17; // the single biggest shake in the game
+const CATACLYSM_SKY_ALPHA = 0.42;
+const CATACLYSM_RING_R1 = 220; // visual impact ring; the ember scatter below
+// sells the rest of the r460 field-wide coverage without a 460px stroked
+// circle dominating the whole screen.
+const CATACLYSM_EMBER_COUNT = 24;
+const CATACLYSM_EMBER_LIFE = 1.1;
+const CATACLYSM_SCATTER_SCORCH_SPAN = 240; // +/- px around the true impact x
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -365,6 +440,9 @@ interface KnockbackEntry {
 
 interface PendingMeteor {
   tx: number;
+  /** True for `mage_cataclysm` — resolves the bigger ultimate impact beat
+   * instead of the signature meteor's plain scorch-on-landing. */
+  isUltimate: boolean;
 }
 
 /** One in-flight ARROW RAIN drop being tracked from cast to landing — `id`
@@ -374,6 +452,18 @@ interface PendingRainArrow {
   id: number;
   tx: number;
   ty: number;
+  /** True for `archer_barrage` — a bigger landing pop than the signature
+   * rain's small dirt/feather puff. */
+  big: boolean;
+}
+
+/** One scheduled field-wide beat (M7.7 quake ultimate) — a ground crack +
+ * dust burst fired `t` real seconds after cast, at a fixed `x`, so the
+ * shockwave reads as spreading across the field over time rather than
+ * everything popping in at once. Capped small (`QUAKE_SCATTER_COUNT`). */
+interface PendingFieldFx {
+  t: number;
+  x: number;
 }
 
 export class FxController {
@@ -438,6 +528,19 @@ export class FxController {
   private readonly gearAura: GearAuraController;
   private readonly gearSparkle: GearSparklePool;
 
+  // ---- M7.7 "Skill Spectacle" per-class skill fx additions -----------------
+  // Ground cracks (sword whirl/quake) live in the CORPSE layer (ground decals,
+  // bottom of the fx stack, same as `scorches`/`portals`); the rain-curtain
+  // sweep (archer rain/barrage) lives in the TRAIL layer (falls like a
+  // tracer, same as `rainShadows`) — both deliberately kept toward the BACK
+  // of this controller's own z-order so they never fight damage numbers/HP
+  // bars for legibility on a busy 21-mob field (the readability guard).
+  private readonly groundCracks: GroundCrackPool;
+  private readonly curtainStreaks: CurtainSweepPool;
+  /** Full-bleed sky-darken overlay for the CATACLYSM ultimate — same "one
+   * shared shape, topmost" convention as `meteorSky`/`flash` below. */
+  private readonly skyDarken: SkyDarkenOverlay;
+
   // ---- M7.5 world-gate navigation (fast-travel channel swirl) --------------
   private readonly travelPortal: TravelPortalController;
   /** Reused every frame — `getWeaponAnchorPos()`/`getArmorAnchorPos()` write
@@ -487,6 +590,11 @@ export class FxController {
    * `MAX_PENDING_RAIN_ARROWS`; extra drops beyond that are silently skipped. */
   private readonly pendingRainArrows: PendingRainArrow[] = [];
 
+  /** Scheduled quake-ultimate scatter beats (ground crack + dust column),
+   * capped at `QUAKE_SCATTER_COUNT` — see `onSwordQuakeCast()`/
+   * `updatePendingFieldFx()`. */
+  private readonly pendingFieldFx: PendingFieldFx[] = [];
+
   /** "This view has a decaying position nudge" entries (item 3) — reaches
    * directly into the SAME `Container` `hitFlash.ts` already reaches into
    * for its filter, never touching `enemyView.ts`/`bossView.ts`. */
@@ -529,8 +637,10 @@ export class FxController {
     this.armorShards = new ArmorShardPool(this.corpseLayer);
     this.rainShadows = new RainShadowPool(this.corpseLayer);
     this.groundArrows = new GroundArrowPool(this.corpseLayer);
+    this.groundCracks = new GroundCrackPool(this.corpseLayer);
     this.weaponTrail = new WeaponTrailController(this.trailLayer);
     this.tracers = new TracerPool(this.trailLayer);
+    this.curtainStreaks = new CurtainSweepPool(this.trailLayer);
     this.crescents = new CrescentPool(this.heroFxLayer);
     this.ghostBlades = new GhostBladePool(this.heroFxLayer);
     this.flashLines = new FlashLinePool(this.heroFxLayer);
@@ -539,7 +649,10 @@ export class FxController {
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
     this.travelPortal = new TravelPortalController(this.heroFxLayer);
-    this.rings = new RingPool(this.ringsLayer);
+    // Ring pool cap bumped 12->24 (M7.7): the BARRAGE ultimate's 13 landing
+    // pops (each spawning a ring) can now overlap with unrelated concurrent
+    // rings (mobAggroed/itemDrop/etc.) on a busy 21-mob field.
+    this.rings = new RingPool(this.ringsLayer, 24);
     this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
@@ -548,8 +661,9 @@ export class FxController {
     this.eventText = new FloatingTextPool(this.textLayer, EVENT_TEXT_CAP);
     this.flash = new ArenaFlash(WORLD_WIDTH, WORLD_HEIGHT);
     this.meteorSky = new MeteorSkyFlash(WORLD_WIDTH);
+    this.skyDarken = new SkyDarkenOverlay(WORLD_WIDTH, WORLD_HEIGHT);
     this.impactFilters = new ImpactFilterController(world);
-    fxContainer.addChild(this.bossEcho.view, this.meteorSky.view, this.flash.view);
+    fxContainer.addChild(this.bossEcho.view, this.meteorSky.view, this.skyDarken.view, this.flash.view);
   }
 
   get shakeOffset(): { x: number; y: number } {
@@ -745,6 +859,9 @@ export class FxController {
     this.armorShards.update(dt);
     this.rainShadows.update(dt);
     this.groundArrows.update(dt);
+    this.groundCracks.update(dt);
+    this.curtainStreaks.update(dt);
+    this.skyDarken.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
     this.levelUpBursts.update(dt);
@@ -768,6 +885,7 @@ export class FxController {
     this.updateKnockback(dt);
     this.updateEnemySpawns(state);
     this.updateBossDeathStages(dt);
+    this.updatePendingFieldFx(dt);
     this.detectBossEntrance(state);
     this.updateGearFx(dt, state);
     this.travelPortal.update(dt);
@@ -781,14 +899,17 @@ export class FxController {
     this.armorShards.destroy();
     this.rainShadows.destroy();
     this.groundArrows.destroy();
+    this.groundCracks.destroy();
     this.bossEcho.destroy();
     this.weaponTrail.destroy();
     this.tracers.destroy();
+    this.curtainStreaks.destroy();
     this.crescents.destroy();
     this.ghostBlades.destroy();
     this.flashLines.destroy();
     this.runeGlyphs.destroy();
     this.meteorSky.destroy();
+    this.skyDarken.destroy();
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
@@ -1177,22 +1298,55 @@ export class FxController {
     const colors = HERO_COLORS[ev.heroClass];
     this.punch.trigger("skillCast", x);
 
-    if (ev.heroClass === "swordsman") {
-      this.onSwordSpinCast(hero, x, colors.light);
-    } else if (ev.heroClass === "archer") {
-      this.onArcherRainCast(x, colors.light, state);
-    } else {
-      this.onMageMeteorCast(x, colors.light, state);
+    // M7.7 "Skill Spectacle": route by the actual SKILL, not just class —
+    // each class's SIGNATURE/UTILITY/ULTIMATE now reads as three distinct
+    // beats (the old class-only dispatch played the same beat for all three,
+    // which was the "current fx read too alike" gap this pass closes).
+    switch (ev.skillId) {
+      case "sword_whirl":
+        this.onSwordWhirlCast(hero, x, colors.light);
+        break;
+      case "sword_warcry":
+        this.onSwordWarcryCast(x, colors.light);
+        break;
+      case "sword_quake":
+        this.onSwordQuakeCast(x);
+        break;
+      case "archer_rain":
+        this.onArcherRainCast(x, colors.light, state, false);
+        break;
+      case "archer_powershot":
+        this.onArcherPowershotCast(x, colors.light);
+        break;
+      case "archer_barrage":
+        this.onArcherRainCast(x, colors.light, state, true);
+        break;
+      case "mage_meteor":
+        this.onMageMeteorCast(x, colors.light, state, false);
+        break;
+      case "mage_frostnova":
+        this.onMageFrostNovaCast(x, colors.light);
+        break;
+      case "mage_cataclysm":
+        this.onMageMeteorCast(x, colors.light, state, true);
+        break;
+      default:
+        break; // unknown skill id — no fx beat rather than guessing wrong
     }
   }
 
-  /** Swordsman skill (spin) — charge-up glow (item 4), whirlwind afterimages
-   * + dust ring (item 5), and the crescent-nova shards + a spin-specific
-   * stronger camera punch (item 6). */
-  private onSwordSpinCast(hero: Hero | undefined, x: number, color: number): void {
+  /** Swordsman SIGNATURE (WHIRL SLASH, "sword_whirl") — charge-up glow,
+   * whirlwind afterimages + dust ring, crescent-nova shards + a spin-
+   * specific stronger camera punch, and (M7.7) a ground crack under the spin
+   * + a punchy mild shake. Crimson/hot-metal accents (`PALETTE.swordCrimson`/
+   * `swordEmber`) give the sword kit its own fx language, distinct from the
+   * archer's emerald/mage's violet — the RIG itself stays the class's own
+   * teal (`color`), only the impact/crack accents go hot-metal. */
+  private onSwordWhirlCast(hero: Hero | undefined, x: number, color: number): void {
     // Stronger, spin-specific punch — "strongest wins" against the generic
     // `skillCast` punch already triggered by the caller (see cameraPunch.ts).
     this.punch.trigger("swordSpin", x);
+    this.shake.trigger(WHIRL_IMPACT_SHAKE);
 
     // Charge-up: front-loaded blade glow + inward-drifting sparkle at the
     // live blade tip (the spin's own 0.4s whirl already runs in heroView;
@@ -1201,7 +1355,7 @@ export class FxController {
     const hasTip = view ? getSwordTipPos(view, this.tipScratch) : false;
     const gx = hasTip ? this.tipScratch.x : x + 12;
     const gy = hasTip ? this.tipScratch.y : HERO_MID_Y;
-    burstInward(this.particles, gx, gy, 8, color, 26, { life: 0.16, speed: 90, radius: 2 });
+    burstInward(this.particles, gx, gy, 8, PALETTE.swordCrimson, 26, { life: 0.16, speed: 90, radius: 2 });
 
     // Whirlwind afterimages + a dust-ring kick-up at the feet.
     this.ghostBlades.triggerSpin(x, HERO_MID_Y, color);
@@ -1214,9 +1368,19 @@ export class FxController {
       width: 3,
       color: PALETTE.muted,
     });
+    // Ground crack under the spin (M7.7) — matches the whirl's own radius
+    // (`SKILL_TYPES.swordsman` IS the learned `sword_whirl` def).
+    this.groundCracks.spawn({
+      x,
+      y: GROUND_Y,
+      radius: WHIRL_CRACK_RADIUS,
+      life: WHIRL_CRACK_LIFE,
+      darkColor: PALETTE.swordCrackDark,
+      glowColor: PALETTE.swordEmber,
+    });
 
-    // Crescent nova: the existing expanding ring, augmented with jagged
-    // shards flying outward while rotating.
+    // Crescent nova: the existing expanding ring (now crimson/hot-metal),
+    // augmented with jagged shards flying outward while rotating.
     this.rings.spawn({
       x,
       y: HERO_MID_Y,
@@ -1224,7 +1388,7 @@ export class FxController {
       r1: SKILL_TYPES.swordsman.radius,
       duration: 0.4,
       width: 4,
-      color,
+      color: PALETTE.swordCrimson,
     });
     const shardCount = 6;
     for (let i = 0; i < shardCount; i++) {
@@ -1238,20 +1402,139 @@ export class FxController {
         radius: 8,
         thickness: 3,
         life: 0.4,
-        color: i % 2 === 0 ? color : PALETTE.steel,
+        color: i % 2 === 0 ? PALETTE.swordCrimson : PALETTE.steel,
       });
     }
   }
 
-  /** Archer skill (ARROW RAIN, 86d3k2t18) — a bow flash + a handful of
-   * upward "volley launch" streaks at cast time, then seeds the falling
-   * shadow markers (+ landing tracking) for all 9 drops the engine already
-   * pushed synchronously into `state.projectiles` this same step (same
-   * readback convention as `onMageMeteorCast()`'s single meteor, generalized
-   * to N drops). The old "3 fan flash-lines toward the nearest targets" read
-   * no longer matches the skill (it now blankets a whole zone, not 3 picked
-   * targets), so that beat is replaced outright rather than kept alongside. */
-  private onArcherRainCast(x: number, color: number, state: GameState): void {
+  /** Swordsman UTILITY (WAR CRY, "sword_warcry") — a self ATK-buff steroid;
+   * kept deliberately modest (utility skills stay legible, not nuke-ified):
+   * a warm crimson ring pulse + a few rising embers at the caster, no AoE
+   * shards/afterimages/shake. */
+  private onSwordWarcryCast(x: number, color: number): void {
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 8,
+      r1: WARCRY_RING_R1,
+      duration: 0.4,
+      width: 3,
+      color: PALETTE.swordCrimson,
+    });
+    burst(this.particles, x, HERO_MID_Y, WARCRY_PARTICLE_COUNT, PALETTE.swordEmber, {
+      speed: 70,
+      life: 0.4,
+      radius: 2.2,
+      gravity: -30,
+      drag: 0.3,
+    });
+    // A faint class-colored accent keeps this readable as "the swordsman",
+    // not just a generic red pulse.
+    burst(this.particles, x, HERO_MID_Y, 4, color, { speed: 50, life: 0.35, radius: 2 });
+  }
+
+  /** Swordsman ULTIMATE (EARTHQUAKE, "sword_quake") — a field-wide r460
+   * ground shockwave: the biggest shake/punch in the sword kit, a traveling
+   * ring out to the skill's own radius, an immediate ground crack at the
+   * caster's feet, and a scatter of further cracks + dust columns staggered
+   * across the field over real time (queued into `pendingFieldFx`, advanced
+   * by `updatePendingFieldFx()`) so the quake reads as SPREADING, not a
+   * single point flash. `strike` resolves the AoE damage INSTANTLY (no
+   * projectile), so every beat here fires at cast time — there is no
+   * separate "impact" moment to wait for. */
+  private onSwordQuakeCast(x: number): void {
+    this.punch.trigger("swordQuake", x);
+    this.shake.trigger(QUAKE_SHAKE);
+    this.impactFilters.triggerShockwave(x, GROUND_Y);
+
+    this.rings.spawn({
+      x,
+      y: GROUND_Y,
+      r0: 20,
+      r1: QUAKE_RING_R1,
+      duration: QUAKE_RING_DURATION,
+      width: 6,
+      color: PALETTE.swordCrimson,
+    });
+    this.groundCracks.spawn({
+      x,
+      y: GROUND_Y,
+      radius: QUAKE_CRACK_SCATTER_RADIUS,
+      spokes: 8,
+      life: 0.7,
+      darkColor: PALETTE.swordCrackDark,
+      glowColor: PALETTE.swordEmber,
+    });
+    burst(this.particles, x, GROUND_Y - 6, QUAKE_DUST_PARTICLE_COUNT, PALETTE.muted, {
+      speed: 120,
+      life: 0.45,
+      radius: 3.5,
+    });
+
+    // Schedule a scatter of further crack+dust beats across the field
+    // (alternating sides, outward), reading as the shockwave TRAVELING away
+    // from the caster rather than everything popping in at cast instant.
+    this.pendingFieldFx.length = 0;
+    for (let i = 0; i < QUAKE_SCATTER_COUNT; i++) {
+      const side = i % 2 === 0 ? 1 : -1;
+      const frac = (Math.floor(i / 2) + 1) / Math.ceil(QUAKE_SCATTER_COUNT / 2);
+      const fx = clamp(x + side * frac * QUAKE_SCATTER_SPAN, 0, WORLD_WIDTH);
+      this.pendingFieldFx.push({ t: frac * QUAKE_SCATTER_DURATION, x: fx });
+    }
+  }
+
+  /** Advances the quake ultimate's scheduled scatter beats (ground crack +
+   * dust burst + a small ring) queued by `onSwordQuakeCast()` — same
+   * "small array, real-time countdown, fire-then-remove" shape as
+   * `updateBossDeathStages()`. */
+  private updatePendingFieldFx(dt: number): void {
+    if (!this.pendingFieldFx.length) return;
+    for (let i = this.pendingFieldFx.length - 1; i >= 0; i--) {
+      const entry = this.pendingFieldFx[i];
+      entry.t -= dt;
+      if (entry.t <= 0) {
+        this.groundCracks.spawn({
+          x: entry.x,
+          y: GROUND_Y,
+          radius: QUAKE_CRACK_SCATTER_RADIUS * 0.8,
+          spokes: 5,
+          life: 0.5,
+          darkColor: PALETTE.swordCrackDark,
+          glowColor: PALETTE.swordEmber,
+        });
+        burst(this.particles, entry.x, GROUND_Y - 6, QUAKE_DUST_PARTICLE_COUNT, PALETTE.muted, {
+          speed: 100,
+          life: 0.4,
+          radius: 3,
+        });
+        this.rings.spawn({
+          x: entry.x,
+          y: GROUND_Y,
+          r0: 8,
+          r1: 60,
+          duration: 0.35,
+          width: 3,
+          color: PALETTE.swordEmber,
+        });
+        this.pendingFieldFx.splice(i, 1);
+      }
+    }
+  }
+
+  /** Archer SIGNATURE (ARROW RAIN, "archer_rain") / ULTIMATE (BARRAGE,
+   * "archer_barrage") — both reuse this one scene builder (M7.7: BARRAGE
+   * reuses the SAME `rainArrow` projectile kind — footgun #6, no new
+   * `ProjectileKind` — so it's differentiated here by the `isUltimate` flag
+   * `onSkillCast()` derives from `ev.skillId`, never by `kind`). A bow flash
+   * + upward "volley launch" streaks at cast time, then a rain-CURTAIN
+   * streak PER real drop (its life IS that drop's own fall time, so the
+   * curtain visually resolves exactly as each arrow lands) alongside the
+   * existing falling-shadow markers + landing tracking, for every drop the
+   * engine already pushed synchronously into `state.projectiles` this same
+   * step. The ultimate additionally gets its own big shake/punch AT CAST
+   * (the "whole field is about to get hit" read) and a bigger/brighter
+   * emerald curtain than the signature's paler dusting. */
+  private onArcherRainCast(x: number, color: number, state: GameState, isUltimate: boolean): void {
     // Bow flash: quick expanding ring + a tiny release burst at the bow.
     this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 11, duration: 0.15, width: 2, color });
     burst(this.particles, x, HERO_MID_Y, 5, color, { speed: 60, life: 0.2, radius: 2 });
@@ -1273,20 +1556,39 @@ export class FxController {
       });
     }
 
-    // The 9 `rainArrow` drops were just pushed synchronously this same
-    // engine step (`engine/systems/skills.ts`) — read them back for their
-    // exact (tx,ty) + flight time rather than re-deriving either.
+    if (isUltimate) {
+      this.punch.trigger("archerBarrage", x);
+      this.shake.trigger(BARRAGE_CAST_SHAKE);
+    }
+
+    const curtainColor = isUltimate ? PALETTE.archerEmerald : HERO_COLORS.archer.light;
+    const curtainWidth = isUltimate ? BARRAGE_CURTAIN_WIDTH : RAIN_CURTAIN_WIDTH;
+    const curtainAlpha = isUltimate ? BARRAGE_CURTAIN_ALPHA : RAIN_CURTAIN_ALPHA;
+
+    // The drops (9 signature / 13 barrage) were just pushed synchronously
+    // this same engine step (`engine/systems/skills.ts`) — read them back
+    // for their exact (tx,ty) + flight time rather than re-deriving either.
     const drops = state.projectiles.filter((p) => p.team === "hero" && p.kind === "rainArrow");
     for (const p of drops) {
       if (this.pendingRainArrows.length >= MAX_PENDING_RAIN_ARROWS) break;
       const fallDist = Math.hypot(p.tx - p.x, p.ty - p.y);
       const fallTime = Math.max(0.1, fallDist / Math.max(1, p.speed));
-      this.rainShadows.trySpawn({ x: p.tx, y: p.ty, life: fallTime, color });
-      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty });
+      this.rainShadows.trySpawn({ x: p.tx, y: p.ty, life: fallTime, color: curtainColor });
+      this.curtainStreaks.spawn({
+        x: p.tx,
+        topY: HERO_TOP_Y - 50,
+        bottomY: p.ty,
+        life: fallTime,
+        color: curtainColor,
+        glintColor: PALETTE.archerGoldGlint,
+        width: curtainWidth,
+        alpha: curtainAlpha,
+      });
+      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: isUltimate });
     }
   }
 
-  /** Continuous per-frame check of the ARROW RAIN drops queued by
+  /** Continuous per-frame check of the ARROW RAIN/BARRAGE drops queued by
    * `onArcherRainCast()`: the frame a tracked drop's id disappears from
    * `state.projectiles` (i.e. it just resolved on the ground — same
    * "vanished this frame" detection `updateMeteorTracking()` uses), fires
@@ -1297,59 +1599,176 @@ export class FxController {
       const entry = this.pendingRainArrows[i];
       const stillFalling = state.projectiles.some((p) => p.id === entry.id);
       if (!stillFalling) {
-        this.onRainArrowLanded(entry.tx, entry.ty);
+        this.onRainArrowLanded(entry.tx, entry.ty, entry.big);
         this.pendingRainArrows.splice(i, 1);
       }
     }
   }
 
-  /** One ARROW RAIN drop resolving: a small dirt + feather puff (NOT the
-   * bigger AOE impact burst class — this is a hail of small arrows, not a
-   * nuke) plus a brief arrow-stuck-in-ground decal. */
-  private onRainArrowLanded(x: number, y: number): void {
-    burst(this.particles, x, y, RAIN_LAND_DIRT_COUNT, PALETTE.muted, {
-      speed: 55,
-      life: 0.22,
-      radius: 2,
+  /** One ARROW RAIN/BARRAGE drop resolving: a small dirt + feather puff (NOT
+   * the bigger AOE impact burst class — this is a hail of small arrows, not
+   * a nuke) plus a brief arrow-stuck-in-ground decal. BARRAGE (`big`) gets a
+   * bigger burst + a small emerald impact ring + a mild re-punch shake, so
+   * the ultimate's blanket reads as staggered impacts ACROSS the field over
+   * real time, not just its one cast-time announcement. */
+  private onRainArrowLanded(x: number, y: number, big: boolean): void {
+    burst(this.particles, x, y, big ? RAIN_LAND_DIRT_COUNT + 2 : RAIN_LAND_DIRT_COUNT, PALETTE.muted, {
+      speed: big ? 75 : 55,
+      life: big ? 0.28 : 0.22,
+      radius: big ? 2.6 : 2,
     });
-    burst(this.particles, x, y, RAIN_LAND_FEATHER_COUNT, HERO_COLORS.archer.light, {
-      speed: 35,
-      life: 0.3,
-      radius: 1.6,
-    });
+    burst(
+      this.particles,
+      x,
+      y,
+      big ? BARRAGE_LAND_PARTICLE_COUNT : RAIN_LAND_FEATHER_COUNT,
+      HERO_COLORS.archer.light,
+      { speed: big ? 55 : 35, life: big ? 0.38 : 0.3, radius: 1.8 },
+    );
     this.groundArrows.spawn(x, y, HERO_COLORS.archer.light);
+    if (big) {
+      this.rings.spawn({
+        x,
+        y,
+        r0: 4,
+        r1: BARRAGE_LAND_RING_R1,
+        duration: 0.28,
+        width: 2.5,
+        color: PALETTE.archerEmerald,
+      });
+      this.shake.trigger(BARRAGE_LAND_SHAKE);
+    }
   }
 
-  /** Mage skill (meteor) — "the meteor is a scene" (item 11): a sky flash +
-   * a large glowing ground rune at the meteor's fixed target point while it
-   * falls; the falling fire tracer is handled continuously by
-   * `updateTracers()`, and the scorch-on-impact by `updateMeteorTracking()`. */
-  private onMageMeteorCast(x: number, color: number, state: GameState): void {
+  /** Archer UTILITY (POWER SHOT, "archer_powershot") — a single high-damage
+   * homing arrow (the archer's single-target answer to a lone boss); modest,
+   * a brighter release flash + a longer gold streak than the basic shot, no
+   * field dressing. The arrow itself reuses the `arrow` projectile kind, so
+   * its flight already gets `updateTracers()`'s tracer for free. */
+  private onArcherPowershotCast(x: number, color: number): void {
+    this.rings.spawn({ x, y: HERO_MID_Y, r0: 4, r1: POWERSHOT_RING_R1, duration: 0.2, width: 2.5, color });
+    this.flashLines.spawn({
+      x1: x,
+      y1: HERO_MID_Y,
+      x2: x + POWERSHOT_STREAK_LEN,
+      y2: HERO_MID_Y,
+      color: PALETTE.archerGoldGlint,
+      width: 2.4,
+      life: 0.18,
+      alpha: 0.8,
+    });
+    burst(this.particles, x, HERO_MID_Y, 6, color, { speed: 90, life: 0.22, radius: 2.2 });
+  }
+
+  /** Mage SIGNATURE (METEOR, "mage_meteor") / ULTIMATE (CATACLYSM,
+   * "mage_cataclysm") — both reuse this scene builder (M7.7: CATACLYSM
+   * reuses the SAME `meteor` projectile kind — footgun #6 — differentiated
+   * here by `isUltimate`, driven off `ev.skillId`): a sky flash + a large
+   * glowing ground rune at the target point while it falls; the falling
+   * fire tracer is `updateTracers()`'s job, the scorch/impact beat is
+   * `updateMeteorTracking()`'s (both already generalize via `PendingMeteor`
+   * carrying `isUltimate`). The ultimate additionally darkens the sky for a
+   * beat (`skyDarken`, azure-tinted per the mage's arcane sky-event
+   * language) and gets a bigger rune/flourish — its shake/impact spectacle
+   * lands ON IMPACT, not cast (see `onCataclysmImpact()`), matching how the
+   * boss's own slam telegraphs before it lands. */
+  private onMageMeteorCast(x: number, color: number, state: GameState, isUltimate: boolean): void {
     // The meteor's fixed ground-target point is `tx` on the projectile the
     // engine pushed synchronously in this same step (see
     // `engine/systems/skills.ts`) — read it back rather than re-deriving it.
     const meteor = state.projectiles.find((p) => p.team === "hero" && p.kind === "meteor");
     const tx = meteor ? meteor.tx : x;
 
-    this.meteorSky.trigger(color, 0.22);
+    this.meteorSky.trigger(isUltimate ? PALETTE.mageAzure : color, isUltimate ? 0.34 : 0.22);
+    if (isUltimate) this.skyDarken.trigger(PALETTE.skyDarkTint, CATACLYSM_SKY_ALPHA);
+
     const fallTime = estimateMeteorFallTime();
     this.runeGlyphs.spawn({
       x: tx,
       y: GROUND_Y,
-      radius: METEOR_RUNE_RADIUS,
-      ticks: METEOR_RUNE_TICKS,
-      color,
+      radius: isUltimate ? METEOR_RUNE_RADIUS * 1.6 : METEOR_RUNE_RADIUS,
+      ticks: isUltimate ? METEOR_RUNE_TICKS + 4 : METEOR_RUNE_TICKS,
+      color: isUltimate ? PALETTE.mageAzure : color,
       life: fallTime,
-      rotationSpeed: 1.6,
+      rotationSpeed: isUltimate ? 2.2 : 1.6,
       alpha: 0.5,
       fadeInFrac: 0.15,
     });
     if (this.pendingMeteors.length < MAX_PENDING_METEORS) {
-      this.pendingMeteors.push({ tx });
+      this.pendingMeteors.push({ tx, isUltimate });
     }
 
     // Cast flourish at the staff.
-    burst(this.particles, x, HERO_TOP_Y, 6, color, { speed: 50, life: 0.3, radius: 2.5 });
+    burst(this.particles, x, HERO_TOP_Y, isUltimate ? 10 : 6, isUltimate ? PALETTE.mageAzure : color, {
+      speed: 50,
+      life: 0.3,
+      radius: 2.5,
+    });
+  }
+
+  /** CATACLYSM ultimate's impact beat (M7.7, fired from `updateMeteorTracking()`
+   * the frame its tracked drop resolves) — the biggest shake/punch in the
+   * game, a big azure impact ring, a scatter of extra scorch patches across
+   * the field (selling the r460 field-wide reach without one dominating
+   * 460px stroked circle), and lingering embers that drift a moment after
+   * everything else has settled. */
+  private onCataclysmImpact(tx: number): void {
+    this.punch.trigger("mageCataclysm", tx);
+    this.shake.trigger(CATACLYSM_SHAKE);
+    this.impactFilters.triggerShockwave(tx, GROUND_Y);
+
+    const scatterXs = [tx - CATACLYSM_SCATTER_SCORCH_SPAN, tx, tx + CATACLYSM_SCATTER_SCORCH_SPAN];
+    for (const sx of scatterXs) {
+      this.scorches.spawn(clamp(sx, 0, WORLD_WIDTH), GROUND_Y, PALETTE.mageAzure);
+    }
+
+    this.rings.spawn({
+      x: tx,
+      y: GROUND_Y,
+      r0: 24,
+      r1: CATACLYSM_RING_R1,
+      duration: 0.55,
+      width: 6,
+      color: PALETTE.mageAzure,
+    });
+    burst(this.particles, tx, GROUND_Y - 10, 20, HERO_COLORS.mage.light, {
+      speed: 190,
+      life: 0.45,
+      radius: 4,
+    });
+    // Lingering embers — a slow upward drift over a longer life than any
+    // other burst in the fx toolkit, reading as "the aftermath hangs a beat".
+    burst(this.particles, tx, GROUND_Y - 10, CATACLYSM_EMBER_COUNT, PALETTE.mageAzure, {
+      speed: 40,
+      life: CATACLYSM_EMBER_LIFE,
+      radius: 2.5,
+      gravity: -18,
+      drag: 0.5,
+    });
+  }
+
+  /** Mage UTILITY (FROST NOVA, "mage_frostnova") — a cheap, fast AoE burst
+   * for sustained clearing between meteors; modest icy/azure accents, no
+   * big shake/shockwave (utility skills stay legible). Centered on the
+   * caster — render has no read on the engine's exact `nearestWithin`
+   * target x for an instant `strike`, and a self-centered burst still reads
+   * correctly for a "close-range clear" ability. */
+  private onMageFrostNovaCast(x: number, color: number): void {
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 10,
+      r1: FROSTNOVA_RING_R1,
+      duration: 0.35,
+      width: 3,
+      color: PALETTE.mageAzure,
+    });
+    burst(this.particles, x, HERO_MID_Y, FROSTNOVA_PARTICLE_COUNT, PALETTE.ivory, {
+      speed: 90,
+      life: 0.32,
+      radius: 2.4,
+    });
+    burst(this.particles, x, HERO_MID_Y, 6, color, { speed: 60, life: 0.3, radius: 2 });
   }
 
   /** `projectileSpawn` reactions that aren't already covered by the
@@ -1715,9 +2134,11 @@ export class FxController {
   /** Watches the in-flight mage meteors this controller is tracking (queued
    * by `onMageMeteorCast()`) and, the frame one disappears from
    * `state.projectiles` (i.e. it just resolved/hit the ground), spawns the
-   * glowing scorch patch at its target point (item 11). The existing
-   * shockwave/impact-burst on the actual damage `hit` stays unchanged — this
-   * only adds the ground decal. */
+   * glowing scorch patch at its target point (item 11) — or, for the
+   * CATACLYSM ultimate (M7.7, `entry.isUltimate`), the much bigger
+   * `onCataclysmImpact()` beat instead. The existing shockwave/impact-burst
+   * on the actual damage `hit` stays unchanged — this only adds the ground
+   * decal (+ the ultimate's extra spectacle). */
   private updateMeteorTracking(state: GameState): void {
     if (!this.pendingMeteors.length) return;
     for (let i = this.pendingMeteors.length - 1; i >= 0; i--) {
@@ -1726,7 +2147,11 @@ export class FxController {
         (p) => p.team === "hero" && p.kind === "meteor" && Math.abs(p.tx - entry.tx) < 0.5,
       );
       if (!stillFalling) {
-        this.scorches.spawn(entry.tx, GROUND_Y, HERO_COLORS.mage.light);
+        if (entry.isUltimate) {
+          this.onCataclysmImpact(entry.tx);
+        } else {
+          this.scorches.spawn(entry.tx, GROUND_Y, HERO_COLORS.mage.light);
+        }
         this.pendingMeteors.splice(i, 1);
       }
     }

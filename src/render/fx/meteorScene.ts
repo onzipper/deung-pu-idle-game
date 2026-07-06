@@ -60,8 +60,12 @@ export class MeteorSkyFlash {
   }
 }
 
-// ---- scorch patches (pooled, cap 3, ~2s fade) -------------------------------
-const SCORCH_CAP = 3;
+// ---- scorch patches (pooled, cap 6, ~2s fade) -------------------------------
+// Bumped 3->6 (M7.7): the CATACLYSM ultimate's impact beat (`onCataclysmImpact`
+// in FxController) spawns a 3-point scorch SCATTER in one shot to sell its
+// field-wide reach — the old cap-3 pool would immediately self-evict within
+// that same call, leaving no headroom for a concurrent signature-meteor scorch.
+const SCORCH_CAP = 6;
 const SCORCH_DURATION = 2.0;
 const SCORCH_HOLD_FRAC = 0.3; // stay near-full for the first 30% of the fade
 
