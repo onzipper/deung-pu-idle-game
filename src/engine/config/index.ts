@@ -237,8 +237,10 @@ export const CONFIG = {
     // Fast-travel channel time (s). The hero stands still (no hunt/skills) and any
     // damage taken during it CANCELS the warp (fastTravelBlocked "damaged").
     fastTravelCastSeconds: 1.75,
-    // Bot walk-to-town time (s) when no return scroll is held — a single DIRECT
-    // transit to town (mirrors respawnToTown's walk-home), negligible vs clears.
+    // Bot walk-to-town time PER ZONE OF DEPTH (s) when no return scroll is held
+    // — a single direct transit whose duration = botWalkSeconds x zoneIdx (min 1).
+    // Depth-scaled so the return scroll is a real time-saver from deep zones
+    // instead of a pointless purchase (2026-07-06 logic review).
     botWalkSeconds: 1.2,
   },
 

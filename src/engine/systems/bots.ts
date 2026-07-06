@@ -110,9 +110,37 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
   if (!bot.enabled && !bot.sellTripEnabled) return;
   if (state.traveling || state.fastTravelCast) return;
   if (state.phase !== "battle") return; // never mid boss / victory
-  if (zoneAt(state.location).kind !== "farm") return; // trips initiate from farming
   const hero = state.heroes[0];
   if (!hero || hero.dead) return;
+
+  // Restock trips fire on EMPTY, not below-target (owner call 2026-07-06): a
+  // target of 80 must NOT warp at 79 to buy one bottle — the trip happens when a
+  // tracked potion type runs OUT (stock 0 with a non-zero target), and the town
+  // stop then refills all the way to the targets. Between trips, any OTHER bot
+  // trip (e.g. a sell trip) opportunistically tops potions up while it's at the
+  // shop anyway (see onBotTownArrival), so a dry spell is rare in practice.
+  // The affordability gate below prevents a trip LIVELOCK — a broke hero that
+  // can't buy would otherwise trip, buy nothing, return, and immediately re-trip
+  // without ever farming. So the bot waits at the farm, banking gold, until a
+  // restock trip is actually worthwhile.
+  const hpShort = bot.hpPotionTarget > 0 && state.consumables.hpPotion <= 0;
+  const mpShort = bot.mpPotionTarget > 0 && state.consumables.manaPotion <= 0;
+  const spendable = Math.max(0, state.gold - bot.goldReserve);
+  const stage = shopStageOf(state);
+  const canAfford =
+    (hpShort && spendable >= shopPriceAt("hpPotion", stage)) ||
+    (mpShort && spendable >= shopPriceAt("manaPotion", stage));
+  const needRestock = bot.enabled && (hpShort || mpShort) && canAfford;
+
+  const kind = zoneAt(state.location).kind;
+  if (kind === "town") {
+    // Already STANDING at the shop (death respawn while waiting, manual visit):
+    // restock in place — walking to the farm just to trip straight back here
+    // would be an absurd round trip.
+    if (needRestock) botRestock(state);
+    return;
+  }
+  if (kind !== "farm") return; // trips initiate from farming
 
   // A prior sell trip gave up with the bag still at `sellTripWatermark` items —
   // stay latched until the count actually drops below it (a manual/late sell
@@ -125,19 +153,6 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
     state.sellTripWatermark = null;
   }
 
-  // Restock is due only if a potion is below target AND the hero can afford at least
-  // ONE of the short potions within the gold floor. The affordability gate prevents a
-  // trip LIVELOCK — a broke hero that can't buy would otherwise trip to town, buy
-  // nothing, return, and immediately re-trip without ever farming. So the bot waits at
-  // the farm, banking gold, until a restock trip is actually worthwhile.
-  const hpShort = state.consumables.hpPotion < bot.hpPotionTarget;
-  const mpShort = state.consumables.manaPotion < bot.mpPotionTarget;
-  const spendable = Math.max(0, state.gold - bot.goldReserve);
-  const stage = shopStageOf(state);
-  const canAfford =
-    (hpShort && spendable >= shopPriceAt("hpPotion", stage)) ||
-    (mpShort && spendable >= shopPriceAt("manaPotion", stage));
-  const needRestock = bot.enabled && (hpShort || mpShort) && canAfford;
   const needSell =
     bot.sellTripEnabled &&
     typeof inventoryCount === "number" &&
@@ -196,7 +211,11 @@ function beginBotTrip(state: GameState, restock: boolean, sell: boolean): void {
     state.consumables.returnScroll -= 1;
     beginTransit(state, town, 0, "bot"); // warp: arrives this same step
   } else {
-    beginTransit(state, town, CONFIG.travel.botWalkSeconds, "bot");
+    // Walk time scales with how DEEP the hero is (zones from town) — a flat
+    // 1.2s from anywhere made the scroll a pointless purchase (it "saved"
+    // nothing). Deep-zone farmers now feel the walk; the scroll is the upgrade.
+    const depth = Math.max(1, state.location.zoneIdx);
+    beginTransit(state, town, CONFIG.travel.botWalkSeconds * depth, "bot");
   }
 }
 
@@ -210,7 +229,10 @@ export function onBotTownArrival(state: GameState): void {
   const pending = state.botPending ?? { restock: false, sell: false };
   state.botPending = null;
 
-  if (pending.restock) botRestock(state);
+  // Opportunistic top-up: ANY bot trip restocks while it's standing at the shop
+  // anyway (the restock bot must be ON — a sell-only player who left it off
+  // clearly doesn't want gold auto-spent on potions).
+  if (pending.restock || state.bot.enabled) botRestock(state);
 
   const reason: "restock" | "sell" | "restockSell" =
     pending.restock && pending.sell ? "restockSell" : pending.sell ? "sell" : "restock";

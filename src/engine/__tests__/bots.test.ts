@@ -130,7 +130,7 @@ describe("potion-restock bot", () => {
     expect(zoneAt(s.location).kind).toBe("farm");
     expect(s.consumables.hpPotion).toBe(0);
 
-    // The trip fires (potions below target + affordable) and reaches town.
+    // The trip fires (stock EMPTY with a non-zero target + affordable) and reaches town.
     const arrived = runUntilInput(
       s,
       {},
@@ -156,6 +156,39 @@ describe("potion-restock bot", () => {
     );
     expect(back).toBe(true);
     expect(zoneAt(s.location).kind).toBe("farm");
+  });
+
+  it("REGRESSION: does NOT trip while stock is low-but-nonzero (empty-trigger, owner call)", () => {
+    // Old behavior tripped the moment stock dipped BELOW target — target 80
+    // meant a warp at 79 to buy one bottle. The trip must wait for EMPTY.
+    const s = farmingBot();
+    s.consumables.hpPotion = 1;
+    s.consumables.manaPotion = 1;
+    s.autoHpPotion = false; // keep the stock from draining to 0 mid-test
+    s.autoManaPotion = false;
+    for (let i = 0; i < 1500; i++) step(s, {});
+    expect(s.events.some((e) => e.type === "townArrived")).toBe(false);
+    expect(s.consumables.hpPotion).toBe(1); // untouched — and still no trip
+  });
+
+  it("sell trip tops potions up opportunistically while at the shop (restock bot ON)", () => {
+    const s = farmingBot();
+    s.bot.sellTripEnabled = true;
+    s.consumables.hpPotion = 5; // low but NOT empty — no restock trip due
+    s.consumables.manaPotion = 5;
+    s.autoHpPotion = false;
+    s.autoManaPotion = false;
+    const arrived = runUntilInput(
+      s,
+      { inventoryCount: INVENTORY_CAP }, // full bag forces a SELL trip
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      3000,
+    );
+    expect(arrived).toBe(true);
+    const ev = s.events.find((e) => e.type === "townArrived");
+    expect(ev && "reason" in ev && ev.reason).toBe("sell"); // not a restock trip...
+    expect(s.consumables.hpPotion).toBe(15); // ...but it topped up anyway
+    expect(s.consumables.manaPotion).toBe(15);
   });
 
   it("warps with a held return scroll (scroll-else-walk branch)", () => {
@@ -555,9 +588,10 @@ describe("determinism + smoke", () => {
     expect(townTrips).toBeGreaterThan(0);
     expect(kills).toBeGreaterThan(0);
     expect(s.gold).toBeGreaterThan(0);
-    // Potions hover near targets (auto-use drains, the bot tops back up); never a
-    // long dry spell — over the run they stay reasonably stocked.
-    expect(s.consumables.hpPotion).toBeGreaterThan(0);
+    // Empty-trigger restock: stock sawtooths 0 -> target; the run must end with
+    // the loop still functioning (stocked, or a refill trip imminent at 0).
+    expect(s.consumables.hpPotion).toBeGreaterThanOrEqual(0);
+    expect(s.consumables.hpPotion).toBeLessThanOrEqual(15);
     // Never stuck mid boss / stranded — ends alive and reachable.
     expect(zoneAt(s.location).kind).not.toBe("boss");
     expect(isZoneUnlocked(s, s.lastFarmZone)).toBe(true);
