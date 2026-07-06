@@ -6,6 +6,8 @@
  * target id or a fixed ground-target point. Factories live in `./factory`.
  */
 
+import type { EquippedGear } from "@/engine/config/items";
+
 /** Player hero classes (POC: sword / archer / mage). */
 export type HeroClass = "swordsman" | "archer" | "mage";
 
@@ -66,6 +68,71 @@ export type SkillId = string;
 export interface Vec2 {
   x: number;
   y: number;
+}
+
+/**
+ * World zone kinds (M6 "World & Town"):
+ *  - "town": the safe hub + respawn point (no spawns). NPC shops hook here later.
+ *  - "farm": a stage's wave content, farmed to its kill quota to unlock the next.
+ *  - "boss": the map's special BOSS ROOM (entering starts the boss encounter).
+ */
+export type ZoneKind = "town" | "farm" | "boss";
+
+/**
+ * A hero's world position: which map + which zone index within it (M6). Zone
+ * content/kind is DERIVED from CONFIG.world (see systems/world.ts `zoneAt`), so
+ * only the address is stored/persisted. Persisted (SAVE v8).
+ */
+export interface WorldLocation {
+  mapId: string;
+  zoneIdx: number;
+}
+
+/**
+ * NPC-shop consumable ids (M6 "เมืองหลัก + NPC shops", ROADMAP task): bought with
+ * gold in TOWN, non-tradable, held as engine-level STACKABLE COUNTS (see
+ * `ConsumableCounts`).
+ *
+ * BOUNDARY NOTE (vs M7 gear): these are deliberately NOT DB `ItemInstance`s. M7's
+ * item-instance model (unique id + ownerId + audit, server-authoritative) is for
+ * TRADABLE GEAR only; NPC potions are fungible, non-tradable, and cheap, so they
+ * live as plain counts in the save (SAVE v9) — no per-item identity to dupe. A
+ * future warp/party-summon item (M8) can join this union without a schema change.
+ */
+export type ShopItemId = "hpPotion" | "manaPotion" | "returnScroll";
+
+/** Held stack counts of each NPC consumable (M6, SAVE v9). Persisted. */
+export interface ConsumableCounts {
+  hpPotion: number;
+  manaPotion: number;
+  returnScroll: number;
+}
+
+/**
+ * Idle-automation "bot" settings (M7.5 "Sell, Bots & Inventory UX"). Persisted
+ * (SAVE v11), engine-owned (NOT a UI-mirrored transient like `autoReturn`): the
+ * bot triggers are deterministic, engine-side, and their config round-trips
+ * through the save so the automation survives a reload. See systems/bots.ts.
+ *
+ *  - `enabled`         : the POTION-RESTOCK bot (trip to town when potions dip
+ *                        below target, buy up to targets, auto-return to farming).
+ *  - `sellTripEnabled` : the SELL-trip bot (trip to town when the client-fed
+ *                        inventory count hits `INVENTORY_CAP`; the client fires
+ *                        the sell API off the `townArrived` event).
+ *  - `hpPotionTarget` / `mpPotionTarget` : restock target stack counts.
+ *  - `scrollReserve`   : the return-scroll restock target (also the bot's warp
+ *                        fuel — any held scroll is spent to warp home, and the
+ *                        trip tops the stock back up toward this reserve).
+ *  - `goldReserve`     : a spending FLOOR — restock only ever spends gold ABOVE
+ *                        this, so the bot never drains the player dry.
+ */
+export interface BotSettings {
+  enabled: boolean;
+  sellTripEnabled: boolean;
+  hpPotionTarget: number;
+  mpPotionTarget: number;
+  scrollReserve: number;
+  goldReserve: number;
 }
 
 /**
@@ -187,6 +254,14 @@ export interface Hero {
    * (so a fresh, unallocated hero sits exactly on its class baseline). Persisted.
    */
   stats: HeroStats;
+  /**
+   * Equipped gear loadout (M7): one weapon + one armor templateId, or null.
+   * Stats (atk/def/hp) resolve through `ITEM_TEMPLATES` and apply while equipped
+   * (systems/stats `equip*Of`, combat def mitigation). classReq is enforced at
+   * the equip intent (a class-mismatch is rejected). Persisted per save (SAVE
+   * v10) as a SIM CACHE — the DB item ledger is authoritative, boot payload wins.
+   */
+  equipped: EquippedGear;
 }
 
 export interface Enemy {
@@ -206,6 +281,26 @@ export interface Enemy {
   cd: number;
   /** Per-enemy jitter so melee attackers don't stack on the exact same x. */
   engageOffset: number;
+  /**
+   * Wander anchor (M6 "สนามล่ามอน"): the spawn point a not-yet-engaged mob idly
+   * drifts around (deterministic, no RNG). Transient (mobs are never persisted).
+   */
+  homeX: number;
+  /**
+   * Temperament (M6): AGGRESSIVE mobs engage when the hero enters `aggroRadius`;
+   * PASSIVE mobs (`aggressive=false`, `aggroRadius=0`) never initiate and only
+   * fight back once HIT (combat sets `engaged`). Set at spawn from the zone's
+   * per-map aggro ramp (`world.maps[].hunt`). Transient.
+   */
+  aggressive: boolean;
+  /** Aggro radius for an aggressive mob (0 for passive). Transient. */
+  aggroRadius: number;
+  /**
+   * Latched once this mob is FIGHTING the hero (aggro-triggered, or retaliating
+   * after a hit): it then approaches + attacks like the old march-model enemy.
+   * Before that it idle-wanders. Transient.
+   */
+  engaged: boolean;
 }
 
 /**

@@ -9,7 +9,7 @@ import {
   type GameState,
   type SaveData,
 } from "@/engine";
-import { makeStubEnemy, makeParty, soloSave } from "./helpers";
+import { makeStubEnemy, makeParty, soloSave, forceBoss } from "./helpers";
 
 /**
  * Phase B smoke tests: skills, auto-cast, boss flow, boss hint. Deterministic
@@ -42,8 +42,12 @@ describe("skills", () => {
   it("auto-cast guard: never casts with no target in range", () => {
     const s = initGameState(42);
     s.autoCast = true;
-    // Enemies spawn ~0.5s in but at x~860; the sword's spin needs a foe within
-    // 95px, which won't happen this early. skillCd must stay 0 (no wasted cast).
+    // Pause the M6 spawn pool and place a single foe far outside the sword's 95px
+    // spin reach: over 60 steps (~1s) the hero closes only ~175px of the 400px gap,
+    // so no target ever enters whirl range and skillCd must stay 0 (no wasted cast).
+    s.spawnPaused = true;
+    s.heroes[0].x = 214;
+    s.enemies = [makeStubEnemy(1, 214 + 400, 1_000_000)];
     for (let i = 0; i < 60; i++) step(s, {});
     expect(s.enemies.length).toBeGreaterThan(0);
     expect(s.heroes[0].skillCds["sword_whirl"] ?? 0).toBe(0);
@@ -51,8 +55,7 @@ describe("skills", () => {
 
   it("swordsman spin damages an in-range target and starts its cooldown", () => {
     const s = initGameState(1);
-    runUntil(s, (st) => st.bossReady, 30000);
-    step(s, { challengeBoss: true });
+    forceBoss(s); // M6: enter a boss fight without the world walk
     const radius = SKILL_TYPES.swordsman.radius;
     runUntil(
       s,
@@ -93,48 +96,40 @@ describe("skills", () => {
   });
 });
 
-describe("boss flow", () => {
-  it("challenge enters the boss phase and clears the field", () => {
+describe("boss flow (M6 boss room)", () => {
+  it("entering a boss fight clears the field and spawns the boss", () => {
     const s = initGameState(99);
-    expect(runUntil(s, (st) => st.bossReady, 30000)).toBe(true);
-    expect(s.phase).toBe("battle");
-    step(s, { challengeBoss: true });
+    expect(runUntil(s, (st) => st.enemies.length > 0, 3000)).toBe(true);
+    forceBoss(s);
     expect(s.phase).toBe("boss");
     expect(s.boss).not.toBeNull();
     expect(s.enemies.length).toBe(0);
   });
 
-  it("boss kill -> victory -> advanceStage keeps the single character", () => {
+  it("boss kill -> victory pays out and keeps the single character", () => {
     const s = initGameState(5, strongSave());
-    expect(runUntil(s, (st) => st.bossReady, 30000)).toBe(true);
-    step(s, { challengeBoss: true });
+    forceBoss(s);
     // Strong (high-level) hero out-damages the boss well before it can wipe.
     expect(runUntil(s, (st) => st.phase === "victory", 5000)).toBe(true);
     expect(s.gold).toBeGreaterThan(0);
-
-    step(s, { advanceStage: true });
-    expect(s.phase).toBe("battle");
-    expect(s.stage).toBe(2);
     expect(s.heroes).toHaveLength(1);
     expect(s.heroes[0].cls).toBe("swordsman");
   });
 
-  it("solo hero wipe -> boss retreats back to battle (retry allowed)", () => {
+  it("solo hero wipe -> respawns to town (M6, retry allowed)", () => {
     const s = initGameState(11);
-    expect(runUntil(s, (st) => st.bossReady, 30000)).toBe(true);
-    step(s, { challengeBoss: true });
+    forceBoss(s);
     expect(s.phase).toBe("boss");
-    // Force the wipe deterministically (a base hero may or may not out-DPS the
-    // boss depending on seed — the retreat MECHANIC is what this test pins).
+    // Force the wipe deterministically (the town-respawn MECHANIC is what this pins).
     const h = s.heroes[0];
     h.dead = true;
     h.hp = 0;
-    h.reviveTimer = 999;
     step(s, {});
-    expect(s.phase).toBe("battle");
+    // The boss is gone and the hero is walking home to town (not retreating in place).
     expect(s.boss).toBeNull();
-    expect(s.bossReady).toBe(true); // still challengeable
-    expect(s.heroes.every((h) => !h.dead)).toBe(true); // revived on retreat
+    expect(s.traveling).not.toBeNull();
+    // It revives (never permanently down).
+    expect(runUntil(s, (st) => !st.heroes[0].dead, 2000)).toBe(true);
   });
 });
 

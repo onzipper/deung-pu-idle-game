@@ -10,23 +10,34 @@
  *   │   ├── legBack / legFront (Graphics, pivot = hip — swing via rotation)
  *   │   └── upperBody (Container, pivot+position = hip — bob/lean/breathe)
  *   │       ├── torso (Graphics: spine + head, + hood for mage)
+ *   │       ├── gearArmor (Graphics, M7: equipped-armor accent overlay —
+ *   │       │   sibling of torso, rebuilt only on an equip change)
  *   │       ├── offArm (Graphics: plain arm, counter-swings / raises for casts)
- *   │       └── weaponArm (Graphics: arm + class weapon, drives every attack anim)
+ *   │       ├── weaponArm (Graphics: ARM SEGMENT ONLY, drives every attack anim)
+ *   │       │   └── gearWeapon (Graphics, M7: equipped weapon head — blade/
+ *   │       │       bow/staff — a plain child so it inherits every swing for
+ *   │       │       free; rebuilt only on an equip change, see below)
+ *   │       └── tierAccent (Graphics: M5 evolution identity accent)
  *   ├── hpBar (Graphics — NOT under bodyRoot: stays upright even mid-fall)
  *   ├── reviveRing (Graphics — ditto: countdown must stay readable)
  *   └── reviveLabel (Text)
  *
  * Every frame after the initial build only mutates transforms (position /
- * rotation / scale / alpha) or `tint` — never re-walks a Graphics path. Timing
- * split: locomotion (walk cadence/bob/lean) derives from actual per-frame
- * position delta, so it naturally speeds up with the 1x/2x/3x multiplier
- * (more sub-steps -> bigger delta over the same real `dt`); transient
- * attack/death/revive beats run on REAL seconds (`ctx.dt`), exactly like
- * `fx/`, so they stay equally snappy at any sim speed.
+ * rotation / scale / alpha) or `tint` — never re-walks a Graphics path,
+ * EXCEPT `gearWeapon`/`gearArmor` (M7 gear paper-doll), which redraw their
+ * path but ONLY on the (rare) frame the hero's `equipped.{weapon,armor}`
+ * templateId actually changes — see `updateHeroView`'s gear-build gate and
+ * the "GEAR PAPER-DOLL" section below. Timing split: locomotion (walk
+ * cadence/bob/lean) derives from actual per-frame position delta, so it
+ * naturally speeds up with the 1x/2x/3x multiplier (more sub-steps -> bigger
+ * delta over the same real `dt`); transient attack/death/revive beats run on
+ * REAL seconds (`ctx.dt`), exactly like `fx/`, so they stay equally snappy at
+ * any sim speed.
  */
 
 import { Container, Graphics, Text } from "pixi.js";
 import { CONFIG } from "@/engine/config";
+import { ITEM_TEMPLATES, type ItemRarity } from "@/engine/config/items";
 import type { Hero, HeroClass } from "@/engine/entities";
 import type { GameEvent } from "@/engine/state";
 import { GROUND_Y } from "@/render/layout";
@@ -63,6 +74,9 @@ const BREATH_SPEED = Math.PI * 0.9;
 const BREATH_SCALE_AMPLITUDE = 0.018;
 const IDLE_SWAY = 0.02;
 const LEAN_SMOOTH = 8; // per-second lerp rate toward the lean target
+/** Below this normalized speed, a facing re-derive is skipped (holds the last
+ * value) — mirrors `enemyView.ts`'s `AIM_SPEED_THRESHOLD` convention. */
+const FACING_SPEED_THRESHOLD = 0.08;
 
 // ---------------------------------------------------------------------------
 // Per-class resting weapon-arm / off-arm angles (radians).
@@ -73,6 +87,43 @@ const REST_ANGLE: Record<HeroClass, number> = {
   mage: -0.05,
 };
 const OFFARM_REST = 0.35;
+
+// ---------------------------------------------------------------------------
+// M7 GEAR PAPER-DOLL (gear-wow pass): the equipped weapon/armor overlay,
+// keyed by `hero.equipped.{weapon,armor}` templateId — separate from
+// `hero.tier` (M5 class-EVOLUTION tier, 1|2) above; a gear template's own
+// `tier` field (1-6, `@/engine/config/items`) drives THIS section instead.
+// Weapon HEAD geometry (blade/bow/staff) lives in `view.gearWeapon` (a child
+// of `weaponArm`, sharing its rotation so it swings/lunges with every attack
+// anim); armor accents live in `view.gearArmor` (a sibling of `torso` under
+// `upperBody`, same absolute-coordinate convention `buildTierAccent` already
+// uses). Both are rebuilt ONLY when the equipped templateId actually changes
+// (see `updateHeroView`'s `gearWeaponId`/`gearArmorId` edge-gate) — never a
+// per-frame path rebuild.
+// ---------------------------------------------------------------------------
+
+/** Per-gear-tier visual growth multiplier — "t1 modest -> t6 huge & อลัง"
+ * (GDD). Applied to weapon length/radius math, never to a whole container's
+ * `scale` (that would also stretch the arm segment). */
+const GEAR_TIER_SCALE: Record<number, number> = { 1: 1, 2: 1.05, 3: 1.12, 4: 1.22, 5: 1.35, 6: 1.55 };
+
+/** Shared shoulder-to-hand grip point per class — both the (build-once) arm
+ * segment in `buildRig` and the (rebuilt-on-equip-change) weapon head in
+ * `buildGearWeapon` anchor off this SAME point, so a weapon head always
+ * lines up with its arm regardless of which one last rebuilt. */
+const WEAPON_HAND: Record<HeroClass, { x: number; y: number }> = {
+  swordsman: { x: 12, y: HEAD_Y - 2 },
+  archer: { x: 11, y: HEAD_Y + 4 },
+  mage: { x: 11, y: HEAD_Y + 4 },
+};
+
+/** Rarity -> accent color (common reuses the shared `steel` weapon-material
+ * tone; rare/epic get their own jewel accents — see `theme.ts`). */
+function rarityAccentColor(rarity: ItemRarity): number {
+  if (rarity === "epic") return PALETTE.gearEpic;
+  if (rarity === "rare") return PALETTE.gearRare;
+  return PALETTE.steel;
+}
 
 // ---------------------------------------------------------------------------
 // Attack animation durations (REAL seconds) + amplitudes.
@@ -168,6 +219,24 @@ interface HeroAnimState {
    * only ever increases (single evolution path in M5), so this never needs
    * to un-build anything. */
   tierBuilt: 1 | 2;
+  /**
+   * Rig-flip state (open hunting field, 86d3jv7m3 follow-up): the whole rig
+   * is drawn facing +x (bow/blade/staff all built on the +x side — see
+   * `buildRig`). `1` = default/unflipped (facing +x); `-1` = mirrored (facing
+   * -x). Derived from the hero's OWN recent movement delta (this view has no
+   * reference to its current target's position) and HELD through stationary
+   * beats (holding position to swing/shoot/cast) rather than re-derived every
+   * frame off a near-zero velocity.
+   */
+  facing: 1 | -1;
+  /** M7 gear paper-doll: the LAST-BUILT `hero.equipped.{weapon,armor}`
+   * templateId (or `null` for "nothing equipped") — `updateHeroView` rebuilds
+   * `gearWeapon`/`gearArmor` only when these no longer match, never per
+   * frame. `gearInitialized` forces exactly one build on this view's first
+   * frame (covers a save that loads already geared). */
+  gearWeaponId: string | null;
+  gearArmorId: string | null;
+  gearInitialized: boolean;
 }
 
 export interface HeroView extends Container {
@@ -179,6 +248,27 @@ export interface HeroView extends Container {
   torso: Graphics;
   offArm: Graphics;
   weaponArm: Graphics;
+  /** M7 gear paper-doll: the equipped WEAPON head (blade/bow/staff), a child
+   * of `weaponArm` so it inherits every attack anim's rotation/lunge for
+   * free — see `buildGearWeapon()`. Rebuilt only when `hero.equipped.weapon`
+   * changes (`HeroAnimState.gearWeaponId`). Grows/gains rarity accents with
+   * the equipped template's own `tier`/`rarity` (`@/engine/config/items`),
+   * independent of `hero.tier` (M5 evolution) below. */
+  gearWeapon: Graphics;
+  /** M7 gear paper-doll: the equipped ARMOR overlay (trim/accents on top of
+   * the class's base silhouette), a sibling of `torso` under `upperBody` —
+   * see `buildGearArmor()`. Rebuilt only when `hero.equipped.armor` changes. */
+  gearArmor: Graphics;
+  /** Last-built weapon/armor template's tier/rarity — read by
+   * `fx/FxController.ts` (via `getWeaponAnchorPos`/`getArmorAnchorPos`) to
+   * decide whether the tier-6/epic weapon aura or tier-5+ armor sparkle
+   * should be active for this hero, without re-deriving from `GameState`
+   * itself (the view already resolved it while building). Defaults to
+   * tier 1 / common (bare rig, pre-M7 look). */
+  gearWeaponTier: number;
+  gearWeaponRarity: ItemRarity;
+  gearArmorTier: number;
+  gearArmorRarity: ItemRarity;
   /** Tier-2 (M5 evolution) identity accent — a NEW, separate Graphics (not
    * extra draws into `torso`/`offArm`/`weaponArm`) so the tier-1 rig those
    * build once never needs touching again; see `buildTierAccent()`. Child of
@@ -255,7 +345,20 @@ export function createHeroView(): HeroView {
   const tierAccent = new Graphics();
   tierAccent.visible = false;
 
-  upperBody.addChild(torso, offArm, weaponArm, tierAccent);
+  // M7 gear paper-doll: `gearWeapon` is a plain (pivot/position default 0,0)
+  // child of `weaponArm` — since a child with no pivot/position offset of
+  // its own is a transform no-op, drawing into it with the SAME absolute
+  // coordinates `buildRig`'s arm-line uses lines up identically (see the
+  // module doc comment's "GEAR PAPER-DOLL" section) while still inheriting
+  // every attack anim's rotation for free. `gearArmor` is a sibling of
+  // `torso` (same convention as `tierAccent` above) so it only follows
+  // body lean/bob/breathe, never a swing.
+  const gearWeapon = new Graphics();
+  weaponArm.addChild(gearWeapon);
+  const gearArmor = new Graphics();
+  gearArmor.visible = false; // stays hidden until `buildGearArmor` actually draws something
+
+  upperBody.addChild(torso, gearArmor, offArm, weaponArm, tierAccent);
   bodyRoot.addChild(legBack, legFront, upperBody);
 
   const hpBar = new Graphics();
@@ -287,6 +390,12 @@ export function createHeroView(): HeroView {
   view.torso = torso;
   view.offArm = offArm;
   view.weaponArm = weaponArm;
+  view.gearWeapon = gearWeapon;
+  view.gearArmor = gearArmor;
+  view.gearWeaponTier = 1;
+  view.gearWeaponRarity = "common";
+  view.gearArmorTier = 1;
+  view.gearArmorRarity = "common";
   view.tierAccent = tierAccent;
   view.auraRing = auraRing;
   view.hpBar = hpBar;
@@ -307,6 +416,10 @@ export function createHeroView(): HeroView {
     shotPoseIndex: 0,
     attackSeq: 0,
     tierBuilt: 1,
+    facing: 1,
+    gearWeaponId: null,
+    gearArmorId: null,
+    gearInitialized: false,
   };
   return view;
 }
@@ -458,82 +571,272 @@ function buildRig(view: HeroView, cls: HeroClass): void {
     view.offArm.circle(-10, SHOULDER_Y + 6.5, 1.4).fill(colors.light);
   }
 
-  // Weapon arm: class-specific arm + weapon — absolute coordinates
-  // (shoulder pivot), same convention as everything above.
+  // Weapon arm: class-specific ARM SEGMENT ONLY — absolute coordinates
+  // (shoulder pivot), same convention as everything above. The weapon HEAD
+  // itself (blade/bow/staff) no longer lives here (M7 gear paper-doll): it's
+  // drawn into `view.gearWeapon` (a plain child of this SAME Graphics, so it
+  // shares this transform for free) by `buildGearWeapon()` below, which is
+  // keyed by the hero's EQUIPPED template and rebuilt on every equip change
+  // rather than once here — see the "GEAR PAPER-DOLL" module doc comment.
   const g = view.weaponArm;
   if (cls === "swordsman") {
-    const bx = 12;
-    const by = HEAD_Y - 2;
+    const hand = WEAPON_HAND.swordsman;
     g.moveTo(0, SHOULDER_Y)
-      .lineTo(bx, by)
+      .lineTo(hand.x, hand.y)
       .stroke({ width: 2.6, color: colors.body, cap: "round" });
-    // Big sword: a tapered blade poly (reads as a blade, not a stick) with a
-    // distinct crossguard perpendicular to it. Tip position is mirrored in
-    // `SWORD_TIP_LOCAL` below (the weapon-trail hook) — keep them in sync.
-    const tipX = bx + 12;
-    const tipY = by - 20;
-    const dx = tipX - bx;
-    const dy = tipY - by;
+  } else if (cls === "archer") {
+    const hand = WEAPON_HAND.archer;
+    g.moveTo(0, SHOULDER_Y)
+      .lineTo(hand.x, hand.y)
+      .stroke({ width: 2.4, color: colors.body, cap: "round" });
+  } else {
+    const hand = WEAPON_HAND.mage;
+    g.moveTo(0, SHOULDER_Y)
+      .lineTo(hand.x, hand.y)
+      .stroke({ width: 2.4, color: colors.body, cap: "round" });
+  }
+}
+
+/**
+ * M7 gear paper-doll: (re)draw the equipped WEAPON head into
+ * `view.gearWeapon` — a child of `weaponArm` (see `createHeroView`), so it
+ * inherits every attack anim's rotation/lunge/scale for free without this
+ * function knowing anything about attack timing. Called from
+ * `updateHeroView` only when `hero.equipped.weapon` actually changes
+ * (`HeroAnimState.gearWeaponId`), never per frame. `templateId === null`
+ * (nothing equipped) falls back to the plain tier-1/common look — the same
+ * bare-weapon glyph every hero has always shown, so an unarmed hero never
+ * reads as "no weapon".
+ *
+ * Growth/ornament escalates with the template's own `tier` (1..6,
+ * `@/engine/config/items` — via `GEAR_TIER_SCALE`, NOT `hero.tier`'s M5
+ * evolution flag): t1 modest, t6 huge & อลัง (GDD) with an extra flare
+ * ornament; `rarity` (common/rare/epic) tints an accent stroke/ornament
+ * color (`rarityAccentColor()`) so a glance signals BOTH power band and
+ * rarity. Tier-6/epic weapons additionally get the "Super Saiyan" flame aura
+ * (`fx/gearAura.ts`, driven continuously from `FxController` via
+ * `getWeaponAnchorPos()` below — not drawn here).
+ */
+function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | null): void {
+  const colors = HERO_COLORS[cls];
+  const tpl = templateId ? ITEM_TEMPLATES[templateId] : undefined;
+  const tier = tpl?.tier ?? 1;
+  const rarity: ItemRarity = tpl?.rarity ?? "common";
+  const scale = GEAR_TIER_SCALE[tier] ?? 1;
+  const accent = rarityAccentColor(rarity);
+  const g = view.gearWeapon;
+  g.clear();
+
+  if (cls === "swordsman") {
+    const hand = WEAPON_HAND.swordsman;
+    // Tapered blade poly, growing in length/rise with tier. Tip position is
+    // mirrored in `swordTipLocal()` below (the weapon-trail hook) — keep the
+    // two formulas in sync.
+    const bladeLen = (12 + (tier - 1) * 2.4) * scale;
+    const bladeRise = 20 * scale;
+    const tipX = hand.x + bladeLen;
+    const tipY = hand.y - bladeRise;
+    const dx = tipX - hand.x;
+    const dy = tipY - hand.y;
     const len = Math.hypot(dx, dy) || 1;
     const nx = dx / len;
     const ny = dy / len;
     const px = -ny;
     const py = nx;
-    const halfW = 2.2;
+    const halfW = 2.2 * (0.9 + scale * 0.1);
     g.poly(
-      [bx + px * halfW, by + py * halfW, tipX, tipY, bx - px * halfW, by - py * halfW],
+      [hand.x + px * halfW, hand.y + py * halfW, tipX, tipY, hand.x - px * halfW, hand.y - py * halfW],
       true,
     ).fill(PALETTE.steel);
-    g.moveTo(bx - px * 5, by - py * 5)
-      .lineTo(bx + px * 5, by + py * 5)
+    const guardLen = 5 * scale;
+    g.moveTo(hand.x - px * guardLen, hand.y - py * guardLen)
+      .lineTo(hand.x + px * guardLen, hand.y + py * guardLen)
       .stroke({ width: 2.2, color: colors.light, cap: "round" });
+    if (rarity !== "common") {
+      g.poly(
+        [
+          hand.x + px * halfW,
+          hand.y + py * halfW,
+          tipX,
+          tipY,
+          hand.x - px * halfW,
+          hand.y - py * halfW,
+        ],
+        true,
+      ).stroke({ width: 1, color: accent, alpha: 0.85 });
+    }
+    if (tier >= 6) {
+      // "อาวุธใหญ่อลัง" break-tier flare ornament off the crossguard.
+      const flareLen = guardLen * 1.7;
+      g.poly(
+        [
+          hand.x - px * guardLen,
+          hand.y - py * guardLen,
+          hand.x - px * flareLen,
+          hand.y - py * flareLen - 3,
+          hand.x - px * guardLen * 0.7,
+          hand.y - py * guardLen * 0.7 - 4,
+        ],
+        true,
+      ).fill(accent);
+      g.poly(
+        [
+          hand.x + px * guardLen,
+          hand.y + py * guardLen,
+          hand.x + px * flareLen,
+          hand.y + py * flareLen - 3,
+          hand.x + px * guardLen * 0.7,
+          hand.y + py * guardLen * 0.7 - 4,
+        ],
+        true,
+      ).fill(accent);
+    }
   } else if (cls === "archer") {
-    const bx = 11;
-    const cx = bx + 3;
-    const cy = HEAD_Y + 4;
-    const r = 13;
-    g.moveTo(0, SHOULDER_Y)
-      .lineTo(bx, cy)
-      .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.arc(cx, cy, r, -1.1, 1.1).stroke({ width: 1.8, color: colors.light });
+    const hand = WEAPON_HAND.archer;
+    const cx = hand.x + 3;
+    const cy = hand.y;
+    const r = 13 * scale;
+    g.arc(cx, cy, r, -1.1, 1.1).stroke({ width: tier >= 4 ? 2.2 : 1.8, color: colors.light });
     const p1x = cx + r * Math.cos(-1.1);
     const p1y = cy + r * Math.sin(-1.1);
     const p2x = cx + r * Math.cos(1.1);
     const p2y = cy + r * Math.sin(1.1);
-    // Bowstring (chord), pulled back slightly toward -x — "always under
-    // tension" per the rest-angle tuning above — plus a nocked arrow aimed
-    // forward (+x, the facing direction).
     const stringX = cx - r * 0.15;
     g.moveTo(p1x, p1y)
       .lineTo(stringX, cy)
       .lineTo(p2x, p2y)
       .stroke({ width: 1, color: PALETTE.steel, alpha: 0.8 });
+    const arrowLen = 15 * scale;
     g.moveTo(stringX, cy)
-      .lineTo(stringX + 15, cy)
+      .lineTo(stringX + arrowLen, cy)
       .stroke({ width: 1.4, color: colors.light, cap: "round" });
-    g.poly([stringX + 15, cy - 2, stringX + 19, cy, stringX + 15, cy + 2], true).fill(
-      PALETTE.steel,
-    );
+    g.poly(
+      [stringX + arrowLen, cy - 2, stringX + arrowLen + 4, cy, stringX + arrowLen, cy + 2],
+      true,
+    ).fill(PALETTE.steel);
+    if (rarity !== "common") {
+      // A SECOND `.arc()` call on a Graphics whose pen is already elsewhere
+      // (the string/arrow paths just drawn above) blows up `getBounds()` —
+      // same footgun class as `Graphics.arc().fill()` (CLAUDE.md #2), just
+      // manifesting through `.stroke()`'s miter join instead of a fill
+      // collapse. `arcFanPoints()` (point-sampled, no implicit path
+      // continuation) sidesteps it entirely — same fix pattern the module
+      // already uses for filled arc caps.
+      g.poly(arcFanPoints(cx, cy, r, -1.1, 1.1), false).stroke({
+        width: 1,
+        color: accent,
+        alpha: 0.7,
+      });
+    }
+    if (tier >= 6) {
+      // Break-tier feathered limb-tip flares.
+      g.poly([p1x, p1y, p1x - 3, p1y - 5, p1x + 2, p1y - 3], true).fill(accent);
+      g.poly([p2x, p2y, p2x - 3, p2y + 5, p2x + 2, p2y + 3], true).fill(accent);
+    }
   } else {
-    const sx = 11;
-    g.moveTo(0, SHOULDER_Y)
-      .lineTo(sx, HEAD_Y + 4)
-      .stroke({ width: 2.4, color: colors.body, cap: "round" });
-    g.moveTo(sx, HEAD_Y - 18)
+    const hand = WEAPON_HAND.mage;
+    const sx = hand.x;
+    const shaftTop = HEAD_Y - 18 - (tier - 1) * 2 * scale;
+    const crystalY = shaftTop - 2;
+    const crystalR = 3 * scale;
+    g.moveTo(sx, shaftTop)
       .lineTo(sx, GROUND_Y - 16)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
     // Crystal head: layered flat-alpha "glow" rings (no gradients) around a
     // bright core — the cast "pulse" scales `weaponArm` as a whole, so the
     // glow breathes with it for free.
-    g.circle(sx, HEAD_Y - 20, safeRadius(7)).fill({ color: colors.light, alpha: 0.16 });
-    g.circle(sx, HEAD_Y - 20, safeRadius(5)).fill({ color: colors.light, alpha: 0.32 });
-    g.circle(sx, HEAD_Y - 20, safeRadius(3)).fill({ color: colors.light, alpha: 0.95 });
-    g.circle(sx, HEAD_Y - 20, safeRadius(3)).stroke({
+    g.circle(sx, crystalY, safeRadius(crystalR * 2.33)).fill({ color: colors.light, alpha: 0.16 });
+    g.circle(sx, crystalY, safeRadius(crystalR * 1.67)).fill({ color: colors.light, alpha: 0.32 });
+    g.circle(sx, crystalY, safeRadius(crystalR)).fill({ color: colors.light, alpha: 0.95 });
+    g.circle(sx, crystalY, safeRadius(crystalR)).stroke({
       width: 1,
       color: PALETTE.outline,
       alpha: 0.5,
     });
+    if (rarity !== "common") {
+      g.circle(sx, crystalY, safeRadius(crystalR * 1.67)).stroke({
+        width: 1,
+        color: accent,
+        alpha: 0.7,
+      });
+    }
+    if (tier >= 6) {
+      // Break-tier orbiting shard cluster around the crystal head.
+      for (const a of [0, (Math.PI * 2) / 3, (Math.PI * 4) / 3]) {
+        const ox = Math.cos(a) * crystalR * 2.2;
+        const oy = Math.sin(a) * crystalR * 2.2 * 0.6;
+        g.circle(sx + ox, crystalY + oy, safeRadius(crystalR * 0.5)).fill({
+          color: accent,
+          alpha: 0.85,
+        });
+      }
+    }
   }
+
+  view.gearWeaponTier = tier;
+  view.gearWeaponRarity = rarity;
+}
+
+/**
+ * M7 gear paper-doll: (re)draw the equipped ARMOR accent overlay into
+ * `view.gearArmor` — a sibling of `torso` under `upperBody` (same
+ * absolute-coordinate convention `buildTierAccent` already uses), so it only
+ * follows body lean/bob/breathe, never a swing. Called from
+ * `updateHeroView` only when `hero.equipped.armor` changes
+ * (`HeroAnimState.gearArmorId`). `templateId === null` clears the overlay —
+ * the bare class silhouette `buildRig` already draws is the unarmored look,
+ * exactly as it was pre-M7.
+ *
+ * Tier-5+ armor additionally gets the looping sparkle/glint fx
+ * (`fx/gearSparkle.ts`, driven continuously from `FxController` via
+ * `getArmorAnchorPos()` below — not drawn here).
+ */
+function buildGearArmor(view: HeroView, cls: HeroClass, templateId: string | null): void {
+  const g = view.gearArmor;
+  g.clear();
+  if (!templateId) {
+    // An EMPTY but VISIBLE Graphics still contributes a bounds point at its
+    // own local origin (the exact footgun `tierAccent`'s doc comment warns
+    // about) — hide it outright rather than leaving nothing drawn.
+    g.visible = false;
+    view.gearArmorTier = 1;
+    view.gearArmorRarity = "common";
+    return;
+  }
+  g.visible = true;
+  const tpl = ITEM_TEMPLATES[templateId];
+  const tier = tpl?.tier ?? 1;
+  const rarity: ItemRarity = tpl?.rarity ?? "common";
+  const scale = GEAR_TIER_SCALE[tier] ?? 1;
+  const accent = rarityAccentColor(rarity);
+
+  if (cls === "swordsman") {
+    const padR = 3.2 * (0.9 + scale * 0.2);
+    g.roundRect(-4 * scale, SHOULDER_Y - 1, 8 * scale, HIP_Y - SHOULDER_Y - 3, 2).stroke({
+      width: 1.2,
+      color: accent,
+      alpha: 0.9,
+    });
+    g.circle(-4.5, SHOULDER_Y, safeRadius(padR)).stroke({ width: 1.2, color: accent, alpha: 0.9 });
+    g.circle(4.5, SHOULDER_Y, safeRadius(padR)).stroke({ width: 1.2, color: accent, alpha: 0.9 });
+  } else if (cls === "archer") {
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(4 * scale)).fill({ color: accent, alpha: 0.18 });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(2.4 * scale)).fill({ color: accent, alpha: 0.6 });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
+    g.moveTo(-6, SHOULDER_Y - 2)
+      .lineTo(-10, HIP_Y - 2)
+      .stroke({ width: 1, color: accent, alpha: 0.75 });
+  } else {
+    g.circle(0, SHOULDER_Y - 2, safeRadius(4 * scale)).fill({ color: accent, alpha: 0.18 });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(2.4 * scale)).fill({ color: accent, alpha: 0.6 });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
+    g.moveTo(-6, HEAD_Y - 9)
+      .lineTo(6, HEAD_Y - 9)
+      .stroke({ width: 1.6, color: accent, alpha: 0.9 });
+  }
+
+  view.gearArmorTier = tier;
+  view.gearArmorRarity = rarity;
 }
 
 // ---------------------------------------------------------------------------
@@ -781,10 +1084,25 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   if (view.cls !== hero.cls) {
     view.cls = hero.cls;
     buildRig(view, hero.cls);
+    view.anim.gearInitialized = false; // force a gear rebuild — anchors are class-specific
   }
 
   const anim = view.anim;
   const dt = Math.max(0, ctx.dt);
+
+  // ---- M7 gear paper-doll: rebuild ONLY when the equipped templateId
+  // actually changed (or on this view's first frame, incl. a save that loads
+  // already geared) — never a per-frame path rebuild. See the module doc
+  // comment's "GEAR PAPER-DOLL" section / `buildGearWeapon`/`buildGearArmor`.
+  if (!anim.gearInitialized || anim.gearWeaponId !== hero.equipped.weapon) {
+    anim.gearWeaponId = hero.equipped.weapon;
+    buildGearWeapon(view, hero.cls, hero.equipped.weapon);
+  }
+  if (!anim.gearInitialized || anim.gearArmorId !== hero.equipped.armor) {
+    anim.gearArmorId = hero.equipped.armor;
+    buildGearArmor(view, hero.cls, hero.equipped.armor);
+  }
+  anim.gearInitialized = true;
 
   // ---- tier-2 (M5 evolution) identity accent: one-time build on the edge --
   // A hero can evolve long after its rig was first built, so this can't ride
@@ -821,6 +1139,15 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   const velocity = dt > 0 ? (hero.x - anim.lastX) / dt : 0;
   anim.lastX = hero.x;
   const speedFrac = clamp01(Math.abs(velocity) / CONFIG.heroMove);
+
+  // Rig flip: only re-derive while actually moving with intent — holds its
+  // last value while stationary (in range, holding station to attack/cast),
+  // frozen while dead (see `EnemyAnimState.facing`'s sibling doc comment for
+  // why this can't just key off a live target reference instead).
+  if (!hero.dead && speedFrac >= FACING_SPEED_THRESHOLD) {
+    anim.facing = velocity > 0 ? 1 : -1;
+  }
+  view.bodyRoot.scale.x = anim.facing;
 
   anim.walkPhase += dt * (WALK_FREQ_BASE + speedFrac * WALK_FREQ_RANGE);
   anim.breathPhase += dt * BREATH_SPEED;
@@ -970,10 +1297,17 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
 // layer reaching into the rig's internal Graphics/animation state directly.
 // ---------------------------------------------------------------------------
 
-/** Fixed LOCAL point (within `weaponArm`'s own coordinate frame) at the
- * blade tip — must track the segment drawn in `buildRig`'s swordsman branch
- * (`bx=12, by=HEAD_Y-2`; tip at `bx+12, by-20`). */
-const SWORD_TIP_LOCAL = { x: 24, y: HEAD_Y - 22 };
+/** LOCAL point (within `weaponArm`'s own coordinate frame) at the blade
+ * tip — MUST track `buildGearWeapon`'s swordsman branch's own tip formula
+ * (`bladeLen`/`bladeRise`), so a tier-grown blade's trail/aura anchor grows
+ * with it instead of lagging behind at the old tier-1 tip. */
+function swordTipLocal(tier: number): { x: number; y: number } {
+  const scale = GEAR_TIER_SCALE[tier] ?? 1;
+  const hand = WEAPON_HAND.swordsman;
+  const bladeLen = (12 + (tier - 1) * 2.4) * scale;
+  const bladeRise = 20 * scale;
+  return { x: hand.x + bladeLen, y: hand.y - bladeRise };
+}
 
 /**
  * World-space (i.e. `view.parent`-relative — the same logical coordinate
@@ -985,7 +1319,58 @@ const SWORD_TIP_LOCAL = { x: 24, y: HEAD_Y - 22 };
  */
 export function getSwordTipPos(view: HeroView, out: { x: number; y: number }): boolean {
   if (view.cls !== "swordsman" || !view.parent) return false;
-  view.parent.toLocal(SWORD_TIP_LOCAL, view.weaponArm, out);
+  view.parent.toLocal(swordTipLocal(view.gearWeaponTier), view.weaponArm, out);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// M7 gear-wow hooks (`fx/gearAura.ts` / `fx/gearSparkle.ts`) — same minimal
+// readonly-query pattern as `getSwordTipPos` above, generalized to every
+// class (the weapon aura/armor sparkle aren't swordsman-only).
+// ---------------------------------------------------------------------------
+
+/** Per-class LOCAL "business end" of the weapon (mid-blade / bow center /
+ * crystal head) — approximate on purpose (this anchors an ambient orbiting
+ * flame aura, not a precision trail) but scales with tier so it stays
+ * roughly on the weapon as it grows. */
+function weaponAnchorLocal(cls: HeroClass, tier: number): { x: number; y: number } {
+  const scale = GEAR_TIER_SCALE[tier] ?? 1;
+  if (cls === "swordsman") {
+    const hand = WEAPON_HAND.swordsman;
+    const bladeLen = (12 + (tier - 1) * 2.4) * scale;
+    const bladeRise = 20 * scale;
+    return { x: hand.x + bladeLen * 0.55, y: hand.y - bladeRise * 0.55 };
+  }
+  if (cls === "archer") {
+    const hand = WEAPON_HAND.archer;
+    return { x: hand.x + 3, y: hand.y };
+  }
+  const hand = WEAPON_HAND.mage;
+  return { x: hand.x, y: HEAD_Y - 18 - (tier - 1) * 2 * scale - 2 };
+}
+
+/** World-space position of this hero's weapon anchor THIS frame (see
+ * `weaponAnchorLocal`), for the tier-6/epic "Super Saiyan" aura
+ * (`fx/gearAura.ts`) — driven continuously from `FxController`, never from
+ * an event. `false` for a view not yet attached under a parent Container. */
+export function getWeaponAnchorPos(view: HeroView, out: { x: number; y: number }): boolean {
+  if (!view.cls || !view.parent) return false;
+  view.parent.toLocal(weaponAnchorLocal(view.cls, view.gearWeaponTier), view.weaponArm, out);
+  return true;
+}
+
+/** Fixed LOCAL chest point (within `upperBody`'s own coordinate frame,
+ * same convention as `torso`/`gearArmor`) — anchors the tier-5+ armor
+ * sparkle (`fx/gearSparkle.ts`); follows body lean/bob/breathe (and the
+ * death-fall tilt) same as the armor overlay itself. */
+const ARMOR_ANCHOR_LOCAL = { x: 0, y: SHOULDER_Y + 4 };
+
+/** World-space position of this hero's chest/armor anchor THIS frame, for
+ * the tier-5+ armor sparkle (`fx/gearSparkle.ts`). `false` for a view not
+ * yet attached under a parent Container. */
+export function getArmorAnchorPos(view: HeroView, out: { x: number; y: number }): boolean {
+  if (!view.parent) return false;
+  view.parent.toLocal(ARMOR_ANCHOR_LOCAL, view.upperBody, out);
   return true;
 }
 
@@ -1036,4 +1421,10 @@ function setGhostTint(view: HeroView, dead: boolean): void {
   view.offArm.tint = tint;
   view.weaponArm.tint = tint;
   view.tierAccent.tint = tint;
+  // `tint` doesn't cascade to children the way `alpha` does — `gearWeapon`/
+  // `gearArmor` are children of `weaponArm`/`upperBody` (M7 paper-doll) and
+  // need the same ghost tint explicitly, or gear would stay full-color while
+  // everything else desaturates on death.
+  view.gearWeapon.tint = tint;
+  view.gearArmor.tint = tint;
 }

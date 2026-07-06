@@ -14,7 +14,14 @@
  * single plain-object allocation per game moment.
  */
 
-import type { EnemyKind, HeroClass, ProjectileKind, StatKey } from "@/engine/entities";
+import type {
+  EnemyKind,
+  HeroClass,
+  ProjectileKind,
+  ShopItemId,
+  StatKey,
+  ZoneKind,
+} from "@/engine/entities";
 
 /** Which side of the board a damaged target belongs to. */
 export type HitTargetKind = "hero" | "enemy" | "boss";
@@ -52,7 +59,10 @@ export type GameEvent =
   | { type: "bossEnraged"; x: number; y: number }
   | { type: "bossDefeated"; x: number; y: number; goldGained: number }
   | { type: "bossRetreat"; x: number; y: number }
-  | { type: "waveSpawn"; wave: number }
+  // A mob AGGROED onto the hero (M6 "สนามล่ามอน"): an aggressive mob's aggro radius
+  // triggered, so it starts hunting the hero. One-way (render may hook a growl/alert
+  // beat). Replaces the retired march-model `waveSpawn` (there are no waves now).
+  | { type: "mobAggroed"; id: number; kind: EnemyKind; x: number; y: number }
   | { type: "stageCleared"; stage: number }
   | { type: "stageAdvanced"; stage: number }
   // Class-change quest lifecycle (M5 task 5 — for UI + future juice). All carry
@@ -69,4 +79,58 @@ export type GameEvent =
       /** The objective's target count (for a "n/N" readout). */
       count: number;
     }
-  | { type: "questCompleted"; id: number; questId: string };
+  | { type: "questCompleted"; id: number; questId: string }
+  // World navigation lifecycle (M6 "World & Town" — for UI + future render juice).
+  // One-way like every event; the engine never reads them back.
+  | { type: "zoneEntered"; mapId: string; zoneIdx: number; kind: ZoneKind; stage: number }
+  | { type: "zoneUnlocked"; mapId: string; zoneIdx: number }
+  | { type: "mapUnlocked"; mapId: string }
+  | { type: "bossRoomEntered"; mapId: string; stage: number }
+  // Frontier reached (M6): the last map's boss room was cleared and there is no
+  // further map yet (map4 doesn't exist). Signals the graceful "สุดเขตแดนตอนนี้"
+  // end-state instead of a stall/crash. One-way (UI reads it for a banner).
+  | { type: "frontierCleared"; mapId: string }
+  // NPC shop / consumables lifecycle (M6 "เมืองหลัก" — for UI + future render juice).
+  // `shopPurchase`: a town buy went through (post-clamp qty + total gold cost).
+  // `consumableUsed`: a potion was used (type-keyed by item). `townReturned`: a
+  // return scroll teleported the hero to town (render may hook a warp fx later).
+  | { type: "shopPurchase"; item: ShopItemId; qty: number; cost: number }
+  | { type: "consumableUsed"; item: ShopItemId }
+  | { type: "townReturned"; mapId: string }
+  // Idle-bot town trip completed (M7.5): the potion-restock and/or sell-trip bot
+  // arrived in town. `reason` reports which triggers coalesced into this one trip —
+  // the CLIENT fires the sell API when `reason` involves selling ("sell" /
+  // "restockSell"). Restock buying is fully engine-side (done before this fires).
+  | { type: "townArrived"; reason: "restock" | "sell" | "restockSell" }
+  // Fast travel lifecycle (M7.5): a short damage-cancellable channel to any
+  // UNLOCKED zone, then an instant FREE hop arriving at the zone's gate-side x.
+  // Positions are included so render can place the warp-portal fx. `fastTravelBlocked`
+  // fires (with a reason) when the intent is rejected — locked zone / aggro / dead /
+  // already there / mid-transit / boss phase / invalid target, or a mid-cast cancel.
+  | { type: "fastTravelCastStart"; x: number; y: number; mapId: string; zoneIdx: number }
+  | { type: "fastTravelArrive"; x: number; y: number; mapId: string; zoneIdx: number }
+  | {
+      type: "fastTravelBlocked";
+      reason: "locked" | "aggro" | "dead" | "same" | "traveling" | "boss" | "invalid" | "damaged";
+    }
+  // Zone-gate transit polish (M7.5): a walk between adjacent zones passes THROUGH a
+  // themed archway — the hero enters the departure-edge gate (`zoneGateEnter`) and
+  // emerges from the arrival-edge gate (`zoneGateExit`). `side` is which edge of the
+  // zone the gate sits on; `x` is its position. Render places the archway prop +
+  // whoosh; the props/fx themselves are the render zone, not the engine's.
+  | { type: "zoneGateEnter"; x: number; side: "left" | "right" }
+  | { type: "zoneGateExit"; x: number; side: "left" | "right" }
+  // M7 gear DROP (systems/gear): a kill rolled an item. `rollId` is the stable,
+  // per-save monotonic loot-counter value used for this roll (the server claim
+  // key is `${characterId}:${rollId}`, docs/persistence-m7.md); `templateId` is a
+  // key into `ITEM_TEMPLATES`; `mobId` is the enemy/boss that dropped it. One-way
+  // (render pops a pickup; the ui queues a server claim). Deterministic (hashed,
+  // no RNG draw — the seeded stream stays wave-composition only).
+  | {
+      type: "itemDrop";
+      rollId: string;
+      templateId: string;
+      x: number;
+      y: number;
+      mobId: number;
+    };

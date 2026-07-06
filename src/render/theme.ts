@@ -50,6 +50,37 @@ export const PALETTE = {
    * shared across weapon glyphs so armament reads as "the same material"
    * regardless of hero class. */
   steel: 0xd7deee,
+
+  // ---- M7 gear paper-doll accents (task 86d3... gear-wow pass) ----
+  /** Rare-tier gear trim/gem accent (common gear reuses `steel` above; epic
+   * uses `gearEpic` below) — a cool icy-blue jewel tone so a glance at the
+   * rig signals rarity band regardless of class. */
+  gearRare: 0x4fc3f7,
+  /** Epic-tier gear trim/gem accent — warm gold-orange, distinct from the
+   * evolution accent's plain `gold` above (this is a GEAR rarity signal, not
+   * the hero-tier evolution one) and from `gearRare`'s cool blue. */
+  gearEpic: 0xffb347,
+  /** Tier-6/epic weapon "Super Saiyan" aura flame tones (footgun 10: solid
+   * flame colors on NORMAL blend, never additive over bright scenes) — two
+   * flat tones (outer/core) standing in for a flame gradient without one,
+   * plus a dark ember outline. */
+  auraFlame: 0xff7a1a,
+  auraFlameCore: 0xffd23f,
+  auraFlameDark: 0x7a2c00,
+
+  // ---- M7.5 world-gate accents (zone-edge archways, fast-travel portal, boss
+  // door) ----
+  /** Fast-travel portal swirl — an arcane blue-violet jewel tone, deliberately
+   * distinct from every combat/skill accent so a channel reads as "travel",
+   * not "a spell". Footgun 10: solid on NORMAL blend + a darker outline,
+   * never additive. */
+  travelPortal: 0x5a7dff,
+  /** Bright icy core at the swirl's center (grows with channel progress). */
+  travelPortalCore: 0xbfe0ff,
+  /** Dark outline/ember-equivalent for the portal swirl shapes. */
+  travelPortalDark: 0x1c2050,
+  /** Chain accent on a locked boss door. */
+  doorChain: 0x2a2a30,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

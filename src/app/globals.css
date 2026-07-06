@@ -135,6 +135,26 @@ body {
   }
 }
 
+/* Fast-travel channel progress fill (M7.5) — a left-to-right width sweep whose
+ * duration is `CONFIG.travel.fastTravelCastSeconds` (see
+ * `FastTravelChannelBar.tsx`). Restarts via a `key` remount rather than a
+ * negative animation-delay (a fast-travel channel always starts fresh — never
+ * resumes mid-flight from a snapshot like the skill cooldown sweep does). */
+@keyframes ddp-fasttravel-fill {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.animate-fasttravel-fill {
+  animation-name: ddp-fasttravel-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
 .animate-gold-pulse {
   display: inline-block;
   animation: gold-pulse 0.26s ease-out;

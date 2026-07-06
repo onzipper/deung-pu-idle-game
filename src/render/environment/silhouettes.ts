@@ -68,6 +68,35 @@ function jaggedSpikes(
   g.poly(polyPoints(pts), true).fill({ color: far.color, alpha: far.alpha });
 }
 
+/** Town far layer (M6): a row of boxy house silhouettes with peaked roofs +
+ * the occasional warm lantern-window dot — reads as a distant rooftop
+ * skyline without needing a dedicated sprite. Flat-alpha fill only. */
+function rooftopSkyline(g: Graphics, opts: SilhouetteChunkOptions): void {
+  const { chunkWidth, baselineY, far } = opts;
+  const featureWidth = 100 / Math.max(0.2, far.density);
+  const houseCount = Math.max(1, Math.round(chunkWidth / featureWidth));
+  const stepX = chunkWidth / houseCount;
+  for (let i = 0; i < houseCount; i++) {
+    const x = i * stepX + stepX * 0.15;
+    const w = stepX * 0.7;
+    const h = far.amplitude * (0.5 + Math.random() * 0.5);
+    const roofH = h * 0.4;
+    const wallTop = baselineY - h + roofH;
+    g.rect(x, wallTop, w, h - roofH).fill({ color: far.color, alpha: far.alpha });
+    g.poly(
+      [x - 2, wallTop, x + w / 2, wallTop - roofH, x + w + 2, wallTop],
+      true,
+    ).fill({ color: far.color, alpha: far.alpha });
+    // A single warm lantern-window glow on roughly half the houses.
+    if (Math.random() < 0.5) {
+      g.rect(x + w * 0.35, wallTop + (h - roofH) * 0.35, 3, 3).fill({
+        color: far.glowRim ?? 0xffcf7a,
+        alpha: 0.7,
+      });
+    }
+  }
+}
+
 function withGlowRim(g: Graphics, opts: SilhouetteChunkOptions): void {
   // Re-trace just the top edge with a thin, brighter stroke — a cheap "glow"
   // that stays within the "no hand-built gradients" rule (plain stroke on a
@@ -100,6 +129,9 @@ export function buildSilhouetteChunk(opts: SilhouetteChunkOptions): Graphics {
       break;
     case "frost-peaks":
       jaggedSpikes(g, opts, 0.85);
+      break;
+    case "rooftops":
+      rooftopSkyline(g, opts);
       break;
   }
   withGlowRim(g, opts);

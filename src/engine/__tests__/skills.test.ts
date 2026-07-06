@@ -42,6 +42,7 @@ describe("archer arrow-rain skill", () => {
 
   it("the drops FALL and resolve as AoE damage (not stranded mid-air) — the meteor-never-explodes guard, for rain", () => {
     const s = makeParty(7);
+    s.spawnPaused = true; // isolate: only the injected wall's hp is summed
     const archer = s.heroes[1];
     archer.cd = 999;
     s.heroes[0].cd = 999; // mute swordsman + mage so only the rain touches enemy hp

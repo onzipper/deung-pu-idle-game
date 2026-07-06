@@ -1,19 +1,33 @@
 # `ui/` — React HUD, menus, panels
 
-React components for everything around the game canvas: gold/level HUD, base-stat panel (STR/DEX/INT/VIT + auto-allocate toggle), skill bar (mana costs, per-skill auto-cast slotting, class-change quest affordance), boss hint panel, speed selector.
+React components for everything around the game canvas: gold/level HUD, base-stat panel (STR/DEX/INT/VIT), skill bar (mana costs, per-skill auto-cast slotting, class-change quest affordance), the goal ladder (see below, replaced the old boss hint panel), and a settings drawer gathering the auto-behavior/audio/language toggles. (The player-facing 1x/2x/3x speed selector was removed, M6.7 — the integration loop always runs 1 fixed sub-step per real frame now.)
 
 **M5 Character Pivot note**: the old gold-bought atk/speed/hp upgrade lines (`UpgradePanel`, `panels.upgradesLabel`/`upgradeAriaLabel`/`autoUpgradeToggle`) are GONE — a solo hero's power now comes from level + base stats (`StatPanel.tsx`, `allocateStat` intent) + class/skills (`SkillBar.tsx`, mana + cooldown + up to 3 auto-cast slots) + the class-change quest (tier 1 -> 2). Don't resurrect "upgrade" copy/components for this system; see `docs/GDD.md`/`docs/ROADMAP.md` for the current vision.
 
 - `components/` — the React components (built in M2).
 - `store/` — the Zustand store. React reads game numbers from a **throttled** engine snapshot (~10 Hz), never from a per-frame subscription. See `store/gameStore.ts`.
 
-UI dispatches player intent (allocate stat, cast skill, set auto-cast slot, accept/complete the class-change quest, set speed) into the engine; it does not run game logic itself.
+UI dispatches player intent (allocate stat, cast skill, set auto-cast slot, accept/complete the class-change quest) into the engine; it does not run game logic itself.
+
+## Goal ladder (M6, ROADMAP.md line 32)
+
+`src/ui/goalLadder.ts` is a pure, headlessly-tested (`__tests__/goalLadder.test.ts`) rung-selection module for the HUD's single "what do I do next" element, rendered by `components/GoalLadder.tsx` (replaced `BossPanel.tsx`, deleted). The motivation ladder is fixed: `levelUp` (grinding toward the Lv.15 class-change-quest gate) -> `classQuest` (offered/accepted/complete) -> `zoneBoss` (unlock the next zone / beat the map boss room, repeats forever post-evolution) -> `hallOfFame` (ALWAYS a dimmed/locked tail rung — M9 doesn't exist yet).
+
+Two pieces render off it, deliberately decoupled:
+
+- The **breadcrumb** (`buildGoalLadder()`) — all 4 rungs always visible (current bright, earlier "done", later "upcoming"/"locked"), purely narrative/read-only.
+- The **core-loop card** (`selectZoneBossDetail(phase, bossReady)`) — the direct `BossPanel` replacement (challenge-boss CTA / victory -> next-stage / the zone-unlock kill bar, integrated here and no longer duplicated in `HudBar.tsx`). This is driven PURELY by `phase`/`bossReady`, independent of which narrative rung is current, because the challenge CTA is the loop's biggest beat and must stay correct from a fresh Lv.1 hero through post-evolution farming — this is also what keeps the FTUE's `boss-panel`/`kill-progress` anchors resolvable regardless of the hero's level/quest state. An optional milestone card (levelUp XP / classQuest kill+boss progress) renders additionally, above the core-loop card, only while one of those is the current rung — the interactive accept/change-class controls themselves stay in `SkillBar.tsx`'s `ClassQuestAffordance`, never duplicated.
+
+## Settings drawer (M6, ROADMAP.md line 29)
+
+`components/SettingsPanel.tsx` (opened via `SettingsButton.tsx`, same local-`useState` modal pattern as `CodexButton.tsx`) gathers the previously-scattered UI-owned toggles into one place: auto-allocate stat points, auto-return-to-farm after death, auto-potion use + thresholds, sound, and language. `autoCast`'s per-skill auto-slot assignment stays in `SkillBar.tsx` — it's part of the skill block (which skill goes in which slot), not a generic on/off preference.
 
 ## i18n
 
 UI strings live in `messages/th.json` / `messages/en.json` (next-intl, cookie-based — see `src/i18n/`); components call `useTranslations("<namespace>")`. `hud`/`panels`/`stats`/`common` hold HUD copy; `content` holds game-content display text keyed by the engine's own stable ids.
 
 **Adding a new content entity** (class/skill now; quest/item later, namespaces already reserved as `{}`):
+
 1. The engine already exposes a stable id (e.g. `HeroClass`, skill id) — never add a display string to `engine/config`.
 2. Add `content.<type>.<id>.name` (and `.desc` if needed) to BOTH message files.
 3. In the component, resolve it with `useTranslations("content")` + a template key: `t(\`classes.${cls}.name\`)`. Icons stay in `src/ui/labels.ts` (visual, not translatable).
@@ -30,4 +44,15 @@ The player arrives at the FTUE having already created a character and picked a c
 
 `src/ui/codex/` is a separate, always-reopenable reference (unlike the one-shot FTUE above), same data-driven philosophy: `entries.ts` exports `CODEX_CATEGORIES` + `CODEX_ENTRIES` (typed `id` + `category` + optional `contentRef` pointing at an existing engine-content id — `{ kind: "heroClass", id }`) plus the pure `codexEntryRequiredKeys`/`codexEntriesByCategory` helpers, headlessly tested in `codex/__tests__/entries.test.ts` (asserts every required key resolves in BOTH message files, and that `contentRef` entries never redeclare a title). Body copy lives in a `codex` message namespace (`entries.<id>.title`/`.body`, `categories.<id>`, plus panel chrome keys); entries with a `contentRef` resolve their TITLE + ICON from the shared `content` namespace / `labels.ts` icon maps instead (never duplicated). `CodexPanel.tsx` renders the modal (grouped-by-category cards) and is mounted on-demand by `CodexButton.tsx` (settings row, `src/ui/components/`) — purely local `useState` open/close, no store field, and the sim is never paused behind it. The panel's "ดูบทช่วยสอนอีกครั้ง" button calls the store's `resetOnboarding()` action then closes itself, so `OnboardingOverlay` (which renders directly off `onboardingStepIndex`) retriggers immediately. **M5+ topics (gear/quests/items) add coverage by appending `CODEX_ENTRIES` (+ a new `CODEX_CATEGORIES` entry if needed) and matching `messages/*.json` `codex.entries.<id>` keys** — no other file should need changes for a new topic.
 
-Categories today: `coreLoop`, `character` (M5: `characterSlots`, `baseStats`, `manaSkills`, `classQuest` — the systems that replaced the old team + upgrade lines), `heroes` (per-class `contentRef` entries), `boss`, `controls` (`gameSpeed`, `autoCast`, `autoAllocate`), `offlineIdle`.
+Categories today: `coreLoop`, `character` (M5: `characterSlots`, `baseStats`, `manaSkills`, `classQuest` — the systems that replaced the old team + upgrade lines), `heroes` (per-class `contentRef` entries), `boss`, `controls` (`autoCast`, `autoAllocate` — the 1x/2x/3x speed selector + its `gameSpeed` entry were removed player-facing, M6.7), `offlineIdle`, `gear` (M7 — see below; its collection grid is the one exception to "entries only" content).
+
+## Gear & Drops (M7)
+
+`src/ui/gear/` holds the pure, headlessly-tested logic: `types.ts` (the `InventoryItem`/`ItemInstanceWire` shapes crossing the `/api/items/*` HTTP boundary — deliberately redeclared, never imported from `@/server/**`), `claimBuffer.ts` (`pushClaim`/`takeBatch` — dedup + batching for the drop-claim flush), `inventoryOps.ts` (`mergeClaimedItems`/`applyEquipChange`/`applyUnequipChange`/`discoveredTemplateIds`), and `api.ts` (thin `fetch` wrappers, same tier as `GameClient.tsx`'s own `/api/save` calls). All headlessly tested under `gear/__tests__/`.
+
+- **Boot hydration**: `GameClient.tsx`'s boot sequence overwrites the loaded save's `equipped` cache with the `/api/save` boot payload's DB-authoritative `equipped` field (DB wins — precedence documented at the API) BEFORE `initGameState`, and seeds the store's `inventory` slice from the same payload's `inventory` array. `InventoryPanel.tsx` never fetches on its own mount — only on an equip/unequip FAILURE (resync via `fetchInventory()`).
+- **Drop-claim pipeline**: the frame loop collects `itemDrop` events every frame into a closure-held buffer (`ClaimBufferEntry[]`, NOT React/Zustand state), flushed as a batched `POST /api/items/claim` on the existing autosave cadence and best-effort via `sendBeacon` on tab-hide (a lost tab-hide beacon is an accepted v1 drop-notification loss — the claim itself is server-side idempotent via `claimKey`, so any surviving retry is always safe). Claim results merge into the `inventory` store slice (`mergeInventory`) and push `DropFeed` toasts for fresh mints only; rejections are `console.warn`-only.
+- **Equip flow** (`InventoryPanel.tsx`): `POST /api/items/equip`|`unequip` FIRST; only on success does it optimistically patch the local `inventory` slice AND queue the engine's `equip` FrameInput intent (`queueEquip`, drained once/frame like every other intent) — this keeps the sim's applied stats and the server's item ledger from ever disagreeing. `classReq` mismatches disable the Equip button with a tooltip (the engine would no-op anyway).
+- **Equipped loadout**: `EquippedLoadout.tsx` (mounted next to `StatPanel` in `GameHud.tsx`) reads the throttled `HeroSummary.equipped` — the SIM's own applied loadout, not the DB-hydrated `inventory` slice — so it always reflects what's actually affecting combat.
+- **Codex collection grid**: `CodexPanel.tsx`'s `gear` category renders all 27 `ITEM_TEMPLATES` catalog entries directly off engine config (not `CODEX_ENTRIES` — it's structured slot/tier/rarity data, not freeform copy). "Discovered" is a v1 DERIVED set (`discoveredTemplateIds`) off the current `inventory` slice, not a persisted ever-owned ledger — a future trade/consume path could re-hide an item; acceptable until then.
+- **i18n**: gear template display names live in `content.items.<templateId>.name` (same namespace as the shop's `hpPotion`/`manaPotion`/`returnScroll`, disjoint ids); coverage for all 27 templates in both locales is tested in `gear/__tests__/itemI18n.test.ts`.

@@ -5,6 +5,7 @@
  */
 
 import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL } from "@/engine/config";
+import { emptyEquipped, ITEM_TEMPLATES, type EquippedGear } from "@/engine/config/items";
 import type { Rng } from "@/engine/core/rng";
 import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
 import type {
@@ -43,9 +44,15 @@ export function makeHero(
   mana?: number,
   autoSlots: (SkillId | null)[] = defaultAutoSlots(cls),
   quest: HeroQuest | null = null,
+  equipped: EquippedGear = emptyEquipped(),
 ): Hero {
   const t = HERO_TYPES[cls];
-  const maxHp = heroMaxHp(cls, level, tier, stats.vit);
+  // Max HP folds in equipped armor's flat HP (0 for an unarmored hero, so a fresh
+  // hero is unchanged). Mirrors `heroMaxHpOf` without importing it (avoids a cycle).
+  const armorHp =
+    (equipped.weapon ? (ITEM_TEMPLATES[equipped.weapon]?.stats.hp ?? 0) : 0) +
+    (equipped.armor ? (ITEM_TEMPLATES[equipped.armor]?.stats.hp ?? 0) : 0);
+  const maxHp = heroMaxHp(cls, level, tier, stats.vit) + armorHp;
   const maxMana = heroMaxMana(cls, stats.int);
   return {
     id,
@@ -71,6 +78,7 @@ export function makeHero(
     stats,
     autoSlots,
     quest,
+    equipped: { weapon: equipped.weapon, armor: equipped.armor },
   };
 }
 
@@ -106,6 +114,13 @@ export function makeEnemy(
     range: et.range,
     cd: rng.next() * CONFIG.enemyInitialCdJitter,
     engageOffset: rng.next() * CONFIG.enemyEngageJitter,
+    // Hunt-field fields (M6 "สนามล่ามอน"): the spawn system positions the mob and
+    // sets its temperament (see systems/waves.ts `spawnMob`). Defaults are a
+    // passive mob anchored at x=0 — safe for a directly-injected test enemy.
+    homeX: 0,
+    aggressive: false,
+    aggroRadius: 0,
+    engaged: false,
   };
 }
 

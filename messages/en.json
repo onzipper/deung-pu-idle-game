@@ -9,7 +9,11 @@
   "hud": {
     "stageLabel": "Stage",
     "waveLabel": "Wave",
-    "killProgressLabel": "Kills to boss",
+    "autoHuntOn": "AUTO",
+    "autoHuntOff": "MANUAL",
+    "autoHuntAriaOn": "Turn auto-hunt off",
+    "autoHuntAriaOff": "Turn auto-hunt on",
+    "zoneUnlockLabel": "Unlock next zone",
     "victoryTitle": "🎉 Stage {stage} cleared!",
     "nextStageButton": "Next Stage →",
     "bossHpLabel": "Boss HP",
@@ -21,6 +25,30 @@
     "challengeBossButton": "⚔ Challenge Boss",
     "challengeBossAriaReady": "Challenge Boss",
     "challengeBossAriaNotReady": "Challenge Boss (not available yet)"
+  },
+  "ladder": {
+    "rungs": {
+      "levelUp": "Next level",
+      "classQuest": "Class change",
+      "zoneBoss": "Clear the map",
+      "hallOfFame": "Hall of Fame"
+    },
+    "hallOfFameHint": "Coming soon",
+    "levelUp": {
+      "progress": "Lv.{level} → Lv.{gate} unlocks the class-change quest"
+    },
+    "classQuest": {
+      "locked": "🔒 Lv.{gate}",
+      "readyHint": "Quest complete! See the skill bar below to change class."
+    },
+    "zoneBoss": {
+      "farmingHint": "Kill enemies to unlock the next zone",
+      "readyHint": "Your power is ready — challenge the boss!",
+      "fightingHint": "⚔ Fighting the boss…",
+      "victoryHint": "Push into the next stage to keep growing stronger."
+    },
+    "powerRatioLabel": "Power {pct}%",
+    "bossStatsLabel": "Boss HP {hp} · ATK {atk}"
   },
   "panels": {
     "skillsLabel": "Skills",
@@ -56,7 +84,12 @@
     "autoAllocateToggle": "🎯 Auto Stat: {state, select, on {ON} other {OFF}}",
     "allocateAria": "Add 1 point to {stat}",
     "primaryTag": "main",
-    "names": { "str": "STR", "dex": "DEX", "int": "INT", "vit": "VIT" },
+    "names": {
+      "str": "STR",
+      "dex": "DEX",
+      "int": "INT",
+      "vit": "VIT"
+    },
     "full": {
       "str": "Strength",
       "dex": "Dexterity",
@@ -71,12 +104,36 @@
     }
   },
   "settings": {
-    "speedLabel": "Speed",
     "soundOn": "Unmute",
     "soundOff": "Mute",
     "localeLabel": "Language",
     "localeTh": "ไทย",
-    "localeEn": "EN"
+    "localeEn": "EN",
+    "openButton": "⚙ Settings",
+    "title": "Settings",
+    "closeButton": "Close",
+    "autoBehaviorGroup": "Auto-behavior",
+    "audioLanguageGroup": "Audio & language",
+    "deathBehaviorLabel": "When your hero dies",
+    "bot": {
+      "title": "Helper bots",
+      "hint": "The bot warps to town on its own when your bags fill up or potions run low, then walks back to farming automatically.",
+      "restockToggle": "Auto-buy potions",
+      "sellTripToggle": "Auto sell-trip",
+      "autoEquipToggle": "Auto-equip best gear",
+      "hpTarget": "HP potion target",
+      "mpTarget": "Mana potion target",
+      "scrollReserve": "Return scroll target",
+      "goldReserve": "Minimum gold reserve",
+      "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)"
+    },
+    "autoSell": {
+      "title": "Auto-sell rules",
+      "sellCommon": "Sell common",
+      "sellRare": "Sell rare",
+      "sellEpic": "Sell epic (locked off)",
+      "keepBetterStat": "Protect good gear (upgrades over equipped + best piece for an empty slot)"
+    }
   },
   "onboarding": {
     "mascotName": "Deung",
@@ -111,7 +168,7 @@
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Speed up the game, mute/unmute sound, switch languages, or tap \"📖 Guide\" to reopen the game guide anytime from this row."
+        "body": "Tap \"⚙ Settings\" to mute/unmute sound, switch languages, or tune auto-behavior, and tap \"📖 Guide\" to reopen the game guide anytime from this row."
       },
       "outro": {
         "title": "You're ready!",
@@ -164,7 +221,12 @@
       "heroes": "Heroes",
       "boss": "Boss",
       "controls": "Controls",
-      "offlineIdle": "Offline Gold"
+      "offlineIdle": "Offline Gold",
+      "gear": "Gear"
+    },
+    "gear": {
+      "undiscovered": "???",
+      "ownedCount": "{owned}/{total} discovered"
     },
     "entries": {
       "coreLoop": {
@@ -200,10 +262,6 @@
         "title": "Challenging the stage boss",
         "body": "The panel below the arena shows the boss's HP, attack power, recommended power, and your current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your hero dies, the boss retreats, your hero fully revives with no penalty, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
       },
-      "gameSpeed": {
-        "title": "⚡ Game speed",
-        "body": "Switch between 1×/2×/3× anytime from the settings row. The simulation stays exactly as accurate — it simply runs faster."
-      },
       "autoCast": {
         "title": "✨ Auto Skill",
         "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. Up to 3 slots unlock by level (Lv 1/15/30) — no need to tap the skill buttons yourself."
@@ -215,14 +273,27 @@
       "offlineIdle": {
         "title": "Offline gold",
         "body": "Close the game and come back later — it automatically calculates the progress you would have made while away (capped at 8 hours per session) and hands you the banked gold as soon as you return."
+      },
+      "gear": {
+        "title": "Drops & Gear",
+        "body": "Enemies and bosses have a chance to drop weapons/armor to collect. Each item has a tier and rarity (common/rare/epic). Open your Inventory (🎒) to equip one weapon + one armor — some pieces require a matching class."
       }
     }
   },
   "content": {
     "classes": {
-      "swordsman": { "name": "Swordsman", "evolvedName": "Knight" },
-      "archer": { "name": "Archer", "evolvedName": "Ranger" },
-      "mage": { "name": "Mage", "evolvedName": "Archmage" }
+      "swordsman": {
+        "name": "Swordsman",
+        "evolvedName": "Knight"
+      },
+      "archer": {
+        "name": "Archer",
+        "evolvedName": "Ranger"
+      },
+      "mage": {
+        "name": "Mage",
+        "evolvedName": "Archmage"
+      }
     },
     "skills": {
       "swordsman": {
@@ -233,7 +304,10 @@
         "name": "Arrow Rain",
         "desc": "Rains arrows across the whole battlefield"
       },
-      "mage": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "mage": {
+        "name": "Meteor",
+        "desc": "Calls down a meteor strike on the area"
+      },
       "sword_whirl": {
         "name": "Whirl Slash",
         "desc": "Spins the blade to hit every foe in range"
@@ -258,7 +332,10 @@
         "name": "Explosive Shot",
         "desc": "An explosive arrow that bursts over a cluster"
       },
-      "mage_meteor": { "name": "Meteor", "desc": "Calls down a meteor strike on the area" },
+      "mage_meteor": {
+        "name": "Meteor",
+        "desc": "Calls down a meteor strike on the area"
+      },
       "mage_frostnova": {
         "name": "Frost Nova",
         "desc": "A quick, cheap frost blast for clearing waves"
@@ -269,7 +346,58 @@
       }
     },
     "quests": {},
-    "items": {}
+    "items": {
+      "hpPotion": {
+        "name": "Healing Potion",
+        "desc": "Restores 50% of max HP"
+      },
+      "manaPotion": {
+        "name": "Mana Potion",
+        "desc": "Restores 45% of max mana"
+      },
+      "returnScroll": {
+        "name": "Return Scroll",
+        "desc": "Teleports you back to town"
+      },
+      "w_sword_t1_rusty": { "name": "Rusty Sword" },
+      "w_sword_t2_iron": { "name": "Iron Sword" },
+      "w_sword_t3_knight": { "name": "Knight's Sword" },
+      "w_sword_t4_flame": { "name": "Flame Sword" },
+      "w_sword_t5_dragon": { "name": "Dragon Sword" },
+      "w_sword_t6_ragna": { "name": "Ragnarok Blade" },
+      "w_bow_t1_short": { "name": "Short Bow" },
+      "w_bow_t2_hunter": { "name": "Hunter's Bow" },
+      "w_bow_t3_composite": { "name": "Composite Bow" },
+      "w_bow_t4_storm": { "name": "Storm Bow" },
+      "w_bow_t5_phoenix": { "name": "Phoenix Bow" },
+      "w_bow_t6_ragna": { "name": "Ragnarok Bow" },
+      "w_staff_t1_apprentice": { "name": "Apprentice Staff" },
+      "w_staff_t2_oak": { "name": "Oak Staff" },
+      "w_staff_t3_arcane": { "name": "Arcane Staff" },
+      "w_staff_t4_inferno": { "name": "Inferno Staff" },
+      "w_staff_t5_astral": { "name": "Astral Staff" },
+      "w_staff_t6_ragna": { "name": "Ragnarok Staff" },
+      "a_cloth_t1_tunic": { "name": "Cloth Tunic" },
+      "a_leather_t2_vest": { "name": "Leather Vest" },
+      "a_chain_t3_mail": { "name": "Chain Mail" },
+      "a_plate_t4_guard": { "name": "Plate Guard" },
+      "a_rune_t5_ward": { "name": "Rune Ward" },
+      "a_aegis_t6_bulwark": { "name": "Aegis Bulwark" },
+      "a_sword_t4_fortress": { "name": "Fortress Plate" },
+      "a_archer_t4_windcloak": { "name": "Windcloak" },
+      "a_mage_t4_archrobe": { "name": "Archrobe" }
+    },
+    "maps": {
+      "map1": {
+        "name": "Human World"
+      },
+      "map2": {
+        "name": "Demon Realm"
+      },
+      "map3": {
+        "name": "Wild Frontier"
+      }
+    }
   },
   "characters": {
     "pageTitle": "Your Characters",
@@ -333,6 +461,97 @@
       "limitError": "You already have the maximum of 3 characters",
       "duplicateError": "That name is already taken — try another",
       "genericError": "Couldn't create the character — try again"
+    }
+  },
+  "world": {
+    "zoneFarm": "Zone {stage}",
+    "zoneTown": "Town",
+    "zoneBoss": "Boss Room",
+    "traveling": "Traveling…",
+    "walkLeftAria": "Walk to the left zone",
+    "walkRightAria": "Walk to the right zone",
+    "lockedTooltip": "Locked — clear this zone’s quota first",
+    "enterBossRoom": "Enter Boss Room",
+    "autoReturnOn": "Auto: return to farming",
+    "autoReturnOff": "Auto: wait in town",
+    "frontier": "End of the frontier for now",
+    "fastTravelButton": "Warp",
+    "fastTravelTitle": "Fast Travel",
+    "fastTravelClose": "Close",
+    "fastTravelCurrent": "You're here",
+    "fastTravelChanneling": "Warping to {map}…"
+  },
+  "shop": {
+    "title": "Town Shop",
+    "subtitle": "Stock up before you head out",
+    "owned": "{count}/{cap} held",
+    "buyAria": "Buy {qty} {name}",
+    "quickUseLabel": "Items",
+    "useAria": "Use {name} ({count} left)",
+    "returnScrollTitle": "Return to town",
+    "returnScrollInTown": "You're already in town",
+    "returnScrollAria": "Use a Return Scroll to teleport to town ({count} left)",
+    "autoLabel": "Auto",
+    "hpLabel": "HP potion",
+    "manaLabel": "Mana potion",
+    "autoUseAria": "Auto {name}: {state, select, on {on} other {off}}",
+    "thresholdDownAria": "Lower the auto {name} threshold",
+    "thresholdUpAria": "Raise the auto {name} threshold"
+  },
+  "inventory": {
+    "openButton": "🎒 Inventory",
+    "title": "Inventory",
+    "closeButton": "Close",
+    "loadoutLabel": "Equipped",
+    "emptySlotHint": "No items yet",
+    "equipButton": "Equip",
+    "unequipButton": "Unequip",
+    "equippedBadge": "Equipped",
+    "tierLabel": "Tier {tier}",
+    "statAtk": "ATK +{value}",
+    "statDef": "DEF +{value}",
+    "statHp": "HP +{value}",
+    "classReqBlocked": "{cls} only",
+    "slot": {
+      "weapon": "Weapon",
+      "armor": "Armor"
+    },
+    "rarity": {
+      "common": "Common",
+      "rare": "Rare",
+      "epic": "Epic"
+    },
+    "classNames": {
+      "swordsman": "Swordsman",
+      "archer": "Archer",
+      "mage": "Mage"
+    },
+    "tierShort": "T{tier}",
+    "newBadge": "New",
+    "classOnlyToggle": "My class only",
+    "capacityLabel": "{count}/{cap} slots",
+    "sellTownOnly": "Can only sell in town",
+    "sellOneButton": "Sell one",
+    "sellAllButton": "Sell all ({count})",
+    "sellAllCommonButton": "Sell all common",
+    "confirmSell": "Confirm sell?"
+  },
+  "dropFeed": {
+    "gotItem": "Item obtained: {name}"
+  },
+  "notices": {
+    "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
+    "autoEquipDone": "Bot equipped {count} better item(s)",
+    "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
+    "fastTravelBlocked": {
+      "locked": "That zone isn't unlocked yet",
+      "aggro": "A mob is engaged with you — can't warp",
+      "dead": "Your hero is down — can't warp",
+      "same": "You're already in that zone",
+      "traveling": "Already traveling",
+      "boss": "Mid boss fight — can't warp",
+      "invalid": "Can't warp there",
+      "damaged": "You took damage — warp cancelled"
     }
   }
 }

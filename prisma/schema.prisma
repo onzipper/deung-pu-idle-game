@@ -49,10 +49,81 @@ model Character {
   // CUTOVER APPLIED: `SaveState.characterId` is now @unique, so this is an
   // effective 1:1 — a character has AT MOST one save row.
   save      SaveState?
+  // M7: gear drops are PER CHARACTER (GDD: "ของดรอปจอใครจอมัน"). ownerId of every
+  // ItemInstance points here (Character.id, a never-reused cuid).
+  items     ItemInstance[]
 
   @@index([userId]) // list an account's characters
   @@index([userId, deletedAt]) // count/enumerate LIVE slots (<=3 rule)
   @@index([name]) // app-level uniqueness check + future name search
+}
+
+// M7 Gear & Drops — the item-instance model. GDD: gear is server-authoritative
+// from the FIRST item; item dupe = existential threat. This table stores only
+// INSTANCES; item TEMPLATES + stats live in engine config as pure TS data and are
+// referenced by `templateId` (so balance tweaks never migrate the DB).
+//
+// SOURCE OF TRUTH: unlike Character.level/power (denormalized caches), ItemInstance
+// is authoritative — it is NOT re-derivable from the save blob. Every row is minted
+// server-side inside a transaction that also appends an ItemEvent(minted). Never
+// hard-delete: `deletedAt` soft-deletes (destroyed/consumed) so the audit trail
+// stays intact. `id` is an opaque cuid, NEVER reused.
+//
+// equippedSlot enforcement (one item per slot per character): MySQL has no partial
+// unique index, but its UNIQUE indexes treat NULLs as DISTINCT — so a plain
+// @@unique([ownerId, equippedSlot]) allows UNLIMITED unequipped rows (equippedSlot
+// NULL) while permitting AT MOST ONE non-null value per (owner, slot). That IS the
+// partial-unique workaround, and it enforces the invariant at the DB layer, not just
+// in app code. INVARIANT the backend must uphold: a soft-deleted item (deletedAt set)
+// MUST have equippedSlot = NULL (unequip in the same tx as destroy) — otherwise a
+// dead row would still occupy a slot in the unique index.
+//
+// claimKey (idempotency): the drop-claim endpoint sets a deterministic key per claim
+// (e.g. `${characterId}:${dropRollId}`). UNIQUE + NULLABLE — a retried/duplicated
+// claim request collides on the unique index and CANNOT double-mint; mints without a
+// client claim (boss/admin/trade) leave it NULL (NULLs are distinct, so many allowed).
+model ItemInstance {
+  id           String    @id @default(cuid()) // opaque, never reused
+  ownerId      String // -> Character.id (per-character ownership; NOT User)
+  owner        Character @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  templateId   String    @db.VarChar(64) // engine item-template key (stats live in TS config)
+  origin       String    @db.VarChar(16) // drop | boss | trade | admin
+  sourceDetail String?   @db.VarChar(64) // audit: e.g. zone id / boss id / admin note
+  equippedSlot String?   @db.VarChar(16) // weapon | armor | NULL(=unequipped)
+  claimKey     String?   @unique // idempotency guard for the drop-claim endpoint
+  acquiredAt   DateTime  @default(now())
+  deletedAt    DateTime? // soft delete (destroyed/consumed); MUST NULL equippedSlot too
+  events       ItemEvent[]
+
+  @@unique([ownerId, equippedSlot]) // partial-unique via MySQL NULL-distinct: <=1 item per slot per owner; also indexes ownerId-prefix inventory reads
+  @@index([templateId]) // "how many of template X exist" / codex / anti-dupe audits
+}
+
+// M7 anti-dupe backbone — APPEND-ONLY audit trail. Every state change to an item
+// (mint / equip / unequip / trade / destroy) writes one row here IN THE SAME TX as
+// the ItemInstance mutation. This is the ledger that makes dupes detectable and
+// ownership transfers (M9 trading) provable.
+//
+// CONVENTION — ENFORCED BY CODE REVIEW, NOT THE DB: no code path may ever UPDATE or
+// DELETE a row in this table. Inserts only. (Rows are purged only via ON DELETE
+// CASCADE when a User account is hard-deleted for GDPR.)
+//
+// from/toCharacterId are RAW cuid strings, deliberately NOT FKs: an audit ledger must
+// be immutable and independent of the entities it references (and mint has no `from`,
+// destroy has no `to`). `meta` is a TEXT column holding serialized JSON (opaque, never
+// queried in SQL) — kept as text, not a JSON column, to stay light on this high-write
+// table.
+model ItemEvent {
+  id              String       @id @default(cuid())
+  itemId          String
+  item            ItemInstance @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type            String       @db.VarChar(16) // minted | equipped | unequipped | traded | destroyed
+  fromCharacterId String? // raw cuid, no FK (immutable ledger)
+  toCharacterId   String? // raw cuid, no FK
+  meta            String?      @db.Text // serialized JSON blob (opaque audit context)
+  createdAt       DateTime     @default(now())
+
+  @@index([itemId]) // read an item's full history (ordered by createdAt in-memory)
 }
 
 // One row per player save slot. `data` holds the versioned SaveData JSON blob

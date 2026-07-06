@@ -24,8 +24,11 @@ function primeArcherBasicAttack(level = 1, targetHp = 1_000_000) {
   const archer = s.heroes[0];
   expect(archer.cls).toBe("archer");
   archer.level = level;
-  // Skills only fire via autoCast (off here) or a manual castSkills intent
-  // (never sent), so the basic-attack lane is isolated on its own.
+  // Isolate the basic-attack lane on ONE known target: pause the M6 spawn pool so
+  // its burst can't inject a nearer mob that would steal the archer's aim (the
+  // widened/denser hunt field now spawns inside archer.x+100). Skills only fire via
+  // autoCast (off here) or a manual castSkills intent (never sent).
+  s.spawnPaused = true;
   archer.cd = 0; // basic attack ready NOW
   const target = makeStubEnemy(1, archer.x + 100, targetHp);
   s.enemies = [target];

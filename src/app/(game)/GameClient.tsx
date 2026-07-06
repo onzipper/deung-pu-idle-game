@@ -7,8 +7,9 @@
  * Owns the live `GameState` and the render `Application` as plain closures
  * inside a single `useEffect` (never React state — see `CLAUDE.md`'s no
  * per-frame-state-in-React rule). Each rAF tick:
- *   1. copies the UI-owned `speed`/`autoUpgrade`/`autoCast`/`soundMuted` flags
- *      off the Zustand store onto the engine state / `AudioController`,
+ *   1. copies the UI-owned `autoCast`/`autoAllocate`/`autoReturn`/auto-potion/
+ *      `soundMuted` flags off the Zustand store onto the engine state /
+ *      `AudioController`,
  *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
  *      once and hands it to the FIRST fixed sub-step of the frame,
  *   2b. shapes this frame's real elapsed seconds through `TimeDirector`
@@ -17,12 +18,14 @@
  *      audio, and the ~10Hz UI-sync below all keep using the real elapsed
  *      time so fx/SFX/HUD stay snappy even while the sim is frozen/slowed,
  *   3. asks the fixed-timestep accumulator how many `FIXED_DT` sub-steps to
- *      run (the speed multiplier = more sub-steps, never a bigger dt) and
- *      runs `step()` that many times, concatenating each sub-step's
+ *      run and runs `step()` that many times, concatenating each sub-step's
  *      `state.events` into one `frameEvents` array (M4 juice feed — the buffer
  *      is cleared at the START of every step(), so a multi-sub-step frame
- *      must collect across all of them or a speed multiplier silently drops
- *      events),
+ *      must collect across all of them). The player-facing 1x/2x/3x speed
+ *      selector was removed (M6.7) — the accumulator is always drained at a
+ *      fixed multiplier of 1 sub-step per real frame now; `drainAccumulator`
+ *      itself still takes a speed argument (used by the sim/balance harness
+ *      and engine tests), it's just hardcoded to `1` from this integration seam,
  *   4. draws the resulting state + `frameEvents` with the (one-way,
  *      read-only) `GameRenderer`, which reacts to them on its `fx` layer, then
  *      hands the same `frameEvents` to the `AudioController` (`render/audio`)
@@ -41,9 +44,11 @@ import { useEffect, useRef } from "react";
 import {
   CONFIG,
   FIXED_DT,
+  ITEM_TEMPLATES,
   SIGNATURE_SKILL,
   bossHint,
   canEvolveHero,
+  canUseConsumable,
   classChangeQuestFor,
   combatPower,
   createAccumulator,
@@ -53,10 +58,13 @@ import {
   learnedSkills,
   migrate,
   primaryStat,
+  shopPriceAt,
+  shopStageOf,
   skillCdOf,
   step,
   toSaveData,
   unlockedAutoSlotCount,
+  worldNav,
   type FrameInput,
   type GameEvent,
   type GameState,
@@ -66,14 +74,29 @@ import {
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
+import { selectAutoEquip } from "@/ui/gear/autoEquip";
+import { selectAutoSellItemIds } from "@/ui/gear/autoSell";
+import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
+import { postClaimBatch, postEquip } from "@/ui/gear/api";
+import { applyEquipChange } from "@/ui/gear/inventoryOps";
+import { executeSell } from "@/ui/gear/sellFlow";
+import { toInventoryItem } from "@/ui/gear/types";
+import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
 import {
   useGameStore,
   type EngineSnapshot,
   type HeroQuestSummary,
   type HeroSummary,
+  type ShopSummary,
   type SkillSummary,
 } from "@/ui/store/gameStore";
 import { TimeDirector } from "./timeDirector";
+
+/** Mirrors `server/items.ts`'s `MAX_CLAIM_BATCH` (server zone, not importable
+ * from here — the cap is a plain contract number, duplicated deliberately
+ * rather than reached into `@/server/**`). A buffer bigger than this flushes
+ * across multiple autosave-cadence ticks instead of being truncated. */
+const MAX_CLAIM_BATCH = 64;
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
@@ -210,8 +233,43 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       stats: { ...h.stats },
       primaryStat: primaryStat(h.cls),
       combatPower: combatPower(h),
+      // M7 Gear & Drops: the sim's own applied loadout (see `HeroSummary.equipped`
+      // doc — distinct from, but kept in sync with, the DB-hydrated `inventory`
+      // store slice). Shallow-copied like `stats` above (never alias engine state).
+      equipped: { ...h.equipped },
     };
   });
+
+  // World position + walk-arrow affordances (M6). Precompute the display-ready
+  // neighbor state here (the one place the engine `worldNav` read runs) so the
+  // throttled store carries only plain data.
+  const nav = worldNav(state);
+  const neighbor = (n: typeof nav.left) =>
+    n
+      ? {
+          mapId: n.zone.mapId,
+          zoneIdx: n.zone.zoneIdx,
+          kind: n.zone.kind,
+          unlocked: n.unlocked,
+        }
+      : null;
+
+  // NPC shop + consumables (M6). Prices scale by farming depth (shopStageOf), not
+  // the town's stage; readiness is the precomputed quick-use guard.
+  const shopStage = shopStageOf(state);
+  const shop: ShopSummary = {
+    counts: { ...state.consumables },
+    prices: {
+      hpPotion: shopPriceAt("hpPotion", shopStage),
+      manaPotion: shopPriceAt("manaPotion", shopStage),
+      returnScroll: shopPriceAt("returnScroll", shopStage),
+    },
+    stackCap: CONFIG.shop.stackCap,
+    ready: {
+      hpPotion: canUseConsumable(state, "hpPotion"),
+      manaPotion: canUseConsumable(state, "manaPotion"),
+    },
+  };
 
   return {
     gold: state.gold,
@@ -223,7 +281,93 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     bossReady: state.bossReady,
     bossHint: bossHint(state),
     heroes,
+    world: {
+      mapId: nav.current.mapId,
+      zoneIdx: nav.current.zoneIdx,
+      kind: nav.current.kind,
+      stage: nav.current.stage,
+      traveling: nav.traveling,
+      left: neighbor(nav.left),
+      right: neighbor(nav.right),
+    },
+    shop,
+    // Idle-bot config (M7.5, read-only display source — see `HudState.bot`'s
+    // doc) + per-map unlocked-zone counts (M6 SAVE v8 field, surfaced for the
+    // fast-travel picker's lock read).
+    bot: { ...state.bot },
+    autoHunt: state.autoHunt,
+    unlockedZones: { ...state.unlockedZones },
   };
+}
+
+/**
+ * M7.5 auto-sell executor — runs off a `townArrived` event (reason "sell" /
+ * "restockSell"): computes the sell list from the CURRENT inventory slice +
+ * persisted rules, then reuses the same POST-first sell flow the manual
+ * `InventoryPanel` sell buttons use (`executeSell`). Fire-and-forget: a
+ * dropped/failed auto-sell simply leaves the inventory full, so the NEXT trip
+ * (or a manual sell) retries it — never a stuck state.
+ */
+/**
+ * M7.5 auto-equip executor (owner request 2026-07-06) — keeps the hero in its
+ * best gear without babysitting. Same POST-first flow as the manual equip
+ * buttons; one run in flight at a time (each pick is a server round trip).
+ * Runs off: boot hydration, merged drop claims, and town arrivals (BEFORE the
+ * auto-sell sweep, so the keep-guard baseline reflects the new gear and
+ * yesterday's pieces become sellable in the same trip).
+ */
+let autoEquipInFlight = false;
+async function performAutoEquip(): Promise<void> {
+  if (autoEquipInFlight) return;
+  const store = useGameStore.getState();
+  if (!store.autoEquip) return;
+  const picks = selectAutoEquip(store.inventory, ITEM_TEMPLATES, store.heroes[0]?.cls);
+  if (picks.length === 0) return;
+  autoEquipInFlight = true;
+  try {
+    let equippedCount = 0;
+    for (const pick of picks) {
+      const res = await postEquip(pick.instanceId);
+      const st = useGameStore.getState();
+      if (!res.ok) break; // server said no (stale local view) — stop, next run resyncs
+      st.setInventory(applyEquipChange(st.inventory, pick.instanceId, pick.slot));
+      st.queueEquip(pick.slot, pick.templateId);
+      equippedCount++;
+    }
+    if (equippedCount > 0) {
+      useGameStore.getState().pushNotice("autoEquipDone", { count: equippedCount });
+    }
+  } finally {
+    autoEquipInFlight = false;
+  }
+}
+
+async function performAutoSell(): Promise<void> {
+  const store = useGameStore.getState();
+  const ids = selectAutoSellItemIds(
+    store.inventory,
+    ITEM_TEMPLATES,
+    {
+      sellCommon: store.autoSellCommon,
+      sellRare: store.autoSellRare,
+      keepBetterStat: store.autoSellKeepBetterStat,
+    },
+    store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
+  );
+  if (ids.length === 0) {
+    // Bag full but the rules matched nothing — the engine latches its sell-trip
+    // watermark and stops tripping; tell the player WHY the bot gave up (fix =
+    // loosen the rules in Settings or sell manually).
+    store.pushNotice("autoSellNothing");
+    return;
+  }
+  const result = await executeSell(ids);
+  if (result.ok && result.soldCount > 0) {
+    useGameStore.getState().pushNotice("autoSellDone", {
+      count: result.soldCount,
+      gold: result.totalGold.toLocaleString(),
+    });
+  }
 }
 
 export function GameClient() {
@@ -294,6 +438,13 @@ export function GameClient() {
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
 
+    // ---- M7 Gear & Drops: drop-claim buffer (closure state, NOT React/Zustand
+    // — same "never per-frame state in React" rule as engine state itself).
+    // `itemDrop` events are collected here every frame and flushed as a batch
+    // on the autosave cadence + tab-hide (see `flushClaims`/`onVisibility`). ----
+    let pendingClaims: ClaimBufferEntry[] = [];
+    let claimInFlight = false;
+
     /**
      * Never fail silently: any init error becomes a visible Thai message inside
      * the arena slot plus a real console.error. This is the safety net that
@@ -322,6 +473,12 @@ export function GameClient() {
       // UI-owned flags the engine reads directly (not part of FrameInput).
       state.autoCast = store.autoCast;
       state.autoAllocate = store.autoAllocate;
+      state.autoReturn = store.autoReturn;
+      // Auto-use potion toggles + thresholds (M6), same UI-owned pattern.
+      state.autoHpPotion = store.autoHpPotion;
+      state.autoManaPotion = store.autoManaPotion;
+      state.autoHpThreshold = store.autoHpThreshold;
+      state.autoManaThreshold = store.autoManaThreshold;
       // UI-owned sound preference — applied to the audio module every frame,
       // same pattern (never queued through FrameInput; it isn't sim state).
       audio.setMuted(store.soundMuted);
@@ -335,9 +492,22 @@ export function GameClient() {
         setAutoSlots: pending.setAutoSlots.length ? pending.setAutoSlots : undefined,
         challengeBoss: pending.challengeBoss || undefined,
         advanceStage: pending.advanceStage || undefined,
+        walkToZone: pending.walkToZone ?? undefined,
         evolveHero: pending.evolveHero ?? undefined,
         acceptQuest: pending.acceptQuest ?? undefined,
         allocateStat: pending.allocateStat ?? undefined,
+        buyShopItem: pending.buyShopItem ?? undefined,
+        useConsumable: pending.useConsumable ?? undefined,
+        useReturnScroll: pending.useReturnScroll || undefined,
+        equip: pending.equip ?? undefined,
+        setBotSettings: pending.setBotSettings ?? undefined,
+        setAutoHunt: pending.setAutoHunt ?? undefined,
+        fastTravel: pending.fastTravel ?? undefined,
+        goldCredit: pending.goldCredit ?? undefined,
+        // M7.5: the sell-trip bot's trigger — the engine knows nothing about
+        // item instances, so the client feeds this transient count every frame
+        // (see `FrameInput.inventoryCount`'s doc).
+        inventoryCount: store.inventory.length,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -346,11 +516,14 @@ export function GameClient() {
       const simElapsed = timeDirector.shape(elapsed, lastFrameEvents);
 
       // `state.events` is cleared at the START of each step() and holds only
-      // that sub-step's events; a speed multiplier runs more than one sub-step
-      // per rAF frame, so we must collect across ALL of them before draw() —
-      // otherwise 2x/3x speed would silently drop every event but the last
-      // sub-step's (see engine/state/events.ts's collection contract).
-      const steps = drainAccumulator(acc, simElapsed, store.speed);
+      // that sub-step's events; a stalled/dropped rAF frame can still produce
+      // more than one fixed sub-step here (via `simElapsed`), so we must
+      // collect across ALL of them before draw() (see
+      // engine/state/events.ts's collection contract). The speed multiplier
+      // itself is hardcoded to 1 — the player-facing 1x/2x/3x selector was
+      // removed (M6.7); `drainAccumulator`'s speed parameter still exists for
+      // the sim/balance harness and engine tests.
+      const steps = drainAccumulator(acc, simElapsed, 1);
       const frameEvents: GameEvent[] = [];
       for (let i = 0; i < steps; i++) {
         step(state, i === 0 ? firstInput : {});
@@ -359,6 +532,37 @@ export function GameClient() {
 
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
+
+      // M7 Gear & Drops: buffer every `itemDrop` this frame for the batched
+      // server claim (flushed on the autosave cadence / tab-hide below). The
+      // engine's roll is already deterministic + monotonic (rollId), so this
+      // is a plain append — no on-the-spot dedup needed in the common case.
+      for (const ev of frameEvents) {
+        if (ev.type === "itemDrop") {
+          pendingClaims.push({
+            rollId: ev.rollId,
+            templateId: ev.templateId,
+            stage: state.stage,
+          });
+        } else if (ev.type === "townArrived") {
+          // M7.5 sell-trip bot: the engine restocked already (engine-side);
+          // the CLIENT owns item instances, so a "sell"/"restockSell" arrival
+          // is where the auto-sell rules actually run (fire-and-forget — a
+          // dropped auto-sell just retries on the NEXT full-inventory trip).
+          if (ev.reason === "sell" || ev.reason === "restockSell") {
+            // Equip first so the keep-guard baseline reflects the NEW gear —
+            // the displaced pieces then vendor in this same trip.
+            void performAutoEquip().then(performAutoSell);
+          }
+        } else if (ev.type === "fastTravelCastStart") {
+          useGameStore.getState().startFastTravelChannel(ev.mapId, ev.zoneIdx);
+        } else if (ev.type === "fastTravelArrive") {
+          useGameStore.getState().clearFastTravelChannel();
+        } else if (ev.type === "fastTravelBlocked") {
+          useGameStore.getState().clearFastTravelChannel();
+          useGameStore.getState().pushNotice(`fastTravelBlocked.${ev.reason}`);
+        }
+      }
 
       uiSyncAccum += elapsed;
       if (uiSyncAccum >= UI_SYNC_INTERVAL) {
@@ -388,6 +592,55 @@ export function GameClient() {
       }).catch(() => {
         /* offline / transient failure — next autosave retries */
       });
+      // Same cadence as the save POST (see the drop-claim flush's own doc below).
+      flushClaims();
+    }
+
+    // ---- M7 Gear & Drops: batched drop-claim flush (same cadence as autosave,
+    // see the call site below). Fire-and-forget; on a network failure the batch
+    // is RE-QUEUED (claims are server-side idempotent via claimKey — a retry
+    // can never double-mint, see `docs/persistence-m7.md`), so nothing here can
+    // lose a drop except the tab-hide beacon path (accepted v1 tradeoff — noted
+    // on `onVisibility` below and in the ui/README). One flush in flight at a
+    // time so two overlapping timers can't race the same buffer. ----
+    function applyClaimResults(results: ClaimItemResultWire[]): void {
+      const minted: ItemInstanceWire[] = [];
+      const rejectedCounts: Partial<Record<string, number>> = {};
+      for (const r of results) {
+        if (r.status === "rejected") {
+          rejectedCounts[r.reason] = (rejectedCounts[r.reason] ?? 0) + 1;
+          continue;
+        }
+        minted.push(r.item);
+        if (r.status === "minted") {
+          const template = ITEM_TEMPLATES[r.item.templateId];
+          useGameStore
+            .getState()
+            .pushDropFeed(r.item.templateId, template?.rarity ?? "common");
+        }
+      }
+      if (minted.length) {
+        useGameStore.getState().mergeInventory(minted);
+        void performAutoEquip(); // wear an upgrade the moment it drops
+      }
+      if (Object.keys(rejectedCounts).length) {
+        console.warn("[GameClient] drop-claim rejections:", rejectedCounts);
+      }
+    }
+
+    function flushClaims(): void {
+      if (claimInFlight || pendingClaims.length === 0) return;
+      const { batch, remaining } = takeBatch(pendingClaims, MAX_CLAIM_BATCH);
+      pendingClaims = remaining;
+      claimInFlight = true;
+      void postClaimBatch(batch)
+        .then((res) => {
+          if (res) applyClaimResults(res.results);
+          else pendingClaims = [...batch, ...pendingClaims]; // network failure — retry next cadence
+        })
+        .finally(() => {
+          claimInFlight = false;
+        });
     }
 
     // On tab-hide (covers most real "closing the game" cases): sendBeacon is
@@ -398,6 +651,19 @@ export function GameClient() {
         type: "application/json",
       });
       navigator.sendBeacon("/api/save", blob);
+
+      // Best-effort drop-claim flush via the same fire-and-forget beacon
+      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
+      // accepted v1 loss (no response to merge into the inventory slice even
+      // if it lands) — documented tradeoff, see this function's doc comment.
+      if (pendingClaims.length > 0) {
+        const claimBlob = new Blob(
+          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+          { type: "application/json" },
+        );
+        navigator.sendBeacon("/api/items/claim", claimBlob);
+        pendingClaims = [];
+      }
     }
 
     // Browsers block audio output until a real user gesture — resume() is
@@ -427,6 +693,10 @@ export function GameClient() {
           const json = (await res.json()) as {
             save: SaveData | null;
             offline?: { creditedSeconds: number; capped: boolean };
+            // M7 boot payload (server: src/app/api/save/route.ts GET) — always
+            // present (possibly empty arrays/nulls pre-character).
+            inventory?: ItemInstanceWire[];
+            equipped?: { weapon: string | null; armor: string | null };
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -434,6 +704,23 @@ export function GameClient() {
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
+          }
+          // M7: the DB `ItemInstance` ledger is AUTHORITATIVE over the save
+          // blob's own `equipped` cache (precedence documented at the API) —
+          // overwrite it BEFORE `initGameState` derives max HP from it below.
+          if (loaded && json.equipped) loaded.equipped = { ...json.equipped };
+          // Seed the inventory store slice straight from the boot payload —
+          // this is the ONLY normal hydration path (InventoryPanel never
+          // fetches on its own mount, only on an equip-failure resync).
+          if (json.inventory) {
+            useGameStore.getState().setInventory(json.inventory.map(toInventoryItem));
+            void performAutoEquip(); // boot in best gear (no-op if already worn)
+            // M7.5 "NEW" badge baseline: everything owned AT BOOT is "known" —
+            // any templateId minted afterward reads as new for this session
+            // (see `sessionKnownTemplateIds`'s doc).
+            useGameStore
+              .getState()
+              .setSessionKnownTemplateIds(json.inventory.map((i) => i.templateId));
           }
         }
       } catch {
@@ -450,6 +737,10 @@ export function GameClient() {
       // the live loop uses, bounded by OFFLINE_SYNC_BUDGET_MS (see its comment).
       const totalOfflineSteps = Math.floor(offlineSeconds / FIXED_DT);
       if (totalOfflineSteps > 0) {
+        // Offline idle FORCES auto-return (M6): a hero dead at the snapshot must
+        // respawn + walk back to farm during the replay so idle earnings never
+        // stall in town (regardless of the live UI toggle).
+        state.autoReturn = true;
         const goldBefore = state.gold;
         const deadline = performance.now() + OFFLINE_SYNC_BUDGET_MS;
         let ran = 0;

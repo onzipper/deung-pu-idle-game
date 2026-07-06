@@ -8,7 +8,7 @@ import {
   type GameEvent,
   type SaveData,
 } from "@/engine";
-import { soloSave, makeParty, runUntil, makeStubEnemy } from "./helpers";
+import { soloSave, makeParty, runUntil, makeStubEnemy, forceBoss } from "./helpers";
 
 /**
  * Per-step EVENT BUFFER (M4 render/audio juice feed). Verifies events are
@@ -62,16 +62,18 @@ describe("event buffer lifecycle", () => {
     const s = initGameState(1);
     expect(s.events).toEqual([]);
 
-    // Force a wave to spawn (emits waveSpawn), then step once more.
-    const withEvents = collectUntil(s, (st) => st.enemies.length > 0, 3000);
-    expect(withEvents.length).toBeGreaterThan(0);
-
-    // The step that spawned the wave left a non-empty buffer...
+    // Step until combat (hunt/hit/kill) fills the buffer.
+    let steps = 0;
+    while (s.events.length === 0 && steps < 3000) {
+      step(s, {});
+      steps++;
+    }
     expect(s.events.length).toBeGreaterThan(0);
-    // ...but a subsequent quiet step clears it (no new events that step).
+
+    // A subsequent step reuses the SAME array (cleared in place, not reallocated),
+    // reflecting only that step's events.
     const before = s.events;
     step(s, {});
-    // Same array identity (cleared in place), and it reflects only THIS step.
     expect(s.events).toBe(before);
   });
 
@@ -84,12 +86,20 @@ describe("event buffer lifecycle", () => {
 });
 
 describe("combat events", () => {
-  it("emits waveSpawn with the wave number when a wave spawns", () => {
-    const s = initGameState(1);
-    const evs = collectUntil(s, (st) => st.enemies.length > 0, 3000);
-    const wave = evs.find((e) => e.type === "waveSpawn");
-    expect(wave).toBeDefined();
-    expect(wave).toMatchObject({ type: "waveSpawn", wave: 1 });
+  it("emits mobAggroed when an aggressive mob's radius triggers (M6 สนามล่ามอน)", () => {
+    // A map3 farm zone mixes in aggressive mobs (aggro ramp) — hunting toward them
+    // trips at least one aggro radius, emitting mobAggroed. Window sized for the
+    // gradual re-entry fill (M6 hunt follow-up): the field seeds at a fraction of the
+    // cap and trickles up, so aggressive mobs take a few seconds to populate.
+    const s = initGameState(1, soloSave("swordsman", 12));
+    const evs = collectEvents(s, 4000);
+    const aggro = evs.find((e) => e.type === "mobAggroed");
+    expect(aggro).toBeDefined();
+    expect(aggro).toMatchObject({ type: "mobAggroed" });
+    if (aggro?.type === "mobAggroed") {
+      expect(typeof aggro.id).toBe("number");
+      expect(["normal", "fast", "tank", "ranged"]).toContain(aggro.kind);
+    }
   });
 
   it("emits projectileSpawn + hit for a ranged team, and kill on a death", () => {
@@ -142,8 +152,7 @@ describe("combat events", () => {
 
   it("swordsman spin emits a skill-sourced hit on an in-range target", () => {
     const s = initGameState(1);
-    runUntil(s, (st) => st.bossReady, 30000);
-    step(s, { challengeBoss: true });
+    forceBoss(s); // M6: enter a boss fight without the world walk
     const radius = SKILL_TYPES.swordsman.radius;
     runUntil(
       s,
@@ -163,11 +172,9 @@ describe("combat events", () => {
 describe("boss lifecycle events", () => {
   it("emits telegraph, slam land, and slam-sourced hits during the fight", () => {
     const s = initGameState(11);
-    runUntil(s, (st) => st.bossReady, 30000);
-    step(s, { challengeBoss: true });
+    forceBoss(s); // M6: enter a boss fight without the world walk
     // Make the solo hero fragile (but not one-shot): it survives long enough to
-    // eat slams, then wipes -> the boss retreats. Deterministic regardless of the
-    // hero's own DPS (which is now tanky enough to sometimes out-race the boss).
+    // eat slams, then wipes -> M6 death respawn (walks home to town).
     s.heroes[0].maxHp = 120;
     s.heroes[0].hp = 120;
     const evs = collectUntil(s, (st) => st.phase !== "boss", 6000);
@@ -175,14 +182,13 @@ describe("boss lifecycle events", () => {
     expect(t.has("bossSlamTelegraph")).toBe(true);
     expect(t.has("bossSlamLand")).toBe(true);
     expect(evs.some((e) => e.type === "hit" && e.source === "slam")).toBe(true);
-    // Weak team wipes -> boss retreats.
-    expect(t.has("bossRetreat")).toBe(true);
+    // Weak hero wipes -> M6: it heads home to town (not an in-place boss retreat).
+    expect(s.traveling).not.toBeNull();
   });
 
-  it("emits bossEnraged, bossDefeated + stageCleared, then stageAdvanced", () => {
+  it("emits bossEnraged, then bossDefeated + stageCleared on a boss kill", () => {
     const s = initGameState(5, strongSave());
-    runUntil(s, (st) => st.bossReady, 30000);
-    step(s, { challengeBoss: true });
+    forceBoss(s); // M6: enter a boss fight without the world walk
     const fight = collectUntil(s, (st) => st.phase === "victory", 5000);
     const t = typesOf(fight);
     expect(t.has("bossEnraged")).toBe(true);
@@ -193,10 +199,6 @@ describe("boss lifecycle events", () => {
     if (defeated.type === "bossDefeated") {
       expect(defeated.goldGained).toBeGreaterThan(0);
     }
-
-    step(s, { advanceStage: true });
-    const adv = s.events.find((e) => e.type === "stageAdvanced");
-    expect(adv).toMatchObject({ type: "stageAdvanced", stage: 2 });
   });
 });
 
@@ -239,12 +241,27 @@ describe("determinism", () => {
 describe("events are transient (never persisted)", () => {
   it("toSaveData excludes the events buffer entirely", () => {
     const s = initGameState(7, soloSave("swordsman", 3));
-    // Populate the buffer with a real event (a spawned wave emits waveSpawn).
+    // Populate the buffer with a real event (hunting a mob emits hit/kill).
     runUntil(s, (st) => st.events.length > 0, 3000);
     expect(s.events.length).toBeGreaterThan(0);
 
     const save = toSaveData(s);
     expect(save).not.toHaveProperty("events");
-    expect(Object.keys(save)).toEqual(["version", "stage", "gold", "hero", "lastSeen"]);
+    expect(Object.keys(save)).toEqual([
+      "version",
+      "stage",
+      "gold",
+      "location",
+      "unlockedZones",
+      "lastFarmZone",
+      "consumables",
+      "bot",
+      "autoHunt",
+      "equipped",
+      "hero",
+      "lootCounter",
+      "lootSalt",
+      "lastSeen",
+    ]);
   });
 });

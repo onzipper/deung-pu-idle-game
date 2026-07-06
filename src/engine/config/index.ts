@@ -33,6 +33,217 @@ export const CONFIG = {
   /** Throttle for engine -> UI (Zustand) state sync, in Hz. */
   uiSyncHz: 10,
 
+  // ---- world / zones (M6 "World & Town", ROADMAP task 1) ----
+  // The world is a set of ordered MAPS (themes). Each map is a left-to-right run
+  // of walkable ZONES: farm zones (one existing STAGE each) + a single BOSS ROOM.
+  // The TOWN (safe hub + respawn point) is one zone at the LEFT edge of
+  // `townMapId`. This REGROUPS the existing stage content (stages 1-5 -> map1's
+  // five farm zones, 6-10 -> map2, 11+ -> map3 frontier) — per-zone enemy
+  // rosters/scaling are still driven by `state.stage` (= the zone's stage), so
+  // combat balance INSIDE a zone is UNCHANGED. Config-driven so M7/M8 add maps by
+  // data. Progression + navigation live in systems/world.ts.
+  //
+  // A farm zone unlocks the NEXT zone once its kill quota (killGoal(stage)) is met;
+  // clearing a farm zone grants the SAME xp/gold the old per-stage boss did
+  // (xpPerBossKill/goldPerBoss are REUSED, so the leveling curve is preserved
+  // WITHOUT a per-zone boss). The boss room unlocks after the last farm zone;
+  // beating it unlocks the next map. map3 is the soft-wall frontier (bossStageId 15
+  // sits past the current content ceiling — intended; extended by M7/M8 content).
+  // Per-map fields:
+  //  - `fieldWidth`: the zone's walkable width in engine units (M6 "สนามล่ามอน").
+  //    Default = the current screen field (~900, the letterboxed logical width in
+  //    render/layout.ts). A wider zone is a DATA change here (+ a camera-follow
+  //    render task) — the hunt/spawn systems already read it, so no engine rework.
+  //  - `hunt`: the per-map spawn-pool + temperament knobs (see the `hunt` block
+  //    below for the shared defaults). `aggroStart`/`aggroEnd` ramp the AGGRESSIVE
+  //    fraction across the map's farm zones (index 0 -> last farm before the boss),
+  //    so aggression concentrates toward the boss room (GDD). `aggroRadius` is that
+  //    map's aggressive aggro range (slightly larger in later maps).
+  //
+  // M6 "ALIVE FIELD" retune (2026-07-06): `maxAlive` was raised ~2.5× (6-8 -> 15/17/18)
+  // so a zone reads as a busy hunting ground, `respawnDelay` cut so the denser field
+  // stays populated. Because the aggressive-mob COUNT = aggroFraction × maxAlive, the
+  // aggro FRACTIONS were cut in step (map3 0.35-0.60 -> 0.15-0.25) so the belt's
+  // ABSOLUTE danger only rose modestly (no meat grinder) — danger toward the frontier
+  // now comes mostly from tougher + more-aggressive mobs, not raw body count. The
+  // clear-time ballpark is held by the ×1.6 killGoal (see the curve block); see
+  // docs/balance-m6.md task 4 for the sim table + the archer frontier caveat.
+  world: {
+    maps: [
+      {
+        id: "map1", zoneStageIds: [1, 2, 3, 4, 5], bossStageId: 5, fieldWidth: 900,
+        hunt: { maxAlive: 15, respawnDelay: 0.75, aggroStart: 0.0, aggroEnd: 0.1, aggroRadius: 125 },
+      },
+      {
+        id: "map2", zoneStageIds: [6, 7, 8, 9, 10], bossStageId: 10, fieldWidth: 900,
+        hunt: { maxAlive: 17, respawnDelay: 0.65, aggroStart: 0.09, aggroEnd: 0.18, aggroRadius: 145 },
+      },
+      {
+        id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15, fieldWidth: 900,
+        hunt: { maxAlive: 18, respawnDelay: 0.6, aggroStart: 0.15, aggroEnd: 0.25, aggroRadius: 145 },
+      },
+    ],
+    townMapId: "map1",
+    // Deterministic walk transit per hop (seconds). Negligible vs clear times;
+    // render animates the actual multi-zone walk (a later task). Death respawn
+    // reuses `heroReviveTime` as its walk-home time (unchanged death cost).
+    transitSeconds: 0.6,
+  },
+
+  // ---- hunting field ("สนามล่ามอน", M6 combat rework, decided 2026-07-05) ----
+  // The forward-march wave model is replaced by an OPEN FIELD the hero HUNTS across.
+  // A per-zone spawn POOL keeps `maxAlive` mobs on the field (seeded RNG places +
+  // composes them — spawn composition/placement is exactly what the RNG stream is
+  // reserved for); a killed mob respawns after `respawnDelay`. Mobs idle-WANDER
+  // gently around their spawn point via a DETERMINISTIC id-hashed phase (NOT the RNG
+  // stream — mid-combat draws stay forbidden). Temperament: PASSIVE (default — never
+  // initiates; fights back once HIT) + AGGRESSIVE (an aggro radius — engages when the
+  // hero enters it). The AGGRESSIVE fraction ramps per map (`world.maps[].hunt`) so
+  // danger concentrates toward the boss rooms. All knobs sim-tuned — docs/balance-m6.md.
+  hunt: {
+    // Spawn-pool defaults (a map's `hunt` block overrides maxAlive/respawnDelay).
+    maxAlive: 7,
+    respawnDelay: 1.6,
+    /** Delay before the first spawn on zone entry (the field then bursts to full). */
+    initialGap: 0.3,
+    /** Spawn band as fractions of the zone `fieldWidth` (mobs placed in [min,max]). */
+    // Widened (was 0.30-0.96) to spread 15-20 concurrent mobs over a longer stretch
+    // so a fuller field reads less clumped. Placement is still uncollided random
+    // uniform, so a fuller field WILL visually overlap at points (acceptable for now
+    // — flagged in docs/balance-m6.md); a wider band lowers the overlap density.
+    spawnMinXFrac: 0.22,
+    spawnMaxXFrac: 0.98,
+    // Idle wander around the spawn point (deterministic; no RNG). Amplitude in px,
+    // a gentle drift speed cap, and an id-hashed frequency spread so mobs desync.
+    wanderAmp: 22,
+    wanderSpeed: 18,
+    wanderFreqBase: 0.5,
+    wanderFreqSpread: 0.4,
+    /** Default aggro radius (per-map `aggroRadius` overrides). */
+    aggroRadius: 150,
+    // Hero auto-hunt: walk speed toward the target, the melee stop gap (+approach
+    // short), and the ranged standoff (hold at range*frac; kite in below kiteDist).
+    huntSpeed: 175,
+    contactGap: 34,
+    meleeApproachGap: 26,
+    rangedStandoffFrac: 0.82,
+    /** Engaged melee mob stops this far from the hero before swinging. */
+    mobContactGap: 34,
+    /** Hero field bounds: left clamp (don't back off-screen) + right margin. */
+    heroMinX: 55,
+    fieldRightMargin: 24,
+
+    // ---- M6 hunt follow-ups (engine, 2026-07-06 — flagged in docs/balance-m6.md) ----
+    // (1) Gradual RE-ENTRY fill. Entering/re-entering a farm zone used to BURST the
+    // field to `maxAlive` in one step — on a death respawn that re-swarmed the
+    // returning hero instantly (no retreat room; the squishy archer's AoE-aggro
+    // death-spiral walled it at s13). Instead the field bursts only THIS FRACTION of
+    // `maxAlive` on entry, then the normal respawn cadence (`respawnDelay`) trickles
+    // it up to the cap over a few seconds — so a returning kiter gets breathing room
+    // while the field refills. Still ends up FULL (the owner's "alive field" intent
+    // is preserved; only the first seconds after each entry ramp). Deterministic.
+    reentryBurstFrac: 0.35,
+    // (2) Min-spacing spawn PLACEMENT (best-candidate). A spawn draws THIS many
+    // candidate x's (a FIXED count so the RNG draw-count per spawn stays BOUNDED +
+    // deterministic — spawn placement legitimately uses the seeded stream) and keeps
+    // the one FARTHEST from the nearest existing mob, so a dense field reads spread
+    // out instead of stacking mobs on a point. 1 = plain uniform random (old behaviour).
+    spawnCandidates: 5,
+    // (3) AoE-AGGRO rule. A single AoE (arrow rain / meteor / whirl / frost) DAMAGES
+    // every mob in its blast (unchanged), but must NOT wake the whole passive cluster
+    // — the archer's rain used to aggro every passive it clipped, swarming its kite in
+    // a dense field. Retaliation is limited to the mobs NEAREST the impact, within
+    // `aoeWakeRadiusFrac × blastRadius`, capped at `aoeWakeCap` per impact
+    // (deterministic nearest-first + id tie-break; NO RNG — combat never draws from the
+    // stream). Edge-of-blast passives take damage but stay passive, so an AoE farmer
+    // keeps retreat room. The directly-targeted mob (at the impact centre) always wakes.
+    aoeWakeRadiusFrac: 0.6,
+    aoeWakeCap: 2,
+  },
+
+  // ---- NPC shop / consumables (M6 "เมืองหลัก + NPC shops", ROADMAP task) ----
+  // The FIRST real gold sink since the upgrade lines were removed (gold otherwise
+  // accumulates unused). Three NPC-bought, non-tradable, stackable consumables:
+  //   hpPotion     — restore `restoreFrac` of MAX HP (idle sustain; cooldown-gated)
+  //   manaPotion   — restore `restoreFrac` of MAX MANA (caster sustain)
+  //   returnScroll — teleport to town from anywhere (consumed; instant)
+  //
+  // PRICING is STAGE-SCALED: `priceAt(item, stage) = round(basePrice *
+  // priceStageBase^(stage-1))`. Gold income per kill itself grows (~1.05^n plus a
+  // linear term), so a flat price would trivialise late-game; scaling at 1.12/stage
+  // keeps a potion worth a meaningful slice (~4-6 kills) of the CURRENT zone's gold
+  // at every depth — a real sink that bites hardest exactly at the frontier wall
+  // (where the hero dies + drinks most). Non-tradable + fungible => plain COUNTS in
+  // the save (SAVE v9), NOT M7 item-instances (see entities `ShopItemId`).
+  //
+  // AUTO-USE (the idle feature): settings-style toggles + thresholds (UI-owned like
+  // autoCast, mirrored onto state each frame). `autoDefaults` seeds the initial
+  // toggle/threshold values; a step-level, per-type-cooldown deterministic use
+  // fires when the pool drops below the threshold (systems/consumables). Defaults
+  // ON so idle play benefits without setup (same spirit as autoReturn).
+  //
+  // Sim-tuned — see docs/balance-m6.md (prices, sustain deltas, gold sink rate).
+  shop: {
+    /** Max held per item (a hand-edited save can't stockpile absurd counts). */
+    stackCap: 99,
+    /** Per-stage price multiplier (compounds on `basePrice`). */
+    priceStageBase: 1.12,
+    /** Initial (UI-owned) auto-use toggle + threshold values. */
+    autoDefaults: {
+      hpPotion: true,
+      manaPotion: true,
+      /** Auto hp-potion fires below this fraction of MAX HP. */
+      hpThreshold: 0.35,
+      /** Auto mana-potion fires below this fraction of MAX MANA. */
+      manaThreshold: 0.25,
+    },
+    /** The catalog. `restoreFrac` / `cooldown` are 0 for the non-potion scroll. */
+    items: {
+      hpPotion: { basePrice: 60, restoreFrac: 0.5, cooldown: 8 },
+      manaPotion: { basePrice: 45, restoreFrac: 0.45, cooldown: 10 },
+      returnScroll: { basePrice: 150, restoreFrac: 0, cooldown: 0 },
+    },
+  },
+
+  // ---- idle bots + fast travel (M7.5 "Sell, Bots & Inventory UX") ----
+  // Engine-side, DETERMINISTIC automations (same pattern as autoReturn/auto-potion,
+  // no RNG, no wall-clock): a potion-restock bot + a sell-trip bot make a town round
+  // trip (warp via a held ยันกลับเมือง scroll, else a direct walk transit — reusing
+  // the death respawn's walk-home mechanic), then auto-return to the last farm zone.
+  // Fast travel is a player intent: a short damage-cancellable channel then an
+  // instant, FREE hop to any UNLOCKED zone (the scroll keeps its value — it warps
+  // even while swarmed; fast travel demands a clear standoff). All sim-OFF by default
+  // so the balance baseline is byte-identical (docs/balance-m7.md).
+  bot: {
+    // Seed values for a fresh save's BotSettings (both bots OFF so a cold start /
+    // the sim run behave exactly as pre-M7.5). Targets are stack counts.
+    defaults: {
+      enabled: false,
+      sellTripEnabled: false,
+      hpPotionTarget: 15,
+      mpPotionTarget: 15,
+      scrollReserve: 3,
+      goldReserve: 0,
+    },
+    // How long a SELL trip waits in town (s) for the client's async sell API to
+    // shrink the fed `inventoryCount` below the cap before giving up and walking
+    // home. On give-up the count is latched as a watermark and no new sell trip
+    // starts until the count drops below it (or the settings change) — the
+    // anti-warp-loop guard (2026-07-06 bug: bot looped town trips burning
+    // scrolls whenever the auto-sell rules matched nothing).
+    sellDwellSeconds: 6,
+  },
+  travel: {
+    // Fast-travel channel time (s). The hero stands still (no hunt/skills) and any
+    // damage taken during it CANCELS the warp (fastTravelBlocked "damaged").
+    fastTravelCastSeconds: 1.75,
+    // Bot walk-to-town time PER ZONE OF DEPTH (s) when no return scroll is held
+    // — a single direct transit whose duration = botWalkSeconds x zoneIdx (min 1).
+    // Depth-scaled so the return scroll is a real time-saver from deep zones
+    // instead of a pointless purchase (2026-07-06 logic review).
+    botWalkSeconds: 1.2,
+  },
+
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.
@@ -171,8 +382,16 @@ export const CONFIG = {
     rangedChanceS3: 0.55, // stage >= 3
   },
 
-  // ---- curves (functions of stage n), verbatim from the POC ----
-  killGoal: (n: number): number => 10 + n * 5,
+  // ---- curves (functions of stage n) ----
+  // M6 hunt-density retune (2026-07-06): concurrent mobs per zone rose ~2.5×
+  // (maxAlive 6-8 -> 15-20) to make the field feel ALIVE. Measured raw throughput
+  // then rose ~1.6× (clear times ~halved), so the KILL QUOTA is the lever that
+  // restores the M6 clear-time ballpark ("busier, not trivially faster"): killGoal
+  // is scaled ×1.6 (10+5n -> 16+8n). Because level/gold-per-zone = quota × per-kill
+  // reward, xpPerKill + goldPerKill are divided by the SAME 1.6 below so the
+  // leveling trajectory, the map3 power wall, class-change-at-stage-5, and the
+  // potion-sink %s all stay on the M6 curve — only the field density changed.
+  killGoal: (n: number): number => 16 + n * 8,
   // M4 tune: HP scaling exponent 1.23 -> 1.20. `heroAtk` is ADDITIVE
   // (base*(1+per*level)) while enemy/boss HP is GEOMETRIC, so the atk level (and
   // its geometric cost) needed to keep pace grows super-linearly with stage — a
@@ -189,7 +408,10 @@ export const CONFIG = {
   // multiplier keeps stage 1-3 values effectively unchanged (7, 9, 12 vs 7, 9,
   // 11) but lets income track the cost curve deeper, converting the old stage-8
   // stall into a comfortable stage and pushing the hard stall out to stage 9.
-  goldPerKill: (n: number): number => Math.round((5 + n * 2) * Math.pow(1.05, n - 1)),
+  // M6 hunt-density retune: base coeffs are the old (5 + 2n) divided by the 1.6×
+  // killGoal factor (≈ 3.125 + 1.25n) so gold-per-ZONE = killGoal × goldPerKill is
+  // preserved — income trajectory and the depth-scaled potion-sink %s are unchanged.
+  goldPerKill: (n: number): number => Math.round((3.125 + n * 1.25) * Math.pow(1.05, n - 1)),
   goldPerBoss: (n: number): number => 50 + n * 20,
 
   // ---- spatial layout ----
@@ -307,7 +529,11 @@ export const CONFIG = {
     hpPerLevel: 0.09,
     // XP granted to the solo hero per NORMAL enemy kill; scales with stage so
     // deeper (tougher) kills are worth more and leveling keeps pace with HP.
-    xpPerKill: (n: number): number => 10 + n * 3,
+    // M6 hunt-density retune: ≈ old (10 + 3n) divided by the 1.6× killGoal factor
+    // so xp-per-ZONE = killGoal × xpPerKill is preserved — the leveling trajectory
+    // (level-at-stage, class-change beat, map3 power wall) is unchanged despite the
+    // ~2.5× denser field (which only made the same kills arrive faster).
+    xpPerKill: (n: number): number => 6 + n * 2,
     // XP granted per BOSS kill — a chunky milestone reward (a level or more).
     xpPerBossKill: (n: number): number => 80 + n * 25,
     // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
@@ -403,6 +629,21 @@ export const CONFIG = {
   power: {
     dpsWeight: 6,
     hpWeight: 0.5,
+    // M7 gear DEF axis weight in the combat-power scalar. Small: DEF is flat
+    // per-hit mitigation, not a big HOF mover, but it must register (monotonic).
+    defWeight: 3,
+  },
+
+  // ---- gear / drops (M7 "ของดรอปและ Gear", ROADMAP M7) ----
+  // Equipped weapon/armor apply FLAT atk/def/hp (systems/stats `equip*Of`).
+  // Stats live in `config/items.ts` (pure TS; never the DB). A no-gear hero
+  // contributes 0 on every axis, so unarmored combat is byte-identical to pre-M7
+  // (the balance-m6 curves are untouched — docs/balance-m7.md). DEF is FLAT
+  // per-hit mitigation applied in systems/damage; a hit is floored so armor can
+  // never make a hero unkillable. Sim-swept.
+  gear: {
+    /** A mitigated hero hit never drops below this many points (armor floor). */
+    minDamage: 1,
   },
 
   // ---- class advancement / evolution (M5 "ปลดคลาส evolution", 86d3jv7m3) ----

@@ -14,7 +14,7 @@ import {
   unlockedAutoSlotCount,
   isSkillLearned,
 } from "@/engine";
-import { makeParty, makeStubEnemy, soloSave } from "./helpers";
+import { makeParty, makeStubEnemy, soloSave, worldAutopilot } from "./helpers";
 
 /**
  * M5 "mana + skill framework v2" (86d3jv7m3) — the task's required coverage:
@@ -244,10 +244,10 @@ describe("mana starvation never hard-stalls progression", () => {
     s.autoCast = true;
     // Cripple regen isn't directly tunable per-run, but a fresh hero's tight pool
     // already forces skips; assert real progress accrues regardless.
+    s.autoReturn = true;
     let advanced = false;
     for (let i = 0; i < 60 * 300 && !advanced; i++) {
-      const bossReady = s.phase === "battle" && s.bossReady;
-      step(s, bossReady ? { challengeBoss: true } : s.phase === "victory" ? { advanceStage: true } : {});
+      step(s, worldAutopilot(s)); // M6: farm zone 1 to quota, then walk into zone 2
       advanced = s.stage >= 2;
     }
     expect(advanced).toBe(true);

@@ -100,8 +100,9 @@ describe("save round-trip", () => {
     s.heroes[0].level = 8;
 
     const save: SaveData = {
-      version: SAVE_VERSION,
-      stage: s.stage,
+      // Start from a valid v8 save (correct world fields for stage 2), then swap
+      // in the specific hero progression + gold this round-trip asserts.
+      ...soloSave("mage", 2),
       gold: s.gold,
       hero: {
         cls: "mage",
@@ -132,7 +133,9 @@ describe("save round-trip", () => {
 
   it("migrate() fills every default field for a bare/old save shape", () => {
     const migrated = migrate({});
-    expect(migrated).toEqual({
+    // toMatchObject (not toEqual) so the derived, content-hashed `lootSalt` — a
+    // deterministic uint32 asserted separately below — doesn't need a magic literal.
+    expect(migrated).toMatchObject({
       version: SAVE_VERSION,
       stage: 1,
       gold: 0,
@@ -148,8 +151,22 @@ describe("save round-trip", () => {
         autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
         quest: null,
       },
+      // M6 v8 world fields: placed at the first farm zone (map1, stage 1), with the
+      // town + that zone unlocked, auto-return pointed at the same zone.
+      location: { mapId: "map1", zoneIdx: 1 },
+      unlockedZones: { map1: 2 },
+      lastFarmZone: { mapId: "map1", zoneIdx: 1 },
+      // M6 v9 NPC consumables: a bare save backfills to zeros.
+      consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+      // M7 v10 gear: empty loadout + zeroed counter (DB ledger is authoritative).
+      equipped: { weapon: null, armor: null },
+      lootCounter: 0,
       lastSeen: 0,
     });
+    // Salt is a deterministic uint32 derived from the (bare) save content.
+    expect(typeof migrated.lootSalt).toBe("number");
+    expect(Number.isInteger(migrated.lootSalt)).toBe(true);
+    expect(migrated.lootSalt).toBeGreaterThanOrEqual(0);
   });
 
   it("migrate() only fills missing fields, preserving present ones", () => {

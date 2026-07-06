@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { initGameState, step, frontHeroX, CONFIG, FIXED_DT, HERO_TYPES } from "@/engine";
 import type { GameState } from "@/engine";
-import { soloSave, makeParty } from "./helpers";
+import { soloSave, makeParty, forceBoss, worldAutopilot } from "./helpers";
 
 /**
  * Deep boss-fight regression coverage (Phase C handoff): enrage transition,
@@ -14,10 +14,9 @@ import { soloSave, makeParty } from "./helpers";
  * boss-flow *transition* itself is exercised in phase-b.test.ts.
  */
 
-/** Challenge the boss immediately and place it at engage range (skip travel time). */
+/** Spawn the boss immediately and place it at engage range (skip travel time). */
 function engageBoss(s: GameState): void {
-  s.bossReady = true;
-  step(s, { challengeBoss: true });
+  forceBoss(s); // M6: enter a boss fight at the current stage without the world walk
   s.boss!.x = frontHeroX(s) + CONFIG.clash + CONFIG.boss.engageExtra;
 }
 
@@ -139,31 +138,38 @@ describe("boss slam telegraph", () => {
   });
 });
 
-describe("boss retreat / re-challenge loop", () => {
-  it("can retreat on a team wipe and be re-challenged repeatedly", () => {
+describe("boss wipe -> town respawn -> retry loop (M6)", () => {
+  it("a boss-room wipe sends the hero to town, then it revives to retry", () => {
+    // M6: a wipe no longer retreats-in-place — the dead hero walks home to town
+    // (GDD: death = respawn in town), revives there, then (auto-return on)
+    // walks back to the last farm zone. Verify a full wipe/respawn cycle.
     const s = initGameState(1);
-    for (let i = 0; i < 3; i++) {
-      s.bossReady = true;
-      step(s, { challengeBoss: true });
-      expect(s.phase).toBe("boss");
-      expect(s.boss).not.toBeNull();
+    s.autoReturn = true;
+    forceBoss(s);
+    expect(s.phase).toBe("boss");
+    expect(s.boss).not.toBeNull();
 
-      // Force a team wipe to trigger the retreat path deterministically
-      // (no need to actually out-tank the boss).
-      for (const h of s.heroes) {
-        h.dead = true;
-        h.hp = 0;
-        h.reviveTimer = 999;
-      }
-      step(s, {});
-
-      expect(s.phase).toBe("battle");
-      expect(s.boss).toBeNull();
-      expect(s.bossReady).toBe(true); // still challengeable
-      expect(s.enemies.length).toBe(0);
-      expect(s.waveGap).toBe(CONFIG.bossRetreatWaveGap);
-      expect(s.heroes.every((h) => !h.dead && h.hp === h.maxHp)).toBe(true);
+    // Force a team wipe to trigger the respawn path deterministically.
+    for (const h of s.heroes) {
+      h.dead = true;
+      h.hp = 0;
     }
+    step(s, {}); // resolveDeaths -> respawnToTown
+
+    // The boss is gone and the hero is walking home to town.
+    expect(s.boss).toBeNull();
+    expect(s.traveling).not.toBeNull();
+
+    // Run out the transit(s): town revive, then auto-return to the last farm zone.
+    for (let i = 0; i < 2000; i++) {
+      step(s, {});
+      if (!s.traveling && !s.heroes[0].dead && s.enemies.length >= 0 && s.phase === "battle") {
+        break;
+      }
+    }
+    // Revived at full HP, back on a farmable footing (never permanently locked).
+    expect(s.heroes.every((h) => !h.dead && h.hp === h.maxHp)).toBe(true);
+    expect(s.traveling).toBeNull();
   });
 });
 
@@ -183,8 +189,7 @@ describe("boss-phase ranged coverage (ตัวตีไกลไม่ตีบ
       h.maxHp = 1e9;
       h.hp = 1e9;
     }
-    s.bossReady = true;
-    step(s, { challengeBoss: true });
+    forceBoss(s);
     s.boss!.maxHp = 1e9;
     s.boss!.hp = 1e9;
 
@@ -218,17 +223,17 @@ describe("solo character (no hero-unlock progression)", () => {
     expect(s.heroes[0].cls).toBe("archer");
   });
 
-  it("advancing a stage keeps the single chosen character (never adds slots)", () => {
-    const s = initGameState(1, soloSave("mage", 3));
-    s.bossReady = true;
-    step(s, { challengeBoss: true });
-    s.boss!.hp = 0; // force a kill without grinding the fight
-    step(s, {}); // resolveDeaths pays out and flips to victory
-
-    expect(s.phase).toBe("victory");
-    step(s, { advanceStage: true });
-
-    expect(s.stage).toBe(4);
+  it("walking the world keeps the single chosen character (never adds slots)", () => {
+    // M6: progression is walking zones, not stage++. Drive the autopilot far
+    // enough to cross at least one zone boundary and confirm the party stays solo.
+    const s = initGameState(1, soloSave("mage", 1));
+    s.autoCast = true;
+    s.autoReturn = true;
+    const startStage = s.stage;
+    for (let i = 0; i < 60_000 && s.stage === startStage; i++) {
+      step(s, worldAutopilot(s));
+    }
+    expect(s.stage).toBeGreaterThan(startStage); // walked into a later zone
     expect(s.heroes).toHaveLength(1);
     expect(s.heroes[0].cls).toBe("mage");
   });

@@ -24,12 +24,14 @@
  * GROUND_Y-relative coordinates (exactly as the original flat code did) —
  * never pre-subtract the pivot, or the whole rig collapses toward world y≈0.
  *
- * `state.boss` is set to `null` the SAME engine step `bossDefeated`/
- * `bossRetreat` fire (see `engine/systems/boss.ts`), so `GameRenderer`
- * destroys this view before any "collapse forward"/"turn away and slide out"
- * animation could play on it — those two beats are therefore handled as a
- * one-shot echo in `fx/bossEcho.ts` off the event, not here (same reasoning
- * as `fx/corpseEcho.ts` for regular enemies).
+ * `state.boss` is set to `null` the SAME engine step `bossDefeated` fires (see
+ * `engine/systems/boss.ts`), so `GameRenderer` destroys this view before any
+ * "collapse forward" animation could play on it — that beat is therefore
+ * handled as a one-shot echo in `fx/bossEcho.ts` off the event, not here
+ * (same reasoning as `fx/corpseEcho.ts` for regular enemies). A team wipe no
+ * longer retreats the boss in place — M6 "World & Town" routes it through
+ * `respawnToTown` (walk home, revive in town) instead, so there is no second
+ * "boss leaves" beat to handle here.
  */
 
 import { Container, Graphics } from "pixi.js";

@@ -8,10 +8,29 @@
  */
 
 import { CONFIG, SIGNATURE_SKILL } from "@/engine/config";
+import { emptyEquipped, type EquippedGear } from "@/engine/config/items";
+import { splitmix32 } from "@/engine/core/hash";
 import { heroMaxMana } from "@/engine/systems/stats";
 import { classChangeQuestFor } from "@/engine/systems/quests";
+import {
+  farmLocationForStage,
+  isValidLocation,
+  mapZoneCount,
+  unlockUpTo,
+  zoneAt,
+} from "@/engine/systems/world";
+import { normalizeBotSettings } from "@/engine/systems/bots";
 import type { SaveData, CharacterSave } from "@/engine/state";
-import type { HeroClass, HeroStats, HeroQuest, SkillId } from "@/engine/entities";
+import type {
+  HeroClass,
+  HeroStats,
+  HeroQuest,
+  SkillId,
+  ShopItemId,
+  ConsumableCounts,
+  BotSettings,
+  WorldLocation,
+} from "@/engine/entities";
 
 // v1 -> v2 (M5): added per-hero `heroes: {level,xp}[]` (Character XP + Level).
 // v2 -> v3 (M5): added per-hero `tier` (class advancement / evolution).
@@ -36,7 +55,43 @@ import type { HeroClass, HeroStats, HeroQuest, SkillId } from "@/engine/entities
 //   level >= the gate is simply RE-OFFERED the quest on load (progress starts
 //   empty when accepted). No gold is owed — the old evolve gold cost is gone
 //   (quest EFFORT replaced it; evolution stays a one-way flag).
-export const SAVE_VERSION = 7;
+// v7 -> v8 (M6 "World & Town", ROADMAP task 1): the save gains `location`
+//   (mapId + zoneIdx), `unlockedZones` (per-map unlocked count) and `lastFarmZone`.
+//   Migration PLACES an existing save at the FARM zone matching its current
+//   `stage` (clamped into the frontier), unlocks EVERY zone up to and including
+//   it ("all zones up to it"), and points auto-return at that same farm zone. A
+//   v8 save's own world fields are validated + preserved (idempotent for the
+//   server's migrate-on-every-save). `stage` is re-derived to the placed zone's
+//   stage so it can never drift from `location`.
+// v8 -> v9 (M6 "เมืองหลัก + NPC shops"): the save gains `consumables` (held
+//   {hpPotion, manaPotion, returnScroll} stack COUNTS — non-tradable, fungible;
+//   NOT M7 item-instances). A pre-v9 save had none, so migration backfills ZEROS.
+//   A v9 save's counts are preserved (clamped to [0, stackCap] — idempotent for
+//   the server's migrate-on-every-save). Use-cooldowns + the auto-use toggles are
+//   transient / UI-owned, so nothing else persists.
+// v9 -> v10 (M7 "ของดรอปและ Gear"): the save gains `equipped` (weapon/armor
+//   templateId cache — the DB ItemInstance ledger is authoritative, boot payload
+//   wins on load), `lootCounter` (monotonic drop-roll counter → anti-dupe rollId
+//   source) and `lootSalt` (per-save constant decorrelating the drop stream). A
+//   pre-v10 save had none: `equipped` backfills to an EMPTY loadout (a fresh
+//   character owns no gear yet — the DB ledger, not the blob, is the truth), the
+//   counter to 0, and the salt is DERIVED deterministically from the save content
+//   (migrate has no init seed) so it is stable for that save + spread across
+//   characters. A v10 save's own fields are preserved (idempotent for the
+//   server's migrate-on-every-save): a present salt is NEVER recomputed, the
+//   counter is clamped monotonic, and the loadout is normalised.
+// v10 -> v11 (M7.5 "Sell, Bots & Inventory UX"): the save gains `bot` (idle-
+//   automation settings — the potion-restock + sell-trip bots + their targets /
+//   reserves). A pre-v11 save had none, so migration backfills the config DEFAULTS
+//   (both bots OFF, so behaviour is unchanged). A v11 save's own settings are
+//   preserved (booleans coerced, targets clamped to the stack cap, gold floor
+//   non-negative — idempotent for the server's migrate-on-every-save).
+// v11 -> v12 (M6.6 "autoHunt toggle"): the save gains `autoHunt` (whether the
+//   hero auto-acquires NEW hunt targets outside the boss phase). A pre-v12 save
+//   had none, so migration backfills `true` (behaviour unchanged — auto-hunt was
+//   always on before this toggle existed). A v12 save's own flag is preserved
+//   (coerced to a boolean — idempotent for the server's migrate-on-every-save).
+export const SAVE_VERSION = 12;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -44,12 +99,32 @@ type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
 /** A per-hero stat block from an unknown/older save (all fields optional). */
 type UnknownStats = { str?: number; dex?: number; int?: number; vit?: number };
 
+/** A world location from an unknown/older save (fields optional). */
+type UnknownLocation = { mapId?: unknown; zoneIdx?: unknown };
+
 /** A save of unknown/older version, before migration. */
 export interface UnknownSave {
   version?: number;
   stage?: number;
   gold?: number;
   lastSeen?: number;
+  // v8 world fields (M6). All optional so a pre-v8 save is backfilled from `stage`.
+  location?: UnknownLocation;
+  unlockedZones?: Record<string, unknown>;
+  lastFarmZone?: UnknownLocation;
+  // v9 NPC-consumable stacks (M6). Optional so a pre-v9 save backfills to zeros.
+  consumables?: { hpPotion?: unknown; manaPotion?: unknown; returnScroll?: unknown };
+  // v11 idle-bot settings (M7.5). Optional so a pre-v11 save backfills to defaults
+  // (both bots OFF). Partial so a trimmed block is filled by `normalizeBotSettings`.
+  bot?: Partial<BotSettings>;
+  // v12 autoHunt toggle (M6.6). Optional/unknown so a pre-v12 (or malformed) save
+  // backfills to `true`.
+  autoHunt?: unknown;
+  // v10 gear (M7). Optional so a pre-v10 save backfills (equipped empty, counter 0,
+  // salt derived). `equipped` fields are unknown so a malformed cache normalises.
+  equipped?: { weapon?: unknown; armor?: unknown };
+  lootCounter?: unknown;
+  lootSalt?: unknown;
   // v4/v5/v6/v7 single-character shape (v5 adds statPoints + stats; v6 adds mana +
   // autoSlots; v7 adds quest):
   hero?: Partial<CharacterSave> & {
@@ -145,6 +220,90 @@ function normalizeAutoSlots(
 }
 
 /**
+ * Normalise saved consumable stacks (M6, v9) to the {hp,mana,return} shape: each
+ * count clamped to [0, stackCap], anything missing/malformed -> 0. A pre-v9 save
+ * (no `consumables`) becomes all zeros.
+ */
+function normalizeConsumables(
+  saved: UnknownSave["consumables"],
+): ConsumableCounts {
+  const cap = CONFIG.shop.stackCap;
+  const one = (v: unknown): number => {
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return 0;
+    return Math.min(Math.floor(v), cap);
+  };
+  return {
+    hpPotion: one(saved?.hpPotion),
+    manaPotion: one(saved?.manaPotion),
+    returnScroll: one(saved?.returnScroll),
+  } satisfies Record<ShopItemId, number>;
+}
+
+/**
+ * Normalise a saved equipped-gear cache (M7, v10) to the {weapon, armor} shape:
+ * each is a templateId string or null. A pre-v10 save (no `equipped`) becomes an
+ * EMPTY loadout — a fresh character owns no gear, and the DB item ledger (not this
+ * blob) is authoritative, so the boot payload overrides this on load anyway.
+ * Templates are NOT validated here (unknown ids resolve to 0-stat at read time and
+ * are cleaned up by the server ledger); this only fixes the SHAPE.
+ */
+function normalizeEquipped(saved: UnknownSave["equipped"]): EquippedGear {
+  if (!saved) return emptyEquipped();
+  return {
+    weapon: typeof saved.weapon === "string" ? saved.weapon : null,
+    armor: typeof saved.armor === "string" ? saved.armor : null,
+  };
+}
+
+/**
+ * Deterministically derive a drop-roll salt for a pre-v10 save (migrate has no
+ * init seed). Hashes a few stable-ish save fields so the salt is CONSTANT for a
+ * given save (idempotent — migrate re-derives the same value until a real v10 save
+ * carries its own salt forward) yet spread across characters. Not security — only
+ * decorrelates one character's drop stream from another's.
+ */
+function deriveSalt(save: UnknownSave): number {
+  const cls = asClass(save.hero?.cls);
+  const clsHash = cls === "swordsman" ? 1 : cls === "archer" ? 2 : 3;
+  const mix =
+    ((save.stage ?? 1) >>> 0) ^
+    Math.imul((save.gold ?? 0) >>> 0, 0x9e3779b9) ^
+    Math.imul((save.hero?.level ?? 1) >>> 0, 0x85ebca6b) ^
+    Math.imul(clsHash, 0xc2b2ae35);
+  return splitmix32(mix >>> 0);
+}
+
+/** A location is valid only if it addresses a real zone; else null. */
+function normalizeLocation(loc: UnknownLocation | undefined): WorldLocation | null {
+  if (!loc || typeof loc.mapId !== "string" || typeof loc.zoneIdx !== "number") return null;
+  if (!Number.isInteger(loc.zoneIdx) || loc.zoneIdx < 0) return null;
+  const candidate: WorldLocation = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+  return isValidLocation(candidate) ? candidate : null;
+}
+
+/**
+ * Merge a saved `unlockedZones` (clamped to each map's real zone count) with the
+ * baseline that guarantees `location` itself is reachable ("all zones up to it").
+ * A pre-v8 save has no saved counts, so it becomes exactly the baseline.
+ */
+function normalizeUnlocked(
+  saved: Record<string, unknown> | undefined,
+  base: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = { ...base };
+  if (saved) {
+    for (const [mapId, v] of Object.entries(saved)) {
+      const count = mapZoneCount(mapId);
+      if (count === 0) continue; // unknown map id — drop
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+        out[mapId] = Math.max(out[mapId] ?? 0, Math.min(Math.floor(v), count));
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Upgrade a possibly-old save to the current `SAVE_VERSION`.
  *
  * v5 payloads already carry the single-character + base-stats shape (idempotent).
@@ -212,11 +371,52 @@ export function migrate(save: UnknownSave): SaveData {
     };
   }
 
+  // ---- world placement (M6, v8) ----
+  // Place the save at the FARM zone matching its `stage` (clamped) unless it
+  // already carries a valid v8 location. Unlock everything up to that zone; point
+  // auto-return at the placed farm zone. Re-derive `stage` from the placement so
+  // it can never drift from `location`.
+  const rawStage = save.stage ?? 1;
+  const location: WorldLocation =
+    normalizeLocation(save.location) ?? farmLocationForStage(rawStage);
+  const placedFarm =
+    normalizeLocation(save.lastFarmZone) &&
+    zoneAt(normalizeLocation(save.lastFarmZone)!).kind === "farm"
+      ? normalizeLocation(save.lastFarmZone)!
+      : zoneAt(location).kind === "farm"
+        ? location
+        : farmLocationForStage(rawStage);
+  const unlockedZones = normalizeUnlocked(save.unlockedZones, unlockUpTo(location));
+
   return {
     version: SAVE_VERSION,
-    stage: save.stage ?? 1,
+    stage: zoneAt(location).stage,
     gold: save.gold ?? 0,
     hero,
+    location,
+    unlockedZones,
+    lastFarmZone: placedFarm,
+    // NPC consumables (M6, v9): preserve a v9 save's clamped counts; a pre-v9 save
+    // backfills to zeros.
+    consumables: normalizeConsumables(save.consumables),
+    // Idle bots (M7.5, v11): preserve a v11 save's clamped settings; a pre-v11 save
+    // backfills to the config defaults (both bots OFF).
+    bot: normalizeBotSettings(save.bot),
+    // autoHunt toggle (M6.6, v12): preserve a v12 save's flag (coerced to a
+    // boolean); a pre-v12 save (no flag) backfills to `true` (unchanged behaviour).
+    autoHunt: typeof save.autoHunt === "boolean" ? save.autoHunt : true,
+    // M7 gear (v10): empty loadout for a pre-v10 save (DB ledger is authoritative);
+    // a monotonic counter clamped non-negative; a salt PRESERVED if present (never
+    // recomputed — idempotent) else derived deterministically from the save content.
+    equipped: normalizeEquipped(save.equipped),
+    lootCounter: asStat(
+      typeof save.lootCounter === "number" ? save.lootCounter : undefined,
+      0,
+    ),
+    lootSalt:
+      typeof save.lootSalt === "number" && Number.isFinite(save.lootSalt)
+        ? save.lootSalt >>> 0
+        : deriveSalt(save),
     lastSeen: save.lastSeen ?? 0,
   };
 }

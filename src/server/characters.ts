@@ -177,6 +177,24 @@ export async function getOwnedLiveCharacter(
   });
 }
 
+/**
+ * Fetch a LIVE character's base class (owner-checked), or null. Used by the M7
+ * equip endpoint to enforce an item's `classReq` against the account's character
+ * server-side (the client class is never trusted). `baseClass` is the immutable
+ * creation class — the classReq gate keys off it, not the transient current tier.
+ */
+export async function getOwnedLiveCharacterClass(
+  userId: string,
+  characterId: string,
+): Promise<{ id: string; baseClass: HeroClass } | null> {
+  const row = await prisma.character.findFirst({
+    where: { id: characterId, userId, deletedAt: null },
+    select: { id: true, baseClass: true },
+  });
+  if (!row) return null;
+  return { id: row.id, baseClass: row.baseClass as HeroClass };
+}
+
 export type DeleteResult = { ok: true } | { ok: false; error: string };
 
 /**

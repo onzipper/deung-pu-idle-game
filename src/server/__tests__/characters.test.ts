@@ -183,6 +183,7 @@ describe("listCharacters + powerFromSave", () => {
       stats: base,
       mana: CONFIG.mana.base,
       autoSlots,
+      quest: null,
     });
     const high = powerFromSave({
       cls: "archer",
@@ -193,6 +194,7 @@ describe("listCharacters + powerFromSave", () => {
       stats: { ...base, dex: base.dex + 50 },
       mana: CONFIG.mana.base,
       autoSlots,
+      quest: null,
     });
     expect(low).toBeGreaterThan(0);
     expect(high).toBeGreaterThan(low);

@@ -12,17 +12,32 @@
  * coin shower) never clip together.
  *
  * Intentionally SILENT event types (no entry / no case in AudioController):
- *  - `waveSpawn` — fires on every wave, constantly; a game-y idle-exposure
- *    context makes even a "subtle" tick fatiguing over a long session.
  *  - `projectileSpawn` — fires per-shot, far too high frequency for a discrete
  *    sound without machine-gunning even with throttling.
  *  - `stageCleared` — fires in the same instant as `bossDefeated` (see
  *    `engine/systems/boss.ts`), which already carries the "big moment" fanfare;
  *    a second overlapping sting here would just be noise.
  *  - `goldOffline` — not a real-time event a player is present to hear.
+ *  - `zoneEntered` (M6 "World & Town") — fires on every zone-to-zone walk hop,
+ *    same "too frequent for a discrete sound" reasoning as `waveSpawn`; the
+ *    visual whoosh (`FxController.onZoneEntered`) carries this beat alone.
+ *  - `zoneUnlocked`/`mapUnlocked` (M6) — visual-only sparkle in `FxController`
+ *    is enough for these; kept unpaired with a sound rather than adding two
+ *    more one-off stings to an already dense palette. EXCEPTION (M7.5): the
+ *    sub-case of a `zoneUnlocked` that is specifically a map's BOSS ROOM
+ *    unlocking DOES get a sound (`playBossDoorUnlocked`) — see
+ *    `AudioController`'s `isBossZoneIdx` check — since that's the one-shot
+ *    "the grand door outside just unlocked" beat the M7.5 gate feel spec asks
+ *    for, distinct enough from routine zone progression to earn its own cue.
+ *  - `zoneGateEnter`/`zoneGateExit` (M7.5) — the gate-transit polish stays
+ *    visual-only too, same reasoning as `zoneEntered` (fires on every walk
+ *    hop) — "reuse/extend the whoosh feel, don't duplicate audio" per spec.
+ *  - `townArrived` (M7.5 idle-bot trips) — a background bookkeeping event
+ *    (restock/sell), not a moment the player is watching for; silent.
  */
 
 import type { GameEvent } from "@/engine";
+import type { ItemRarity } from "@/engine/config/items";
 import type { AudioEngine } from "@/render/audio/AudioEngine";
 
 /** Per-event tunable synth parameters. Retune freely; no code changes needed
@@ -54,6 +69,11 @@ export const SFX_PARAMS = {
     mage: { freqFrom: 90, freqTo: 55, duration: 0.4, gain: 0.22 },
   },
   heroDown: { freqFrom: 320, freqTo: 110, duration: 0.5, gain: 0.22 },
+  /** Somber "walking home" tail, layered right after `heroDown`'s own sting
+   * (M6 "World & Town": a full wipe now walks home to town via
+   * `world.respawnToTown` instead of the old in-place boss retreat — this
+   * repurposes what used to be `bossRetreat`'s quiet, non-punishing whiff). */
+  heroWalkHome: { freqFrom: 260, freqTo: 130, duration: 0.4, gain: 0.1, delay: 0.15 },
   heroRevived: { freqFrom: 420, freqTo: 720, duration: 0.3, gain: 0.18 },
   bossSlamTelegraph: { freqFrom: 90, freqTo: 260, duration: 0.6, gain: 0.16 },
   bossSlamLand: {
@@ -66,6 +86,14 @@ export const SFX_PARAMS = {
     noiseGain: 0.28,
   },
   bossEnraged: { freq: 140, freqEnd: 85, decay: 0.3, gain: 0.26, detune: 14 },
+  /** Mob aggro growl (M6 "สนามล่ามอน" follow-up, open hunting field): a small,
+   * SHORT snarl — deliberately higher/quicker/quieter than `bossEnraged`'s
+   * growl (which is lower, longer, and much louder — a boss-fight moment)
+   * and a different timbre than `hit`'s tick (sawtooth vs. triangle/square)
+   * so the two never get confused on a busy field. Heavily throttled (see
+   * `SFX_MIN_INTERVAL_MS`) — several mobs aggroing in the same instant
+   * collapse into one bark, never a machine-gun. */
+  mobAggroed: { freq: 210, freqEnd: 130, decay: 0.12, gain: 0.09, detune: 10 },
   bossDefeated: {
     arpeggio: [523.25, 659.25, 783.99, 1046.5], // C5 E5 G5 C6
     noteGap: 0.09,
@@ -78,7 +106,10 @@ export const SFX_PARAMS = {
     coinDuration: 0.09,
     coinGain: 0.14,
   },
-  bossRetreat: { freqFrom: 260, freqTo: 140, duration: 0.35, gain: 0.12 },
+  /** Boss-room entrance (M6): a low, ominous drone — distinct from
+   * `bossEnraged`'s growl and `bossSlamTelegraph`'s riser, since this fires
+   * once on arrival, not mid-fight. */
+  bossRoomEntered: { freq: 70, freqEnd: 45, decay: 0.5, gain: 0.2 },
   stageAdvanced: {
     notes: [440, 554.37, 659.25], // A4 C#5 E5
     noteGap: 0.07,
@@ -118,6 +149,41 @@ export const SFX_PARAMS = {
     blipDuration: 0.08,
     blipGain: 0.16,
   },
+  /** M7 gear-wow "drop beat": a soft synthesized chime, rarity-tiered — a
+   * plain rising sweep for common/rare (rare pitches a touch higher/richer),
+   * a short 3-note arpeggio for epic so the milestone drop is unmistakable.
+   * Deliberately quiet (farm drops can fire often on a busy field). */
+  itemDrop: {
+    common: { freq: 720, freqEnd: 960, duration: 0.13, gain: 0.11 },
+    rare: { freq: 740, freqEnd: 1160, duration: 0.15, gain: 0.13 },
+    epic: {
+      notes: [740, 987.77, 1244.51], // F#5 B5 D#6
+      noteGap: 0.06,
+      noteDecay: 0.18,
+      noteGain: 0.16,
+    },
+  },
+  /** M7.5 fast travel: a short rising arcane whir as the portal begins
+   * forming (NOT a full-channel drone — `AudioEngine` has no early-stop API,
+   * and every other cast-type cue in this palette is a short blip too), a
+   * brighter arrival chime, and a quiet descending "dud" for a mid-channel
+   * fizzle (only played when a channel was actually cancelled — see
+   * `AudioController`). */
+  fastTravelCastStart: { freqFrom: 260, freqTo: 620, duration: 0.4, gain: 0.14 },
+  fastTravelArrive: {
+    popFilterFreq: 1600,
+    popDuration: 0.05,
+    popGain: 0.16,
+    chimeFreqFrom: 700,
+    chimeFreqTo: 1300,
+    chimeDuration: 0.12,
+    chimeGain: 0.16,
+  },
+  fastTravelFizzle: { freqFrom: 420, freqTo: 180, duration: 0.18, gain: 0.12 },
+  /** Boss-door unlock (M7.5): a low drone at the door itself — lighter/
+   * shorter than `bossRoomEntered`'s own drone (which fires later, on actual
+   * entry) so the two never get confused despite sharing a register. */
+  bossDoorUnlocked: { freq: 85, freqEnd: 55, decay: 0.4, gain: 0.16 },
 } as const;
 
 /** Minimum ms between two sounds sharing a throttle key — the "same-type
@@ -133,12 +199,18 @@ export const SFX_MIN_INTERVAL_MS = {
   bossSlamTelegraph: 400,
   bossSlamLand: 300,
   bossEnraged: 400,
+  mobAggroed: 700,
   bossDefeated: 800,
-  bossRetreat: 250,
+  bossRoomEntered: 800,
   stageAdvanced: 500,
   levelUp: 200,
   evolve: 400,
   upgradeBought: 40,
+  itemDrop: 180,
+  fastTravelCastStart: 500,
+  fastTravelArrive: 300,
+  fastTravelFizzle: 300,
+  bossDoorUnlocked: 1000,
 } as const;
 
 type Ev<T extends GameEvent["type"]> = Extract<GameEvent, { type: T }>;
@@ -221,6 +293,21 @@ export function playHeroDown(engine: AudioEngine): void {
   engine.sweep(p.freqFrom, p.freqTo, { shape: "sine", duration: p.duration, gain: p.gain });
 }
 
+/** Somber "walking home" tail (M6 "World & Town") — a quieter, slightly
+ * lower second downward sweep starting a beat after `playHeroDown`'s own
+ * sting, so a wipe reads as "down, then a long quiet walk home" rather than
+ * one more hit-taken cue. See `SFX_PARAMS.heroWalkHome`'s doc comment for the
+ * `bossRetreat` history this repurposes. */
+export function playHeroWalkHome(engine: AudioEngine): void {
+  const p = SFX_PARAMS.heroWalkHome;
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "sine",
+    duration: p.duration,
+    gain: p.gain,
+    delay: p.delay,
+  });
+}
+
 /** Hero revived: soft rising chime. */
 export function playHeroRevived(engine: AudioEngine): void {
   const p = SFX_PARAMS.heroRevived;
@@ -282,6 +369,21 @@ export function playBossEnraged(engine: AudioEngine): void {
   });
 }
 
+/** Mob aggro growl: one short, quiet, detuned sawtooth snarl — see
+ * `SFX_PARAMS.mobAggroed`'s doc comment for how this stays distinct from
+ * `playBossEnraged`/`playHit`. */
+export function playMobAggroed(engine: AudioEngine): void {
+  const p = SFX_PARAMS.mobAggroed;
+  engine.tone(p.freq, {
+    shape: "sawtooth",
+    attack: 0.002,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.freqEnd,
+    detune: p.detune,
+  });
+}
+
 /** Boss defeated: victory arpeggio followed by a coin-shower of ticks. */
 export function playBossDefeated(engine: AudioEngine): void {
   const p = SFX_PARAMS.bossDefeated;
@@ -305,12 +407,18 @@ export function playBossDefeated(engine: AudioEngine): void {
   }
 }
 
-/** Boss retreat (team wiped, boss backs off): a quiet, non-punishing whiff —
- * distinct from `heroDown` so a full wipe doesn't just sound like one more
- * hero-down cue, but deliberately muted since this is already a setback. */
-export function playBossRetreat(engine: AudioEngine): void {
-  const p = SFX_PARAMS.bossRetreat;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "sine", duration: p.duration, gain: p.gain });
+/** Boss-room entrance: a low, ominous drone — one-shot on arrival, distinct
+ * from every mid-fight boss cue (`bossEnraged`'s growl, `bossSlamTelegraph`'s
+ * riser). */
+export function playBossRoomEntered(engine: AudioEngine): void {
+  const p = SFX_PARAMS.bossRoomEntered;
+  engine.tone(p.freq, {
+    shape: "sine",
+    attack: 0.01,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.freqEnd,
+  });
 }
 
 /** Stage advanced: a short 3-note ascending fanfare. */
@@ -368,6 +476,74 @@ export function playEvolve(engine: AudioEngine): void {
     filterQ: 1.4,
     gain: p.shimmerGain,
     delay: p.notes.length * p.noteGap * 0.5,
+  });
+}
+
+/** M7 gear-wow "drop beat": a soft chime, rarity-tiered (see
+ * `SFX_PARAMS.itemDrop`'s doc comment). */
+export function playItemDrop(engine: AudioEngine, rarity: ItemRarity): void {
+  const p = SFX_PARAMS.itemDrop;
+  if (rarity === "epic") {
+    p.epic.notes.forEach((freq, i) => {
+      engine.tone(freq, {
+        shape: "triangle",
+        attack: 0.003,
+        decay: p.epic.noteDecay,
+        gain: p.epic.noteGain,
+        delay: i * p.epic.noteGap,
+      });
+    });
+    return;
+  }
+  const cfg = rarity === "rare" ? p.rare : p.common;
+  engine.sweep(cfg.freq, cfg.freqEnd, { shape: "sine", duration: cfg.duration, gain: cfg.gain });
+}
+
+/** Fast travel begins channeling: a short rising arcane whir. */
+export function playFastTravelCastStart(engine: AudioEngine): void {
+  const p = SFX_PARAMS.fastTravelCastStart;
+  engine.sweep(p.freqFrom, p.freqTo, { shape: "sawtooth", duration: p.duration, gain: p.gain });
+}
+
+/** Fast travel arrives: a soft pop immediately followed by a bright chime —
+ * mirrors `playKill`'s "pop then blip" shape but pitched/timed differently so
+ * the two never get confused. */
+export function playFastTravelArrive(engine: AudioEngine): void {
+  const p = SFX_PARAMS.fastTravelArrive;
+  engine.noise({
+    duration: p.popDuration,
+    filterType: "bandpass",
+    filterFreq: p.popFilterFreq,
+    filterQ: 1.1,
+    gain: p.popGain,
+  });
+  engine.sweep(p.chimeFreqFrom, p.chimeFreqTo, {
+    shape: "triangle",
+    duration: p.chimeDuration,
+    gain: p.chimeGain,
+    delay: 0.03,
+  });
+}
+
+/** Fast travel fizzles mid-channel (damaged/dead/etc. — only played when a
+ * channel was actually in progress, see `AudioController`): a quiet
+ * descending "dud". */
+export function playFastTravelFizzle(engine: AudioEngine): void {
+  const p = SFX_PARAMS.fastTravelFizzle;
+  engine.sweep(p.freqFrom, p.freqTo, { shape: "square", duration: p.duration, gain: p.gain });
+}
+
+/** Boss-door unlock: a low drone at the door itself — see `SFX_PARAMS
+ * .bossDoorUnlocked`'s doc comment for how this stays distinct from
+ * `playBossRoomEntered`. */
+export function playBossDoorUnlocked(engine: AudioEngine): void {
+  const p = SFX_PARAMS.bossDoorUnlocked;
+  engine.tone(p.freq, {
+    shape: "sine",
+    attack: 0.015,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.freqEnd,
   });
 }
 

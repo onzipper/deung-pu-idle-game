@@ -8,8 +8,13 @@
 export * from "@/engine/core/loop";
 export * from "@/engine/core/rng";
 export * from "@/engine/core/math";
+export * from "@/engine/core/hash";
 export * from "@/engine/core/step";
 export * from "@/engine/config";
+// M7 gear catalog + drop tables (config/items is NOT re-exported by config/index —
+// it's a pinned contract module). render/ui read templates + the EquippedGear type
+// through here; the server imports it directly (@/engine/config/items).
+export * from "@/engine/config/items";
 export * from "@/engine/entities";
 export * from "@/engine/state";
 export * from "@/engine/state/version";
@@ -41,6 +46,37 @@ export {
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";
+
+// World / zone read helpers (M6 "World & Town"): the UI derives the current
+// map/zone label + walk-arrow (adjacent/locked) affordances from these pure
+// reads. Navigation itself happens ONLY through `step()` intents
+// (`walkToZone` / `challengeBoss` / `advanceStage`), so the mutators stay internal.
+export {
+  zoneAt,
+  worldNav,
+  isZoneUnlocked,
+  firstFarmLocation,
+  type Zone,
+  type WorldNav,
+  type ZoneNeighbor,
+} from "@/engine/systems/world";
+
+// NPC shop / consumables read helpers (M6 "เมืองหลัก"): the UI derives shop prices
+// (stage-scaled) + potion quick-use affordances from these pure reads. The
+// mutators (buy / use / return-scroll) happen ONLY through `step()` intents, so
+// they stay internal.
+export {
+  SHOP_ITEMS,
+  shopPriceAt,
+  shopStageOf,
+  canUseConsumable,
+  emptyConsumables,
+} from "@/engine/systems/consumables";
+
+// Idle-bot settings (M7.5): the UI derives its bot-config form defaults from these
+// pure reads. The bots run ONLY through `step()` (deterministic, engine-side); the
+// mutator is the `setBotSettings` FrameInput intent, so it stays internal.
+export { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
 
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure

@@ -27,7 +27,7 @@ import {
   CLASS_SKILLS,
   type SkillType,
 } from "@/engine/config";
-import { applyDamage } from "@/engine/systems/damage";
+import { applyAoeDamage, wakeNearestPassives } from "@/engine/systems/damage";
 import { heroAtkOf } from "@/engine/systems/stats";
 import {
   aliveHeroes,
@@ -127,21 +127,18 @@ function applySkillEffect(
       return;
     }
     case "nova": {
-      // Instant AoE around the hero.
+      // Instant AoE around the hero. The AoE-aggro rule caps how many passive mobs
+      // this wakes (M6 hunt follow-up — see applyAoeDamage).
       const dmg = Math.round(heroAtkOf(hero) * def.mult);
-      for (const e of targets) {
-        if (Math.abs(e.x - hero.x) < def.radius) applyDamage(state, e, dmg, "skill");
-      }
+      applyAoeDamage(state, targets, hero.x, def.radius, dmg, "skill");
       return;
     }
     case "strike": {
-      // Instant AoE centred on the nearest in-range target's x.
+      // Instant AoE centred on the nearest in-range target's x (aggro-capped).
       const center = nearestWithin(targets, hero.x, def.range);
       if (!center) return;
       const dmg = Math.round(heroAtkOf(hero) * def.mult);
-      for (const e of targets) {
-        if (Math.abs(e.x - center.x) < def.radius) applyDamage(state, e, dmg, "skill");
-      }
+      applyAoeDamage(state, targets, center.x, def.radius, dmg, "skill");
       return;
     }
     case "bolt": {
@@ -175,6 +172,12 @@ function applySkillEffect(
       const cx = inRange.reduce((sum, e) => sum + e.x, 0) / inRange.length;
       const dmg = Math.round(heroAtkOf(hero) * def.mult);
       const ty = L.groundY - L.heroProjImpactYOffset;
+      // AoE-aggro rule (M6 hunt follow-up): decide the capped wake ONCE for the whole
+      // volley — wake the ≤`aoeWakeCap` mobs NEAREST the cluster centroid (cast range
+      // as the search radius; the cap, not the radius, is what limits it). The drops
+      // (below) then deal NO-WAKE damage, so a single rain can't aggro the entire dense
+      // field and swarm the kiting archer.
+      wakeNearestPassives(targets, cx, def.range);
       for (let i = 0; i < def.targets; i++) {
         const off = CONFIG.arrowRainOffsets[i];
         const tx = cx + off.dx;

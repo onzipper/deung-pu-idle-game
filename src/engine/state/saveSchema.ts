@@ -30,6 +30,38 @@ export const statBlockSchema = z
   .object({ str: statAxis, dex: statAxis, int: statAxis, vit: statAxis })
   .strict();
 
+/** A world location (M6 "World & Town", SAVE v8): map id + zone index. Validity of
+ * the address (map exists, zone in range) is re-checked by `migrate` on load, so a
+ * loose shape here never needlessly 400s a stale-but-harmless location. */
+export const worldLocationSchema = z
+  .object({ mapId: z.string(), zoneIdx: z.number().int().min(0) })
+  .strict();
+
+/** Held NPC-consumable stack counts (M6 "เมืองหลัก", SAVE v9). Loose non-negative
+ * ints — `migrate` clamps each to `CONFIG.shop.stackCap`, so an over-cap saved
+ * count never needlessly 400s (same resilience as the world fields below). */
+export const consumablesSchema = z
+  .object({
+    hpPotion: z.number().int().min(0),
+    manaPotion: z.number().int().min(0),
+    returnScroll: z.number().int().min(0),
+  })
+  .strict();
+
+/** Idle-bot settings (M7.5, SAVE v11). Loose non-negative numbers — `migrate`
+ * (`normalizeBotSettings`) coerces booleans + clamps targets to the stack cap, so a
+ * stale/over-cap block never needlessly 400s (same resilience as the fields below). */
+export const botSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    sellTripEnabled: z.boolean(),
+    hpPotionTarget: z.number().int().min(0),
+    mpPotionTarget: z.number().int().min(0),
+    scrollReserve: z.number().int().min(0),
+    goldReserve: z.number().min(0).finite(),
+  })
+  .strict();
+
 /**
  * The accepted incoming-save contract (M5 v5 single character). Anything that
  * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
@@ -82,6 +114,35 @@ export const saveDataSchema = z
           .optional(),
       })
       .strict(),
+    // M6 "World & Town" world position (SAVE v8). All OPTIONAL so a pre-v8 (or
+    // trimmed) payload is backfilled by `migrate()` from `stage` — same resilience
+    // as the optional fields above. `unlockedZones` is a per-map count record;
+    // counts are clamped to each map's real zone count on load.
+    location: worldLocationSchema.optional(),
+    unlockedZones: z.record(z.string(), z.number().int().min(0)).optional(),
+    lastFarmZone: worldLocationSchema.optional(),
+    // M6 "เมืองหลัก" NPC-consumable stacks (SAVE v9). OPTIONAL so a pre-v9 (or
+    // trimmed) payload is backfilled to zeros by `migrate()` — same resilience as
+    // the world fields above.
+    consumables: consumablesSchema.optional(),
+    // M7.5 idle-bot settings (SAVE v11). OPTIONAL so a pre-v11 (or trimmed) payload
+    // is backfilled to the config defaults (both bots OFF) by `migrate()` — same
+    // resilience as the fields above. Values are re-clamped on load.
+    bot: botSettingsSchema.optional(),
+    // autoHunt toggle (M6.6, SAVE v12). Optional so a pre-v12 (or trimmed) payload
+    // is backfilled to `true` by `migrate()` -- same resilience as the fields above.
+    autoHunt: z.boolean().optional(),
+    // M7 gear (SAVE v10). All OPTIONAL so a pre-v10 (or trimmed) payload is
+    // backfilled by `migrate()` (equipped → empty, counter → 0, salt → derived) —
+    // same resilience as the fields above. `equipped` is a weapon/armor templateId
+    // cache (nullable strings; validity re-checked at equip time, so a stale/foreign
+    // id never needlessly 400s). The DB item ledger is authoritative regardless.
+    equipped: z
+      .object({ weapon: z.string().nullable(), armor: z.string().nullable() })
+      .strict()
+      .optional(),
+    lootCounter: z.number().int().min(0).optional(),
+    lootSalt: z.number().int().min(0).optional(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

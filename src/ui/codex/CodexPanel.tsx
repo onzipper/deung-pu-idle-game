@@ -11,18 +11,94 @@
  * `CODEX_ENTRIES` registry; this component only resolves each entry's
  * display strings (content-namespace reuse for `contentRef` entries, or
  * plain `codex.entries.<id>.*` copy otherwise) and renders them grouped by
- * category. Adding M5+ topics (gear/quests/items) never touches this file —
- * only the registry + message keys.
+ * category. Adding M5+ topics (quests) never touches this file — only the
+ * registry + message keys.
+ *
+ * The ONE exception is the "gear" category's COLLECTION GRID (M7 Gear &
+ * Drops): all 27 `ITEM_TEMPLATES` catalog entries, rendered directly off
+ * engine config rather than `CODEX_ENTRIES` (structured slot/tier/rarity/stat
+ * data, not freeform copy — see `entries.ts`'s doc on the `gear` entry).
+ * Undiscovered templates render silhouetted/dimmed until first owned; the
+ * "discovered" set is a v1 DERIVED read of the current `inventory` store
+ * slice (not a persisted ever-owned ledger — a future trade/consume path
+ * could re-hide an item, acceptable tradeoff until then, see
+ * `gear/inventoryOps.ts`'s `discoveredTemplateIds` doc).
  */
 
 import { useTranslations } from "next-intl";
+import { ITEM_TEMPLATES, type ItemTemplate } from "@/engine";
 import {
   CODEX_CATEGORIES,
   codexEntriesByCategory,
   type CodexEntryDef,
 } from "@/ui/codex/entries";
-import { HERO_ICONS } from "@/ui/labels";
+import { discoveredTemplateIds } from "@/ui/gear/inventoryOps";
+import { GEAR_SLOT_ICONS, HERO_ICONS, RARITY_COLORS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
+
+const GEAR_TEMPLATES: readonly ItemTemplate[] = Object.values(ITEM_TEMPLATES);
+
+function GearCollectionCard({
+  template,
+  discovered,
+}: {
+  template: ItemTemplate;
+  discovered: boolean;
+}) {
+  const tContent = useTranslations("content.items");
+  const t = useTranslations("codex");
+  const colors = RARITY_COLORS[template.rarity];
+
+  if (!discovered) {
+    return (
+      <div className="flex flex-col items-center gap-0.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2 py-2 text-center opacity-40 grayscale">
+        <span aria-hidden className="text-base">
+          {GEAR_SLOT_ICONS[template.slot]}
+        </span>
+        <span className="text-[10px] font-bold text-ddp-ink-muted">
+          {t("gear.undiscovered")}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex flex-col items-center gap-0.5 rounded-(--ddp-radius-md) border ${colors.border} bg-black/40 px-2 py-2 text-center`}
+    >
+      <span aria-hidden className="text-base">
+        {GEAR_SLOT_ICONS[template.slot]}
+      </span>
+      <span className={`truncate text-[10px] font-bold ${colors.text}`}>
+        {colors.icon} {tContent(`${template.id}.name`)}
+      </span>
+    </div>
+  );
+}
+
+/** The M7 gear collection grid — see this file's top doc comment. */
+function GearCollectionGrid() {
+  const inventory = useGameStore((s) => s.inventory);
+  const t = useTranslations("codex");
+  const discovered = discoveredTemplateIds(inventory);
+
+  return (
+    <div className="mt-2">
+      <div className="mb-1.5 text-[10px] font-semibold text-ddp-ink-muted">
+        {t("gear.ownedCount", { owned: discovered.size, total: GEAR_TEMPLATES.length })}
+      </div>
+      <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5">
+        {GEAR_TEMPLATES.map((template) => (
+          <GearCollectionCard
+            key={template.id}
+            template={template}
+            discovered={discovered.has(template.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type Translator = ReturnType<typeof useTranslations>;
 
@@ -119,6 +195,7 @@ export function CodexPanel({ onClose }: CodexPanelProps) {
                   <CodexEntryCard key={entry.id} entry={entry} />
                 ))}
               </div>
+              {category.id === "gear" && <GearCollectionGrid />}
             </section>
           ))}
         </div>

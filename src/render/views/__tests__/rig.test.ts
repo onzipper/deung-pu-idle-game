@@ -48,6 +48,8 @@ function makeHero(cls: Hero["cls"]): Hero {
     statPoints: 0,
     stats: { str: 8, dex: 4, int: 3, vit: 6 },
     autoSlots: ["sword_whirl", null, null],
+    quest: null,
+    equipped: { weapon: null, armor: null },
   };
 }
 
@@ -66,6 +68,10 @@ function makeEnemy(kind: Enemy["kind"]): Enemy {
     range: kind === "ranged" ? 160 : 0,
     cd: 1,
     engageOffset: 0,
+    homeX: 0,
+    aggressive: false,
+    aggroRadius: 0,
+    engaged: false,
   };
 }
 
@@ -102,6 +108,70 @@ describe("enemyView rig transform math (regression guard)", () => {
       const b = view.getBounds();
       expect(b.y).toBeGreaterThan(MIN_Y);
       expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+      view.destroy({ children: true });
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// M7 gear paper-doll (86d3... gear-wow pass): a fully tier-6/epic-geared hero
+// grows a bigger weapon silhouette + armor accent overlay (`gearWeapon`/
+// `gearArmor`, children of `weaponArm`/`upperBody` respectively) — this
+// guards the SAME class of bug the bare-rig tests above do, extended to
+// cover those two new Graphics (an empty-but-visible `gearArmor` when
+// unequipped was exactly this bug in an early draft — see
+// `buildGearArmor`'s "EMPTY but VISIBLE" doc comment).
+// ---------------------------------------------------------------------------
+const T6_WEAPON: Record<Hero["cls"], string> = {
+  swordsman: "w_sword_t6_ragna",
+  archer: "w_bow_t6_ragna",
+  mage: "w_staff_t6_ragna",
+};
+const T6_ARMOR = "a_aegis_t6_bulwark";
+
+// A fully-geared t6 rig is DELIBERATELY bigger (blade/bow/staff grow with
+// tier per the GDD's "อาวุธใหญ่อลัง" — see `GEAR_TIER_SCALE` in
+// `heroView.ts`), so its bounds legitimately extend a bit further above the
+// bare-rig band above — a wider (but still meaningfully bounded, still
+// nowhere near the world-y≈0 double-subtraction collapse) allowance here.
+const GEARED_MIN_Y = GROUND_Y - 110;
+
+describe("heroView rig transform math with tier-6/epic gear equipped (regression guard)", () => {
+  for (const cls of ["swordsman", "archer", "mage"] as const) {
+    it(`${cls}: t6 weapon + t6 armor geometry lands in the GROUND_Y-relative band, not near world y=0`, () => {
+      const view = createHeroView();
+      const hero = makeHero(cls);
+      hero.equipped = { weapon: T6_WEAPON[cls], armor: T6_ARMOR };
+      updateHeroView(view, hero, { dt: 0, slot: 0, events: [], marching: false });
+      const b = view.bodyRoot.getBounds();
+      expect(b.y).toBeGreaterThan(GEARED_MIN_Y);
+      expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+      view.destroy({ children: true });
+    });
+
+    it(`${cls}: re-gearing from nothing -> t6 -> unequipped never leaves a stray empty-but-visible gear layer`, () => {
+      const view = createHeroView();
+      const hero = makeHero(cls);
+      // Frame 1: unequipped (bare rig look).
+      updateHeroView(view, hero, { dt: 0, slot: 0, events: [], marching: false });
+      let b = view.bodyRoot.getBounds();
+      expect(b.y).toBeGreaterThan(MIN_Y);
+      expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+
+      // Frame 2: equip t6 weapon + t6 armor (forces a gearWeapon/gearArmor rebuild).
+      hero.equipped = { weapon: T6_WEAPON[cls], armor: T6_ARMOR };
+      updateHeroView(view, hero, { dt: 0.016, slot: 0, events: [], marching: false });
+      b = view.bodyRoot.getBounds();
+      expect(b.y).toBeGreaterThan(GEARED_MIN_Y);
+      expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+
+      // Frame 3: unequip again (gearArmor must hide itself, not just clear()).
+      hero.equipped = { weapon: null, armor: null };
+      updateHeroView(view, hero, { dt: 0.016, slot: 0, events: [], marching: false });
+      b = view.bodyRoot.getBounds();
+      expect(b.y).toBeGreaterThan(MIN_Y);
+      expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+
       view.destroy({ children: true });
     });
   }

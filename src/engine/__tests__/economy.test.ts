@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { initGameState, step, heroAtkSpeed, HERO_TYPES, CONFIG } from "@/engine";
-import { soloSave, runUntil } from "./helpers";
+import { soloSave, runUntil, worldAutopilot } from "./helpers";
 
 /**
  * M5 solo economy + anti-stall regression. The three purchasable upgrade lines
@@ -55,19 +55,20 @@ describe("solo respawn (anti-stall)", () => {
     expect(s.heroes[0].hp).toBe(s.heroes[0].maxHp);
   });
 
-  it("a fresh solo hero left running unattended never permanently stalls", () => {
+  it("a fresh solo hero left running unattended never permanently stalls (M6)", () => {
+    // M6: progress is walking the world (farm a zone to quota -> walk to the next).
+    // The autopilot mirrors an idle player; death -> town -> auto-return keeps it
+    // farming. It must advance zones (higher stage) AND keep leveling, never freeze.
     const s = initGameState(7, soloSave("archer", 1));
     s.autoCast = true;
+    s.autoReturn = true;
     const startStage = s.stage;
     let maxLevel = s.heroes[0].level;
     for (let i = 0; i < 120_000; i++) {
-      step(s, {
-        challengeBoss: s.phase === "battle" && s.bossReady ? true : undefined,
-        advanceStage: s.phase === "victory" ? true : undefined,
-      });
+      step(s, worldAutopilot(s));
       maxLevel = Math.max(maxLevel, s.heroes[0].level);
     }
-    // Progress happened: it advanced stages AND kept leveling (never frozen).
+    // Progress happened: it walked into later zones AND kept leveling (never frozen).
     expect(s.stage).toBeGreaterThan(startStage);
     expect(maxLevel).toBeGreaterThan(1);
   });

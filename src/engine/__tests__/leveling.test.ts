@@ -90,19 +90,19 @@ describe("XP accrual from kills", () => {
     expect(a.heroes[0].xp + (a.heroes[0].level - 1)).toBeGreaterThan(0);
   });
 
-  it("a dead hero earns no XP while it is down", () => {
-    // Use a save where an ALLY still farms? Solo has one hero — instead verify the
-    // dead hero itself banks nothing: force it down, and confirm level/xp frozen
-    // while the field-clear/respawn keeps it dead (long revive).
+  it("a downed hero banks no XP while walking home / idling in town (M6)", () => {
+    // M6: a dead solo hero walks home to town and revives there. With auto-return
+    // OFF it then idles in town (a safe hub — no spawns, no kills), so it earns no
+    // XP the whole time it is down or waiting. (The old "reviveTimer keeps it
+    // permanently dead" premise is gone — town respawn replaced in-place revive.)
     const s = initGameState(7);
+    s.autoReturn = false; // stay in town after respawn -> never farms -> no kills
     const hero = s.heroes[0];
     hero.dead = true;
     hero.hp = 0;
-    hero.reviveTimer = 9999;
     const xpBefore = hero.xp;
     const levelBefore = hero.level;
     for (let i = 0; i < 3000; i++) step(s, {});
-    expect(hero.dead).toBe(true);
     expect(hero.xp).toBe(xpBefore);
     expect(hero.level).toBe(levelBefore);
   });

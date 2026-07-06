@@ -21,19 +21,31 @@
 
 import { WORLD_WIDTH } from "@/render/layout";
 
-export type CameraPunchKind = "skillCast" | "swordSpin" | "bossSlamLand" | "bossDefeated";
+export type CameraPunchKind =
+  | "skillCast"
+  | "swordSpin"
+  | "bossSlamLand"
+  | "bossDefeated"
+  | "zoneWhoosh"
+  | "bossRoomEntered";
 
 /** Peak scale multiplier (1.0 = no zoom) per trigger kind — see the task
  * spec's exact values. `swordSpin` (HERO SIGNATURE PASS item 6) is a
  * slightly stronger variant of the generic `skillCast` punch, specifically
  * for the swordsman's crescent-nova spin — "strongest wins" (see
  * `trigger()`) means it naturally takes over from a plain `skillCast` punch
- * that happened to fire the same instant. */
+ * that happened to fire the same instant. `zoneWhoosh` (M6 "World & Town",
+ * a zone-to-zone walk arriving) is deliberately the softest of all — barely
+ * a nudge, it just sells "you just arrived somewhere". `bossRoomEntered` is
+ * a dedicated, weightier entrance beat — bigger than a skill cast, smaller
+ * than the boss's own slam. */
 const PEAK_SCALE: Record<CameraPunchKind, number> = {
   skillCast: 1.02,
   swordSpin: 1.035,
   bossSlamLand: 1.045,
   bossDefeated: 1.06,
+  zoneWhoosh: 1.015,
+  bossRoomEntered: 1.05,
 };
 
 /** Peak position nudge (world px, toward the event's side of the arena),
@@ -43,6 +55,8 @@ const PEAK_NUDGE_PX: Record<CameraPunchKind, number> = {
   swordSpin: 2.2,
   bossSlamLand: 3,
   bossDefeated: 4,
+  zoneWhoosh: 1,
+  bossRoomEntered: 3.5,
 };
 
 /** Total real-seconds duration of one punch (zoom-in + ease-out), per spec. */

@@ -20,12 +20,7 @@
 import type { HeroClass } from "@/engine";
 
 export type CodexCategoryId =
-  | "coreLoop"
-  | "character"
-  | "heroes"
-  | "boss"
-  | "controls"
-  | "offlineIdle";
+  "coreLoop" | "character" | "heroes" | "boss" | "controls" | "offlineIdle" | "gear";
 
 export interface CodexCategoryDef {
   id: CodexCategoryId;
@@ -53,6 +48,7 @@ export const CODEX_CATEGORIES: readonly CodexCategoryDef[] = [
   { id: "boss" },
   { id: "controls" },
   { id: "offlineIdle" },
+  { id: "gear" },
 ];
 
 export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
@@ -66,17 +62,31 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   { id: "manaSkills", category: "character" },
   { id: "classQuest", category: "character" },
 
-  { id: "hero-swordsman", category: "heroes", contentRef: { kind: "heroClass", id: "swordsman" } },
-  { id: "hero-archer", category: "heroes", contentRef: { kind: "heroClass", id: "archer" } },
+  {
+    id: "hero-swordsman",
+    category: "heroes",
+    contentRef: { kind: "heroClass", id: "swordsman" },
+  },
+  {
+    id: "hero-archer",
+    category: "heroes",
+    contentRef: { kind: "heroClass", id: "archer" },
+  },
   { id: "hero-mage", category: "heroes", contentRef: { kind: "heroClass", id: "mage" } },
 
   { id: "boss", category: "boss" },
 
-  { id: "gameSpeed", category: "controls" },
   { id: "autoCast", category: "controls" },
   { id: "autoAllocate", category: "controls" },
 
   { id: "offlineIdle", category: "offlineIdle" },
+
+  // "gear" (M7 Gear & Drops): the intro/explainer text entry. The category's
+  // COLLECTION GRID (all 27 catalog templates, undiscovered ones silhouetted)
+  // is rendered specially by `CodexPanel.tsx` reading `@/engine`'s
+  // `ITEM_TEMPLATES` directly — it's structured game data (slot/tier/rarity),
+  // not freeform codex copy, so it deliberately isn't a `CODEX_ENTRIES` list.
+  { id: "gear", category: "gear" },
 ];
 
 /** Returns the `codex` namespace-relative i18n keys REQUIRED for an entry

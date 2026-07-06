@@ -90,7 +90,7 @@ function ClassQuestAffordance({
     return (
       <span
         title={tPanels("evolvedBadgeTitle", { name: heroName })}
-        className="rounded-full border border-ddp-gold/60 bg-ddp-gold/10 px-1.5 text-[8px] font-bold text-ddp-gold-bright"
+        className="rounded-full border border-ddp-gold/60 bg-ddp-gold/10 px-2 py-0.5 text-[11px] font-bold text-ddp-gold-bright"
       >
         {heroName}
       </span>
@@ -106,7 +106,7 @@ function ClassQuestAffordance({
       <span
         title={tq("lockedHint", { level: CONFIG.evolution.levelRequired })}
         aria-label={tq("ariaLocked", { heroName, level: CONFIG.evolution.levelRequired })}
-        className="cursor-default rounded-full border border-ddp-border bg-black/40 px-1.5 text-[8px] font-bold text-ddp-ink-muted"
+        className="cursor-default rounded-full border border-ddp-border bg-black/40 px-2 py-0.5 text-[11px] font-bold text-ddp-ink-muted"
       >
         🔒 Lv.{CONFIG.evolution.levelRequired}
       </span>
@@ -121,7 +121,7 @@ function ClassQuestAffordance({
         onClick={() => acceptQuest(slot)}
         style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
         aria-label={tq("ariaAccept", { heroName })}
-        className="relative rounded-full border border-(--accent-soft) bg-ddp-panel-strong px-1.5 text-[8px] font-bold whitespace-nowrap text-ddp-gold-bright transition-all duration-100 before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] active:scale-95"
+        className="relative min-h-8 rounded-full border border-(--accent-soft) bg-ddp-panel-strong px-2.5 text-[11px] font-bold whitespace-nowrap text-ddp-gold-bright transition-all duration-100 before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] active:scale-95"
       >
         {tq("acceptButton")}
       </button>
@@ -144,7 +144,7 @@ function ClassQuestAffordance({
           goal: quest.killGoal,
           boss: quest.bossDone ? "done" : "pending",
         })}
-        className="cursor-default rounded-full border border-ddp-border-soft bg-black/50 px-1.5 text-[8px] font-bold whitespace-nowrap tabular-nums text-ddp-ink-muted"
+        className="cursor-default rounded-full border border-ddp-border-soft bg-black/50 px-2 py-0.5 text-[11px] font-bold whitespace-nowrap tabular-nums text-ddp-ink-muted"
       >
         {progressLabel}
       </span>
@@ -179,7 +179,7 @@ function ClassQuestAffordance({
       title={armed ? tq("confirmHint") : undefined}
       style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
       aria-label={tq("ariaChange", { heroName, state: armed ? "confirm" : "normal" })}
-      className={`relative rounded-full border px-1.5 text-[8px] font-bold whitespace-nowrap transition-all duration-100 active:scale-95 ${
+      className={`relative min-h-8 rounded-full border px-2.5 text-[11px] font-bold whitespace-nowrap transition-all duration-100 active:scale-95 ${
         armed
           ? "animate-buy-pulse border-ddp-gold bg-ddp-gold text-ddp-panel-strong"
           : "border-(--accent-soft) bg-ddp-panel-strong text-ddp-gold-bright before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-['']"
@@ -228,7 +228,7 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
           seconds: cdSeconds,
         })}
         style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
-        className={`relative h-16 w-16 rounded-(--ddp-radius-md) border shadow-(--ddp-shadow-btn) transition-transform duration-100 active:translate-y-0.5 active:scale-[0.96] ${
+        className={`relative h-20 w-20 rounded-(--ddp-radius-md) border shadow-(--ddp-shadow-btn) transition-transform duration-100 active:translate-y-0.5 active:scale-[0.96] ${
           ready
             ? "border-(--accent-soft) before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_18px_3px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.4s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] hover:brightness-110"
             : "border-ddp-border disabled:cursor-not-allowed"
@@ -239,10 +239,12 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
             !ready ? "grayscale" : ""
           }`}
         >
-          <span className="text-xl leading-none">{icon}</span>
-          <span className="mt-0.5 text-[8px] leading-tight text-ddp-ink-muted">{skillName}</span>
+          <span className="text-2xl leading-none">{icon}</span>
+          <span className="mt-1 line-clamp-1 px-0.5 text-[10px] leading-tight text-ddp-ink-muted">
+            {skillName}
+          </span>
           <span
-            className={`text-[8px] leading-none tabular-nums ${
+            className={`text-[11px] leading-none font-semibold tabular-nums ${
               skill.affordable ? "text-sky-300" : "text-red-400"
             }`}
           >
@@ -257,12 +259,12 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
             />
           )}
           {skill.cd > 0 && !hero.dead && (
-            <span className="pointer-events-none absolute right-1 bottom-1 rounded-full bg-black/60 px-1 text-[9px] font-bold text-ddp-ink tabular-nums">
+            <span className="pointer-events-none absolute right-1 bottom-1 rounded-full bg-black/60 px-1.5 text-xs font-bold text-ddp-ink tabular-nums">
               {cdSeconds}
             </span>
           )}
           {hero.dead && (
-            <span className="absolute inset-0 flex items-center justify-center bg-black/70 text-[10px] font-bold text-red-400">
+            <span className="absolute inset-0 flex items-center justify-center bg-black/70 text-xs font-bold text-red-400">
               {tPanels("heroDeadBadge")}
             </span>
           )}
@@ -274,7 +276,7 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
         disabled={!canToggleAuto}
         aria-pressed={inSlot}
         title={tPanels("autoSlotToggleHint")}
-        className={`w-16 rounded-full border px-1 py-0.5 text-[8px] font-bold transition-colors ${
+        className={`min-h-7 w-20 rounded-full border px-1 py-1 text-[10px] font-bold transition-colors ${
           inSlot
             ? "border-emerald-400 bg-emerald-400/20 text-emerald-300"
             : canToggleAuto
@@ -310,11 +312,11 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
       : null;
 
   return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="flex items-center gap-1">
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="flex items-center gap-1.5">
         <span
           title={heroName}
-          className={`rounded-full border border-ddp-border-soft bg-black/60 px-1.5 text-[9px] font-bold tabular-nums ${
+          className={`rounded-full border border-ddp-border-soft bg-black/60 px-2 py-0.5 text-xs font-bold tabular-nums ${
             hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
           } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
         >
@@ -324,7 +326,7 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
       </div>
 
       {/* HP bar */}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/50" title={heroName}>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-black/50" title={heroName}>
         <div
           className={`h-full rounded-full transition-[width] duration-200 ${
             hpPct > 35 ? "bg-emerald-400" : "bg-red-500"
@@ -333,21 +335,25 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
         />
       </div>
       {/* XP bar (gold = progress currency) */}
-      <div className="h-1 w-full overflow-hidden rounded-full bg-black/50" title={heroName}>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/50" title={heroName}>
         <div
           className="h-full rounded-full bg-ddp-gold transition-[width] duration-300"
           style={{ width: `${hero.atLevelCap ? 100 : xpPct}%` }}
         />
       </div>
-      {/* Mana bar (blue = caster resource) */}
-      <div
-        className="h-1 w-full overflow-hidden rounded-full bg-black/50"
-        title={tPanels("manaLabel", { mana: Math.floor(hero.mana), max: hero.maxMana })}
-      >
-        <div
-          className="h-full rounded-full bg-sky-400 transition-[width] duration-150"
-          style={{ width: `${manaPct}%` }}
-        />
+      {/* Mana bar (blue = caster resource) + a visible n/max readout (was
+          tooltip-only — secondary-tier info needs to actually be legible,
+          not hidden behind a hover that phones can't even trigger). */}
+      <div className="flex w-full items-center gap-1">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/50">
+          <div
+            className="h-full rounded-full bg-sky-400 transition-[width] duration-150"
+            style={{ width: `${manaPct}%` }}
+          />
+        </div>
+        <span className="text-[10px] leading-none tabular-nums text-sky-300/90">
+          {Math.floor(hero.mana)}/{hero.maxMana}
+        </span>
       </div>
 
       {/* The learned skill kit */}
@@ -357,7 +363,7 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
         ))}
       </div>
       {nextLockedLevel !== null && (
-        <span className="text-[8px] text-ddp-ink-muted/70">
+        <span className="text-[10px] text-ddp-ink-muted/70">
           {tPanels("autoSlotNextUnlock", { level: nextLockedLevel })}
         </span>
       )}
@@ -373,7 +379,7 @@ export function SkillBar() {
 
   return (
     <div data-onboarding-anchor="skill-bar" className="flex flex-wrap items-start gap-3">
-      <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+      <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("skillsLabel")}
       </span>
       <div className="flex gap-4">

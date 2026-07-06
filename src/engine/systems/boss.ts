@@ -19,7 +19,9 @@ import { makeBoss } from "@/engine/entities";
 import { combatPower } from "@/engine/systems/stats";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
+import { onBossRoomCleared } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
+import { rollBossDrop } from "@/engine/systems/gear";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
 
@@ -95,12 +97,20 @@ export function onBossKilled(state: GameState): void {
   // Count the boss defeat toward the solo hero's class-change quest (M5 task 5),
   // while the winning hero is still on the field (before the phase flip).
   advanceQuestObjective(state, "killBoss");
+  // M7: a boss is a GUARANTEED drop (stateless hash; never the wave RNG). Rolled
+  // while the boss is still on the field so the drop position/id are real.
+  if (state.boss) rollBossDrop(state, state.boss);
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;
   state.phase = "victory";
   state.events.push({ type: "bossDefeated", x: bx, y: by, goldGained });
   state.events.push({ type: "stageCleared", stage: state.stage });
+  // M6 "World & Town": a boss room is the map's gate — beating it unlocks the next
+  // MAP's first zone (emits mapUnlocked + zoneUnlocked). No-op for a non-boss-room
+  // boss (there are none in M6, but the guard keeps this safe). The player then
+  // walks out of the victory via `advanceStage` (-> next map) or backtracks.
+  onBossRoomCleared(state);
 }
 
 /** Team wiped: boss leaves, revive the team, resume normal waves (retry allowed). */

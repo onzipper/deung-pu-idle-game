@@ -9,7 +9,11 @@
   "hud": {
     "stageLabel": "ด่าน",
     "waveLabel": "เวฟ",
-    "killProgressLabel": "kill สู่บอส",
+    "autoHuntOn": "ออโต้",
+    "autoHuntOff": "หยุดตี",
+    "autoHuntAriaOn": "ปิดการตีมอนอัตโนมัติ",
+    "autoHuntAriaOff": "เปิดการตีมอนอัตโนมัติ",
+    "zoneUnlockLabel": "ปลดโซนถัดไป",
     "victoryTitle": "🎉 ชนะด่าน {stage}!",
     "nextStageButton": "ด่านถัดไป →",
     "bossHpLabel": "HP บอส",
@@ -21,6 +25,30 @@
     "challengeBossButton": "⚔ ท้าบอส",
     "challengeBossAriaReady": "ท้าบอส",
     "challengeBossAriaNotReady": "ท้าบอส (ยังท้าไม่ได้ตอนนี้)"
+  },
+  "ladder": {
+    "rungs": {
+      "levelUp": "เลเวลถัดไป",
+      "classQuest": "เปลี่ยนคลาส",
+      "zoneBoss": "ล้างด่าน",
+      "hallOfFame": "ทำเนียบเกียรติยศ"
+    },
+    "hallOfFameHint": "เร็วๆ นี้",
+    "levelUp": {
+      "progress": "Lv.{level} → Lv.{gate} ปลดเควสเปลี่ยนคลาส"
+    },
+    "classQuest": {
+      "locked": "🔒 Lv.{gate}",
+      "readyHint": "เควสครบแล้ว! ไปกดที่แถบสกิลด้านล่างเพื่อเปลี่ยนคลาส"
+    },
+    "zoneBoss": {
+      "farmingHint": "ฆ่ามอนให้ครบเพื่อปลดโซนถัดไป",
+      "readyHint": "พลังพร้อมแล้ว — ไปท้าบอสได้เลย!",
+      "fightingHint": "⚔ กำลังต่อสู้กับบอส...",
+      "victoryHint": "ไปด่านถัดไปเพื่อแข็งแกร่งขึ้นต่อ"
+    },
+    "powerRatioLabel": "พลัง {pct}%",
+    "bossStatsLabel": "HP บอส {hp} · โจมตี {atk}"
   },
   "panels": {
     "skillsLabel": "สกิล",
@@ -56,7 +84,12 @@
     "autoAllocateToggle": "🎯 Auto สเตตัส: {state, select, on {เปิด} other {ปิด}}",
     "allocateAria": "เพิ่ม 1 แต้มให้ {stat}",
     "primaryTag": "หลัก",
-    "names": { "str": "STR", "dex": "DEX", "int": "INT", "vit": "VIT" },
+    "names": {
+      "str": "STR",
+      "dex": "DEX",
+      "int": "INT",
+      "vit": "VIT"
+    },
     "full": {
       "str": "พลัง",
       "dex": "ความคล่องแคล่ว",
@@ -71,12 +104,36 @@
     }
   },
   "settings": {
-    "speedLabel": "ความเร็ว",
     "soundOn": "เปิดเสียง",
     "soundOff": "ปิดเสียง",
     "localeLabel": "ภาษา",
     "localeTh": "ไทย",
-    "localeEn": "EN"
+    "localeEn": "EN",
+    "openButton": "⚙ ตั้งค่า",
+    "title": "ตั้งค่า",
+    "closeButton": "ปิด",
+    "autoBehaviorGroup": "พฤติกรรมอัตโนมัติ",
+    "audioLanguageGroup": "เสียง & ภาษา",
+    "deathBehaviorLabel": "เมื่อฮีโร่ตาย",
+    "bot": {
+      "title": "บอทผู้ช่วย",
+      "hint": "บอทวาปกลับเมืองเองเมื่อของครบ/ยาใกล้หมด แล้วกลับไปฟาร์มต่อให้อัตโนมัติ",
+      "restockToggle": "บอทซื้อยา",
+      "sellTripToggle": "บอทวาปขายของ",
+      "autoEquipToggle": "สวมของที่ดีที่สุดอัตโนมัติ",
+      "hpTarget": "เป้าหมายยาเลือด",
+      "mpTarget": "เป้าหมายยามานา",
+      "scrollReserve": "เป้าหมายยันกลับเมือง",
+      "goldReserve": "ทองสำรองขั้นต่ำ",
+      "goldReserveHint": "บอทจะเหลือทองไม่ต่ำกว่านี้เสมอ (ไม่ใช่งบใช้จ่าย)"
+    },
+    "autoSell": {
+      "title": "กฎขายอัตโนมัติ",
+      "sellCommon": "ขายของธรรมดา",
+      "sellRare": "ขายของหายาก",
+      "sellEpic": "ขายตำนาน (ล็อกปิด)",
+      "keepBetterStat": "กันของดีไว้ให้ (อัปเกรดเหนือของที่ใส่ + ชิ้นดีสุดของช่องที่ยังว่าง)"
+    }
   },
   "onboarding": {
     "mascotName": "น้องดึ๋ง",
@@ -111,7 +168,7 @@
       },
       "settingsTour": {
         "title": "ปรับแต่งการเล่นได้ตรงนี้",
-        "body": "เร่งความเร็วเกม เปิด/ปิดเสียง สลับภาษา หรือกด \"📖 คู่มือ\" เพื่อเปิดคู่มือเกมย้อนดูได้ทุกเมื่อจากแถบนี้"
+        "body": "กด \"⚙ ตั้งค่า\" เพื่อเปิด/ปิดเสียง สลับภาษา หรือปรับพฤติกรรมอัตโนมัติ และกด \"📖 คู่มือ\" เพื่อเปิดคู่มือเกมย้อนดูได้ทุกเมื่อจากแถบนี้"
       },
       "outro": {
         "title": "พร้อมลุยแล้ว!",
@@ -164,7 +221,12 @@
       "heroes": "ฮีโร่",
       "boss": "บอส",
       "controls": "การควบคุม",
-      "offlineIdle": "ทองตอนออฟไลน์"
+      "offlineIdle": "ทองตอนออฟไลน์",
+      "gear": "อุปกรณ์"
+    },
+    "gear": {
+      "undiscovered": "???",
+      "ownedCount": "พบแล้ว {owned}/{total}"
     },
     "entries": {
       "coreLoop": {
@@ -200,10 +262,6 @@
         "title": "ท้าบอสประจำด่าน",
         "body": "แผงด้านล่างสนามแสดง HP บอส พลังโจมตีบอส พลังแนะนำ และพลังของคุณตอนนี้ ปุ่มท้าบอสจะกดได้เมื่อพลังถึงเกณฑ์แนะนำ ถ้าฮีโร่ตาย บอสจะถอย ฮีโร่ฟื้นเต็มไม่มีโทษ กลับไปลุยเวฟต่อ และท้าใหม่ได้ทันที ถ้าชนะจะได้ทองก้อนใหญ่และปลดด่านถัดไป"
       },
-      "gameSpeed": {
-        "title": "⚡ ความเร็วเกม",
-        "body": "สลับความเร็ว 1×/2×/3× ได้ทุกเมื่อจากแถบตั้งค่า เกมยังคงจำลองผลลัพธ์แม่นยำเท่าเดิม แค่รันเร็วขึ้นเท่านั้น"
-      },
       "autoCast": {
         "title": "✨ Auto สกิล",
         "body": "เมื่อเปิดไว้ ฮีโร่จะร่ายสกิลที่ใส่ไว้ในช่องอัตโนมัติให้เองทันทีที่คูลดาวน์และมานาพร้อม ปลดช่องเพิ่มได้ถึง 3 ช่องตามเลเวล (Lv.1/15/30) — ไม่ต้องคอยกดปุ่มสกิลเอง"
@@ -215,31 +273,131 @@
       "offlineIdle": {
         "title": "ทองตอนออฟไลน์",
         "body": "ปิดเกมไปแล้วกลับมาเปิดใหม่ เกมจะคำนวณความคืบหน้าที่ควรเกิดขึ้นระหว่างที่คุณไม่ได้เล่นให้อัตโนมัติ (จำกัดไม่เกิน 8 ชั่วโมงต่อครั้ง) แล้วมอบทองสะสมให้ทันทีตอนเข้าเกม"
+      },
+      "gear": {
+        "title": "ของดรอปและอุปกรณ์",
+        "body": "ศัตรูและบอสมีโอกาสดรอปอาวุธ/เกราะให้เก็บสะสม แต่ละชิ้นมีระดับและความหายาก (ธรรมดา/หายาก/ตำนาน) เปิดกระเป๋าไอเทม (🎒) เพื่อสวมใส่อาวุธ+เกราะได้อย่างละ 1 ชิ้น — บางชิ้นต้องตรงกับอาชีพของตัวละครจึงจะสวมได้"
       }
     }
   },
   "content": {
     "classes": {
-      "swordsman": { "name": "นักดาบ", "evolvedName": "อัศวิน" },
-      "archer": { "name": "นักธนู", "evolvedName": "นายพราน" },
-      "mage": { "name": "นักเวท", "evolvedName": "จอมเวท" }
+      "swordsman": {
+        "name": "นักดาบ",
+        "evolvedName": "อัศวิน"
+      },
+      "archer": {
+        "name": "นักธนู",
+        "evolvedName": "นายพราน"
+      },
+      "mage": {
+        "name": "นักเวท",
+        "evolvedName": "จอมเวท"
+      }
     },
     "skills": {
-      "swordsman": { "name": "หมุนฟัน", "desc": "หมุนดาบฟันศัตรูรอบตัว" },
-      "archer": { "name": "ฝนลูกธนู", "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม" },
-      "mage": { "name": "อุกกาบาต", "desc": "เรียกอุกกาบาตถล่มพื้นที่" },
-      "sword_whirl": { "name": "หมุนฟัน", "desc": "หมุนดาบฟันศัตรูรอบตัว" },
-      "sword_warcry": { "name": "ตะโกนศึก", "desc": "ตะโกนปลุกใจ เพิ่มพลังโจมตีชั่วขณะ" },
-      "sword_quake": { "name": "แผ่นดินไหว", "desc": "ทุบพื้นสร้างความเสียหายเป็นวงกว้างด้านหน้า" },
-      "archer_rain": { "name": "ฝนลูกธนู", "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม" },
-      "archer_powershot": { "name": "ธนูทรงพลัง", "desc": "ยิงลูกธนูนัดเดียวรุนแรง เหมาะกับบอส" },
-      "archer_barrage": { "name": "ธนูระเบิด", "desc": "ลูกธนูระเบิดใส่กลุ่มศัตรู" },
-      "mage_meteor": { "name": "อุกกาบาต", "desc": "เรียกอุกกาบาตถล่มพื้นที่" },
-      "mage_frostnova": { "name": "เกล็ดน้ำแข็ง", "desc": "ระเบิดน้ำแข็งเร็วและถูก เหมาะเคลียร์มอน" },
-      "mage_cataclysm": { "name": "มหาวินาศ", "desc": "อุกกาบาตลูกมหึมา สกิลไม้ตาย" }
+      "swordsman": {
+        "name": "หมุนฟัน",
+        "desc": "หมุนดาบฟันศัตรูรอบตัว"
+      },
+      "archer": {
+        "name": "ฝนลูกธนู",
+        "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม"
+      },
+      "mage": {
+        "name": "อุกกาบาต",
+        "desc": "เรียกอุกกาบาตถล่มพื้นที่"
+      },
+      "sword_whirl": {
+        "name": "หมุนฟัน",
+        "desc": "หมุนดาบฟันศัตรูรอบตัว"
+      },
+      "sword_warcry": {
+        "name": "ตะโกนศึก",
+        "desc": "ตะโกนปลุกใจ เพิ่มพลังโจมตีชั่วขณะ"
+      },
+      "sword_quake": {
+        "name": "แผ่นดินไหว",
+        "desc": "ทุบพื้นสร้างความเสียหายเป็นวงกว้างด้านหน้า"
+      },
+      "archer_rain": {
+        "name": "ฝนลูกธนู",
+        "desc": "ยิงฝนลูกธนูถล่มทั้งสนาม"
+      },
+      "archer_powershot": {
+        "name": "ธนูทรงพลัง",
+        "desc": "ยิงลูกธนูนัดเดียวรุนแรง เหมาะกับบอส"
+      },
+      "archer_barrage": {
+        "name": "ธนูระเบิด",
+        "desc": "ลูกธนูระเบิดใส่กลุ่มศัตรู"
+      },
+      "mage_meteor": {
+        "name": "อุกกาบาต",
+        "desc": "เรียกอุกกาบาตถล่มพื้นที่"
+      },
+      "mage_frostnova": {
+        "name": "เกล็ดน้ำแข็ง",
+        "desc": "ระเบิดน้ำแข็งเร็วและถูก เหมาะเคลียร์มอน"
+      },
+      "mage_cataclysm": {
+        "name": "มหาวินาศ",
+        "desc": "อุกกาบาตลูกมหึมา สกิลไม้ตาย"
+      }
     },
     "quests": {},
-    "items": {}
+    "items": {
+      "hpPotion": {
+        "name": "ยาเลือด",
+        "desc": "ฟื้นฟู HP 50% ของค่าสูงสุด"
+      },
+      "manaPotion": {
+        "name": "ยามานา",
+        "desc": "ฟื้นฟูมานา 45% ของค่าสูงสุด"
+      },
+      "returnScroll": {
+        "name": "ยันกลับเมือง",
+        "desc": "วาร์ปกลับเมืองหลักทันที"
+      },
+      "w_sword_t1_rusty": { "name": "ดาบสนิม" },
+      "w_sword_t2_iron": { "name": "ดาบเหล็ก" },
+      "w_sword_t3_knight": { "name": "ดาบอัศวิน" },
+      "w_sword_t4_flame": { "name": "ดาบเพลิง" },
+      "w_sword_t5_dragon": { "name": "ดาบมังกร" },
+      "w_sword_t6_ragna": { "name": "ดาบรากนาร็อก" },
+      "w_bow_t1_short": { "name": "ธนูสั้น" },
+      "w_bow_t2_hunter": { "name": "ธนูนักล่า" },
+      "w_bow_t3_composite": { "name": "ธนูผสม" },
+      "w_bow_t4_storm": { "name": "ธนูพายุ" },
+      "w_bow_t5_phoenix": { "name": "ธนูฟีนิกซ์" },
+      "w_bow_t6_ragna": { "name": "ธนูรากนาร็อก" },
+      "w_staff_t1_apprentice": { "name": "ไม้เท้าฝึกหัด" },
+      "w_staff_t2_oak": { "name": "ไม้เท้าโอ๊ก" },
+      "w_staff_t3_arcane": { "name": "ไม้เท้าอาร์เคน" },
+      "w_staff_t4_inferno": { "name": "ไม้เท้าอัคคี" },
+      "w_staff_t5_astral": { "name": "ไม้เท้าดาราจักร" },
+      "w_staff_t6_ragna": { "name": "ไม้เท้ารากนาร็อก" },
+      "a_cloth_t1_tunic": { "name": "เสื้อผ้าธรรมดา" },
+      "a_leather_t2_vest": { "name": "เสื้อหนัง" },
+      "a_chain_t3_mail": { "name": "เกราะลูกโซ่" },
+      "a_plate_t4_guard": { "name": "เกราะเหล็กแผ่น" },
+      "a_rune_t5_ward": { "name": "เกราะรูน" },
+      "a_aegis_t6_bulwark": { "name": "โล่พิทักษ์เอจิส" },
+      "a_sword_t4_fortress": { "name": "เกราะป้อมปราการ" },
+      "a_archer_t4_windcloak": { "name": "เสื้อคลุมสายลม" },
+      "a_mage_t4_archrobe": { "name": "อาภรณ์จอมเวท" }
+    },
+    "maps": {
+      "map1": {
+        "name": "โลกมนุษย์"
+      },
+      "map2": {
+        "name": "แดนอสูร"
+      },
+      "map3": {
+        "name": "พรมแดนเถื่อน"
+      }
+    }
   },
   "characters": {
     "pageTitle": "ตัวละครของคุณ",
@@ -303,6 +461,97 @@
       "limitError": "สร้างตัวละครได้สูงสุด 3 ตัวต่อบัญชีแล้ว",
       "duplicateError": "ชื่อนี้ถูกใช้แล้ว ลองชื่ออื่น",
       "genericError": "สร้างตัวละครไม่สำเร็จ ลองใหม่อีกครั้ง"
+    }
+  },
+  "world": {
+    "zoneFarm": "โซน {stage}",
+    "zoneTown": "เมืองหลัก",
+    "zoneBoss": "ห้องบอส",
+    "traveling": "กำลังเดินทาง…",
+    "walkLeftAria": "เดินไปโซนซ้าย",
+    "walkRightAria": "เดินไปโซนขวา",
+    "lockedTooltip": "ล็อกอยู่ — เคลียร์โควตาของโซนนี้ก่อน",
+    "enterBossRoom": "เข้าห้องบอส",
+    "autoReturnOn": "อัตโนมัติ: กลับไปฟาร์ม",
+    "autoReturnOff": "อัตโนมัติ: รอที่เมือง",
+    "frontier": "สุดเขตแดนตอนนี้",
+    "fastTravelButton": "วาร์ป",
+    "fastTravelTitle": "วาร์ปข้ามโซน",
+    "fastTravelClose": "ปิด",
+    "fastTravelCurrent": "อยู่ตรงนี้",
+    "fastTravelChanneling": "กำลังวาร์ปไปยัง {map}…"
+  },
+  "shop": {
+    "title": "ร้านค้าในเมือง",
+    "subtitle": "ซื้อของตุนก่อนออกไปลุย",
+    "owned": "มี {count}/{cap}",
+    "buyAria": "ซื้อ {name} {qty} ชิ้น",
+    "quickUseLabel": "ไอเทม",
+    "useAria": "ใช้ {name} (เหลือ {count})",
+    "returnScrollTitle": "กลับเมืองหลัก",
+    "returnScrollInTown": "อยู่ในเมืองอยู่แล้ว",
+    "returnScrollAria": "ใช้ยันกลับเมืองเพื่อวาร์ปกลับเมือง (เหลือ {count})",
+    "autoLabel": "อัตโนมัติ",
+    "hpLabel": "ยาเลือด",
+    "manaLabel": "ยามานา",
+    "autoUseAria": "ใช้ {name} อัตโนมัติ: {state, select, on {เปิด} other {ปิด}}",
+    "thresholdDownAria": "ลดเกณฑ์ใช้ {name} อัตโนมัติ",
+    "thresholdUpAria": "เพิ่มเกณฑ์ใช้ {name} อัตโนมัติ"
+  },
+  "inventory": {
+    "openButton": "🎒 กระเป๋า",
+    "title": "กระเป๋าไอเทม",
+    "closeButton": "ปิด",
+    "loadoutLabel": "อุปกรณ์ที่สวมใส่",
+    "emptySlotHint": "ยังไม่มีไอเทม",
+    "equipButton": "สวมใส่",
+    "unequipButton": "ถอด",
+    "equippedBadge": "สวมอยู่",
+    "tierLabel": "ระดับ {tier}",
+    "statAtk": "ATK +{value}",
+    "statDef": "DEF +{value}",
+    "statHp": "HP +{value}",
+    "classReqBlocked": "ใช้ได้เฉพาะ{cls}",
+    "slot": {
+      "weapon": "อาวุธ",
+      "armor": "เกราะ"
+    },
+    "rarity": {
+      "common": "ธรรมดา",
+      "rare": "หายาก",
+      "epic": "ตำนาน"
+    },
+    "classNames": {
+      "swordsman": "นักดาบ",
+      "archer": "นักธนู",
+      "mage": "นักเวท"
+    },
+    "tierShort": "T{tier}",
+    "newBadge": "ใหม่",
+    "classOnlyToggle": "ใส่ได้เฉพาะคลาสฉัน",
+    "capacityLabel": "{count}/{cap} ช่อง",
+    "sellTownOnly": "ขายได้เฉพาะในเมือง",
+    "sellOneButton": "ขายชิ้นนี้",
+    "sellAllButton": "ขายทั้งหมด ({count})",
+    "sellAllCommonButton": "ขาย common ทั้งหมด",
+    "confirmSell": "ยืนยันขาย?"
+  },
+  "dropFeed": {
+    "gotItem": "ได้ไอเทม: {name}"
+  },
+  "notices": {
+    "autoSellDone": "บอทขายของอัตโนมัติ {count} ชิ้น +{gold} ทอง",
+    "autoEquipDone": "บอทสวมของที่ดีกว่าให้ {count} ชิ้น",
+    "autoSellNothing": "กระเป๋าเต็มแต่กฎขายอัตโนมัติไม่ตรงกับของชิ้นไหนเลย — ปรับกฎในตั้งค่า หรือขายเอง บอทจะพักวาปขายไว้ก่อน",
+    "fastTravelBlocked": {
+      "locked": "โซนนั้นยังไม่ปลด",
+      "aggro": "มีมอนติดพันอยู่ วาร์ปไม่ได้",
+      "dead": "ฮีโร่ล้มอยู่ วาร์ปไม่ได้",
+      "same": "อยู่โซนนี้อยู่แล้ว",
+      "traveling": "กำลังเดินทางอยู่",
+      "boss": "อยู่ระหว่างสู้บอส วาร์ปไม่ได้",
+      "invalid": "วาร์ปไปโซนนั้นไม่ได้",
+      "damaged": "โดนโจมตี วาร์ปถูกยกเลิก"
     }
   }
 }
