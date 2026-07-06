@@ -10,9 +10,10 @@
  * `CONFIG.uiSyncHz` tick (~100ms), same latency class as every other intent.
  */
 
+import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { CONFIG } from "@/engine";
-import { useGameStore } from "@/ui/store/gameStore";
+import { readStoredAutoEquip, useGameStore } from "@/ui/store/gameStore";
 
 const TARGET_CAP = CONFIG.shop.stackCap;
 const GOLD_STEP = 100;
@@ -93,7 +94,16 @@ function Stepper({
 export function BotSettingsSection() {
   const bot = useGameStore((s) => s.bot);
   const setBotSettings = useGameStore((s) => s.setBotSettings);
+  // Auto-equip is a CLIENT-side executor preference (localStorage, like the
+  // auto-sell rules) — not part of the engine-persisted `state.bot` block.
+  const autoEquip = useGameStore((s) => s.autoEquip);
+  const toggleAutoEquip = useGameStore((s) => s.toggleAutoEquip);
+  const hydrateAutoEquip = useGameStore((s) => s.hydrateAutoEquip);
   const t = useTranslations("settings.bot");
+
+  useEffect(() => {
+    hydrateAutoEquip(readStoredAutoEquip());
+  }, [hydrateAutoEquip]);
 
   return (
     <section className="flex flex-col gap-2.5">
@@ -112,6 +122,7 @@ export function BotSettingsSection() {
           on={bot.sellTripEnabled}
           onToggle={() => setBotSettings({ sellTripEnabled: !bot.sellTripEnabled })}
         />
+        <ToggleRow label={t("autoEquipToggle")} on={autoEquip} onToggle={toggleAutoEquip} />
       </div>
       <div className="flex flex-col gap-1.5">
         <Stepper

@@ -74,9 +74,11 @@ import {
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
+import { selectAutoEquip } from "@/ui/gear/autoEquip";
 import { selectAutoSellItemIds } from "@/ui/gear/autoSell";
 import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
-import { postClaimBatch } from "@/ui/gear/api";
+import { postClaimBatch, postEquip } from "@/ui/gear/api";
+import { applyEquipChange } from "@/ui/gear/inventoryOps";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { toInventoryItem } from "@/ui/gear/types";
 import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
@@ -306,6 +308,40 @@ function buildSnapshot(state: GameState): EngineSnapshot {
  * dropped/failed auto-sell simply leaves the inventory full, so the NEXT trip
  * (or a manual sell) retries it — never a stuck state.
  */
+/**
+ * M7.5 auto-equip executor (owner request 2026-07-06) — keeps the hero in its
+ * best gear without babysitting. Same POST-first flow as the manual equip
+ * buttons; one run in flight at a time (each pick is a server round trip).
+ * Runs off: boot hydration, merged drop claims, and town arrivals (BEFORE the
+ * auto-sell sweep, so the keep-guard baseline reflects the new gear and
+ * yesterday's pieces become sellable in the same trip).
+ */
+let autoEquipInFlight = false;
+async function performAutoEquip(): Promise<void> {
+  if (autoEquipInFlight) return;
+  const store = useGameStore.getState();
+  if (!store.autoEquip) return;
+  const picks = selectAutoEquip(store.inventory, ITEM_TEMPLATES, store.heroes[0]?.cls);
+  if (picks.length === 0) return;
+  autoEquipInFlight = true;
+  try {
+    let equippedCount = 0;
+    for (const pick of picks) {
+      const res = await postEquip(pick.instanceId);
+      const st = useGameStore.getState();
+      if (!res.ok) break; // server said no (stale local view) — stop, next run resyncs
+      st.setInventory(applyEquipChange(st.inventory, pick.instanceId, pick.slot));
+      st.queueEquip(pick.slot, pick.templateId);
+      equippedCount++;
+    }
+    if (equippedCount > 0) {
+      useGameStore.getState().pushNotice("autoEquipDone", { count: equippedCount });
+    }
+  } finally {
+    autoEquipInFlight = false;
+  }
+}
+
 async function performAutoSell(): Promise<void> {
   const store = useGameStore.getState();
   const ids = selectAutoSellItemIds(
@@ -514,7 +550,9 @@ export function GameClient() {
           // is where the auto-sell rules actually run (fire-and-forget — a
           // dropped auto-sell just retries on the NEXT full-inventory trip).
           if (ev.reason === "sell" || ev.reason === "restockSell") {
-            void performAutoSell();
+            // Equip first so the keep-guard baseline reflects the NEW gear —
+            // the displaced pieces then vendor in this same trip.
+            void performAutoEquip().then(performAutoSell);
           }
         } else if (ev.type === "fastTravelCastStart") {
           useGameStore.getState().startFastTravelChannel(ev.mapId, ev.zoneIdx);
@@ -581,7 +619,10 @@ export function GameClient() {
             .pushDropFeed(r.item.templateId, template?.rarity ?? "common");
         }
       }
-      if (minted.length) useGameStore.getState().mergeInventory(minted);
+      if (minted.length) {
+        useGameStore.getState().mergeInventory(minted);
+        void performAutoEquip(); // wear an upgrade the moment it drops
+      }
       if (Object.keys(rejectedCounts).length) {
         console.warn("[GameClient] drop-claim rejections:", rejectedCounts);
       }
@@ -673,6 +714,7 @@ export function GameClient() {
           // fetches on its own mount, only on an equip-failure resync).
           if (json.inventory) {
             useGameStore.getState().setInventory(json.inventory.map(toInventoryItem));
+            void performAutoEquip(); // boot in best gear (no-op if already worn)
             // M7.5 "NEW" badge baseline: everything owned AT BOOT is "known" —
             // any templateId minted afterward reads as new for this session
             // (see `sessionKnownTemplateIds`'s doc).

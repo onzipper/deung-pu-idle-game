@@ -427,6 +427,31 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
   }
 }
 
+/** M7.5 auto-equip preference (client-side executor toggle, same tier as the
+ * auto-sell rules). Default ON — idle players expect the hero to wear its best
+ * gear without babysitting (autoAllocate/auto-potion default ON for the same
+ * reason). */
+const AUTO_EQUIP_STORAGE_KEY = "ddp-auto-equip";
+
+export function readStoredAutoEquip(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = window.localStorage.getItem(AUTO_EQUIP_STORAGE_KEY);
+    return raw === null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+function writeAutoEquip(on: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(AUTO_EQUIP_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    /* storage blocked — this session's preference just won't persist */
+  }
+}
+
 function writeAutoSellRules(rules: StoredAutoSellRules): void {
   if (typeof window === "undefined") return;
   try {
@@ -544,6 +569,8 @@ export interface HudState {
   autoSellCommon: boolean;
   autoSellRare: boolean;
   autoSellKeepBetterStat: boolean;
+  /** M7.5 auto-equip executor toggle (localStorage-persisted, default ON). */
+  autoEquip: boolean;
 
   // ---- plain UI-owned state the integration loop reads directly every frame ----
   autoCast: boolean;
@@ -704,6 +731,9 @@ export interface HudState {
   /** Mount-effect-only: apply the persisted rules once, post-hydration (same
    * "don't re-persist on mount" rule as `setSoundMuted`). */
   hydrateAutoSellRules: (rules: StoredAutoSellRules) => void;
+  toggleAutoEquip: () => void;
+  /** Mount-effect-only: apply the persisted auto-equip preference once. */
+  hydrateAutoEquip: (on: boolean) => void;
 
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
@@ -745,6 +775,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoSellCommon: DEFAULT_AUTO_SELL_RULES.sellCommon,
   autoSellRare: DEFAULT_AUTO_SELL_RULES.sellRare,
   autoSellKeepBetterStat: DEFAULT_AUTO_SELL_RULES.keepBetterStat,
+  autoEquip: true,
 
   autoCast: false,
   autoAllocate: false,
@@ -935,6 +966,13 @@ export const useGameStore = create<HudState>((set, get) => ({
       autoSellRare: rules.sellRare,
       autoSellKeepBetterStat: rules.keepBetterStat,
     }),
+  toggleAutoEquip: () =>
+    set((s) => {
+      const autoEquip = !s.autoEquip;
+      writeAutoEquip(autoEquip);
+      return { autoEquip };
+    }),
+  hydrateAutoEquip: (on) => set({ autoEquip: on }),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;

@@ -120,6 +120,7 @@
       "hint": "The bot warps to town on its own when your bags fill up or potions run low, then walks back to farming automatically.",
       "restockToggle": "Auto-buy potions",
       "sellTripToggle": "Auto sell-trip",
+      "autoEquipToggle": "Auto-equip best gear",
       "hpTarget": "HP potion target",
       "mpTarget": "Mana potion target",
       "scrollReserve": "Return scroll target",
@@ -540,6 +541,7 @@
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
+    "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",

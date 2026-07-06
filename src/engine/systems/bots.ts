@@ -188,11 +188,14 @@ function tickSellDwell(state: GameState, inventoryCount?: number): void {
   }
 }
 
-/** Walk home to the last farm zone (shared by restock-only arrival + dwell end). */
+/** Walk home to the last farm zone (shared by restock-only arrival + dwell end).
+ * Depth-scaled like the to-town walk (owner call 2026-07-06): returning to a
+ * deep farm zone takes botWalkSeconds x zoneIdx, symmetric with the trip out. */
 function botReturnToFarm(state: GameState): void {
   const back = state.lastFarmZone;
   if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
-    beginTransit(state, back, CONFIG.world.transitSeconds, "walk");
+    const depth = Math.max(1, back.zoneIdx);
+    beginTransit(state, back, CONFIG.travel.botWalkSeconds * depth, "walk");
   }
 }
 
