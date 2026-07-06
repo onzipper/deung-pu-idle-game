@@ -41,13 +41,13 @@
 - [ ] ~~ตัวละครใหม่~~ ยกเลิก — gear visuals M7 ทำบนริกเดิม
 - [ ] UI skin (title/หน้าเลือกตัว/HUD กรอบเกม + ฟอนต์) — แขวนไว้ รอเจ้าของอยากหยิบขึ้นมาอีกครั้ง
 
-## M7 — Gear & Drops ⭐ (+ visual gear)
+## ✅ M7 — Gear & Drops ⭐ (เสร็จ 2026-07-06)
 
-- [ ] **Item-instance model** (unique ID + ownerId + audit) + server-authoritative — schema + anti-dupe รากฐานตลาดกลาง (DB เสร็จแล้ว — persistence-m7.md)
-- [ ] Drop tables อาวุธ+ชุด ต่อ zone/บอส
-- [ ] Inventory + equip/loadout UI
-- [ ] **Paper-doll + ตัวละครอนิเมะ/RO**: เรนเดอร์ชุด/อาวุธจริงบนตัว, อาวุธใหญ่อลัง, tier สูง = ชุดระยิบ + ออร่าอาวุธซุปเปอร์ไซย่า (คุม GPU มือถือ)
-- [ ] โยงเข้า codex/collection
+- [x] **Item-instance model** (unique ID + ownerId + audit) + server-authoritative — API claim/equip/unequip/inventory ครบตาม tx recipes + invariant 1-7,9 (persistence-m7.md; ข้อ 8 trade = M9), claimKey idempotent, rate-plausibility ceiling, boot payload คืน inventory+equipped (DB ชนะ save-blob cache)
+- [x] Drop tables อาวุธ+ชุด ต่อ zone/บอส — catalog 27 ชิ้น (อาวุธ 3 คลาส × t1-6 + เกราะ) band ตาม stage ผ่าน tierForStage; farm = on-curve tier, boss = guaranteed roll on-curve+next tier; drop roll = stateless splitmix32(lootSalt, lootCounter) ไม่แตะ wave RNG stream; SAVE v10; sim: no-gear ตรง balance-m6 เป๊ะ, geared นุ่ม s13/s14 แต่ s15 wall อยู่ (balance-m7.md)
+- [x] Inventory + equip/loadout UI — InventoryPanel + EquippedLoadout, equip = API ก่อนแล้วค่อย engine intent, ท่อ claim แบบ batch/idempotent บน autosave cadence + sendBeacon, DropFeed toasts
+- [x] **Paper-doll บนริกเดิม** (ตามมติ M6.5 — ไม่ใช่ตัวละครอนิเมะ/RO): อาวุธโตตาม tier จน t6 อลัง+ออร่าเปลวไฟซุปเปอร์ไซย่า (solid บน normal blend กัน white-out), เกราะ trim/gem + t5+ ระยิบ; pooled/capped คุม GPU; rig tests ครอบ geared bounds
+- [x] โยงเข้า codex/collection — หมวด gear ใน codex, grid 27 ชิ้น ยังไม่เจอ = เงาจาง (v1 derive จาก inventory ปัจจุบัน)
 
 ## M8 — Party
 
