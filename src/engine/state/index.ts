@@ -118,13 +118,15 @@ export interface GameState {
    */
   botPending: { restock: boolean; sell: boolean } | null;
   /**
-   * Seconds left of a SELL trip's in-town dwell (M7.5 anti-warp-loop fix), or null.
-   * While non-null the bot stands in town waiting for the client's async sell to
-   * shrink the fed `inventoryCount` below the cap (then returns early) or for the
-   * timer to run out (then returns and latches `sellTripWatermark`). Transient —
-   * NEVER persisted.
+   * A SELL trip's in-town dwell (M7.5 anti-warp-loop fix), or null. While
+   * non-null the bot stands in town waiting for the client's async sell to
+   * shrink the fed `inventoryCount` below the cap (then returns early) or for
+   * the timer to run out (then returns and latches `sellTripWatermark`).
+   * `lastCount` tracks the fed count between ticks: any DECREASE = the sell is
+   * making progress (a big pre-cap bag sells in several 100-item chunks), so
+   * the timer RESETS instead of giving up mid-sweep. Transient — NEVER persisted.
    */
-  botDwell: number | null;
+  botDwell: { timer: number; lastCount: number | null } | null;
   /**
    * The fed `inventoryCount` at which the last sell trip GAVE UP (dwell timeout with
    * the bag still full), or null. Suppresses new sell trips until the count drops

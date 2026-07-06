@@ -363,6 +363,34 @@ describe("sell-trip bot (inventoryCount trigger)", () => {
     expect(second).toBe(true);
   });
 
+  it("dwell EXTENDS while the count keeps dropping (chunked big-bag sell-off)", () => {
+    // A pre-cap 1,890-item bag sells in sequential 100-item chunks — the sweep
+    // outlasts one 6s window, but visible PROGRESS must keep the bot waiting.
+    const s = sellBotState();
+    runUntilInput(
+      s,
+      { inventoryCount: 1890 },
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      600,
+    );
+    expect(s.botDwell).not.toBeNull();
+    // Burn ~5.5s of the 6s window with no progress...
+    for (let i = 0; i < 330; i++) step(s, { inventoryCount: 1890 });
+    expect(s.botDwell).not.toBeNull();
+    // ...then a sold chunk lands (count drops) → the timer resets to full.
+    step(s, { inventoryCount: 1790 });
+    expect(s.botDwell?.timer ?? 0).toBeGreaterThan(5);
+    // Another ~5.5s of stall is now survivable again (still dwelling, no latch).
+    for (let i = 0; i < 330; i++) step(s, { inventoryCount: 1790 });
+    expect(s.botDwell).not.toBeNull();
+    expect(s.sellTripWatermark).toBeNull();
+    // Chunks keep landing until below cap → success, returns unlatched.
+    step(s, { inventoryCount: 50 });
+    expect(s.botDwell).toBeNull();
+    expect(s.sellTripWatermark).toBeNull();
+    expect(s.traveling).not.toBeNull(); // walking home
+  });
+
   it("releases the latch when the count finally drops below the watermark", () => {
     const s = sellBotState();
     stepCounting(s, 6000, INVENTORY_CAP); // one trip, latched, back at the farm

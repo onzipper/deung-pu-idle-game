@@ -165,6 +165,8 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
 
 /** One fixed-dt tick of the in-town sell dwell (see `updateBots`). */
 function tickSellDwell(state: GameState, inventoryCount?: number): void {
+  const dwell = state.botDwell;
+  if (!dwell) return;
   // Defensive: a dwell only means something while standing in town. If the state
   // was force-moved (death, manual walk queued the same frame), just drop it.
   if (state.traveling || zoneAt(state.location).kind !== "town") {
@@ -179,9 +181,16 @@ function tickSellDwell(state: GameState, inventoryCount?: number): void {
     botReturnToFarm(state);
     return;
   }
-  state.botDwell = (state.botDwell ?? 0) - FIXED_DT;
-  if (state.botDwell <= 0) {
-    // Gave up: bag still full. Latch the count so we don't re-trip until it drops.
+  // PROGRESS extends the wait: a pre-cap 1,000+ bag sells in sequential
+  // 100-item chunks (server batch cap), easily outlasting one dwell window —
+  // as long as the fed count keeps DROPPING between ticks, keep standing here.
+  if (count !== null && dwell.lastCount !== null && count < dwell.lastCount) {
+    dwell.timer = CONFIG.bot.sellDwellSeconds;
+  }
+  dwell.lastCount = count;
+  dwell.timer -= FIXED_DT;
+  if (dwell.timer <= 0) {
+    // Gave up: bag still full and no progress. Latch so we don't re-trip.
     state.botDwell = null;
     if (count !== null) state.sellTripWatermark = count;
     botReturnToFarm(state);
@@ -246,7 +255,7 @@ export function onBotTownArrival(state: GameState): void {
     // dwell in town for it instead of walking home in this same step (the
     // original walk-home-immediately behavior warp-looped: bag never shrank
     // before the next full-bag trigger back at the farm).
-    state.botDwell = CONFIG.bot.sellDwellSeconds;
+    state.botDwell = { timer: CONFIG.bot.sellDwellSeconds, lastCount: null };
     return;
   }
   botReturnToFarm(state);
