@@ -45,6 +45,7 @@ import { MaterialIcon } from "@/ui/components/icons";
 import {
   GEAR_SLOT_ICONS,
   HERO_ICONS,
+  prestigeNameClass,
   RARITY_COLORS,
   RARITY_GLOW,
   TIER_BORDER_COLORS,
@@ -246,6 +247,8 @@ function DetailCard({
   // M7.6 ตีบวก: preview the material yield BEFORE salvaging (spec — the server
   // rolls nothing here, `salvageYield` is a pure tier/rarity table read).
   const perItemYield = salvageYield(template.tier, template.rarity);
+  // M7.6+ polish: +8 and up gets prestige-gold name styling (see ui/labels.ts).
+  const prestigeCls = prestigeNameClass(stack.refineLevel);
 
   function handleSell(all: boolean): void {
     if (needsConfirm && !confirmingSell) {
@@ -274,10 +277,13 @@ function DetailCard({
           {GEAR_SLOT_ICONS[template.slot]}
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <span className={`truncate text-sm font-bold ${colors.text}`}>
+          <span className={`truncate text-sm ${prestigeCls || `font-bold ${colors.text}`}`}>
             {colors.icon} {tContent(`${stack.templateId}.name`)}
             {stack.refineLevel > 0 && (
-              <span className="text-emerald-400"> {t("refinePlus", { level: stack.refineLevel })}</span>
+              <span className={prestigeCls || "text-emerald-400"}>
+                {" "}
+                {t("refinePlus", { level: stack.refineLevel })}
+              </span>
             )}
           </span>
           <span className="text-[10px] text-ddp-ink-muted">
