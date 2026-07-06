@@ -130,6 +130,16 @@ const T6_WEAPON: Record<Hero["cls"], string> = {
 };
 const T6_ARMOR = "a_aegis_t6_bulwark";
 
+/** A deliberately LOW tier (rare, not epic) weapon/armor — used below to
+ * prove the M7.6+ refine-prestige ladder's high `refine` levels never inflate
+ * the paper-doll's own geometry (that escalation is fx-layer only). */
+const T3_WEAPON: Record<Hero["cls"], string> = {
+  swordsman: "w_sword_t3_knight",
+  archer: "w_bow_t3_composite",
+  mage: "w_staff_t3_arcane",
+};
+const T3_ARMOR = "a_chain_t3_mail";
+
 // A fully-geared t6 rig is DELIBERATELY bigger (blade/bow/staff grow with
 // tier per the GDD's "อาวุธใหญ่อลัง" — see `GEAR_TIER_SCALE` in
 // `heroView.ts`), so its bounds legitimately extend a bit further above the
@@ -148,6 +158,31 @@ describe("heroView rig transform math with tier-6/epic gear equipped (regression
       expect(b.y).toBeGreaterThan(GEARED_MIN_Y);
       expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
       view.destroy({ children: true });
+    });
+
+    it(`${cls}: a low-tier weapon/armor refined to +8/+10 (fx-layer only, per M7.6+ refine-prestige) does not grow the paper-doll geometry into the t6 band`, () => {
+      // The refine-prestige ladder (+8/+9/+10, `fx/gearAura.ts`/
+      // `fx/gearSparkle.ts`/`fx/refinePrestige.ts`) is a FX-LAYER-ONLY
+      // escalation — `heroView.ts`'s rig geometry only reacts to the
+      // equipped TEMPLATE's own tier, never `equipped.refine`. This guards
+      // the owner's exact spec line structurally: "a +10 t3 weapon must not
+      // be confused with a +0 t6" — the paper-doll silhouette for a
+      // heavily-refined LOW-tier item must stay in the plain (non-t6) rig
+      // band regardless of how high its `refine` level climbs.
+      for (const refineLevel of [8, 10]) {
+        const view = createHeroView();
+        const hero = makeHero(cls);
+        hero.equipped = {
+          weapon: T3_WEAPON[cls],
+          armor: T3_ARMOR,
+          refine: { weapon: refineLevel, armor: refineLevel },
+        };
+        updateHeroView(view, hero, { dt: 0, slot: 0, events: [], marching: false });
+        const b = view.bodyRoot.getBounds();
+        expect(b.y).toBeGreaterThan(MIN_Y);
+        expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+        view.destroy({ children: true });
+      }
     });
 
     it(`${cls}: re-gearing from nothing -> t6 -> unequipped never leaves a stray empty-but-visible gear layer`, () => {

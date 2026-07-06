@@ -45,6 +45,7 @@ import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
 import { burst, burstDirectional, burstInward, ParticlePool, shower } from "@/render/fx/particles";
 import { PortalPool } from "@/render/fx/portal";
 import { GroundArrowPool, RainShadowPool } from "@/render/fx/rainScene";
+import { RefinePrestigeFx } from "@/render/fx/refinePrestige";
 import { RingPool } from "@/render/fx/rings";
 import { RuneGlyphPool } from "@/render/fx/runeGlyph";
 import { ScreenShake } from "@/render/fx/screenShake";
@@ -364,6 +365,13 @@ const ITEM_DROP_POP_Y = GROUND_Y - 6;
 const REFINE_AURA_THRESHOLD = 7;
 const REFINE_SPARKLE_THRESHOLD = 7;
 
+/** M7.6+ refine-prestige ladder (owner spec "make +8/+9/+10 visually
+ * prestigious") — the "+8: clearly stronger presence" step for whichever
+ * piece (weapon aura / armor sparkle) is already active per the thresholds
+ * above; see `gearAura.ts`/`gearSparkle.ts`'s `boosted` param doc. The +9/+10
+ * steps are `fx/refinePrestige.ts`'s own thresholds, applied below. */
+const REFINE_PRESTIGE_BOOST_THRESHOLD = 8;
+
 // ---- M7.8 "Manual Play" command feedback (tap-to-move / tap-to-attack) ----
 // Ground click-marker (`moveOrdered`): 3 concentric fading rings via the
 // shared `RingPool` (same started-together-different-radii trick as a sonar
@@ -553,6 +561,10 @@ export class FxController {
   // `updateCastAura()`.
   private readonly gearAura: GearAuraController;
   private readonly gearSparkle: GearSparklePool;
+  /** M7.6+ refine-prestige ladder's +9/+10 steps — reuses `this.particles`/
+   * `this.rings` (constructed below), adds zero new pooled Graphics of its
+   * own. See `updateGearFx()`. */
+  private readonly refinePrestige: RefinePrestigeFx;
 
   // ---- M7.7 "Skill Spectacle" per-class skill fx additions -----------------
   // Ground cracks (sword whirl/quake) live in the CORPSE layer (ground decals,
@@ -690,6 +702,9 @@ export class FxController {
     this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
+    // Reuses the just-constructed `this.particles`/`this.rings` — must come
+    // after both (see this field's own doc comment).
+    this.refinePrestige = new RefinePrestigeFx(this.particles, this.rings);
     this.soulWisps = new SoulWispPool(this.particlesLayer);
     this.damageNumbers = new FloatingTextPool(this.textLayer, DAMAGE_NUMBER_CAP);
     this.eventText = new FloatingTextPool(this.textLayer, EVENT_TEXT_CAP);
@@ -983,7 +998,14 @@ export class FxController {
    * (`gearSparkle`) when that hero's live view + equipped template say so,
    * else eases the slot back to invisible. Reads `ITEM_TEMPLATES` directly
    * (not `HeroView.gearWeaponTier`/`gearArmorRarity`, though those exist too)
-   * since `state.heroes` is already being walked here regardless. */
+   * since `state.heroes` is already being walked here regardless.
+   *
+   * M7.6+ refine-prestige ladder (owner spec, on top of the above): once the
+   * aura/sparkle is active at all (+7), `weaponRefine`/`armorRefine` further
+   * gate a 3-step escalation — +8 boosts the SAME pooled aura/sparkle in
+   * place (`gearAura`/`gearSparkle`'s own `boosted` param), +9/+10 add an
+   * intermittent crackle / continuous signature beat via `refinePrestige`
+   * (zero new pooled Graphics — see that module's doc comment). */
   private updateGearFx(dt: number, state: GameState): void {
     state.heroes.forEach((h, slot) => {
       const view = h.dead ? null : this.lookupHeroView(h.id);
@@ -1008,13 +1030,37 @@ export class FxController {
         this.weaponAnchorScratch.x,
         this.weaponAnchorScratch.y,
         PALETTE.auraFlame,
+        weaponRefine >= REFINE_PRESTIGE_BOOST_THRESHOLD,
+      );
+      // +9/+10 steps ride the SAME anchor/active-gate as the aura above — a
+      // naturally-epic (refine +0) weapon's aura stays exactly as it was
+      // (refineLevel 0 here, below both prestige thresholds).
+      this.refinePrestige.update(
+        dt,
+        `${slot}-weapon`,
+        auraOn ? weaponRefine : 0,
+        this.weaponAnchorScratch.x,
+        this.weaponAnchorScratch.y,
       );
 
       const sparkleOn =
         !!view &&
         (armorTier >= 5 || armorRefine >= REFINE_SPARKLE_THRESHOLD) &&
         getArmorAnchorPos(view, this.armorAnchorScratch);
-      this.gearSparkle.setSlot(slot, sparkleOn, this.armorAnchorScratch.x, this.armorAnchorScratch.y);
+      this.gearSparkle.setSlot(
+        slot,
+        sparkleOn,
+        this.armorAnchorScratch.x,
+        this.armorAnchorScratch.y,
+        armorRefine >= REFINE_PRESTIGE_BOOST_THRESHOLD,
+      );
+      this.refinePrestige.update(
+        dt,
+        `${slot}-armor`,
+        sparkleOn ? armorRefine : 0,
+        this.armorAnchorScratch.x,
+        this.armorAnchorScratch.y,
+      );
     });
     this.gearAura.update(dt);
     this.gearSparkle.update(dt);
