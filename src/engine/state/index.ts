@@ -12,7 +12,8 @@
  */
 
 import { CONFIG } from "@/engine/config";
-import { emptyEquipped, type EquippedGear } from "@/engine/config/items";
+import { emptyEquipped, refineOf, type EquippedGear } from "@/engine/config/items";
+import { clampRefine } from "@/engine/config/refine";
 import { clamp } from "@/engine/core/math";
 import { splitmix32 } from "@/engine/core/hash";
 import { makeHero, defaultAutoSlots } from "@/engine/entities";
@@ -56,7 +57,11 @@ export interface GameState {
   stage: number;
   phase: Phase;
   wave: number;
+  /** Kills toward THIS zone's unlock quota (live counter; see `zoneKills`). */
   kills: number;
+  /** Persisted per-zone unlock progress (SAVE v13) backing `kills` across zone
+   * moves — see `arriveAtZone` (stash old zone / restore new zone). */
+  zoneKills: Record<string, number>;
   gold: number;
   /** The player's chosen base class (M5). Drives which hero is spawned. */
   heroClass: HeroClass;
@@ -219,6 +224,13 @@ export interface GameState {
    */
   lootCounter: number;
   /**
+   * M7.6 ตีบวก material counter: a plain per-character resource (like `gold`) spent
+   * with gold to refine gear + granted by salvaging duplicates. Transactions are
+   * SERVER-authoritative (this only carries the count for display/save; the engine
+   * mutates it solely via the trusted `materialsDelta` intent). Persisted (SAVE v14).
+   */
+  materials: number;
+  /**
    * Per-step event buffer for render/audio juice. Cleared at the START of each
    * `step()`, filled during the step, drained by the outside layers after it.
    * Deterministic, one-way (engine never reads it), and NEVER persisted.
@@ -280,6 +292,10 @@ export interface SaveData {
   /** Auto-hunt toggle (M6.6, SAVE v12). Engine-persisted (default true). See
    * `GameState.autoHunt` for the behaviour contract. */
   autoHunt: boolean;
+  /** Per-farm-zone unlock-quota kill progress keyed "mapId:zoneIdx" (M7.7
+   * follow-up, SAVE v13) — the zone-unlock gauge no longer wipes on a town
+   * trip/warp/death; `arriveAtZone` stashes + restores through this. */
+  zoneKills: Record<string, number>;
   /**
    * Equipped gear loadout (M7, SAVE v10): weapon/armor templateId or null. A SIM
    * CACHE — the DB `ItemInstance` ledger is authoritative (docs/persistence-m7.md),
@@ -291,6 +307,10 @@ export interface SaveData {
   lootSalt: number;
   /** M7 monotonic drop-roll counter (SAVE v10) — anti-dupe rollId source. */
   lootCounter: number;
+  /** M7.6 ตีบวก material counter (SAVE v14): a per-character resource (like gold),
+   * spent + gold to refine gear, granted by salvage. Server-authoritative
+   * transactions; engine carries the count for display/save. */
+  materials: number;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -319,9 +339,18 @@ export function initHeroes(state: GameState): void {
       // Quest progress MUST survive a stage reset — the boss-defeat objective
       // completes as the stage clears, then nextStage rebuilds the hero.
       prev ? cloneQuest(prev.quest) : null,
-      // Equipped gear (M7) survives a battlefield reset (stage advance) — makeHero
-      // folds its armor HP into the rebuilt hero's max HP.
-      prev ? { weapon: prev.equipped.weapon, armor: prev.equipped.armor } : emptyEquipped(),
+      // Equipped gear (M7) + its refine (M7.6) survive a battlefield reset (stage
+      // advance) — makeHero folds refined armor HP into the rebuilt hero's max HP.
+      prev
+        ? {
+            weapon: prev.equipped.weapon,
+            armor: prev.equipped.armor,
+            refine: {
+              weapon: refineOf(prev.equipped, "weapon"),
+              armor: refineOf(prev.equipped, "armor"),
+            },
+          }
+        : emptyEquipped(),
     ),
   ];
 }
@@ -332,12 +361,47 @@ function cloneQuest(q: HeroQuest | null): HeroQuest | null {
 }
 
 /**
+ * Repair a save whose `hero.cls` disagrees with the ACCOUNT's authoritative
+ * character class (`Character.baseClass` — immutable at creation; evolution
+ * only changes `tier`). This healed the 2026-07-06 "everyone is a swordsman"
+ * bug: a fresh character had no save row, the boot defaulted to swordsman, and
+ * the first autosave then locked the wrong class in permanently. On mismatch
+ * the class is corrected and the allocated stat block is RESET to the true
+ * class's base with every earned point refunded (they were auto-dumped into
+ * the WRONG primary stat) — level/xp/gold/tier/world progress all survive.
+ * Identity (===) when nothing is wrong, so callers can apply it untangled.
+ */
+export function repairHeroClass(save: SaveData, trueClass: HeroClass): SaveData {
+  if (save.hero.cls === trueClass) return save;
+  const level = save.hero.level;
+  return {
+    ...save,
+    hero: {
+      ...save.hero,
+      cls: trueClass,
+      stats: { ...CONFIG.stats.base[trueClass] },
+      statPoints: Math.max(0, (level - 1) * CONFIG.stats.pointsPerLevel),
+      // Wrong-class slotted skills can never be learned by the true class —
+      // reset the loadout to the class defaults (the quest is re-derived
+      // against the corrected class by initGameState's normalizeHeroQuest).
+      autoSlots: defaultAutoSlots(trueClass),
+    },
+  };
+}
+
+/**
  * Construct a live `GameState` from a seed and (optionally) a loaded save.
  * A save restores stage / gold / chosen class / character progression; the
  * battlefield always starts fresh at wave 0 of the saved stage.
+ * `fallbackClass` seeds a FRESH state (no save yet — a just-created character's
+ * first boot) with the account's true class instead of the swordsman default.
  */
-export function initGameState(seed: number, save?: SaveData): GameState {
-  const heroClass: HeroClass = save?.hero.cls ?? "swordsman";
+export function initGameState(
+  seed: number,
+  save?: SaveData,
+  fallbackClass?: HeroClass,
+): GameState {
+  const heroClass: HeroClass = save?.hero.cls ?? fallbackClass ?? "swordsman";
 
   // World position (M6). A save restores its location; a fresh start begins in the
   // first farm zone (map1, stage 1). `state.stage` is DERIVED from the location's
@@ -356,7 +420,10 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     stage,
     phase: "battle",
     wave: 0,
-    kills: 0,
+    // Restore this zone's persisted unlock progress (v13) — a reload mid-zone
+    // resumes the gauge instead of restarting it.
+    kills: save?.zoneKills?.[`${location.mapId}:${location.zoneIdx}`] ?? 0,
+    zoneKills: { ...(save?.zoneKills ?? {}) },
     gold: save?.gold ?? 0,
     heroClass,
     autoCast: false,
@@ -411,6 +478,9 @@ export function initGameState(seed: number, save?: SaveData): GameState {
         ? save.lootSalt >>> 0
         : splitmix32(seed >>> 0),
     lootCounter: Math.max(0, Math.floor(save?.lootCounter ?? 0)),
+    // M7.6 ตีบวก material counter (SAVE v14): restore the saved count (server-
+    // authoritative), else 0 for a fresh/pre-v14 start.
+    materials: Math.max(0, Math.floor(save?.materials ?? 0)),
     events: [],
   };
   initHeroes(state);
@@ -438,6 +508,12 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     h.equipped = {
       weapon: typeof save.equipped?.weapon === "string" ? save.equipped.weapon : null,
       armor: typeof save.equipped?.armor === "string" ? save.equipped.armor : null,
+      // Refine levels (M7.6, SAVE v14): migrate() backfills these (0 for a pre-v14
+      // save); clamp defensively for a raw save literal handed straight in.
+      refine: {
+        weapon: clampRefine(save.equipped?.refine?.weapon),
+        armor: clampRefine(save.equipped?.refine?.armor),
+      },
     };
     h.maxHp = heroMaxHpOf(h);
     h.hp = h.maxHp;
@@ -510,6 +586,14 @@ export function toSaveData(state: GameState): SaveData {
     // standing in `location` (mid-walk is not persisted).
     location: { mapId: state.location.mapId, zoneIdx: state.location.zoneIdx },
     unlockedZones: { ...state.unlockedZones },
+    // v13: persist per-zone unlock progress, INCLUDING the live counter for the
+    // zone the hero is standing in right now.
+    zoneKills: {
+      ...state.zoneKills,
+      ...(zoneAt(state.location).kind === "farm"
+        ? { [`${state.location.mapId}:${state.location.zoneIdx}`]: state.kills }
+        : {}),
+    },
     lastFarmZone: { mapId: state.lastFarmZone.mapId, zoneIdx: state.lastFarmZone.zoneIdx },
     // NPC consumable stacks (M6, SAVE v9). Use-cooldowns + auto-use toggles are
     // transient/UI-owned — not persisted.
@@ -518,9 +602,14 @@ export function toSaveData(state: GameState): SaveData {
     bot: { ...state.bot },
     // Auto-hunt toggle (M6.6, SAVE v12). Engine-persisted (default true).
     autoHunt: state.autoHunt,
-    // Equipped gear cache (M7, SAVE v10). Authoritative copy is the DB item ledger
-    // (boot payload wins on load); this persists the loadout for offline power.
-    equipped: { weapon: h.equipped.weapon, armor: h.equipped.armor },
+    // Equipped gear cache (M7, SAVE v10) + per-slot refine (M7.6, SAVE v14).
+    // Authoritative copy is the DB item ledger (boot payload wins on load); this
+    // persists the loadout + refine so offline power is correct.
+    equipped: {
+      weapon: h.equipped.weapon,
+      armor: h.equipped.armor,
+      refine: { weapon: refineOf(h.equipped, "weapon"), armor: refineOf(h.equipped, "armor") },
+    },
     hero: {
       cls: h.cls,
       level: h.level,
@@ -539,6 +628,8 @@ export function toSaveData(state: GameState): SaveData {
     // M7 drop-roll bookkeeping (SAVE v10): monotonic counter + per-save salt.
     lootCounter: state.lootCounter,
     lootSalt: state.lootSalt,
+    // M7.6 ตีบวก material counter (SAVE v14).
+    materials: state.materials,
     lastSeen: 0,
   };
 }

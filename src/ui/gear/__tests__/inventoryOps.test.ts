@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   applyEquipChange,
+  applyRefineLevelChange,
   applyUnequipChange,
   discoveredTemplateIds,
   isNewTemplate,
   mergeClaimedItems,
+  removeInstanceId,
+  removeSalvagedItems,
   removeSoldItems,
 } from "@/ui/gear/inventoryOps";
 import type {
   InventoryItem,
   ItemInstanceWire,
+  SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
 
@@ -19,6 +23,7 @@ function item(over: Partial<InventoryItem> = {}): InventoryItem {
     templateId: "w_sword_t1_rusty",
     slot: "weapon",
     equippedSlot: null,
+    refineLevel: 0,
     ...over,
   };
 }
@@ -31,6 +36,7 @@ function wire(over: Partial<ItemInstanceWire> = {}): ItemInstanceWire {
     equippedSlot: null,
     origin: "drop",
     acquiredAt: new Date().toISOString(),
+    refineLevel: 0,
     ...over,
   };
 }
@@ -129,6 +135,46 @@ describe("removeSoldItems", () => {
   it("is a no-op copy when nothing sold/already", () => {
     const items = [item({ instanceId: "rejected1" })];
     expect(removeSoldItems(items, results)).toEqual(items);
+  });
+});
+
+describe("removeSalvagedItems (M7.6)", () => {
+  const results: SalvageItemResultWire[] = [
+    { itemId: "salvaged1", status: "salvaged", yield: 3 },
+    { itemId: "already1", status: "already", yield: 0 },
+    { itemId: "rejected1", status: "rejected", reason: "equipped" },
+  ];
+
+  it("removes items with status salvaged or already", () => {
+    const items = [
+      item({ instanceId: "salvaged1" }),
+      item({ instanceId: "already1" }),
+      item({ instanceId: "rejected1" }),
+      item({ instanceId: "untouched" }),
+    ];
+    const result = removeSalvagedItems(items, results);
+    expect(result.map((i) => i.instanceId).sort()).toEqual(["rejected1", "untouched"]);
+  });
+
+  it("is a no-op copy when nothing salvaged/already", () => {
+    const items = [item({ instanceId: "rejected1" })];
+    expect(removeSalvagedItems(items, results)).toEqual(items);
+  });
+});
+
+describe("applyRefineLevelChange (M7.6)", () => {
+  it("bumps the target instance's refineLevel and leaves others untouched", () => {
+    const items = [item({ instanceId: "i1", refineLevel: 0 }), item({ instanceId: "i2" })];
+    const result = applyRefineLevelChange(items, "i1", 1);
+    expect(result.find((i) => i.instanceId === "i1")?.refineLevel).toBe(1);
+    expect(result.find((i) => i.instanceId === "i2")?.refineLevel).toBe(0);
+  });
+});
+
+describe("removeInstanceId (M7.6 refine break)", () => {
+  it("removes exactly the destroyed instance", () => {
+    const items = [item({ instanceId: "i1" }), item({ instanceId: "i2" })];
+    expect(removeInstanceId(items, "i1").map((i) => i.instanceId)).toEqual(["i2"]);
   });
 });
 

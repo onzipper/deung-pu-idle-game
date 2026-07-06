@@ -127,6 +127,11 @@ export async function persistSave(
       update: { version: data.version, data: jsonData, lastSeen: now },
     }),
     // Refresh the HOF caches (source of truth stays the save blob above).
+    // NOTE (M7.6): `Character.materials` is NOT refreshed here — it is the
+    // AUTHORITATIVE refine-material counter, mutated ONLY by the salvage/refine
+    // endpoints. The save blob carries a `materials` mirror the boot payload
+    // overrides from the DB; writing it back from an untrusted save would let a
+    // client grant itself materials.
     prisma.character.update({
       where: { id: characterId },
       data: { level: data.hero.level, power },

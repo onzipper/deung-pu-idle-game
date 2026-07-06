@@ -43,6 +43,18 @@ model Character {
   baseClass String     @db.VarChar(16) // engine HeroClass string: swordsman | archer | mage
   level     Int        @default(1) // cache of engine level (re-derivable)
   power     Int        @default(0) // cache of derived combat power for HOF (re-derivable; widen to BigInt if it ever exceeds 2^31)
+  // M7.6 "ตีบวก" (Refine): the per-character REFINE MATERIAL counter. UNLIKE
+  // level/power above (denormalized re-derivable caches), this is AUTHORITATIVE —
+  // it is NOT re-derivable from the save blob. It is minted ONLY by the salvage
+  // endpoint (destroy dupes -> +materials) and spent ONLY by the refine endpoint
+  // (materials + gold -> attempt a +level), each inside the same tx as the
+  // ItemInstance/ItemEvent mutation. The save blob carries a `materials` MIRROR
+  // (like the equipped-gear cache): the boot payload overrides it from THIS column
+  // on load, and `persistSave` MUST NOT write it back (a client could otherwise
+  // grant itself materials via a save). Owned per-character to match item ownership
+  // (ItemInstance.ownerId -> Character.id); gold stays MVP-client-authoritative in
+  // the save blob until the M5 gold re-derivation lands.
+  materials Int        @default(0)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete: slot freed, row kept for audit
@@ -90,6 +102,11 @@ model ItemInstance {
   origin       String    @db.VarChar(16) // drop | boss | trade | admin
   sourceDetail String?   @db.VarChar(64) // audit: e.g. zone id / boss id / admin note
   equippedSlot String?   @db.VarChar(16) // weapon | armor | NULL(=unequipped)
+  // M7.6 "ตีบวก" (Refine): the item's RO-style +level (+0..+REFINE.maxRefine).
+  // Additive, default 0 -> every pre-M7.6 row is an unrefined +0 (byte-identical
+  // stats). Mutated ONLY by the server-authoritative refine endpoint (the engine
+  // never rolls — CLAUDE.md); success -> +1, degrade -> -1, break -> soft-delete.
+  refineLevel  Int       @default(0)
   claimKey     String?   @unique // idempotency guard for the drop-claim endpoint
   acquiredAt   DateTime  @default(now())
   deletedAt    DateTime? // soft delete (destroyed/consumed); MUST NULL equippedSlot too
@@ -117,7 +134,10 @@ model ItemEvent {
   id              String       @id @default(cuid())
   itemId          String
   item            ItemInstance @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  type            String       @db.VarChar(16) // minted | equipped | unequipped | traded | destroyed
+  type            String       @db.VarChar(16) // minted | equipped | unequipped | traded | destroyed | refined | salvaged
+  // (M7.6 "ตีบวก": `salvaged` = destroyed-for-materials (meta.yield); `refined` =
+  //  a refine attempt (meta {from,to,outcome,cost}; outcome "break" also soft-
+  //  deletes the item, so it doubles as the destroy record for that row).
   fromCharacterId String? // raw cuid, no FK (immutable ledger)
   toCharacterId   String? // raw cuid, no FK
   meta            String?      @db.Text // serialized JSON blob (opaque audit context)

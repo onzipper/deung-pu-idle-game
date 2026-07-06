@@ -55,23 +55,38 @@ describe("hunt-field spawning (M6 สนามล่ามอน)", () => {
 
   it("keeps the pool respawning as mobs are hunted down", () => {
     const s = initGameState(42);
-    run(s, 3000);
-    const killsMid = s.kills;
+    s.autoCast = true; // real play auto-casts the signature (M7.7: needed to survive
+    // the denser field's survivor-retaliation as a low-level hero — a bare basic-only
+    // hero can get swarmed and respawn, which resets s.kills mid-run).
+    // s.kills resets on a death→town→auto-return trip, so tally kill EVENTS across the
+    // run (as the hunt anti-stall tests do) — the real "pool keeps feeding" signal.
+    let total = 0;
+    const tally = (): void => {
+      for (const e of s.events) if (e.type === "kill") total++;
+    };
+    for (let i = 0; i < 3000; i++) {
+      step(s, {});
+      tally();
+    }
+    const killsMid = total;
     expect(killsMid).toBeGreaterThan(0);
-    run(s, 3000);
+    for (let i = 0; i < 3000; i++) {
+      step(s, {});
+      tally();
+    }
     // The pool keeps feeding the hunt (respawn refills what the hero clears).
-    expect(s.kills).toBeGreaterThan(killsMid);
+    expect(total).toBeGreaterThan(killsMid);
   });
 });
 
 describe("boss readiness", () => {
-  it("flips bossReady once the kill goal is met (no auto boss fight in Phase A)", () => {
+  it("never arms bossReady at a non-gate zone; the sim stays in battle", () => {
+    // 2026-07-07: bossReady arms ONLY at the map's last farm zone (the boss-gate
+    // check in world.checkZoneUnlock). A fresh state farms map1 zone 1 — however
+    // many kills accrue, the challenge affordance must stay dark here.
     const s = initGameState(99);
     run(s, 20000);
-    // With enough kills the boss becomes challengeable, but the sim stays in battle.
-    if (s.kills >= 10 + s.stage * 5) {
-      expect(s.bossReady).toBe(true);
-    }
+    expect(s.bossReady).toBe(false);
     expect(s.phase).toBe("battle");
   });
 });

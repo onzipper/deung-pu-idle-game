@@ -23,6 +23,7 @@ function item(over: Partial<InventoryItem>): InventoryItem {
     templateId: "common_sword",
     slot: "weapon",
     equippedSlot: null,
+    refineLevel: 0,
     ...over,
   };
 }

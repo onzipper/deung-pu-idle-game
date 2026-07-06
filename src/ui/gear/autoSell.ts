@@ -1,33 +1,47 @@
 /**
- * M7.5 auto-sell rules — pure selection of which owned instances a sell-trip
- * (manual bulk button OR the bot's `townArrived` reason "sell"/"restockSell"
- * executor in `GameClient.tsx`) should sell. No React/fetch here (headlessly
- * testable, `__tests__/autoSell.test.ts`).
+ * M7.5→M7.7 auto-dispose rules — pure selection of which owned instances a
+ * town-trip (manual bulk path OR the bot's `townArrived` reason "sell"/
+ * "restockSell" executor in `GameClient.tsx`) should SELL vs SALVAGE. No
+ * React/fetch here (headlessly testable, `__tests__/autoSell.test.ts`).
  *
- * Rules v1.1 (2026-07-06, after the "bot never sells" report): epic NEVER
- * auto-sells (no `sellEpic` field — the rule doesn't exist, not just defaulted
- * off); common AND rare both default ON. Rare must default ON because the
- * catalog's rarity tracks TIER (t3-5 = all rare): from stage 6 onward every
- * drop is rare, so the old common-only default gave the bot literally nothing
- * it was allowed to sell. What makes rare-ON safe is the `keepBetterStat`
- * guard, which protects:
+ * Rules v2 (2026-07-07, M7.7 salvage-by-rarity): each of common/rare gets a
+ * 3-way action — "off" | "sell" | "salvage" — instead of the old two booleans.
+ * Epic still NEVER auto-disposes (no field for it at all — the rule doesn't
+ * exist, not just defaulted "off"). `keepBetterStat` is unchanged and guards
+ * BOTH actions identically: it decides whether an instance is a disposal
+ * CANDIDATE at all; the per-rarity action then decides whether that candidate
+ * is sold or salvaged. The guard protects:
  *  - a SLOT WITH GEAR EQUIPPED: any candidate whose flat stat total BEATS the
  *    equipped item (a real upgrade survives the sweep), and
  *  - an EMPTY slot: the single BEST candidate equippable by the hero's class
- *    (your future first equip is kept; the other 97 copies go to the vendor).
+ *    (your future first equip is kept; the other 97 copies are disposed).
  *    An empty slot must NOT keep everything (the original 0-baseline bug that
  *    warp-looped the bot) and must NOT keep nothing (selling your only weapon).
+ *
+ * `selectAutoSellSalvageIds` runs ONE sweep over the inventory and returns
+ * `{ sellIds, salvageIds }` — deliberately not two independent sweeps, so the
+ * empty-slot "keep ONE best backup" pick sees the whole candidate pool exactly
+ * once (two separate sweeps could each decide differently and either keep
+ * zero backups or keep two).
  */
 
 import type { GearSlot, HeroClass, ItemRarity } from "@/engine";
 import type { InventoryItem } from "@/ui/gear/types";
 
+/** Per-rarity disposal action. "off" = never touched by the sweep. */
+export type AutoSellAction = "off" | "sell" | "salvage";
+
 export interface AutoSellRules {
-  sellCommon: boolean;
-  sellRare: boolean;
-  /** Keep-guard: never sell a stat upgrade over what's equipped; on an empty
-   * slot, keep the best class-equippable candidate (see module doc). */
+  common: AutoSellAction;
+  rare: AutoSellAction;
+  /** Keep-guard: never dispose of a stat upgrade over what's equipped; on an
+   * empty slot, keep the best class-equippable candidate (see module doc). */
   keepBetterStat: boolean;
+}
+
+export interface AutoSellSalvageIds {
+  sellIds: string[];
+  salvageIds: string[];
 }
 
 /** The minimal per-template shape this module needs (a subset of the engine's
@@ -51,19 +65,26 @@ function equippableBy(t: SellableTemplate, cls: HeroClass | undefined): boolean 
   return cls === undefined || t.classReq === cls;
 }
 
+function actionFor(rarity: ItemRarity, rules: AutoSellRules): AutoSellAction {
+  if (rarity === "epic") return "off"; // v1: epic is never auto-disposed, period
+  if (rarity === "common") return rules.common;
+  return rules.rare;
+}
+
 /**
- * Selects instance ids to sell. NEVER selects an equipped item (belt-and-
- * braces — the server's sell endpoint rejects those anyway, `reason:
- * "equipped"`). A template missing from `templates` (stale/retired) is
- * skipped defensively rather than crashing the sweep. `heroClass` scopes the
- * empty-slot best-backup pick to items the hero can actually wear.
+ * Selects instance ids to dispose of, split by action. NEVER selects an
+ * equipped item (belt-and-braces — the server's sell/salvage endpoints reject
+ * those anyway, `reason: "equipped"`). A template missing from `templates`
+ * (stale/retired) is skipped defensively rather than crashing the sweep.
+ * `heroClass` scopes the empty-slot best-backup pick to items the hero can
+ * actually wear.
  */
-export function selectAutoSellItemIds(
+export function selectAutoSellSalvageIds(
   items: readonly InventoryItem[],
   templates: Record<string, SellableTemplate>,
   rules: AutoSellRules,
   heroClass?: HeroClass,
-): string[] {
+): AutoSellSalvageIds {
   // Per-slot equipped stat-total baseline for the keep-guard.
   const equippedStatSum: Partial<Record<GearSlot, number>> = {};
   for (const item of items) {
@@ -74,13 +95,16 @@ export function selectAutoSellItemIds(
 
   // Empty-slot best-backup pick: the single strongest class-equippable
   // candidate per slot WITHOUT anything equipped (stat total, then tier, then
-  // instanceId for a deterministic tie-break).
+  // instanceId for a deterministic tie-break). This scans ALL disposable
+  // candidates regardless of sell-vs-salvage action, since the guard is about
+  // "is this a candidate at all", not which action would apply to it.
   const bestBackup: Partial<Record<GearSlot, string>> = {};
   if (rules.keepBetterStat) {
     for (const item of items) {
       if (item.equippedSlot !== null) continue;
       const t = templates[item.templateId];
       if (!t || equippedStatSum[t.slot] !== undefined) continue; // slot has gear
+      if (actionFor(t.rarity, rules) === "off") continue; // not a candidate at all
       if (!equippableBy(t, heroClass)) continue;
       const incumbentId = bestBackup[t.slot];
       if (incumbentId === undefined) {
@@ -99,14 +123,14 @@ export function selectAutoSellItemIds(
     }
   }
 
-  const out: string[] = [];
+  const sellIds: string[] = [];
+  const salvageIds: string[] = [];
   for (const item of items) {
     if (item.equippedSlot !== null) continue; // never touch equipped gear
     const t = templates[item.templateId];
     if (!t) continue;
-    if (t.rarity === "epic") continue; // v1: epic is never auto-sold, period
-    if (t.rarity === "common" && !rules.sellCommon) continue;
-    if (t.rarity === "rare" && !rules.sellRare) continue;
+    const action = actionFor(t.rarity, rules);
+    if (action === "off") continue;
     if (rules.keepBetterStat) {
       const baseline = equippedStatSum[t.slot];
       // Slot has gear: keep only genuine upgrades. Empty slot: keep only the
@@ -114,7 +138,8 @@ export function selectAutoSellItemIds(
       if (baseline !== undefined && statSum(t.stats) > baseline) continue;
       if (baseline === undefined && bestBackup[t.slot] === item.instanceId) continue;
     }
-    out.push(item.instanceId);
+    if (action === "sell") sellIds.push(item.instanceId);
+    else salvageIds.push(item.instanceId);
   }
-  return out;
+  return { sellIds, salvageIds };
 }

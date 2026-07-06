@@ -133,4 +133,12 @@ export type GameEvent =
       x: number;
       y: number;
       mobId: number;
-    };
+    }
+  // Manual play (M7.8 "Manual Play"): the player issued a tap command. One-way like
+  // every event — the engine NEVER reads these back (the command state lives on the
+  // hero); render adds consumers (a ground click-marker at `moveOrdered.x`, a lock
+  // ring on `targetLocked.id`, a fade on `commandCancelled`). `moveOrdered.x` is the
+  // CLAMPED walkable x actually commanded.
+  | { type: "moveOrdered"; x: number }
+  | { type: "targetLocked"; id: number }
+  | { type: "commandCancelled" };

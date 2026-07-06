@@ -13,7 +13,7 @@
  * behaviour is preserved (and made frame-rate independent).
  */
 
-import { CONFIG, HERO_TYPES, ENEMY_TYPES } from "@/engine/config";
+import { CONFIG, HERO_TYPES, ENEMY_TYPES, type HeroType } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp, sign } from "@/engine/core/math";
 import {
@@ -35,7 +35,7 @@ import {
   nearestTarget,
   nearestWithin,
 } from "@/engine/systems/targeting";
-import type { Hero, Enemy, Boss, Projectile, CombatTarget } from "@/engine/entities";
+import type { Hero, Enemy, Boss, Projectile, CombatTarget, ManualCommand } from "@/engine/entities";
 import type { GameState, HitSource } from "@/engine/state";
 
 const L = CONFIG.layout;
@@ -61,6 +61,32 @@ function huntTarget(targets: readonly CombatTarget[], x: number): CombatTarget |
     }
   }
   return best;
+}
+
+/**
+ * The x a hero WALKS toward to engage `tgt`: melee closes to `contactGap` (stopping
+ * `meleeApproachGap` short), ranged holds at its standoff (kites back if crowded).
+ * Shared by AUTO-HUNT (systems/combat.updateHeroes) and a MANUAL attack command
+ * (M7.8) so both approach identically — the auto path is byte-for-byte unchanged.
+ */
+function approachGoalX(h: Hero, t: HeroType, tgt: CombatTarget): number {
+  const hunt = CONFIG.hunt;
+  const d = tgt.x - h.x;
+  const dist = Math.abs(d);
+  const dir = sign(d) || 1;
+  if (t.attack === "melee") {
+    return dist > hunt.contactGap ? tgt.x - dir * hunt.meleeApproachGap : h.x;
+  }
+  const standoff = t.range * hunt.rangedStandoffFrac;
+  if (dist > standoff) return tgt.x - dir * standoff; // close in to firing range
+  if (dist < CONFIG.kiteDist) return h.x - dir * CONFIG.rangedKiteStep; // crowded: step back
+  return h.x; // hold and fire
+}
+
+/** A live (hp > 0) target with `id` in `list`, or null — the manual attack lookup. */
+function findAliveTargetIn(list: readonly CombatTarget[], id: number): CombatTarget | null {
+  for (const t of list) if (t.id === id && t.hp > 0) return t;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,47 +232,68 @@ function huntableTargets(state: GameState): CombatTarget[] {
 export function updateHeroes(state: GameState): void {
   const hunt = CONFIG.hunt;
   const targets = huntableTargets(state);
+  // Manual attack commands (M7.8) resolve against the FULL target list (not the
+  // AUTO-off-filtered `targets`) so a tapped passive/idle mob is engageable even
+  // with auto-hunt off. Empty during the boss phase — commands are ignored there
+  // (boss forced-combat overrides them, exactly like the AUTO-off toggle).
+  const bossPhase = state.phase === "boss";
+  const commandTargets = bossPhase ? [] : getTargets(state);
   const minX = hunt.heroMinX;
   const maxX = fieldMaxX(state) - hunt.fieldRightMargin;
   for (const h of state.heroes) {
     if (h.dead) continue;
     const t = HERO_TYPES[h.cls];
 
-    // AUTO-HUNT (M6 "สนามล่ามอน"): walk to the nearest alive target (deterministic
-    // id tie-break) and stop at attack range — melee closes to contact, ranged
-    // holds at a standoff and kites if the target crowds it. No formation anchor /
-    // forward march: the hero goes to the mob wherever it is on the field. Aggro-ed
-    // mobs coming AT the hero are just targets that arrive early. The multi-actor
-    // machinery is retained for M8 — each party member hunts independently here, and
-    // the per-class `offset` (formation spacing) is preserved in config for it.
-    const hntTgt = huntTarget(targets, h.x);
+    // MANUAL command (M7.8 "Manual Play") takes priority over auto-hunt, unless the
+    // boss phase is forcing combat (then commands are ignored — see `bossPhase`).
+    // `manualActive` suppresses this step's auto-hunt movement + target acquisition;
+    // `atkTgt` (set only by an in-range attack command) drives the swing below.
     let goalX = h.x;
-    if (hntTgt) {
-      const d = hntTgt.x - h.x;
-      const dist = Math.abs(d);
-      const dir = sign(d) || 1;
-      if (t.attack === "melee") {
-        goalX = dist > hunt.contactGap ? hntTgt.x - dir * hunt.meleeApproachGap : h.x;
+    let atkTgt: CombatTarget | null = null;
+    let manualActive = false;
+    if (!bossPhase && h.command) {
+      const cmd: ManualCommand = h.command;
+      if (cmd.kind === "move") {
+        // Walk to x, IGNORING huntable targets (no attacking; aggro is unchanged —
+        // engaged mobs keep hitting the hero). Arrival within `arriveEps` COMPLETES
+        // the command; this step then falls through to auto-hunt (AUTO on) / idle.
+        if (Math.abs(h.x - cmd.x) <= CONFIG.manual.arriveEps) {
+          h.command = null;
+        } else {
+          goalX = cmd.x;
+          manualActive = true;
+        }
       } else {
-        const standoff = t.range * hunt.rangedStandoffFrac;
-        if (dist > standoff)
-          goalX = hntTgt.x - dir * standoff; // close in to firing range
-        else if (dist < CONFIG.kiteDist)
-          goalX = h.x - dir * CONFIG.rangedKiteStep; // crowded: step back
-        // else hold and fire
+        // Attack a specific target: close to range + fight it until it dies (target
+        // gone -> command complete) or the command is cancelled/replaced. Overrides
+        // the auto/hunt target selection.
+        const ct = findAliveTargetIn(commandTargets, cmd.targetId);
+        if (!ct) {
+          h.command = null; // dead / despawned -> complete
+        } else {
+          goalX = approachGoalX(h, t, ct);
+          if (Math.abs(ct.x - h.x) <= t.range) atkTgt = ct;
+          manualActive = true;
+        }
       }
     }
-    goalX = clamp(goalX, minX, maxX);
-    h.x += clamp(goalX - h.x, -hunt.huntSpeed * FIXED_DT, hunt.huntSpeed * FIXED_DT);
 
-    h.cd -= FIXED_DT;
-    if (h.cd <= 0) {
+    if (!manualActive) {
+      // AUTO-HUNT (M6 "สนามล่ามอน"): walk to the nearest alive target (deterministic
+      // id tie-break) and stop at attack range — melee closes to contact, ranged
+      // holds at a standoff and kites if the target crowds it. No formation anchor /
+      // forward march: the hero goes to the mob wherever it is on the field. Aggro-ed
+      // mobs coming AT the hero are just targets that arrive early. The multi-actor
+      // machinery is retained for M8 — each party member hunts independently here, and
+      // the per-class `offset` (formation spacing) is preserved in config for it.
+      const hntTgt = huntTarget(targets, h.x);
+      goalX = hntTgt ? approachGoalX(h, t, hntTgt) : h.x;
       // Melee retaliates against the nearest foe within its range on EITHER side
       // (symmetric |Δx| ≤ range) so a monster in melee contact is never a free
       // hitter — replaces the POC's asymmetric [meleeTargetMinD, range] window that
       // left an 80–96px blind spot behind him ("มอนตีดาบฟรี"). Ranged stays forward
       // only (nearestTarget with minD 0).
-      const tgt =
+      atkTgt =
         t.attack === "melee"
           ? nearestWithin(targets, h.x, t.range)
           : // Ranged heroes fire FORWARD by default (nearestTarget, minD 0). But if
@@ -258,6 +305,14 @@ export function updateHeroes(state: GameState): void {
             // balance pacing — is unchanged.
             (nearestTarget(targets, h.x, 0, t.range) ??
             nearestWithin(targets, h.x, t.range));
+    }
+
+    goalX = clamp(goalX, minX, maxX);
+    h.x += clamp(goalX - h.x, -hunt.huntSpeed * FIXED_DT, hunt.huntSpeed * FIXED_DT);
+
+    h.cd -= FIXED_DT;
+    if (h.cd <= 0) {
+      const tgt = atkTgt;
       if (tgt) {
         h.cd = heroAtkSpeedOf(h);
         const dmg = heroAtkOf(h);
@@ -373,10 +428,9 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
     const d = Math.hypot(dx, dy);
     if (d <= arrive) {
       const src = projHitSource(p.kind);
-      // AoE-aggro rule (M6 hunt follow-up). Arrow-rain decided its capped wake ONCE
-      // at cast (skills.ts), so its 9 drops deal NO-WAKE damage — otherwise each drop
-      // would re-aggro the field. Single-impact AoEs (mage basic orb, meteor) wake the
-      // capped nearest set per impact.
+      // M7.7 survivor-retaliation: every falling AoE (rain drop, meteor, cataclysm,
+      // mage basic orb) wakes the TOUGH mobs it damages-but-doesn't-kill, via the one
+      // shared AoE path (damageInRadius/applyAoeDamage are the same now — no cap pass).
       if (p.kind === "rainArrow") damageInRadius(state, list, p.tx, p.aoe, p.damage, src);
       else applyAoeDamage(state, list, p.tx, p.aoe, p.damage, src);
       return true;
@@ -437,13 +491,9 @@ export function resolveDeaths(state: GameState): void {
     onBossKilled(state); // gold reward + phase -> victory
   }
 
-  if (
-    state.phase === "battle" &&
-    !state.bossReady &&
-    state.kills >= CONFIG.killGoal(state.stage)
-  ) {
-    state.bossReady = true;
-  }
+  // bossReady arming moved to world.checkZoneUnlock (2026-07-07): quota alone
+  // is NOT enough — the button must only light where the boss room is actually
+  // next door (see the note there).
 
   // Death -> respawn in TOWN (M6 "World & Town"; GDD: dead hero = respawn in town,
   // no penalty). Covers BOTH a farm-zone wipe and a boss-room wipe (replacing the

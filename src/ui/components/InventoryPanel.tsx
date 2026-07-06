@@ -25,13 +25,23 @@
 
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { ITEM_TEMPLATES, INVENTORY_CAP, type GearSlot, type HeroClass } from "@/engine";
+import {
+  ITEM_TEMPLATES,
+  INVENTORY_CAP,
+  refinedStat,
+  salvageYield,
+  type GearSlot,
+  type HeroClass,
+  type ItemTemplate,
+} from "@/engine";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
+import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { groupIntoStacks, type ItemStack } from "@/ui/gear/stacking";
-import { computeStatDelta } from "@/ui/gear/statDelta";
+import { computeStatDelta, type StatBlock } from "@/ui/gear/statDelta";
 import { toInventoryItem } from "@/ui/gear/types";
+import { MaterialIcon } from "@/ui/components/icons";
 import {
   GEAR_SLOT_ICONS,
   HERO_ICONS,
@@ -45,6 +55,30 @@ const SLOT_ORDER: readonly GearSlot[] = ["weapon", "armor"];
 
 function tierBorder(tier: number): string {
   return TIER_BORDER_COLORS[tier] ?? TIER_BORDER_COLORS[6];
+}
+
+/** Stack-level selection key — compound `templateId:refineLevel` (M7.6), since
+ * a +0 and a +5 copy of the same template are now separate `ItemStack`s (see
+ * `ui/gear/stacking.ts`). */
+function stackKey(stack: Pick<ItemStack, "templateId" | "refineLevel">): string {
+  return `${stack.templateId}:${stack.refineLevel}`;
+}
+
+/** The template's flat stat block, refined to `refineLevel` (M7.6 ตีบวก — a
+ * +0 item is byte-identical to its base template). */
+function refinedStatsOf(template: ItemTemplate, refineLevel: number): StatBlock {
+  return {
+    atk: template.stats.atk ? refinedStat(template.stats.atk, refineLevel) : undefined,
+    def: template.stats.def ? refinedStat(template.stats.def, refineLevel) : undefined,
+    hp: template.stats.hp ? refinedStat(template.stats.hp, refineLevel) : undefined,
+  };
+}
+
+/** Flat refined stat total (M7.6 ตีบวก) — used by the "salvage junk common"
+ * bulk affordance to compare a candidate against what's equipped in its slot. */
+function statSumOf(template: ItemTemplate, refineLevel: number): number {
+  const s = refinedStatsOf(template, refineLevel);
+  return (s.atk ?? 0) + (s.def ?? 0) + (s.hp ?? 0);
 }
 
 function GridCell({
@@ -81,6 +115,9 @@ function GridCell({
       </span>
       <span className="text-[9px] font-bold text-ddp-ink-muted">
         {t("tierShort", { tier: template.tier })}
+        {stack.refineLevel > 0 && (
+          <span className="text-emerald-400"> {t("refinePlus", { level: stack.refineLevel })}</span>
+        )}
       </span>
       {template.classReq && (
         <span
@@ -120,16 +157,26 @@ function GridCell({
 
 function StatDeltaChips({
   candidateTemplateId,
+  candidateRefineLevel,
   equippedTemplateId,
+  equippedRefineLevel,
 }: {
   candidateTemplateId: string;
+  candidateRefineLevel: number;
   equippedTemplateId: string | null;
+  equippedRefineLevel: number;
 }) {
   const t = useTranslations("inventory");
   const candidate = ITEM_TEMPLATES[candidateTemplateId];
   if (!candidate) return null;
   const equipped = equippedTemplateId ? ITEM_TEMPLATES[equippedTemplateId] : null;
-  const entries = computeStatDelta(candidate.stats, equipped ? equipped.stats : null);
+  // M7.6 ตีบวก: compare REFINED stat blocks (both sides), not raw catalog stats
+  // — a +7 sword genuinely out-damages a +0 of the same template.
+  const candidateStats = refinedStatsOf(candidate, candidateRefineLevel);
+  const entries = computeStatDelta(
+    candidateStats,
+    equipped ? refinedStatsOf(equipped, equippedRefineLevel) : null,
+  );
 
   if (entries.length === 0) return null;
 
@@ -147,7 +194,7 @@ function StatDeltaChips({
           }
         >
           {t(`stat${e.key === "atk" ? "Atk" : e.key === "def" ? "Def" : "Hp"}`, {
-            value: candidate.stats[e.key] ?? 0,
+            value: candidateStats[e.key] ?? 0,
           })}
           {equippedTemplateId &&
             (e.delta > 0 ? ` (+${e.delta})` : e.delta < 0 ? ` (${e.delta})` : "")}
@@ -161,27 +208,34 @@ function DetailCard({
   stack,
   heroCls,
   equippedTemplateId,
+  equippedRefineLevel,
   inTown,
   busy,
   onEquip,
   onUnequip,
   onSellOne,
   onSellAll,
+  onSalvageOne,
+  onSalvageAll,
 }: {
   stack: ItemStack;
   heroCls: HeroClass;
   equippedTemplateId: string | null;
+  equippedRefineLevel: number;
   inTown: boolean;
   busy: boolean;
   onEquip: (stack: ItemStack) => void;
   onUnequip: (stack: ItemStack) => void;
   onSellOne: (stack: ItemStack) => void;
   onSellAll: (stack: ItemStack) => void;
+  onSalvageOne: (stack: ItemStack) => void;
+  onSalvageAll: (stack: ItemStack) => void;
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
   const template = ITEM_TEMPLATES[stack.templateId];
   const [confirmingSell, setConfirmingSell] = useState(false);
+  const [confirmingSalvage, setConfirmingSalvage] = useState(false);
   if (!template) return null;
 
   const equipped = stack.equippedInstanceId !== null;
@@ -189,6 +243,9 @@ function DetailCard({
   const colors = RARITY_COLORS[template.rarity];
   const needsConfirm = template.rarity === "rare" || template.rarity === "epic";
   const sellableCount = stack.unequippedIds.length;
+  // M7.6 ตีบวก: preview the material yield BEFORE salvaging (spec — the server
+  // rolls nothing here, `salvageYield` is a pure tier/rarity table read).
+  const perItemYield = salvageYield(template.tier, template.rarity);
 
   function handleSell(all: boolean): void {
     if (needsConfirm && !confirmingSell) {
@@ -200,6 +257,16 @@ function DetailCard({
     else onSellOne(stack);
   }
 
+  function handleSalvage(all: boolean): void {
+    if (needsConfirm && !confirmingSalvage) {
+      setConfirmingSalvage(true);
+      return;
+    }
+    setConfirmingSalvage(false);
+    if (all) onSalvageAll(stack);
+    else onSalvageOne(stack);
+  }
+
   return (
     <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 p-3">
       <div className="flex items-center gap-2">
@@ -209,6 +276,9 @@ function DetailCard({
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className={`truncate text-sm font-bold ${colors.text}`}>
             {colors.icon} {tContent(`${stack.templateId}.name`)}
+            {stack.refineLevel > 0 && (
+              <span className="text-emerald-400"> {t("refinePlus", { level: stack.refineLevel })}</span>
+            )}
           </span>
           <span className="text-[10px] text-ddp-ink-muted">
             {t("tierLabel", { tier: template.tier })} · {t(`rarity.${template.rarity}`)}
@@ -218,7 +288,9 @@ function DetailCard({
 
       <StatDeltaChips
         candidateTemplateId={stack.templateId}
+        candidateRefineLevel={stack.refineLevel}
         equippedTemplateId={equipped ? null : equippedTemplateId}
+        equippedRefineLevel={equippedRefineLevel}
       />
 
       <div className="flex flex-wrap gap-2">
@@ -278,6 +350,40 @@ function DetailCard({
           </>
         )}
       </div>
+
+      {sellableCount > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy || !inTown}
+            title={!inTown ? t("sellTownOnly") : undefined}
+            onClick={() => handleSalvage(false)}
+            className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/50 bg-violet-400/10 px-3 text-xs font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <MaterialIcon className="h-3.5 w-3.5" />
+            {confirmingSalvage
+              ? t("confirmSalvage")
+              : t("salvageOneButton", { yield: perItemYield })}
+          </button>
+          {sellableCount > 1 && (
+            <button
+              type="button"
+              disabled={busy || !inTown}
+              title={!inTown ? t("sellTownOnly") : undefined}
+              onClick={() => handleSalvage(true)}
+              className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/30 bg-violet-400/5 px-3 text-xs font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <MaterialIcon className="h-3.5 w-3.5" />
+              {confirmingSalvage
+                ? t("confirmSalvage")
+                : t("salvageAllButton", {
+                    count: sellableCount,
+                    yield: perItemYield * sellableCount,
+                  })}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -289,6 +395,7 @@ export interface InventoryPanelProps {
 export function InventoryPanel({ onClose }: InventoryPanelProps) {
   const t = useTranslations("inventory");
   const inventory = useGameStore((s) => s.inventory);
+  const materials = useGameStore((s) => s.materials);
   const heroCls = useGameStore((s) => s.heroes[0]?.cls);
   const inTown = useGameStore((s) => s.world.kind === "town");
   const sessionKnownTemplateIds = useGameStore((s) => s.sessionKnownTemplateIds);
@@ -297,7 +404,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
 
   const [activeTab, setActiveTab] = useState<GearSlot>("weapon");
   const [classOnly, setClassOnly] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const allStacks = useMemo(() => groupIntoStacks(inventory), [inventory]);
@@ -309,16 +416,17 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         const tpl = ITEM_TEMPLATES[s.templateId];
         return !tpl || tpl.classReq === null || tpl.classReq === heroCls;
       })
-      .sort(
-        (a, b) =>
-          (ITEM_TEMPLATES[b.templateId]?.tier ?? 0) -
-          (ITEM_TEMPLATES[a.templateId]?.tier ?? 0),
-      );
+      .sort((a, b) => {
+        const tierDiff =
+          (ITEM_TEMPLATES[b.templateId]?.tier ?? 0) - (ITEM_TEMPLATES[a.templateId]?.tier ?? 0);
+        return tierDiff !== 0 ? tierDiff : b.refineLevel - a.refineLevel;
+      });
   }, [allStacks, activeTab, classOnly, heroCls]);
 
-  const equippedTemplateId =
-    inventory.find((i) => i.equippedSlot === activeTab)?.templateId ?? null;
-  const selectedStack = stacks.find((s) => s.templateId === selectedTemplateId) ?? null;
+  const equippedItem = inventory.find((i) => i.equippedSlot === activeTab) ?? null;
+  const equippedTemplateId = equippedItem?.templateId ?? null;
+  const equippedRefineLevel = equippedItem?.refineLevel ?? 0;
+  const selectedStack = stacks.find((s) => stackKey(s) === selectedKey) ?? null;
 
   async function resync(): Promise<void> {
     const res = await fetchInventory();
@@ -332,7 +440,9 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     const res = await postEquip(instanceId);
     if (res.ok) {
       setInventory(applyEquipChange(inventory, instanceId, stack.slot));
-      queueEquip(stack.slot, stack.templateId);
+      // M7.6 ตีบวก: carry the stack's refine level so the sim applies the
+      // RIGHT stats immediately (a +7 sword must never equip as if +0).
+      queueEquip(stack.slot, stack.templateId, stack.refineLevel);
     } else {
       await resync();
     }
@@ -378,6 +488,47 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     setBusy(false);
   }
 
+  async function handleSalvageOne(stack: ItemStack): Promise<void> {
+    if (stack.unequippedIds.length === 0) return;
+    setBusy(true);
+    await executeSalvage([stack.unequippedIds[0]]);
+    setBusy(false);
+  }
+
+  async function handleSalvageAll(stack: ItemStack): Promise<void> {
+    if (stack.unequippedIds.length === 0) return;
+    setBusy(true);
+    await executeSalvage(stack.unequippedIds);
+    setBusy(false);
+  }
+
+  /** M7.6 ตีบวก bulk affordance: "ย่อยของ common ทั้งหมดที่ต่ำกว่าของที่ใส่" —
+   * every UNEQUIPPED common item whose refined stat total does not beat what's
+   * currently worn in its slot (an empty slot keeps everything eligible, same
+   * as the sell-side keep-guard's "nothing worn yet" case). */
+  async function handleSalvageJunkCommon(): Promise<void> {
+    const equippedSumBySlot = new Map<GearSlot, number>();
+    for (const it of inventory) {
+      if (!it.equippedSlot) continue;
+      const tpl = ITEM_TEMPLATES[it.templateId];
+      if (tpl) equippedSumBySlot.set(it.equippedSlot, statSumOf(tpl, it.refineLevel));
+    }
+    const ids = inventory
+      .filter((i) => i.equippedSlot === null)
+      .filter((i) => ITEM_TEMPLATES[i.templateId]?.rarity === "common")
+      .filter((i) => {
+        const tpl = ITEM_TEMPLATES[i.templateId];
+        if (!tpl) return false;
+        const baseline = equippedSumBySlot.get(tpl.slot);
+        return baseline === undefined || statSumOf(tpl, i.refineLevel) <= baseline;
+      })
+      .map((i) => i.instanceId);
+    if (ids.length === 0) return;
+    setBusy(true);
+    await executeSalvage(ids);
+    setBusy(false);
+  }
+
   if (!heroCls) return null;
 
   return (
@@ -405,7 +556,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           </button>
         </div>
 
-        {/* Capacity bar */}
+        {/* Capacity bar + materials readout (M7.6 ตีบวก) */}
         <div className="flex items-center gap-2">
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/40">
             <div
@@ -418,6 +569,10 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           <span className="shrink-0 text-[10px] font-bold tabular-nums text-ddp-ink-muted">
             {t("capacityLabel", { count: inventory.length, cap: INVENTORY_CAP })}
           </span>
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-violet-400/40 bg-violet-400/10 px-2 py-0.5 text-[10px] font-bold tabular-nums text-violet-300">
+            <MaterialIcon className="h-3 w-3" />
+            {materials.toLocaleString()}
+          </span>
         </div>
 
         {/* Tabs */}
@@ -428,7 +583,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
               type="button"
               onClick={() => {
                 setActiveTab(slot);
-                setSelectedTemplateId(null);
+                setSelectedKey(null);
               }}
               className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
                 activeTab === slot
@@ -464,6 +619,16 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           >
             {t("sellAllCommonButton")}
           </button>
+          <button
+            type="button"
+            disabled={busy || !inTown}
+            title={!inTown ? t("sellTownOnly") : undefined}
+            onClick={handleSalvageJunkCommon}
+            className="flex min-h-11 items-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/40 bg-violet-400/10 px-2.5 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <MaterialIcon className="h-3.5 w-3.5" />
+            {t("salvageJunkCommonButton")}
+          </button>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
@@ -471,19 +636,18 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             <p className="text-[11px] text-ddp-ink-muted/70">{t("emptySlotHint")}</p>
           ) : (
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-              {stacks.map((stack) => (
-                <GridCell
-                  key={stack.templateId}
-                  stack={stack}
-                  isNew={!sessionKnownTemplateIds.includes(stack.templateId)}
-                  selected={selectedTemplateId === stack.templateId}
-                  onSelect={() =>
-                    setSelectedTemplateId((cur) =>
-                      cur === stack.templateId ? null : stack.templateId,
-                    )
-                  }
-                />
-              ))}
+              {stacks.map((stack) => {
+                const key = stackKey(stack);
+                return (
+                  <GridCell
+                    key={key}
+                    stack={stack}
+                    isNew={!sessionKnownTemplateIds.includes(stack.templateId)}
+                    selected={selectedKey === key}
+                    onSelect={() => setSelectedKey((cur) => (cur === key ? null : key))}
+                  />
+                );
+              })}
             </div>
           )}
 
@@ -492,12 +656,15 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
               stack={selectedStack}
               heroCls={heroCls}
               equippedTemplateId={equippedTemplateId}
+              equippedRefineLevel={equippedRefineLevel}
               inTown={inTown}
               busy={busy}
               onEquip={handleEquip}
               onUnequip={handleUnequip}
               onSellOne={handleSellOne}
               onSellAll={handleSellAll}
+              onSalvageOne={handleSalvageOne}
+              onSalvageAll={handleSalvageAll}
             />
           )}
         </div>

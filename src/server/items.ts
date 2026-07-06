@@ -29,8 +29,17 @@ import {
   INVENTORY_CAP,
   type GearSlot,
 } from "@/engine/config/items";
+import {
+  REFINE,
+  refineCost,
+  salvageYield,
+  successChanceForLevel,
+  failModeForLevel,
+  clampRefine,
+} from "@/engine/config/refine";
 import type { HeroClass } from "@/engine";
 import { prisma } from "@/lib/db";
+import { randomInt } from "node:crypto";
 
 // ── Tunables (plausibility cap) ──────────────────────────────────────────────
 /** Hard cap on items per POST /api/items/claim batch (DoS / abuse bound). */
@@ -38,6 +47,9 @@ export const MAX_CLAIM_BATCH = 64;
 /** Hard cap on itemIds per POST /api/items/sell batch (DoS / abuse bound). Sized
  *  to the full inventory so a "sell everything" trip is one request. */
 export const MAX_SELL_BATCH = 100;
+/** Hard cap on itemIds per POST /api/items/salvage batch (mirrors sell — a full
+ *  inventory "salvage all dupes" trip is one request). */
+export const MAX_SALVAGE_BATCH = 100;
 /**
  * GENEROUS kills/sec ceiling for the rate-plausibility guard — real auto-hunting
  * clears well under ~1 mob/sec; 5 leaves huge headroom for legit bursts/AoE while
@@ -137,6 +149,17 @@ export const sellSchema = z
   })
   .strict();
 
+/** Salvage batch (M7.6). Ids are deduped in `salvageItems` (one soft-destroy +
+ *  material credit per unique id); a duplicated id can never mint materials twice. */
+export const salvageSchema = z
+  .object({
+    itemIds: z.array(z.string().min(1).max(64)).min(1).max(MAX_SALVAGE_BATCH),
+  })
+  .strict();
+
+/** Refine one owned item (M7.6). Single itemId — the server rolls the outcome. */
+export const refineSchema = z.object({ itemId: z.string().min(1).max(64) }).strict();
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface ItemInstanceDTO {
@@ -148,6 +171,8 @@ export interface ItemInstanceDTO {
   equippedSlot: GearSlot | null;
   origin: string;
   acquiredAt: string;
+  /** M7.6 RO-style refine +level (+0..+REFINE.maxRefine). */
+  refineLevel: number;
 }
 
 interface InstanceRow {
@@ -156,6 +181,7 @@ interface InstanceRow {
   equippedSlot: string | null;
   origin: string;
   acquiredAt: Date;
+  refineLevel: number;
 }
 
 function toItemDTO(row: InstanceRow): ItemInstanceDTO | null {
@@ -170,6 +196,7 @@ function toItemDTO(row: InstanceRow): ItemInstanceDTO | null {
     equippedSlot: (row.equippedSlot as GearSlot | null) ?? null,
     origin: row.origin,
     acquiredAt: row.acquiredAt.toISOString(),
+    refineLevel: clampRefine(row.refineLevel),
   };
 }
 
@@ -179,6 +206,7 @@ const INSTANCE_SELECT = {
   equippedSlot: true,
   origin: true,
   acquiredAt: true,
+  refineLevel: true,
 } as const;
 
 // ── Inventory read (invariant-6 unique doubles as the ownerId read index) ─────
@@ -197,19 +225,36 @@ export async function loadInventory(characterId: string): Promise<ItemInstanceDT
   return rows.map(toItemDTO).filter((d): d is ItemInstanceDTO => d !== null);
 }
 
-/** The equipped loadout (weapon/armor → templateId) for the boot payload. */
+/** The equipped loadout (weapon/armor → templateId) for the boot payload. Carries
+ *  the per-slot refine +level (M7.6) so the engine hero rebuilds refined stats. */
 export interface EquippedLoadout {
   weapon: string | null;
   armor: string | null;
+  /** Per-slot refine +level (mirrors `EquippedGear.refine`; missing slot → +0). */
+  refine: { weapon: number; armor: number };
 }
 
 export function equippedLoadoutFrom(inventory: ItemInstanceDTO[]): EquippedLoadout {
-  const loadout: EquippedLoadout = { weapon: null, armor: null };
+  const loadout: EquippedLoadout = { weapon: null, armor: null, refine: { weapon: 0, armor: 0 } };
   for (const item of inventory) {
-    if (item.equippedSlot === "weapon") loadout.weapon = item.templateId;
-    else if (item.equippedSlot === "armor") loadout.armor = item.templateId;
+    if (item.equippedSlot === "weapon") {
+      loadout.weapon = item.templateId;
+      loadout.refine.weapon = item.refineLevel;
+    } else if (item.equippedSlot === "armor") {
+      loadout.armor = item.templateId;
+      loadout.refine.armor = item.refineLevel;
+    }
   }
   return loadout;
+}
+
+/** The active character's authoritative refine-material balance (boot payload). */
+export async function loadMaterials(characterId: string): Promise<number> {
+  const row = await prisma.character.findUnique({
+    where: { id: characterId },
+    select: { materials: true },
+  });
+  return row?.materials ?? 0;
 }
 
 // ── Claim (mint) ─────────────────────────────────────────────────────────────
@@ -624,9 +669,312 @@ export async function sellItems(
   );
 }
 
+// ── Salvage (destroy → refine materials) ─────────────────────────────────────
+
+export type SalvageItemResult =
+  | { itemId: string; status: "salvaged"; yield: number }
+  | { itemId: string; status: "already"; yield: 0 }
+  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+
+/**
+ * Salvage owned items into REFINE MATERIALS (M7.6). Mirrors `sellItems` exactly,
+ * only the currency differs: instead of returning gold for the client to apply,
+ * salvage MINTS materials into the AUTHORITATIVE `Character.materials` column in
+ * the SAME tx as the soft-destroys — so the material counter is server-owned, not
+ * client-trusted (anti-cheat foundation for the refine sink).
+ *
+ * NO DOUBLE-CREDIT (mirrors the sell idempotency pattern — no separate client key
+ * needed): each item's soft-delete is a conditional `updateMany` guarded by
+ * `deletedAt: null` + `equippedSlot: null` (an atomic check-and-set). Two concurrent
+ * salvage calls for the same id race on that write — exactly one matches (count 1 →
+ * "salvaged", yield counted), the loser matches nothing (count 0 → "already",
+ * yield 0). Only the WON set contributes to the materials increment, so a
+ * retried/duplicated request can never mint materials twice. Equipped items REJECT
+ * ("equipped") — salvage never auto-unequips (mirrors sell).
+ *
+ * Yield is captured per item via `salvageYield(tier, rarity)` (engine config) and
+ * recorded in each `salvaged` ItemEvent (meta) as the AUTHORITATIVE audit for a
+ * future server-side re-derivation (never recomputed from today's config).
+ */
+export async function salvageItems(
+  characterId: string,
+  itemIds: string[],
+  now: Date = new Date(),
+): Promise<{ results: SalvageItemResult[]; totalMaterials: number; materials: number }> {
+  const uniqueIds = [...new Set(itemIds)];
+  if (uniqueIds.length === 0) {
+    return { results: [], totalMaterials: 0, materials: await loadMaterials(characterId) };
+  }
+
+  return prisma.$transaction(
+    async (tx) => {
+      const rows = await tx.itemInstance.findMany({
+        where: { id: { in: uniqueIds }, ownerId: characterId },
+        select: { id: true, templateId: true, deletedAt: true, equippedSlot: true },
+      });
+      const byId = new Map(rows.map((r) => [r.id, r]));
+
+      const results: SalvageItemResult[] = [];
+      const salvaged: { itemId: string; yield: number; tier: number; rarity: string }[] = [];
+      for (const itemId of uniqueIds) {
+        const item = byId.get(itemId);
+        if (!item) {
+          results.push({ itemId, status: "rejected", reason: "not_found" });
+          continue;
+        }
+        if (item.deletedAt !== null) {
+          results.push({ itemId, status: "already", yield: 0 });
+          continue;
+        }
+        if (item.equippedSlot !== null) {
+          results.push({ itemId, status: "rejected", reason: "equipped" });
+          continue;
+        }
+        const template = ITEM_TEMPLATES[item.templateId];
+        if (!template) {
+          // Retired/unknown template — cannot value it; treat as un-salvageable.
+          results.push({ itemId, status: "rejected", reason: "not_found" });
+          continue;
+        }
+
+        const gained = salvageYield(template.tier, template.rarity);
+        // Atomic check-and-set (deletedAt:null + equippedSlot:null is the lock).
+        const res = await tx.itemInstance.updateMany({
+          where: { id: itemId, ownerId: characterId, deletedAt: null, equippedSlot: null },
+          data: { deletedAt: now },
+        });
+        if (res.count === 0) {
+          results.push({ itemId, status: "already", yield: 0 });
+          continue;
+        }
+        salvaged.push({ itemId, yield: gained, tier: template.tier, rarity: template.rarity });
+        results.push({ itemId, status: "salvaged", yield: gained });
+      }
+
+      const totalMaterials = salvaged.reduce((acc, s) => acc + s.yield, 0);
+      let materials: number;
+      if (salvaged.length > 0) {
+        await tx.itemEvent.createMany({
+          data: salvaged.map((s) => ({
+            itemId: s.itemId,
+            type: "salvaged",
+            fromCharacterId: characterId,
+            meta: JSON.stringify({
+              salvaged: true,
+              yield: s.yield,
+              tier: s.tier,
+              rarity: s.rarity,
+              currency: "materials",
+            }),
+          })),
+        });
+        // Credit the authoritative counter in the SAME tx (won set only).
+        const updated = await tx.character.update({
+          where: { id: characterId },
+          data: { materials: { increment: totalMaterials } },
+          select: { materials: true },
+        });
+        materials = updated.materials;
+      } else {
+        const cur = await tx.character.findUnique({
+          where: { id: characterId },
+          select: { materials: true },
+        });
+        materials = cur?.materials ?? 0;
+      }
+
+      return { results, totalMaterials, materials };
+    },
+    // Same headroom as the sell batch (≤100 indexed single-row writes on a shared host).
+    { maxWait: 10_000, timeout: 20_000 },
+  );
+}
+
+// ── Refine (ตีบวก — server-authoritative roll) ───────────────────────────────
+
+export type RefineOutcome = "success" | "degrade" | "break" | "safe";
+
+export type RefineResult =
+  | {
+      ok: true;
+      outcome: RefineOutcome;
+      /** New +level after the attempt (0 when broken). */
+      refineLevel: number;
+      /** True when the item was destroyed (fail on the break band). */
+      destroyed: boolean;
+      /** New authoritative material balance after debiting. */
+      materials: number;
+      /** Deltas for the client to apply via engine intents (materialsDelta + gold). */
+      materialsDelta: number;
+      goldDelta: number;
+      cost: { materials: number; gold: number };
+    }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "unknown_template"
+        | "max"
+        | "insufficient_materials"
+        | "insufficient_gold";
+    };
+
+/** Crypto-backed uniform roll in [0, 1). Injectable for deterministic tests. This
+ *  is the SERVER roll (outside the engine determinism rule — CLAUDE.md). */
+function cryptoRoll(): number {
+  return randomInt(0, 1_000_000) / 1_000_000;
+}
+
+/**
+ * Refine ONE owned item (M7.6 "ตีบวก"). SERVER-AUTHORITATIVE — the client never
+ * rolls (anti-cheat). One `prisma.$transaction`:
+ *   1. read the item (owned, non-deleted) → tier (engine config) + current +level;
+ *   2. reject if already at `REFINE.maxRefine`;
+ *   3. cost = `refineCost(tier, current+1)`; reject if `goldBalance` < cost.gold
+ *      (gold lives in the save blob — the route passes the PERSISTED balance; it is
+ *      returned as a delta, not debited here);
+ *   4. debit `cost.materials` from `Character.materials` via a guarded `updateMany`
+ *      (`materials >= cost.materials`) — the atomic materials check-and-set; count 0
+ *      → insufficient_materials (tx aborts, nothing charged);
+ *   5. ROLL success vs `successChanceForLevel(target)`. success → +1; fail →
+ *      `failModeForLevel`: safe → unchanged, degrade → −1 (floor 0), break → soft-
+ *      destroy (deletedAt + equippedSlot NULL — invariant 5, unequips if equipped);
+ *   6. apply the item change via a guarded `updateMany` (`refineLevel: current`,
+ *      `deletedAt: null`) — a COMPARE-AND-SET: a concurrent/retried attempt that
+ *      already moved the level matches 0 rows → aborts the tx (materials restored),
+ *      so no double-charge (every real outcome changes the level or deletes, since
+ *      the safe band is 100%-success in config → no no-op write to double-apply);
+ *   7. append a `refined` ItemEvent (meta {from,to,outcome,cost}; break also carries
+ *      destroyed:true and is the destroy record for that row — invariant 9).
+ *
+ * Returns the new +level/outcome + the authoritative material balance and the
+ * materials/gold DELTAS the client feeds into its `materialsDelta` + gold intents.
+ */
+export async function refineItem(
+  characterId: string,
+  itemId: string,
+  goldBalance: number,
+  opts: { roll?: () => number; now?: Date } = {},
+): Promise<RefineResult> {
+  const roll = opts.roll ?? cryptoRoll;
+  const now = opts.now ?? new Date();
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const item = await tx.itemInstance.findFirst({
+        where: { id: itemId, ownerId: characterId, deletedAt: null },
+        select: { id: true, templateId: true, refineLevel: true, equippedSlot: true },
+      });
+      if (!item) throw new RefineOpError("not_found");
+
+      const template = ITEM_TEMPLATES[item.templateId];
+      if (!template) throw new RefineOpError("unknown_template");
+
+      const current = clampRefine(item.refineLevel);
+      if (current >= REFINE.maxRefine) throw new RefineOpError("max");
+      const target = current + 1;
+      const cost = refineCost(template.tier, target);
+
+      // Gold is client-authoritative (save blob) — check the persisted balance the
+      // route passed in; it is returned as a delta, never debited server-side (yet).
+      if (goldBalance < cost.gold) throw new RefineOpError("insufficient_gold");
+
+      // Atomic materials check-and-set (locks the Character row → serialises the
+      // character's concurrent refines). Count 0 = not enough materials → abort.
+      const debit = await tx.character.updateMany({
+        where: { id: characterId, materials: { gte: cost.materials } },
+        data: { materials: { decrement: cost.materials } },
+      });
+      if (debit.count === 0) throw new RefineOpError("insufficient_materials");
+
+      // Server roll → outcome.
+      const success = roll() < successChanceForLevel(target);
+      let outcome: RefineOutcome;
+      let newLevel = current;
+      let destroyed = false;
+      if (success) {
+        outcome = "success";
+        newLevel = target;
+      } else {
+        const mode = failModeForLevel(target);
+        if (mode === "degrade") {
+          outcome = "degrade";
+          newLevel = Math.max(0, current - 1);
+        } else if (mode === "break") {
+          outcome = "break";
+          destroyed = true;
+        } else {
+          outcome = "safe";
+          newLevel = current;
+        }
+      }
+
+      // Compare-and-set on the item (refineLevel:current guard). A retry/concurrent
+      // attempt that already changed the level matches 0 → abort (materials restored).
+      const applied = destroyed
+        ? await tx.itemInstance.updateMany({
+            where: { id: itemId, ownerId: characterId, deletedAt: null, refineLevel: current },
+            data: { deletedAt: now, equippedSlot: null },
+          })
+        : await tx.itemInstance.updateMany({
+            where: { id: itemId, ownerId: characterId, deletedAt: null, refineLevel: current },
+            data: { refineLevel: newLevel },
+          });
+      if (applied.count === 0) throw new RefineOpError("not_found");
+
+      await tx.itemEvent.create({
+        data: {
+          itemId,
+          type: "refined",
+          fromCharacterId: characterId,
+          meta: JSON.stringify({
+            from: current,
+            to: destroyed ? current : newLevel,
+            outcome,
+            cost,
+            ...(destroyed ? { destroyed: true } : {}),
+          }),
+        },
+      });
+
+      const after = await tx.character.findUnique({
+        where: { id: characterId },
+        select: { materials: true },
+      });
+
+      return {
+        ok: true as const,
+        outcome,
+        refineLevel: destroyed ? 0 : newLevel,
+        destroyed,
+        materials: after?.materials ?? 0,
+        materialsDelta: -cost.materials,
+        goldDelta: -cost.gold,
+        cost,
+      };
+    });
+  } catch (err) {
+    if (err instanceof RefineOpError) return { ok: false, reason: err.reason };
+    throw err;
+  }
+}
+
 /** Internal control-flow error so a tx callback can abort with a typed reason. */
 class ItemOpError extends Error {
   constructor(public readonly reason: "not_found" | "unknown_template" | "class_req") {
+    super(reason);
+  }
+}
+
+/** Internal control-flow error for the refine tx. */
+class RefineOpError extends Error {
+  constructor(
+    public readonly reason:
+      | "not_found"
+      | "unknown_template"
+      | "max"
+      | "insufficient_materials"
+      | "insufficient_gold",
+  ) {
     super(reason);
   }
 }

@@ -81,6 +81,46 @@ export const PALETTE = {
   travelPortalDark: 0x1c2050,
   /** Chain accent on a locked boss door. */
   doorChain: 0x2a2a30,
+
+  // ---- M7.7 "Skill Spectacle" per-class skill-fx accents (task 86d3k...) ----
+  // Distinct from the rig body tones in `HERO_COLORS` (which stay put — this
+  // is the SKILL VFX's own accent language, not a rig recolor): each class
+  // gets a dedicated palette so a glance at a cast reads "sword" vs "archer"
+  // vs "mage" even before the shape resolves. Footgun 10 everywhere here:
+  // flat/solid on NORMAL blend + a darker outline/underlayer, never additive.
+  /** Sword signature/ultimate: wide crimson slash arcs + ground cracks, hot
+   * metal palette (distinct from the swordsman rig's own teal). */
+  swordCrimson: 0xff4d3d,
+  /** Molten glow riding a ground crack's edge. */
+  swordEmber: 0xff7a3c,
+  /** Dark scorched crack fill / outline underlayer. */
+  swordCrackDark: 0x430f08,
+  /** Archer signature/ultimate: a richer, more saturated emerald than the
+   * pale `HERO_COLORS.archer.light` — reserved for the bigger rain-curtain
+   * sweep so it reads distinctly "heavier" than the everyday hit tracer. */
+  archerEmerald: 0x2ecc71,
+  /** Wind/feather glint gold accent riding the curtain sweep. */
+  archerGoldGlint: 0xe8c86b,
+  /** Mage signature/ultimate sky event: an azure accent alongside the
+   * existing arcane violet (`HERO_COLORS.mage`) for cataclysm's sky-darken +
+   * impact. */
+  mageAzure: 0x5ad1ff,
+  /** Cataclysm's brief sky-darken overlay tint — a dark arcane violet-black,
+   * flat alpha only (footgun 10: never additive over the daytime biome sky). */
+  skyDarkTint: 0x140026,
+
+  // ---- M7.8 "Manual Play" command feedback accents (tap-to-move / tap-to-
+  // attack) — deliberately distinct from every combat/skill/travel accent so
+  // a player-issued order reads as "your command", not a spell or an aggro
+  // cue. Footgun 10: flat/solid on NORMAL blend + a darker outline, never
+  // additive. ----
+  /** Ground click-marker ripple (`moveOrdered`) — a cool jewel-tone teal. */
+  orderMove: 0x4fd1c5,
+  orderMoveDark: 0x144a44,
+  /** Target-lock reticle + lock-on pulse (`targetLocked`) — a warm amber,
+   * distinct from `dmgSkill`'s pale yellow and `warn`'s red-alert tone. */
+  orderAttack: 0xffd23f,
+  orderAttackDark: 0x6b4c00,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

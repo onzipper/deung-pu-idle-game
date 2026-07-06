@@ -25,6 +25,7 @@ import {
   tickConsumableCds,
 } from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
+import { applyManualCommand } from "@/engine/systems/manual";
 import { updateSpawns } from "@/engine/systems/waves";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
@@ -134,8 +135,19 @@ export interface FrameInput {
    * (M7). Validated for template existence + slot + classReq (a mismatch is a
    * no-op); OWNERSHIP is server-enforced (the engine trusts the id). Honoured
    * across phases; applied once per drained input (a click equips exactly once).
+   * `refineLevel` (M7.6 ตีบวก, default 0) is the SERVER-decided refine of the
+   * equipped instance — clamped + consumed into stats/power (the engine never
+   * rolls it). Re-equipping the same template at a NEW +N re-derives its stats.
    */
-  equip?: { slot: GearSlot; templateId: string | null };
+  equip?: { slot: GearSlot; templateId: string | null; refineLevel?: number };
+  /**
+   * Apply a SIGNED delta to the material counter (M7.6 ตีบวก), floored at 0.
+   * Materials transactions (salvage grants +, refine spends −) are decided
+   * SERVER-side (like `goldCredit`); this reflects a server-confirmed change into
+   * the client sim so display/save stay in step. Persisted (SAVE v14). Non-finite
+   * values are ignored. Applied once per drained input.
+   */
+  materialsDelta?: number;
   /**
    * Update the idle-bot settings (M7.5) — merged over the current settings and
    * clamped. Applied once per drained input. The engine persists `state.bot`
@@ -156,11 +168,14 @@ export interface FrameInput {
    */
   fastTravel?: WorldLocation;
   /**
-   * Credit gold from a SERVER-confirmed NPC sale (M7.5): the sell endpoint's
-   * `totalGold`, applied once per drained input. Trusted the same way as the
-   * rest of the client-simmed economy — the ItemEvent ledger (price recorded at
-   * sell time) is the audit trail for later server re-derivation, so a spoofed
-   * credit is detectable after the fact. Non-finite/negative values are ignored.
+   * A SERVER-confirmed, SIGNED gold delta, applied once per drained input:
+   * positive from an NPC sale (M7.5, the sell endpoint's `totalGold`), negative
+   * from a M7.6 ตีบวก refine attempt's gold cost (the engine never rolls or
+   * prices a refine — server-authoritative, `config/refine.ts`'s `refineCost`).
+   * Trusted the same way as the rest of the client-simmed economy — the
+   * ItemEvent ledger (price/cost recorded server-side at the time) is the audit
+   * trail for later server re-derivation, so a spoofed credit is detectable
+   * after the fact. Non-finite values are ignored; the result floors at 0.
    */
   goldCredit?: number;
   /**
@@ -170,6 +185,32 @@ export interface FrameInput {
    * (`autoCast`/`autoAllocate`/…), the player's choice survives a reload.
    */
   setAutoHunt?: boolean;
+  /**
+   * Manual play (M7.8): TAP-THE-GROUND move order. The solo hero walks to `x`
+   * (clamped to the zone's walkable bounds), IGNORING huntable targets — it does
+   * NOT drop aggro (mobs already engaged keep attacking). Arrival (within
+   * `CONFIG.manual.arriveEps`) completes the command; auto-hunt (AUTO on) then
+   * resumes or the hero idles (AUTO off). Overridden by the boss phase's forced
+   * combat. Transient command state — NEVER persisted. Applied once per drained
+   * input; a later command this frame replaces it.
+   */
+  moveTo?: { x: number };
+  /**
+   * Manual play (M7.8): TAP-A-MONSTER attack order. The solo hero closes to attack
+   * range and fights the target `id` until it dies (target gone -> command
+   * complete) or the command is cancelled/replaced — overriding the auto/hunt
+   * target (engages even with AUTO off). An INVALID / dead / despawned id is
+   * ignored gracefully (clears nothing). Overridden by the boss phase's forced
+   * combat. Transient — NEVER persisted. Applied once per drained input.
+   */
+  attackTarget?: { id: number };
+  /**
+   * Manual play (M7.8): clear any active manual command (move/attack), returning
+   * the hero to AUTO (auto-hunt) / idle per the AUTO-hunt toggle. Emits
+   * `commandCancelled` only if a command was actually cleared. Applied once per
+   * drained input.
+   */
+  cancelCommand?: boolean;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -191,7 +232,20 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // Auto-hunt toggle (M6.6) — engine-persisted (SAVE v12); see FrameInput.setAutoHunt.
   if (input.setAutoHunt !== undefined) state.autoHunt = input.setAutoHunt;
   // Equip / unequip gear on the solo hero (M7) — validated inside equipItem.
-  if (input.equip) equipItem(state, state.heroes[0], input.equip.slot, input.equip.templateId);
+  // `refineLevel` (M7.6) is the server-decided +N (default 0).
+  if (input.equip) {
+    equipItem(
+      state,
+      state.heroes[0],
+      input.equip.slot,
+      input.equip.templateId,
+      input.equip.refineLevel,
+    );
+  }
+  // Material counter delta (M7.6 ตีบวก) — server-confirmed salvage(+)/refine(−).
+  if (input.materialsDelta !== undefined && Number.isFinite(input.materialsDelta)) {
+    state.materials = Math.max(0, Math.floor(state.materials + input.materialsDelta));
+  }
   // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
   if (input.setAutoSlots) {
     for (const a of input.setAutoSlots) setAutoSlot(state, state.heroes[0], a.slot, a.skillId);
@@ -206,13 +260,12 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // intents below so a scroll+walk in the same frame resolves scroll-first.
   if (input.buyShopItem) buyShopItem(state, input.buyShopItem.item, input.buyShopItem.qty ?? 1);
   if (input.useReturnScroll) applyReturnScroll(state);
-  // Server-confirmed NPC-sale gold (M7.5) — see FrameInput.goldCredit contract.
-  if (
-    input.goldCredit !== undefined &&
-    Number.isFinite(input.goldCredit) &&
-    input.goldCredit > 0
-  ) {
-    state.gold += Math.floor(input.goldCredit);
+  // Server-confirmed gold delta (M7.5 NPC-sale credit, M7.6 ตีบวก refine cost
+  // debit — see FrameInput.goldCredit contract). SIGNED since M7.6: a refine
+  // attempt's gold cost arrives as a negative delta; floored at 0 so a stale/
+  // out-of-order client application can never drive gold negative.
+  if (input.goldCredit !== undefined && Number.isFinite(input.goldCredit) && input.goldCredit !== 0) {
+    state.gold = Math.max(0, state.gold + Math.floor(input.goldCredit));
   }
 
   // --- world navigation (M6 "World & Town") ---
@@ -263,6 +316,11 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // Consumables (M6): a manual quick-use then threshold-gated auto-use, BEFORE
   // skills so a mana potion this step can fund a cast the same step.
   processConsumables(state, input.useConsumable);
+  // Manual play (M7.8): apply this frame's moveTo / attackTarget / cancelCommand
+  // onto the solo hero's transient command slot (never persisted). updateHeroes
+  // honours it below; the boss phase's forced combat overrides it. Runs before
+  // skills/movement so a fresh command steers THIS step's hunt.
+  applyManualCommand(state, input);
   // Fast-travel channel (M7.5): while channeling the hero stands still — skip its
   // offense (skills + auto-hunt movement/attacks) so it doesn't wander off and
   // re-engage mobs. Enemies + projectiles still resolve, so a mob CAN reach + hit

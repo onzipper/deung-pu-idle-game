@@ -178,19 +178,101 @@ describe("allocateStat intent", () => {
   });
 });
 
-describe("auto-allocate toggle", () => {
-  it("dumps all unspent points into the class primary stat, no event", () => {
+describe("auto-allocate v2 (ratio distribution)", () => {
+  const STATS: ReadonlyArray<keyof typeof ST.base.swordsman> = ["str", "dex", "int", "vit"];
+  const ratioOf = (cls: HeroClass) => ST.autoAllocRatio[cls] as Partial<Record<string, number>>;
+  const ratioStats = (cls: HeroClass) => STATS.filter((s) => (ratioOf(cls)[s] ?? 0) > 0);
+
+  it("drains every point toward the class ratio, silently (no event)", () => {
     for (const cls of CLASSES) {
       const s = initGameState(1, soloSave(cls, 1));
       s.autoAllocate = true;
-      s.heroes[0].statPoints = 12;
-      const p = primaryStat(cls);
-      const before = s.heroes[0].stats[p];
+      s.heroes[0].statPoints = 120;
       step(s, {});
-      expect(s.heroes[0].stats[p]).toBe(before + 12);
       expect(s.heroes[0].statPoints).toBe(0);
+      // Off-ratio stats are untouched; on-ratio stats grew.
+      for (const st of STATS) {
+        const grew = s.heroes[0].stats[st] > ST.base[cls][st];
+        expect(grew).toBe((ratioOf(cls)[st] ?? 0) > 0);
+      }
       expect(s.events.some((e) => e.type === "statAllocated")).toBe(false);
     }
+  });
+
+  it("converges to the ratio: stats[s]/weight[s] equalises across ratio stats", () => {
+    for (const cls of CLASSES) {
+      const s = initGameState(1, soloSave(cls, 1));
+      s.autoAllocate = true;
+      s.heroes[0].statPoints = 300;
+      step(s, {});
+      const rs = ratioStats(cls);
+      const scores = rs.map((st) => s.heroes[0].stats[st] / (ratioOf(cls)[st] as number));
+      // Each point goes to the current minimum score, so after draining the spread
+      // between the highest and lowest score is at most one point-step (≤ 1).
+      expect(Math.max(...scores) - Math.min(...scores)).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it("keeps the primary/damage stat the majority of allocated points", () => {
+    for (const cls of CLASSES) {
+      const s = initGameState(1, soloSave(cls, 1));
+      s.autoAllocate = true;
+      s.heroes[0].statPoints = 300;
+      const p = primaryStat(cls);
+      const beforeP = s.heroes[0].stats[p];
+      step(s, {});
+      const allocPrimary = s.heroes[0].stats[p] - beforeP;
+      expect(allocPrimary).toBeGreaterThanOrEqual(150); // > half of 300
+    }
+  });
+
+  it("self-corrects around manual allocation (funnels toward the lagging stat)", () => {
+    // A swordsman with manually over-invested vit: auto then pours into str until
+    // str/4 catches vit/1 (the ratio target), proving it tracks CURRENT stats.
+    const s = initGameState(1, soloSave("swordsman", 1));
+    s.autoAllocate = true;
+    s.heroes[0].stats.vit = 80; // far ahead of its 4:1 target
+    s.heroes[0].statPoints = 40;
+    const strBefore = s.heroes[0].stats.str;
+    const vitBefore = s.heroes[0].stats.vit;
+    step(s, {});
+    expect(s.heroes[0].stats.str - strBefore).toBeGreaterThan(s.heroes[0].stats.vit - vitBefore);
+  });
+
+  it("a capped ratio stat drops out; the rest still absorb the points", () => {
+    // Swordsman {str:4,vit:1}: vit pinned at cap → all points flow into str.
+    const s = initGameState(1, soloSave("swordsman", 1));
+    s.autoAllocate = true;
+    s.heroes[0].stats.vit = CONFIG.stats.cap;
+    s.heroes[0].statPoints = 20;
+    step(s, {});
+    expect(s.heroes[0].stats.vit).toBe(CONFIG.stats.cap);
+    expect(s.heroes[0].statPoints).toBe(0);
+    expect(s.heroes[0].stats.str).toBeGreaterThan(ST.base.swordsman.str);
+  });
+
+  it("spills to the cap then leaves the remainder unspent when room runs out", () => {
+    // vit near cap (room 3), str capped → 3 points fill vit, the rest stay unspent.
+    const s = initGameState(1, soloSave("swordsman", 1));
+    s.autoAllocate = true;
+    s.heroes[0].stats.str = CONFIG.stats.cap;
+    s.heroes[0].stats.vit = CONFIG.stats.cap - 3;
+    s.heroes[0].statPoints = 10;
+    step(s, {});
+    expect(s.heroes[0].stats.vit).toBe(CONFIG.stats.cap);
+    expect(s.heroes[0].statPoints).toBe(7);
+  });
+
+  it("leaves points unspent when every ratio stat is capped", () => {
+    const s = initGameState(1, soloSave("swordsman", 1));
+    s.autoAllocate = true;
+    s.heroes[0].stats.str = CONFIG.stats.cap;
+    s.heroes[0].stats.vit = CONFIG.stats.cap;
+    s.heroes[0].statPoints = 5;
+    step(s, {});
+    expect(s.heroes[0].statPoints).toBe(5);
+    expect(s.heroes[0].stats.str).toBe(CONFIG.stats.cap);
+    expect(s.heroes[0].stats.vit).toBe(CONFIG.stats.cap);
   });
 
   it("is deterministic: a byte-identical clone with auto-allocate advances identically", () => {

@@ -292,6 +292,21 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
   );
 }
 
+/** Held mana-potion count pinned to the mana bar (M7.7 — potions are the
+ * pool's refill loop now; surface the stock where the player watches drain). */
+function ManaPotionBadge() {
+  const count = useGameStore((s) => s.shop.counts.manaPotion ?? 0);
+  return (
+    <span
+      className={`rounded px-1 text-[10px] leading-4 font-bold tabular-nums ${
+        count === 0 ? "bg-rose-950/70 text-rose-300" : "bg-sky-950/70 text-sky-200"
+      }`}
+    >
+      💧{count}
+    </span>
+  );
+}
+
 /** A hero's full skill panel: header, HP/XP/mana bars, and the skill kit. */
 function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const tContent = useTranslations("content");
@@ -341,19 +356,27 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
           style={{ width: `${hero.atLevelCap ? 100 : xpPct}%` }}
         />
       </div>
-      {/* Mana bar (blue = caster resource) + a visible n/max readout (was
-          tooltip-only — secondary-tier info needs to actually be legible,
-          not hidden behind a hover that phones can't even trigger). */}
+      {/* Mana bar (blue = caster resource) + a visible n/max readout. M7.7:
+          mana is now the skill PACING GOVERNOR (skills spam-drain the pool;
+          potions refill it), so the bar got promoted — taller, low-pool
+          warning tint, and the held mana-potion count sits right beside it. */}
       <div className="flex w-full items-center gap-1">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/50">
+        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-black/50">
           <div
-            className="h-full rounded-full bg-sky-400 transition-[width] duration-150"
+            className={`h-full rounded-full transition-[width] duration-150 ${
+              manaPct < 25 ? "animate-pulse bg-rose-400" : "bg-sky-400"
+            }`}
             style={{ width: `${manaPct}%` }}
           />
         </div>
-        <span className="text-[10px] leading-none tabular-nums text-sky-300/90">
+        <span
+          className={`text-[11px] leading-none font-semibold tabular-nums ${
+            manaPct < 25 ? "text-rose-300" : "text-sky-300/90"
+          }`}
+        >
           {Math.floor(hero.mana)}/{hero.maxMana}
         </span>
+        <ManaPotionBadge />
       </div>
 
       {/* The learned skill kit */}

@@ -39,7 +39,7 @@
 
 - [x] ทดลอง art direction ใน /proto → ปิด: คงสไตล์เดิม (decision log 2026-07-06)
 - [ ] ~~ตัวละครใหม่~~ ยกเลิก — gear visuals M7 ทำบนริกเดิม
-- [ ] UI skin (title/หน้าเลือกตัว/HUD กรอบเกม + ฟอนต์) — แขวนไว้ รอเจ้าของอยากหยิบขึ้นมาอีกครั้ง
+- [ ] UI skin (title/หน้าเลือกตัว/HUD กรอบเกม + ฟอนต์) — ✔ เจ้าของหยิบกลับมาแล้ว (2026-07-06) → ย้ายไปทำเป็น **M6.5b** ด้านล่าง
 
 ## ✅ M7 — Gear & Drops ⭐ (เสร็จ 2026-07-06)
 
@@ -62,14 +62,38 @@
 - [x] **ประตูเป็นตัวกลางของการย้ายโซนทุกแบบ** (ฟีลที่เจ้าของอยากได้ 2026-07-06): ขอบ zone มีซุ้มประตูตามธีม biome — เดินเข้าประตู → whoosh/แฟลช → โผล่หน้าประตูฝั่งโซนถัดไป (แทนเดินตกขอบจอ) · fast travel = ประตูวาร์ปวูบขึ้นข้างตัว (cast time = ประตูเปิด) เดินเข้าไปแล้ววาร์ป · **ห้องบอส = ประตูพิเศษ** ใหญ่/ขลังตามธีม map ล็อกอยู่จนเงื่อนไข boss-gate ผ่านแล้วค่อยเปิดพร้อม beat (ต่อยอด entrance beat + เสาประตู arena เดิม) — งานหลักอยู่ render/environment (props ประตูต่อ biome + portal fx pooled) + engine hook สถานะ transit เล็กน้อย
 - [x] (เพิ่มระหว่างทาง) ปุ่ม AUTO เปิด/ปิดตีมอนอัตโนมัติบน HUD — engine gate ที่ huntableTargets (ปิด = ไม่ไล่เป้าใหม่ แต่สวนตัวที่ engaged, ห้องบอสบังคับสู้), SAVE v12
 
-## M7.6 — ตีบวก (Refine, RO แท้)
+## ✅ M7.7 — Skill Spectacle & World Heat (เสร็จ 2026-07-06)
 
-> เคาะแล้ว: **มีลุ้นแตก** — +1-3 ปลอดภัย / +4-7 พลาดลดขั้น / +8-10 พลาดแตก (ItemEvent destroyed) · ย่อยของซ้ำเป็นวัสดุ → ใช้วัสดุ+ทองตีบวก · DB: เพิ่มคอลัมน์ `refineLevel` (additive db push) + ItemEvent `refined`/`salvaged` · SAVE v11 (equipped ต้องพก refine) · stat ต่อบวกและอัตราพลาดต้องผ่าน sim + คิดผลต่อ HOF power
+> ปัญหา: สกิลคล้ายกันหมด รัศมีกองกัน 85-120px ไม่มีท่าไม้ตาย · เคาะแล้ว: **สกิลเบิ้ม ดาเมจแรง ภาพอลัง** + cooldown ไม่ยาว โดย **มานา = ตัวคุมจังหวะ** (ยิงรัวได้แต่ถังแห้งเร็ว → ยามานากลายเป็น sink หลักคู่ยาเลือด) · โลกโหดขึ้นชดเชย: **มอน 15-20+ ต่อสนาม**, killGoal เพิ่มเพื่อ pacing (ความยากมาจาก belt มอนดุ ไม่ใช่โควตา) · **บัพบอส = ไว้ก่อน** (เจ้าของสั่งพัก) · กฎ AoE-aggro เปลี่ยนเป็น **"โดนสกิลแล้วรอด = ลุกมาสู้"** (แทนกฎปลุก ≤2) · เอกลักษณ์คลาส: ดาบ=บุกประชิดหมุนกลางวง / ธนู=ปืนใหญ่คลุมแถบ / เวท=นุกหนักจอสั่น · tier-2 = ultimate ระดับทั้งจอ
 
-- [ ] Salvage: ย่อยของเป็นวัสดุตาม tier/rarity (server tx: destroy + mint material — โมเดลวัสดุเป็น counter ต่อ character ไม่ใช่ instance)
-- [ ] Refine core: server-authoritative roll (กันโกง — ห้าม client ทอย), ItemEvent ทุกครั้ง, engine รับ refineLevel เข้า stat/power
-- [ ] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ
-- [ ] Sim ผลต่อ curve: ของ +10 ต้องไม่ทะลุ s15 wall เร็วกว่าที่ตั้งใจ; อัตราแตกคุมเงินเฟ้อวัสดุ
+- [x] Engine: ยกเครื่องตาราง SKILL_LIST (รัศมี/ดาเมจ/มานา/cd แยกชั้นชัด, tier-2 = screen-wide), กฎ survivor-retaliation, มอนหนาแน่นขึ้น + killGoal + จูน mana economy — sim เทียบ balance-m6/m7 (คุม: เควสเปลี่ยนคลาส ~s5, s15 soft-wall อยู่, 0 stall)
+- [x] Render: ภาษาภาพต่อคลาส (ดาบแดงกว้าง/ธนูห่าฝนแถบยาว/เวทอุกกาบาตจอมืด+สั่น), fx ตาม tier สกิล, perf pass สนาม 20 ตัว (pooled/capped, มือถือ)
+- [x] UI เล็ก: readout มานา/ยามานาเด่นขึ้นตามบทบาทใหม่ (แถบใหญ่ขึ้น + เตือนต่ำกว่า 25% + badge จำนวนยามานา)
+- [x] **Auto-allocate v2 (ต่อท้าย — เคาะ 2026-07-07)**: เปลี่ยนจาก "เทหมดลง primary" เป็น**สัดส่วนตายตัวต่อคลาส** (distributor "ให้แต้มถัดไปกับ stat ที่ต่ำกว่าเป้า `stats[s]/weight[s]` สุด" วัดจาก stat ปัจจุบัน — self-correct กับการแจกมือ, ไม่ต้องเก็บ counter). ผล sim M7.7 **คว่ำร่างเดิม**: **ดาบ 4 STR:1 VIT** (ตาย 183→24, บอสไวป์ 162→2), **ธนู PURE DEX** (VIT ทุกสัดส่วนแย่ลง — 2:1→263+กำแพงใหม่ s15-farm, pure→238 เคลียร์ครบ; ธนูเป็น DPS-race กิน DEX ทั้งดาเมจ+สปีด), **เวท 3 INT:1 VIT** (ตาย 50→20, บอสไวป์ 34→0 — เวทรอดด้วย uptime สกิล/มานาซึ่งโต INT ไม่ใช่ HP). Gate ครบ: เปลี่ยนคลาส s5, กำแพง s15-boss คงอยู่ (0/5), ไม่มี stall (farm 5/5 ทุกคลาส). ไม่แตะ SAVE_VERSION. รายละเอียด: docs/balance-m7.md "Auto-allocate v2"
+
+## ✅ M7.6 — ตีบวก (Refine, RO แท้) (เสร็จ 2026-07-07)
+
+> เคาะแล้ว: **มีลุ้นแตก** — +1-3 ปลอดภัย / +4-7 พลาดลดขั้น / +8-10 พลาดแตก (ItemEvent destroyed) · ย่อยของซ้ำเป็นวัสดุ → ใช้วัสดุ+ทองตีบวก · DB: เพิ่มคอลัมน์ `refineLevel` (additive db push) + ItemEvent `refined`/`salvaged` · SAVE v14 (equipped ต้องพก refine — โน้ตเดิมเขียน v11 ตอนเคาะ แต่ v11-13 ถูกใช้ไปกับ bots/auto-hunt/zoneKills แล้ว) · วัสดุ v1 = ชนิดเดียว yield ตาม tier/rarity (ต่อขยายเป็นหลายชนิดได้ภายหลัง) · stat ต่อบวกและอัตราพลาดต้องผ่าน sim + คิดผลต่อ HOF power
+
+- [x] Salvage: ย่อยของเป็นวัสดุตาม tier/rarity (server tx: destroy + mint material — โมเดลวัสดุเป็น counter ต่อ character ไม่ใช่ instance) — `POST /api/items/salvage` batch tx เดียว กัน double-credit, yield = tier × {common 1, rare 2, epic 4}, UI ย่อยรายชิ้น + bulk พร้อม preview
+- [x] Refine core: server-authoritative roll (crypto ฝั่ง server, engine ไม่ทอย), ItemEvent `refined`/`salvaged` ทุกครั้ง, engine รับ refineLevel เข้า stat/power — `refinedStat = base×(1+N×8%)`, SAVE v14, สำเร็จ +1-3 การันตี / +4-7 = .85-.55 / +8-10 = .45-.25, compare-and-set กันกดซ้อน, แตก = destroy+unequip
+- [x] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ — ตอกค้อน ~1s → สำเร็จ "+N!" เด้ง/ลดขั้นทึบ/แตกกระจาย+แฟลชขอบจอ (CSS+synth SFX), ตัวนับวัสดุใน HUD, stack แยกตาม +N, ออร่า step-up ที่ +7, desktop+mobile
+- [x] (เพิ่มตามคำขอเจ้าของ 2026-07-07) บอท auto-ย่อยของ: กฎ auto-sell เดิมยกเป็น v2 ต่อ rarity 3 ทาง **ปิด/ขาย/ย่อย** (common/rare; epic ห้ามแตะเหมือนเดิม), sweep เดียวได้ทั้งสองลิสต์ (keepBetterStat guard คุ้มครองทั้งขายและย่อยเท่ากัน), บอททริปเมือง ขาย→ย่อย ตามลำดับ + toast "ย่อยแล้ว N ชิ้น +M วัสดุ", migrate ค่าที่ตั้งไว้เดิมอัตโนมัติ
+- [x] Sim ผลต่อ curve: **เลขร่างผ่านทุกเกตโดยไม่แก้** — s15 wall อยู่ 0/15 แม้ refine-stress, เปลี่ยนคลาส s5, วัสดุ sink จริง (ของใส่วน +1~4 ไม่นั่ง +10), ตี +10 ~359 ครั้ง, แตก ~1% ของดรอป; knobs REFINE=1/sweep/STRESS ใน balance-sim (ตาราง: balance-m7.md "M7.6 — Refine")
+
+## ✅ M7.8 — Manual Play (เสร็จ 2026-07-07)
+
+> เจ้าของอยากให้ผู้เล่นเล่นเองได้บ้าง — สไตล์ **RO แท้: แตะ/คลิกพื้นเดิน, แตะ/คลิกมอนตี** (ไม่ใช่ WASD) · ต่อยอดปุ่ม AUTO เดิม (M7.5): AUTO ปิด = ผู้เล่นสั่งเอง · ทุก input เป็น intent ผ่าน `pendingInput` (deterministic, ปูทาง lockstep M8 ฟรี) · **ต้องเล่นสะดวกทั้ง desktop และ mobile** (touch target ใหญ่, แตะเป็น input หลัก)
+
+- [x] Engine: intent `moveTo(x)` / `attackTarget(id)` / `cancelCommand` — Hero.command transient (ไม่ bump SAVE), boss บังคับสู้ชนะทุกคำสั่ง, ถึงโซนใหม่คำสั่งเคลียร์, AUTO เปิด = เสร็จคำสั่งกลับไปล่าต่อ, เส้นทาง auto เดิม byte-identical; events moveOrdered/targetLocked/commandCancelled ให้ render (13 tests)
+- [x] UI/Render: `hitTestPointer` ผ่าน baseTransform (กันจอสั่นทำเป้าเพี้ยน), มอนชนะพื้นเมื่อซ้อน + hit radius ใหญ่บนนิ้ว, ping วงแหวนจุดแตะ + reticle ค้างใต้เป้าที่ล็อก (pooled/flat-alpha), ชิพ "✕ ยกเลิกคำสั่ง" ข้าง AUTO — เมาส์+นิ้วเท่าเทียม · หมายเหตุ: ปุ่มกดสกิลเองยกไป backlog (สกิลยัง auto-cast; ทับซ้อน mana governor ต้องคิดต่อ)
+- [x] ขัดเกลา game-feel: tip สอนครั้งแรกที่ปิด AUTO ("แตะพื้นเพื่อเดิน แตะมอนเพื่อโจมตี"), cursor crosshair บน desktop, แตะพื้นระหว่างล็อกเป้า = สลับคำสั่งลื่น ๆ ไม่ต้องยกเลิกก่อน
+
+## ⏸️ M6.5b — UI Skin (พักอีกรอบ 2026-07-07)
+
+> ลองรอบสอง: wave 1 (tokens + ฟอนต์ Charm/Mitr + หน้า title โทนไม้/ทองเหลือง-ฟ้าพลบ) ทำเสร็จแล้ว **เจ้าของไม่ชอบ → revert ออก** (commit d64d31c → revert 4c856df) · นับเป็น art attempt ที่โดนคว่ำครั้งที่ 3 (pixel-MMX3, SVG อนิเมะ/RO, warm-fantasy title) · **บทเรียน: รอบหน้าอย่าเริ่มจากงานสร้าง — เริ่มจากเก็บ reference ที่เจ้าของชอบก่อน** (ภาพเกม/UI จริงที่เจ้าของชี้ว่า "แบบนี้แหละ") แล้วค่อยลงมือ · แขวนไว้จนเจ้าของหยิบขึ้นมาเอง
+
+- [ ] (แขวน) เก็บ reference รสนิยมจากเจ้าของ → tokens + title → เคาะ → roll out หน้าเลือกตัว + HUD
 
 ## M8 — Party
 

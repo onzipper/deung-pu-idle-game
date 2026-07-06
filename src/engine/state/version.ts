@@ -9,6 +9,7 @@
 
 import { CONFIG, SIGNATURE_SKILL } from "@/engine/config";
 import { emptyEquipped, type EquippedGear } from "@/engine/config/items";
+import { clampRefine } from "@/engine/config/refine";
 import { splitmix32 } from "@/engine/core/hash";
 import { heroMaxMana } from "@/engine/systems/stats";
 import { classChangeQuestFor } from "@/engine/systems/quests";
@@ -91,7 +92,20 @@ import type {
 //   had none, so migration backfills `true` (behaviour unchanged — auto-hunt was
 //   always on before this toggle existed). A v12 save's own flag is preserved
 //   (coerced to a boolean — idempotent for the server's migrate-on-every-save).
-export const SAVE_VERSION = 12;
+// v12 -> v13 (M7.7 follow-up "เกจรี" fix): the save gains `zoneKills` — per-farm-
+//   zone unlock-quota progress keyed "mapId:zoneIdx", so a town trip (bot restock,
+//   warp, death respawn) no longer wipes the zone-unlock gauge. Pre-v13 saves
+//   backfill to {} (progress starts fresh once — the old behavior, one last time).
+// v13 -> v14 (M7.6 "ตีบวก" / Refine): equipped-gear snapshots gain a per-slot
+// `refine` level ({weapon, armor}, +0..+REFINE.maxRefine) and the save gains a
+// `materials` counter (a plain per-character resource, like gold, spent + gold to
+// refine gear + granted by salvage). Pre-v14 saves backfill refine to +0 on every
+// slot (no stat change — an unrefined loadout is byte-identical to pre-M7.6) and
+// materials to 0. Refine ROLLS are server-authoritative (the engine never rolls;
+// config/refine.ts); this only PERSISTS the server-decided level. A v14 save's own
+// values are preserved (refine clamped to [0, max]; materials floored non-negative —
+// idempotent for the server's migrate-on-every-save).
+export const SAVE_VERSION = 14;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -101,6 +115,18 @@ type UnknownStats = { str?: number; dex?: number; int?: number; vit?: number };
 
 /** A world location from an unknown/older save (fields optional). */
 type UnknownLocation = { mapId?: unknown; zoneIdx?: unknown };
+
+/** v13 zoneKills: keep only "map:idx" keys with non-negative integer counts. */
+function normalizeZoneKills(raw: Record<string, unknown> | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === "number" && Number.isInteger(v) && v >= 0 && k.includes(":")) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 
 /** A save of unknown/older version, before migration. */
 export interface UnknownSave {
@@ -120,11 +146,17 @@ export interface UnknownSave {
   // v12 autoHunt toggle (M6.6). Optional/unknown so a pre-v12 (or malformed) save
   // backfills to `true`.
   autoHunt?: unknown;
+  // v13 per-zone unlock-progress kills (M7.7 follow-up). Optional; malformed
+  // entries are dropped (non-negative integers only).
+  zoneKills?: Record<string, unknown>;
   // v10 gear (M7). Optional so a pre-v10 save backfills (equipped empty, counter 0,
   // salt derived). `equipped` fields are unknown so a malformed cache normalises.
-  equipped?: { weapon?: unknown; armor?: unknown };
+  // v14 (M7.6): `equipped.refine` per-slot levels (optional; pre-v14 -> +0).
+  equipped?: { weapon?: unknown; armor?: unknown; refine?: { weapon?: unknown; armor?: unknown } };
   lootCounter?: unknown;
   lootSalt?: unknown;
+  // v14 material counter (M7.6). Optional; pre-v14 backfills to 0.
+  materials?: unknown;
   // v4/v5/v6/v7 single-character shape (v5 adds statPoints + stats; v6 adds mana +
   // autoSlots; v7 adds quest):
   hero?: Partial<CharacterSave> & {
@@ -252,7 +284,18 @@ function normalizeEquipped(saved: UnknownSave["equipped"]): EquippedGear {
   return {
     weapon: typeof saved.weapon === "string" ? saved.weapon : null,
     armor: typeof saved.armor === "string" ? saved.armor : null,
+    // Refine levels (M7.6, v14): clamp to [0, max]; a pre-v14 save (no `refine`)
+    // becomes +0 on every slot (no stat change — byte-identical to pre-M7.6).
+    refine: {
+      weapon: clampRefine(asStat(numOrUndef(saved.refine?.weapon), 0)),
+      armor: clampRefine(asStat(numOrUndef(saved.refine?.armor), 0)),
+    },
   };
+}
+
+/** Coerce an unknown to a number, or undefined for anything non-numeric. */
+function numOrUndef(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
 }
 
 /**
@@ -405,6 +448,8 @@ export function migrate(save: UnknownSave): SaveData {
     // autoHunt toggle (M6.6, v12): preserve a v12 save's flag (coerced to a
     // boolean); a pre-v12 save (no flag) backfills to `true` (unchanged behaviour).
     autoHunt: typeof save.autoHunt === "boolean" ? save.autoHunt : true,
+    // Per-zone unlock progress (v13): keep sane entries, drop garbage.
+    zoneKills: normalizeZoneKills(save.zoneKills),
     // M7 gear (v10): empty loadout for a pre-v10 save (DB ledger is authoritative);
     // a monotonic counter clamped non-negative; a salt PRESERVED if present (never
     // recomputed — idempotent) else derived deterministically from the save content.
@@ -417,6 +462,9 @@ export function migrate(save: UnknownSave): SaveData {
       typeof save.lootSalt === "number" && Number.isFinite(save.lootSalt)
         ? save.lootSalt >>> 0
         : deriveSalt(save),
+    // M7.6 ตีบวก material counter (v14): preserve a v14 save's count (floored non-
+    // negative); a pre-v14 save (no `materials`) backfills to 0.
+    materials: asStat(numOrUndef(save.materials), 0),
     lastSeen: save.lastSeen ?? 0,
   };
 }

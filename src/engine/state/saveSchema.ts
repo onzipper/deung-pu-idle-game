@@ -132,17 +132,33 @@ export const saveDataSchema = z
     // autoHunt toggle (M6.6, SAVE v12). Optional so a pre-v12 (or trimmed) payload
     // is backfilled to `true` by `migrate()` -- same resilience as the fields above.
     autoHunt: z.boolean().optional(),
+    // Per-zone unlock-quota progress (M7.7 follow-up, SAVE v13). Optional so a
+    // pre-v13 payload passes; migrate() normalises entries.
+    zoneKills: z.record(z.string(), z.number().int().nonnegative()).optional(),
     // M7 gear (SAVE v10). All OPTIONAL so a pre-v10 (or trimmed) payload is
     // backfilled by `migrate()` (equipped → empty, counter → 0, salt → derived) —
     // same resilience as the fields above. `equipped` is a weapon/armor templateId
     // cache (nullable strings; validity re-checked at equip time, so a stale/foreign
     // id never needlessly 400s). The DB item ledger is authoritative regardless.
+    // `refine` (M7.6, SAVE v14) is a per-slot +level cache; OPTIONAL + loose
+    // non-negative ints (migrate clamps to [0, REFINE.maxRefine]) so a pre-v14 or
+    // over-cap payload never needlessly 400s. Server-authoritative regardless.
     equipped: z
-      .object({ weapon: z.string().nullable(), armor: z.string().nullable() })
+      .object({
+        weapon: z.string().nullable(),
+        armor: z.string().nullable(),
+        refine: z
+          .object({ weapon: z.number().int().min(0), armor: z.number().int().min(0) })
+          .strict()
+          .optional(),
+      })
       .strict()
       .optional(),
     lootCounter: z.number().int().min(0).optional(),
     lootSalt: z.number().int().min(0).optional(),
+    // M7.6 ตีบวก material counter (SAVE v14). OPTIONAL so a pre-v14 (or trimmed)
+    // payload is backfilled to 0 by `migrate()` — same resilience as the fields above.
+    materials: z.number().int().min(0).optional(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

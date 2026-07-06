@@ -1,46 +1,65 @@
 "use client";
 
 /**
- * M7.5 auto-sell rules — the sell-trip bot's rarity toggles + keep-guard.
- * localStorage-persisted UI preference (`readStoredAutoSellRules`'s doc,
- * `gameStore.ts`), same tier as `soundMuted`: the rules THEMSELVES aren't
- * game progress, only the bot's own `state.bot` config is engine-persisted.
- * Epic is v1 owner-locked OFF — no toggle exists for it (not just disabled).
+ * M7.5→M7.7 auto-dispose rules — the town-trip bot's per-rarity 3-way action
+ * (off/sell/salvage) + keep-guard. localStorage-persisted UI preference
+ * (`readStoredAutoSellRules`'s doc, `gameStore.ts`), same tier as
+ * `soundMuted`: the rules THEMSELVES aren't game progress, only the bot's own
+ * `state.bot` config is engine-persisted. Epic is v1 owner-locked OFF — no
+ * control exists for it (not just disabled).
+ *
+ * The per-rarity control reuses `LocaleSwitch.tsx`'s exact segmented-button
+ * visual language (an existing exclusive-choice pattern in this HUD) rather
+ * than inventing a new one — the owner rejected a restyle here previously.
  */
 
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
-import { readStoredAutoSellRules, useGameStore } from "@/ui/store/gameStore";
+import {
+  readStoredAutoSellRules,
+  useGameStore,
+  type AutoSellAction,
+} from "@/ui/store/gameStore";
 
-function RuleToggle({
+const ACTIONS: AutoSellAction[] = ["off", "sell", "salvage"];
+
+function RaritySegment({
   label,
-  on,
-  onToggle,
-  disabled,
+  value,
+  onChange,
+  actionLabel,
 }: {
   label: string;
-  on: boolean;
-  onToggle: () => void;
-  disabled?: boolean;
+  value: AutoSellAction;
+  onChange: (action: AutoSellAction) => void;
+  actionLabel: (action: AutoSellAction) => string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={disabled}
-      aria-pressed={on}
-      className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-bold transition-all duration-100 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ${
-        on
-          ? "border-emerald-400 bg-emerald-400 text-emerald-950"
-          : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
-      }`}
-    >
-      <span
-        aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${on ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
-      />
-      {label}
-    </button>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="min-w-22 text-xs font-semibold text-ddp-ink">{label}</span>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="flex gap-1 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-1 shadow-(--ddp-shadow-btn)"
+      >
+        {ACTIONS.map((action) => (
+          <button
+            key={action}
+            type="button"
+            role="radio"
+            aria-checked={value === action}
+            onClick={() => onChange(action)}
+            className={`min-h-11 min-w-11 rounded-[calc(var(--ddp-radius-md)-0.25rem)] px-3 py-1.5 text-xs font-bold transition-all duration-100 active:translate-y-0.5 active:scale-[0.95] ${
+              value === action
+                ? "bg-emerald-400 text-emerald-950 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
+                : "bg-transparent text-ddp-ink-muted hover:text-ddp-ink"
+            }`}
+          >
+            {actionLabel(action)}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -48,8 +67,8 @@ export function AutoSellRulesSection() {
   const autoSellCommon = useGameStore((s) => s.autoSellCommon);
   const autoSellRare = useGameStore((s) => s.autoSellRare);
   const autoSellKeepBetterStat = useGameStore((s) => s.autoSellKeepBetterStat);
-  const toggleCommon = useGameStore((s) => s.toggleAutoSellCommon);
-  const toggleRare = useGameStore((s) => s.toggleAutoSellRare);
+  const setCommon = useGameStore((s) => s.setAutoSellCommon);
+  const setRare = useGameStore((s) => s.setAutoSellRare);
   const toggleKeepBetter = useGameStore((s) => s.toggleAutoSellKeepBetterStat);
   const hydrate = useGameStore((s) => s.hydrateAutoSellRules);
   const t = useTranslations("settings.autoSell");
@@ -61,20 +80,48 @@ export function AutoSellRulesSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only sync
   }, []);
 
+  const actionLabel = (action: AutoSellAction): string =>
+    action === "off" ? t("actionOff") : action === "sell" ? t("actionSell") : t("actionSalvage");
+
   return (
     <section className="flex flex-col gap-2">
       <h3 className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("title")}
       </h3>
-      <div className="flex flex-wrap gap-2">
-        <RuleToggle label={t("sellCommon")} on={autoSellCommon} onToggle={toggleCommon} />
-        <RuleToggle label={t("sellRare")} on={autoSellRare} onToggle={toggleRare} />
-        <RuleToggle label={t("sellEpic")} on={false} onToggle={() => {}} disabled />
-        <RuleToggle
-          label={t("keepBetterStat")}
-          on={autoSellKeepBetterStat}
-          onToggle={toggleKeepBetter}
+      <div className="flex flex-col gap-2">
+        <RaritySegment
+          label={t("commonLabel")}
+          value={autoSellCommon}
+          onChange={setCommon}
+          actionLabel={actionLabel}
         />
+        <RaritySegment
+          label={t("rareLabel")}
+          value={autoSellRare}
+          onChange={setRare}
+          actionLabel={actionLabel}
+        />
+        <p className="text-[10px] text-ddp-ink-muted">{t("epicHint")}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={toggleKeepBetter}
+          aria-pressed={autoSellKeepBetterStat}
+          className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-bold transition-all duration-100 active:scale-[0.97] ${
+            autoSellKeepBetterStat
+              ? "border-emerald-400 bg-emerald-400 text-emerald-950"
+              : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
+          }`}
+        >
+          <span
+            aria-hidden
+            className={`h-1.5 w-1.5 rounded-full ${
+              autoSellKeepBetterStat ? "bg-emerald-950" : "bg-ddp-ink-muted"
+            }`}
+          />
+          {t("keepBetterStat")}
+        </button>
       </div>
     </section>
   );

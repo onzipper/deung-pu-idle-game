@@ -245,7 +245,8 @@ describe("migrate v9 → v10", () => {
   it("backfills a pre-v10 save with empty gear, zero counter, derived salt", () => {
     const m = migrate({ version: 9, stage: 6, gold: 100, hero: { cls: "archer", level: 20, tier: 1 } });
     expect(m.version).toBe(SAVE_VERSION);
-    expect(m.equipped).toEqual({ weapon: null, armor: null });
+    expect(m.equipped).toEqual({ weapon: null, armor: null, refine: { weapon: 0, armor: 0 } });
+    expect(m.materials).toBe(0); // M7.6: pre-v14 backfills the material counter to 0
     expect(m.lootCounter).toBe(0);
     expect(typeof m.lootSalt).toBe("number");
     expect(Number.isInteger(m.lootSalt)).toBe(true);
@@ -261,7 +262,11 @@ describe("migrate v9 → v10", () => {
       lootCounter: 812,
       lootSalt: 55555,
     });
-    expect(once.equipped).toEqual({ weapon: "w_staff_t3_arcane", armor: "a_chain_t3_mail" });
+    expect(once.equipped).toEqual({
+      weapon: "w_staff_t3_arcane",
+      armor: "a_chain_t3_mail",
+      refine: { weapon: 0, armor: 0 },
+    });
     expect(once.lootCounter).toBe(812);
     expect(once.lootSalt).toBe(55555);
     expect(migrate(once)).toEqual(once); // idempotent
@@ -274,7 +279,11 @@ describe("migrate v9 → v10", () => {
 
   it("round-trips gear through initGameState + toSaveData", () => {
     const save = soloSave("mage", 5);
-    save.equipped = { weapon: "w_staff_t2_oak", armor: "a_leather_t2_vest" };
+    save.equipped = {
+      weapon: "w_staff_t2_oak",
+      armor: "a_leather_t2_vest",
+      refine: { weapon: 0, armor: 0 },
+    };
     const restored = toSaveData(initGameState(3, save));
     expect(restored.equipped).toEqual(save.equipped);
     const h = initGameState(3, save).heroes[0];

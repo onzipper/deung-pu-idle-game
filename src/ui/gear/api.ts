@@ -9,6 +9,8 @@ import type { GearSlot } from "@/engine";
 import type {
   ClaimItemResultWire,
   ItemInstanceWire,
+  RefineApiResult,
+  SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
 
@@ -109,6 +111,58 @@ export async function postSell(
     return (await res.json()) as { results: SellItemResultWire[]; totalGold: number };
   } catch {
     return null;
+  }
+}
+
+/** POST /api/items/salvage (M7.6 ตีบวก). Same "null on network failure, leave
+ * local state untouched" contract as `postSell`. */
+export async function postSalvage(
+  itemIds: string[],
+): Promise<{ results: SalvageItemResultWire[]; totalMaterials: number; materials: number } | null> {
+  try {
+    const res = await fetch("/api/items/salvage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as {
+      results: SalvageItemResultWire[];
+      totalMaterials: number;
+      materials: number;
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** POST /api/items/refine (M7.6 ตีบวก) — the SERVER rolls the attempt (the
+ * engine/client never rolls, CLAUDE.md). A non-2xx response (409 max/insufficient
+ * funds, 404 not found) resolves to `{ ok: false, reason }` rather than
+ * throwing, using the route's `code` field when present (falls back to `error`,
+ * then `"unknown"`) — same shape as `postEquip`'s `EquipApiResult`. */
+export async function postRefine(itemId: string): Promise<RefineApiResult> {
+  try {
+    const res = await fetch("/api/items/refine", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId }),
+    });
+    const json = (await res.json()) as
+      | Omit<Extract<RefineApiResult, { ok: true }>, "ok">
+      | { error?: string; code?: string };
+    if (!res.ok) {
+      const reason =
+        "code" in json && json.code
+          ? json.code
+          : "error" in json && json.error
+            ? json.error
+            : "unknown";
+      return { ok: false, reason };
+    }
+    return { ok: true, ...(json as Omit<Extract<RefineApiResult, { ok: true }>, "ok">) };
+  } catch {
+    return { ok: false, reason: "network" };
   }
 }
 

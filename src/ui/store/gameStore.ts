@@ -41,10 +41,17 @@ import type {
   WorldLocation,
   ZoneKind,
 } from "@/engine";
-import { mergeClaimedItems, removeSoldItems } from "@/ui/gear/inventoryOps";
+import {
+  applyRefineLevelChange,
+  mergeClaimedItems,
+  removeInstanceId,
+  removeSalvagedItems,
+  removeSoldItems,
+} from "@/ui/gear/inventoryOps";
 import type {
   InventoryItem,
   ItemInstanceWire,
+  SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
 
@@ -147,6 +154,10 @@ export interface HeroSummary {
    * stay in sync because the equip flow writes the DB THEN queues the engine
    * intent, see `GameClient.tsx`). */
   equipped: EquippedGear;
+  /** Manual play (M7.8): whether this hero currently has an active move/attack
+   * command (`hero.command != null`) — drives the "✕ ยกเลิกคำสั่ง" cancel chip.
+   * Read-only display flag, same one-way pattern as `canEvolve`. */
+  hasCommand: boolean;
 }
 
 /** One adjacent zone's walk-arrow state (M6 "World & Town"). */
@@ -211,6 +222,11 @@ export interface EngineSnapshot {
   /** Per-map unlocked-zone counts (M6 SAVE v8 field), surfaced for the M7.5
    * fast-travel picker's lock/unlock read (`isZoneUnlockedUi`). */
   unlockedZones: Record<string, number>;
+  /** M7.6 ตีบวก material counter (`state.materials`, SAVE v14) — read straight
+   * off the engine, same throttled-display pattern as `gold` (server-owned
+   * transactions; the engine just carries the count, see `HudState.materials`'s
+   * doc). */
+  materials: number;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -244,8 +260,11 @@ export interface PendingInput {
    * (M7), or `null` (last-wins per frame — a tap equips exactly once). Queued
    * ONLY after the `/api/items/equip`|`/api/items/unequip` POST already
    * succeeded server-side (see `InventoryPanel.tsx`) — this keeps the sim's
-   * applied stats and the server's item ledger from ever disagreeing. */
-  equip: { slot: GearSlot; templateId: string | null } | null;
+   * applied stats and the server's item ledger from ever disagreeing.
+   * `refineLevel` (M7.6 ตีบวก, optional — default +0) lets a refine on the
+   * CURRENTLY-equipped item re-send the same slot/template at its new +level
+   * so the sim's applied stats stay current (see `ui/gear/refineFlow.ts`). */
+  equip: { slot: GearSlot; templateId: string | null; refineLevel?: number } | null;
   /** Idle-bot settings patch (M7.5), or `null`. Same-frame calls MERGE (not
    * last-wins) so toggling two fields in one tick never drops one of them —
    * the engine's own `setBotSettings` intent handler already merges onto
@@ -263,6 +282,21 @@ export interface PendingInput {
    * (SAVE v12) — the HUD button queues this and reads the current value back
    * from the snapshot's `autoHunt`, never shadow-owning it. */
   setAutoHunt: boolean | null;
+  /** Signed material-counter delta (M7.6 ตีบวก): salvage grants +, refine spends
+   * −, decided SERVER-side. SUMMED across same-frame calls (not last-wins) —
+   * same pattern as `goldCredit`, since a bulk salvage + an overlapping single
+   * refine in the same tick must never drop one. `null`/`0` = nothing pending. */
+  materialsDelta: number | null;
+  /** Manual play (M7.8): tap-the-ground move order, or `null` (last-wins per
+   * frame — a tap walks to exactly one x; the engine clamps it to the zone's
+   * walkable bounds). */
+  moveTo: { x: number } | null;
+  /** Manual play (M7.8): tap-a-monster attack order, or `null` (last-wins per
+   * frame). An invalid/dead/despawned id is a no-op engine-side. */
+  attackTarget: { id: number } | null;
+  /** Manual play (M7.8): cancel the solo hero's active move/attack command,
+   * once per frame. */
+  cancelCommand: boolean;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -283,6 +317,10 @@ function emptyPendingInput(): PendingInput {
     fastTravel: null,
     goldCredit: null,
     setAutoHunt: null,
+    materialsDelta: null,
+    moveTo: null,
+    attackTarget: null,
+    cancelCommand: false,
   };
 }
 
@@ -382,25 +420,45 @@ export function writeSeenTip(id: string, seen: readonly string[]): string[] {
   return next;
 }
 
-/** localStorage-persisted auto-sell rules (M7.5) — same client-preference tier
- * as `soundMuted`/`ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't
- * game progress; the bot's ENGINE-side config, `BotSettings`, is the thing
- * that's actually save-persisted). Owner-locked defaults (ROADMAP.md M7.5):
- * sell common ON, rare OFF, epic never (no field — see `ui/gear/autoSell.ts`),
- * keep-guard ON (don't auto-sell a stat upgrade over what's equipped). */
-const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2"; // v2 (2026-07-06): sellRare default flipped ON (tier-3+ drops are ALL rare; common-only sold nothing mid-game) — key versioned so existing players re-default
+/** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
+ * salvage-by-rarity) — same client-preference tier as `soundMuted`/
+ * `ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't game progress;
+ * the bot's ENGINE-side config, `BotSettings`, is the thing that's actually
+ * save-persisted). Owner-locked defaults: common "sell", rare "sell", epic
+ * never (no field — see `ui/gear/autoSell.ts`), keep-guard ON (don't dispose
+ * of a stat upgrade over what's equipped). SAME storage key as the old v1.1
+ * boolean shape — deliberately NOT bumped, so `readStoredAutoSellRules`
+ * migrates old `{sellCommon, sellRare}` booleans → `"sell"/"off"` in place
+ * rather than resetting every existing player's preference. */
+const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2";
+
+/** Per-rarity disposal action (M7.7 — replaces the old two booleans). */
+export type AutoSellAction = "off" | "sell" | "salvage";
 
 export interface StoredAutoSellRules {
-  sellCommon: boolean;
-  sellRare: boolean;
+  common: AutoSellAction;
+  rare: AutoSellAction;
   keepBetterStat: boolean;
 }
 
 const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
-  sellCommon: true,
-  sellRare: true, // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
+  common: "sell",
+  rare: "sell", // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
   keepBetterStat: true,
 };
+
+function isAutoSellAction(v: unknown): v is AutoSellAction {
+  return v === "off" || v === "sell" || v === "salvage";
+}
+
+/** Migrates one rarity field from either shape: v2 action string (preferred),
+ * v1.1 boolean (`true` → "sell", `false` → "off"), or missing/corrupt → the
+ * default. */
+function migrateAction(actionField: unknown, boolField: unknown, fallback: AutoSellAction): AutoSellAction {
+  if (isAutoSellAction(actionField)) return actionField;
+  if (typeof boolField === "boolean") return boolField ? "sell" : "off";
+  return fallback;
+}
 
 export function readStoredAutoSellRules(): StoredAutoSellRules {
   if (typeof window === "undefined") return DEFAULT_AUTO_SELL_RULES;
@@ -409,14 +467,18 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
     if (!raw) return DEFAULT_AUTO_SELL_RULES;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return DEFAULT_AUTO_SELL_RULES;
-    const p = parsed as Partial<StoredAutoSellRules>;
+    // Loosely typed so both the v1.1 boolean shape and the v2 action shape
+    // read from the same key without a cast-away-safety hack.
+    const p = parsed as {
+      common?: unknown;
+      rare?: unknown;
+      sellCommon?: unknown;
+      sellRare?: unknown;
+      keepBetterStat?: unknown;
+    };
     return {
-      sellCommon:
-        typeof p.sellCommon === "boolean"
-          ? p.sellCommon
-          : DEFAULT_AUTO_SELL_RULES.sellCommon,
-      sellRare:
-        typeof p.sellRare === "boolean" ? p.sellRare : DEFAULT_AUTO_SELL_RULES.sellRare,
+      common: migrateAction(p.common, p.sellCommon, DEFAULT_AUTO_SELL_RULES.common),
+      rare: migrateAction(p.rare, p.sellRare, DEFAULT_AUTO_SELL_RULES.rare),
       keepBetterStat:
         typeof p.keepBetterStat === "boolean"
           ? p.keepBetterStat
@@ -539,6 +601,8 @@ export interface HudState {
   autoHunt: boolean;
   /** Per-map unlocked-zone counts (M6 SAVE v8), for the fast-travel picker. */
   unlockedZones: Record<string, number>;
+  /** M7.6 ตีบวก material counter — see `EngineSnapshot.materials`'s doc. */
+  materials: number;
 
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
@@ -564,10 +628,10 @@ export interface HudState {
    * `fastTravelBlocked` (see `GameClient.tsx`'s frame-event handling). */
   fastTravelChannel: FastTravelChannelState | null;
 
-  // ---- M7.5 auto-sell rules (localStorage-persisted UI preference, same tier
-  // as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
-  autoSellCommon: boolean;
-  autoSellRare: boolean;
+  // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted UI preference,
+  // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
+  autoSellCommon: AutoSellAction;
+  autoSellRare: AutoSellAction;
   autoSellKeepBetterStat: boolean;
   /** M7.5 auto-equip executor toggle (localStorage-persisted, default ON). */
   autoEquip: boolean;
@@ -678,8 +742,9 @@ export interface HudState {
   useReturnScroll: () => void;
   /** Queue an equip/unequip intent for the solo hero (M7, once per frame) —
    * call ONLY after the corresponding `/api/items/*` POST already succeeded
-   * (see `InventoryPanel.tsx`'s equip flow doc). */
-  queueEquip: (slot: GearSlot, templateId: string | null) => void;
+   * (see `InventoryPanel.tsx`'s equip flow doc). `refineLevel` (M7.6, optional)
+   * re-derives stats for the SAME slot/template at a new +level. */
+  queueEquip: (slot: GearSlot, templateId: string | null, refineLevel?: number) => void;
   /** Queue an idle-bot settings patch (M7.5, merges across same-frame calls —
    * see `PendingInput.setBotSettings`'s doc). */
   setBotSettings: (patch: Partial<BotSettings>) => void;
@@ -690,8 +755,20 @@ export interface HudState {
    * attempt. */
   queueFastTravel: (target: WorldLocation) => void;
   /** Queue a server-confirmed gold credit from an NPC sale (M7.5, SUMS across
-   * same-frame calls — see `PendingInput.goldCredit`'s doc). */
+   * same-frame calls — see `PendingInput.goldCredit`'s doc). Also used by
+   * `ui/gear/refineFlow.ts` for a refine's (negative) gold cost. */
   creditGold: (amount: number) => void;
+  /** Queue a signed material-counter delta (M7.6 ตีบวก, SUMS across same-frame
+   * calls — see `PendingInput.materialsDelta`'s doc). */
+  creditMaterials: (amount: number) => void;
+  /** Queue a manual play (M7.8) tap-the-ground move order (last-wins per
+   * frame) — see `PendingInput.moveTo`'s doc. */
+  queueMoveTo: (x: number) => void;
+  /** Queue a manual play (M7.8) tap-a-monster attack order (last-wins per
+   * frame) — see `PendingInput.attackTarget`'s doc. */
+  queueAttackTarget: (id: number) => void;
+  /** Queue a manual play (M7.8) cancel of the active move/attack command. */
+  queueCancelCommand: () => void;
 
   // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
   // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
@@ -713,6 +790,14 @@ export interface HudState {
   /** Remove sold instances from the inventory slice (M7.5, manual + auto-sell
    * flows — see `gear/inventoryOps.ts`'s `removeSoldItems`). */
   removeSoldFromInventory: (results: SellItemResultWire[]) => void;
+  /** Remove salvaged instances from the inventory slice (M7.6 ตีบวก — see
+   * `gear/inventoryOps.ts`'s `removeSalvagedItems`). */
+  removeSalvagedFromInventory: (results: SalvageItemResultWire[]) => void;
+  /** Patch one instance's refine +level after a non-destroying refine outcome
+   * (M7.6 ตีบวก — see `gear/inventoryOps.ts`'s `applyRefineLevelChange`). */
+  setInventoryRefineLevel: (instanceId: string, refineLevel: number) => void;
+  /** Remove one instance destroyed by a refine "break" outcome (M7.6 ตีบวก). */
+  removeInventoryInstance: (instanceId: string) => void;
 
   // ---- M7.5: generic notice toasts + fast-travel channel UI state ----
   /** Push a one-line notice toast (M7.5) — capped, oldest evicted first. */
@@ -724,9 +809,9 @@ export interface HudState {
   /** Clear the fast-travel channel progress UI (arrival or block/cancel). */
   clearFastTravelChannel: () => void;
 
-  // ---- M7.5 auto-sell rules (localStorage-persisted) ----
-  toggleAutoSellCommon: () => void;
-  toggleAutoSellRare: () => void;
+  // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
+  setAutoSellCommon: (action: AutoSellAction) => void;
+  setAutoSellRare: (action: AutoSellAction) => void;
   toggleAutoSellKeepBetterStat: () => void;
   /** Mount-effect-only: apply the persisted rules once, post-hydration (same
    * "don't re-persist on mount" rule as `setSoundMuted`). */
@@ -762,6 +847,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   bot: defaultBotSettings(),
   autoHunt: true,
   unlockedZones: {},
+  materials: 0,
 
   inventory: [],
   dropFeed: [],
@@ -772,8 +858,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   // Safe defaults pre-hydration; a mount effect (`SettingsPanel`'s bot/auto-sell
   // section) applies the persisted values once via `hydrateAutoSellRules` —
   // same two-step pattern as `soundMuted`/`setSoundMuted`.
-  autoSellCommon: DEFAULT_AUTO_SELL_RULES.sellCommon,
-  autoSellRare: DEFAULT_AUTO_SELL_RULES.sellRare,
+  autoSellCommon: DEFAULT_AUTO_SELL_RULES.common,
+  autoSellRare: DEFAULT_AUTO_SELL_RULES.rare,
   autoSellKeepBetterStat: DEFAULT_AUTO_SELL_RULES.keepBetterStat,
   autoEquip: true,
 
@@ -872,8 +958,10 @@ export const useGameStore = create<HudState>((set, get) => ({
   useReturnScroll: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, useReturnScroll: true } })),
 
-  queueEquip: (slot, templateId) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, equip: { slot, templateId } } })),
+  queueEquip: (slot, templateId, refineLevel) =>
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, equip: { slot, templateId, refineLevel } },
+    })),
 
   setBotSettings: (patch) =>
     set((s) => ({
@@ -897,6 +985,22 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
+  creditMaterials: (amount) =>
+    set((s) => ({
+      pendingInput: {
+        ...s.pendingInput,
+        materialsDelta: (s.pendingInput.materialsDelta ?? 0) + amount,
+      },
+    })),
+
+  queueMoveTo: (x) => set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
+
+  queueAttackTarget: (id) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, attackTarget: { id } } })),
+
+  queueCancelCommand: () =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
+
   setInventory: (items) => set({ inventory: items }),
   mergeInventory: (claimed) =>
     set((s) => ({ inventory: mergeClaimedItems(s.inventory, claimed) })),
@@ -915,6 +1019,14 @@ export const useGameStore = create<HudState>((set, get) => ({
     set({ sessionKnownTemplateIds: [...new Set(ids)] }),
   removeSoldFromInventory: (results) =>
     set((s) => ({ inventory: removeSoldItems(s.inventory, results) })),
+  removeSalvagedFromInventory: (results) =>
+    set((s) => ({ inventory: removeSalvagedItems(s.inventory, results) })),
+  setInventoryRefineLevel: (instanceId, refineLevel) =>
+    set((s) => ({
+      inventory: applyRefineLevelChange(s.inventory, instanceId, refineLevel),
+    })),
+  removeInventoryInstance: (instanceId) =>
+    set((s) => ({ inventory: removeInstanceId(s.inventory, instanceId) })),
 
   pushNotice: (messageKey, params) =>
     set((s) => ({
@@ -930,40 +1042,38 @@ export const useGameStore = create<HudState>((set, get) => ({
     })),
   clearFastTravelChannel: () => set({ fastTravelChannel: null }),
 
-  toggleAutoSellCommon: () =>
+  setAutoSellCommon: (action) =>
     set((s) => {
-      const autoSellCommon = !s.autoSellCommon;
       writeAutoSellRules({
-        sellCommon: autoSellCommon,
-        sellRare: s.autoSellRare,
+        common: action,
+        rare: s.autoSellRare,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
-      return { autoSellCommon };
+      return { autoSellCommon: action };
     }),
-  toggleAutoSellRare: () =>
+  setAutoSellRare: (action) =>
     set((s) => {
-      const autoSellRare = !s.autoSellRare;
       writeAutoSellRules({
-        sellCommon: s.autoSellCommon,
-        sellRare: autoSellRare,
+        common: s.autoSellCommon,
+        rare: action,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
-      return { autoSellRare };
+      return { autoSellRare: action };
     }),
   toggleAutoSellKeepBetterStat: () =>
     set((s) => {
       const autoSellKeepBetterStat = !s.autoSellKeepBetterStat;
       writeAutoSellRules({
-        sellCommon: s.autoSellCommon,
-        sellRare: s.autoSellRare,
+        common: s.autoSellCommon,
+        rare: s.autoSellRare,
         keepBetterStat: autoSellKeepBetterStat,
       });
       return { autoSellKeepBetterStat };
     }),
   hydrateAutoSellRules: (rules) =>
     set({
-      autoSellCommon: rules.sellCommon,
-      autoSellRare: rules.sellRare,
+      autoSellCommon: rules.common,
+      autoSellRare: rules.rare,
       autoSellKeepBetterStat: rules.keepBetterStat,
     }),
   toggleAutoEquip: () =>

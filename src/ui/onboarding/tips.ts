@@ -120,6 +120,17 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
     mood: "warning",
     trigger: (prev, next) => prev.phase === "boss" && next.phase === "battle",
   },
+  /**
+   * `manualPlayHint` (M7.8 "Manual Play"): the first time the player turns
+   * AUTO off — explains the RO-style tap-to-move / tap-to-attack controls
+   * that now drive the hero instead of auto-hunt. No anchor (the canvas
+   * itself, not a HUD control, is what it's pointing at).
+   */
+  {
+    id: "manualPlayHint",
+    mood: "excited",
+    trigger: (prev, next) => prev.autoHunt && !next.autoHunt,
+  },
 ];
 
 /**

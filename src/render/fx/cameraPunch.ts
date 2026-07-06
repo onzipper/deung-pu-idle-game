@@ -27,7 +27,10 @@ export type CameraPunchKind =
   | "bossSlamLand"
   | "bossDefeated"
   | "zoneWhoosh"
-  | "bossRoomEntered";
+  | "bossRoomEntered"
+  | "swordQuake"
+  | "archerBarrage"
+  | "mageCataclysm";
 
 /** Peak scale multiplier (1.0 = no zoom) per trigger kind — see the task
  * spec's exact values. `swordSpin` (HERO SIGNATURE PASS item 6) is a
@@ -38,7 +41,11 @@ export type CameraPunchKind =
  * a zone-to-zone walk arriving) is deliberately the softest of all — barely
  * a nudge, it just sells "you just arrived somewhere". `bossRoomEntered` is
  * a dedicated, weightier entrance beat — bigger than a skill cast, smaller
- * than the boss's own slam. */
+ * than the boss's own slam. The three tier-2 ULTIMATE kinds (M7.7 "Skill
+ * Spectacle" — sword_quake/archer_barrage/mage_cataclysm) are deliberately
+ * the BIGGEST punches in the palette, bigger even than `bossDefeated` — the
+ * owner's "เบิ้มๆ สาดๆ ดุๆ" screen-shaking-apocalyptic mandate for a
+ * field-wide ultimate landing. */
 const PEAK_SCALE: Record<CameraPunchKind, number> = {
   skillCast: 1.02,
   swordSpin: 1.035,
@@ -46,6 +53,9 @@ const PEAK_SCALE: Record<CameraPunchKind, number> = {
   bossDefeated: 1.06,
   zoneWhoosh: 1.015,
   bossRoomEntered: 1.05,
+  swordQuake: 1.08,
+  archerBarrage: 1.07,
+  mageCataclysm: 1.09,
 };
 
 /** Peak position nudge (world px, toward the event's side of the arena),
@@ -57,6 +67,9 @@ const PEAK_NUDGE_PX: Record<CameraPunchKind, number> = {
   bossDefeated: 4,
   zoneWhoosh: 1,
   bossRoomEntered: 3.5,
+  swordQuake: 4.5,
+  archerBarrage: 4,
+  mageCataclysm: 5,
 };
 
 /** Total real-seconds duration of one punch (zoom-in + ease-out), per spec. */

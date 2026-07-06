@@ -15,6 +15,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     phase: "battle",
     autoCast: false,
     autoAllocate: false,
+    autoHunt: true,
     heroes: [
       {
         skillCd: 0,

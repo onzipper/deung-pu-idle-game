@@ -216,6 +216,10 @@ function reviveHeroesFull(state: GameState): void {
     h.skillCds = {};
     h.atkBuffMult = 1;
     h.atkBuffTimer = 0;
+    // Manual play (M7.8): a zone arrival is a fresh footing — drop any pending
+    // move/attack command so a stale tap never carries across a transit / into a
+    // boss room (boss forced-combat owns the hero there anyway).
+    h.command = null;
   }
 }
 
@@ -324,12 +328,21 @@ export function arriveAtZone(
   reason: TravelReason,
 ): Zone {
   const zone = zoneAt(target);
+  // Per-zone unlock progress (SAVE v13, the "เกจรี" fix): stash the OLD farm
+  // zone's live counter, then restore the NEW zone's stashed progress — a town
+  // round trip (bot restock/sell, warp, death respawn) keeps the gauge; only
+  // genuinely-new zones start at 0.
+  const from = state.location;
+  if (zoneAt(from).kind === "farm") {
+    state.zoneKills[`${from.mapId}:${from.zoneIdx}`] = state.kills;
+  }
   state.location = { mapId: target.mapId, zoneIdx: target.zoneIdx };
   state.stage = zone.stage;
   state.enemies = [];
   state.projectiles = [];
   state.wave = 0;
-  state.kills = 0;
+  state.kills =
+    zone.kind === "farm" ? (state.zoneKills[`${target.mapId}:${target.zoneIdx}`] ?? 0) : 0;
   state.bossReady = false;
   state.anchorX = CONFIG.baseAnchor;
   state.waveGap = CONFIG.firstWaveGap;
@@ -404,6 +417,12 @@ export function checkZoneUnlock(state: GameState): void {
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
   if (!next || next.mapId !== zone.mapId) return;
+  // Boss-gate arming (2026-07-07 fix, moved here from combat.ts): the challenge
+  // affordance lights up ONLY where enterBossRoom can actually work — quota met
+  // AT the map's LAST farm zone (the next zone is this map's boss room). The old
+  // combat-side check armed on quota alone, so any cleared zone (kills persist
+  // per-zone since SAVE v13) showed a glowing button that walked nowhere.
+  if (next.kind === "boss" && !state.bossReady) state.bossReady = true;
   if (next.zoneIdx < (state.unlockedZones[next.mapId] ?? 0)) return; // already unlocked
 
   state.unlockedZones[next.mapId] = next.zoneIdx + 1;

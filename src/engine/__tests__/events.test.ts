@@ -253,6 +253,7 @@ describe("events are transient (never persisted)", () => {
       "gold",
       "location",
       "unlockedZones",
+      "zoneKills",
       "lastFarmZone",
       "consumables",
       "bot",
@@ -261,6 +262,7 @@ describe("events are transient (never persisted)", () => {
       "hero",
       "lootCounter",
       "lootSalt",
+      "materials",
       "lastSeen",
     ]);
   });

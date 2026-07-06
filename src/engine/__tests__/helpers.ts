@@ -83,7 +83,10 @@ export function worldAutopilot(s: GameState): FrameInput {
     return input;
   }
   if (nav.current.kind === "boss") return input; // fighting
-  if (s.bossReady) walkRight(); // farm quota met -> into the next farm zone / boss room
+  // Quota met -> checkZoneUnlock has OPENED the next zone; that unlock (not
+  // bossReady, which since 2026-07-07 arms only at the boss-gate zone) is the
+  // "move forward" signal. Fresh-run trajectory is identical to the old check.
+  walkRight(); // no-ops while the next zone is still locked
   return input;
 }
 

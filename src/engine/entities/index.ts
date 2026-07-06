@@ -172,6 +172,19 @@ export interface HeroQuest {
   progress: number[];
 }
 
+/**
+ * A player-issued MANUAL command (M7.8 "Manual Play"), or null when the hero is on
+ * AUTO. RO-style: the player taps the ground (`move` — walk to `x`, ignoring
+ * huntable targets) or taps a monster (`attack` — close to range + fight
+ * `targetId` until it dies / the command is cancelled or replaced). All commands
+ * arrive as `FrameInput` intents (moveTo / attackTarget / cancelCommand) and paving
+ * M8 lockstep. TRANSIENT — lives on the (never-persisted) live hero, cleared on any
+ * zone arrival (world.reviveHeroesFull) and never written to `SaveData`.
+ */
+export type ManualCommand =
+  | { kind: "move"; x: number }
+  | { kind: "attack"; targetId: number };
+
 export interface Hero {
   id: number;
   cls: HeroClass;
@@ -262,6 +275,14 @@ export interface Hero {
    * v10) as a SIM CACHE — the DB item ledger is authoritative, boot payload wins.
    */
   equipped: EquippedGear;
+  /**
+   * Active MANUAL command (M7.8 "Manual Play"), or null when auto. Set by the
+   * moveTo / attackTarget FrameInput intents (systems/manual), honoured by the
+   * hunt movement/attack in systems/combat, and OVERRIDDEN by the boss phase's
+   * forced combat (exactly like the AUTO-off toggle). Transient — NEVER persisted
+   * (rebuilt null on load, cleared on any zone arrival).
+   */
+  command: ManualCommand | null;
 }
 
 export interface Enemy {

@@ -9,7 +9,7 @@
  */
 
 import { useTranslations } from "next-intl";
-import type { GearSlot } from "@/engine";
+import { refineOf, type GearSlot } from "@/engine";
 import { GEAR_SLOT_ICONS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -33,6 +33,9 @@ export function EquippedLoadout() {
       {SLOT_ORDER.map((slot) => {
         const templateId = equipped[slot];
         const label = templateId ? tContent(`${templateId}.name`) : t("emptySlotHint");
+        // M7.6 ตีบวก: the currently-applied refine +level (0 for an empty/
+        // unrefined slot — no badge shown then).
+        const refineLevel = templateId ? refineOf(equipped, slot) : 0;
         return (
           <span
             key={slot}
@@ -40,6 +43,9 @@ export function EquippedLoadout() {
           >
             <span aria-hidden>{GEAR_SLOT_ICONS[slot]}</span>
             {label}
+            {refineLevel > 0 && (
+              <span className="text-emerald-400">{t("refinePlus", { level: refineLevel })}</span>
+            )}
           </span>
         );
       })}

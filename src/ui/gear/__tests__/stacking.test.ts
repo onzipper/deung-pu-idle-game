@@ -8,6 +8,7 @@ function item(over: Partial<InventoryItem> = {}): InventoryItem {
     templateId: "w_sword_t1_rusty",
     slot: "weapon",
     equippedSlot: null,
+    refineLevel: 0,
     ...over,
   };
 }
@@ -43,5 +44,30 @@ describe("groupIntoStacks", () => {
 
   it("is empty for an empty inventory", () => {
     expect(groupIntoStacks([])).toEqual([]);
+  });
+
+  it("M7.6: keeps a +0 and a +5 instance of the SAME template as separate stacks", () => {
+    const stacks = groupIntoStacks([
+      item({ instanceId: "a", refineLevel: 0 }),
+      item({ instanceId: "b", refineLevel: 5 }),
+      item({ instanceId: "c", refineLevel: 0 }),
+    ]);
+    expect(stacks).toHaveLength(2);
+    const plain = stacks.find((s) => s.refineLevel === 0)!;
+    const refined = stacks.find((s) => s.refineLevel === 5)!;
+    expect(plain.count).toBe(2);
+    expect(refined.count).toBe(1);
+    expect(refined.representativeId).toBe("b");
+  });
+
+  it("M7.6: an equipped +3 stack keeps its own refine level + representative", () => {
+    const stacks = groupIntoStacks([
+      item({ instanceId: "a", refineLevel: 3, equippedSlot: "weapon" }),
+      item({ instanceId: "b", refineLevel: 0 }),
+    ]);
+    expect(stacks).toHaveLength(2);
+    const refined = stacks.find((s) => s.refineLevel === 3)!;
+    expect(refined.equippedInstanceId).toBe("a");
+    expect(refined.unequippedIds).toEqual([]);
   });
 });

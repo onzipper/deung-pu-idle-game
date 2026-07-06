@@ -57,6 +57,7 @@ import {
   isClassChangeQuestOffered,
   learnedSkills,
   migrate,
+  repairHeroClass,
   primaryStat,
   shopPriceAt,
   shopStageOf,
@@ -69,16 +70,18 @@ import {
   type GameEvent,
   type GameState,
   type Hero,
+  type HeroClass,
   type SaveData,
 } from "@/engine";
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
-import { selectAutoSellItemIds } from "@/ui/gear/autoSell";
+import { selectAutoSellSalvageIds } from "@/ui/gear/autoSell";
 import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
 import { postClaimBatch, postEquip } from "@/ui/gear/api";
 import { applyEquipChange } from "@/ui/gear/inventoryOps";
+import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { toInventoryItem } from "@/ui/gear/types";
 import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
@@ -237,6 +240,8 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       // doc — distinct from, but kept in sync with, the DB-hydrated `inventory`
       // store slice). Shallow-copied like `stats` above (never alias engine state).
       equipped: { ...h.equipped },
+      // M7.8 Manual Play: read-only display flag for the "✕ ยกเลิกคำสั่ง" chip.
+      hasCommand: h.command != null,
     };
   });
 
@@ -297,16 +302,23 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     bot: { ...state.bot },
     autoHunt: state.autoHunt,
     unlockedZones: { ...state.unlockedZones },
+    // M7.6 ตีบวก material counter — same one-way "engine carries it, store just
+    // reflects it" pattern as `gold`.
+    materials: state.materials,
   };
 }
 
 /**
- * M7.5 auto-sell executor — runs off a `townArrived` event (reason "sell" /
- * "restockSell"): computes the sell list from the CURRENT inventory slice +
- * persisted rules, then reuses the same POST-first sell flow the manual
- * `InventoryPanel` sell buttons use (`executeSell`). Fire-and-forget: a
- * dropped/failed auto-sell simply leaves the inventory full, so the NEXT trip
- * (or a manual sell) retries it — never a stuck state.
+ * M7.5→M7.7 auto-dispose executor — runs off a `townArrived` event (reason
+ * "sell" / "restockSell"): computes the sell AND salvage lists from the
+ * CURRENT inventory slice + persisted rules in ONE sweep
+ * (`selectAutoSellSalvageIds`), then reuses the same POST-first flows the
+ * manual `InventoryPanel` sell/salvage buttons use (`executeSell` /
+ * `executeSalvage`) — sell first, then salvage (order doesn't matter
+ * functionally; sequential keeps the shared 100-slot inventory bookkeeping
+ * simple). Fire-and-forget: a dropped/failed run simply leaves the inventory
+ * full, so the NEXT trip (or a manual dispose) retries it — never a stuck
+ * state.
  */
 /**
  * M7.5 auto-equip executor (owner request 2026-07-06) — keeps the hero in its
@@ -344,28 +356,35 @@ async function performAutoEquip(): Promise<void> {
 
 async function performAutoSell(): Promise<void> {
   const store = useGameStore.getState();
-  const ids = selectAutoSellItemIds(
+  const { sellIds, salvageIds } = selectAutoSellSalvageIds(
     store.inventory,
     ITEM_TEMPLATES,
     {
-      sellCommon: store.autoSellCommon,
-      sellRare: store.autoSellRare,
+      common: store.autoSellCommon,
+      rare: store.autoSellRare,
       keepBetterStat: store.autoSellKeepBetterStat,
     },
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
   );
-  if (ids.length === 0) {
+  if (sellIds.length === 0 && salvageIds.length === 0) {
     // Bag full but the rules matched nothing — the engine latches its sell-trip
     // watermark and stops tripping; tell the player WHY the bot gave up (fix =
-    // loosen the rules in Settings or sell manually).
+    // loosen the rules in Settings or sell/salvage manually).
     store.pushNotice("autoSellNothing");
     return;
   }
-  const result = await executeSell(ids);
-  if (result.ok && result.soldCount > 0) {
+  const sellResult = await executeSell(sellIds);
+  if (sellResult.ok && sellResult.soldCount > 0) {
     useGameStore.getState().pushNotice("autoSellDone", {
-      count: result.soldCount,
-      gold: result.totalGold.toLocaleString(),
+      count: sellResult.soldCount,
+      gold: sellResult.totalGold.toLocaleString(),
+    });
+  }
+  const salvageResult = await executeSalvage(salvageIds);
+  if (salvageResult.ok && salvageResult.salvagedCount > 0) {
+    useGameStore.getState().pushNotice("autoSalvageDone", {
+      count: salvageResult.salvagedCount,
+      materials: salvageResult.totalMaterials.toLocaleString(),
     });
   }
 }
@@ -433,6 +452,10 @@ export function GameClient() {
     // Previous rAF frame's event batch — TimeDirector reacts to these (a
     // one-frame trigger latency is expected/fine; see timeDirector.ts).
     let lastFrameEvents: GameEvent[] = [];
+    // M7.5 bot-status toast trackers (frame-to-frame transition detection).
+    let botPrevTravelReason: string | null = null;
+    let botPrevDwell = false;
+    let botTownActivityUntil = 0;
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
@@ -470,6 +493,15 @@ export function GameClient() {
 
       const store = useGameStore.getState();
 
+      // M7.5 bot-status toasts ("มันเกิดขึ้นไวไป มองไม่ทัน" — owner request):
+      // capture pre-step consumable counts so a town restock this frame can be
+      // reported with real numbers after the sub-steps run.
+      const potsBefore = {
+        hp: state.consumables.hpPotion,
+        mp: state.consumables.manaPotion,
+        scroll: state.consumables.returnScroll,
+      };
+
       // UI-owned flags the engine reads directly (not part of FrameInput).
       state.autoCast = store.autoCast;
       state.autoAllocate = store.autoAllocate;
@@ -504,10 +536,18 @@ export function GameClient() {
         setAutoHunt: pending.setAutoHunt ?? undefined,
         fastTravel: pending.fastTravel ?? undefined,
         goldCredit: pending.goldCredit ?? undefined,
+        // M7.6 ตีบวก: signed material-counter delta (salvage +, refine −), see
+        // `PendingInput.materialsDelta`'s doc.
+        materialsDelta: pending.materialsDelta ?? undefined,
         // M7.5: the sell-trip bot's trigger — the engine knows nothing about
         // item instances, so the client feeds this transient count every frame
         // (see `FrameInput.inventoryCount`'s doc).
         inventoryCount: store.inventory.length,
+        // M7.8 Manual Play: RO-style tap-to-move / tap-to-attack, queued by the
+        // canvas tap handler below (see `hitTestPointer()`/`onArenaClick()`).
+        moveTo: pending.moveTo ?? undefined,
+        attackTarget: pending.attackTarget ?? undefined,
+        cancelCommand: pending.cancelCommand || undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -532,6 +572,42 @@ export function GameClient() {
 
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
+
+      // ---- M7.5 bot-status toasts (transition detection; engine untouched) ----
+      // The bot's town round trip resolves in seconds (warps are instant), so
+      // without these the player only sees the hero teleport around. Signals:
+      // traveling.reason "bot" = the walk out; botDwell = standing selling; a
+      // potion-count jump without a manual buy = the restock; a "walk" transit
+      // shortly after town activity = the walk home.
+      const travelReason = state.traveling?.reason ?? null;
+      if (travelReason === "bot" && botPrevTravelReason !== "bot") {
+        store.pushNotice("botTripStart");
+      }
+      const dwellNow = state.botDwell !== null;
+      if (dwellNow && !botPrevDwell) store.pushNotice("botSelling");
+      const potGain = {
+        hp: Math.max(0, state.consumables.hpPotion - potsBefore.hp),
+        mp: Math.max(0, state.consumables.manaPotion - potsBefore.mp),
+        scroll: Math.max(0, state.consumables.returnScroll - potsBefore.scroll),
+      };
+      if ((potGain.hp || potGain.mp || potGain.scroll) && !pending.buyShopItem) {
+        // A stock jump the player didn't click for = the bot restocked.
+        store.pushNotice("botRestocked", potGain);
+        botTownActivityUntil = now + 15_000;
+      }
+      if (frameEvents.some((e) => e.type === "townArrived") || dwellNow) {
+        botTownActivityUntil = now + 15_000;
+      }
+      if (
+        travelReason === "walk" &&
+        botPrevTravelReason !== "walk" &&
+        now < botTownActivityUntil
+      ) {
+        store.pushNotice("botReturning");
+        botTownActivityUntil = 0;
+      }
+      botPrevTravelReason = travelReason;
+      botPrevDwell = dwellNow;
 
       // M7 Gear & Drops: buffer every `itemDrop` this frame for the batched
       // server claim (flushed on the autosave cadence / tab-hide below). The
@@ -674,6 +750,37 @@ export function GameClient() {
     }
     arenaEl.addEventListener("pointerdown", onPointerDown);
 
+    // ---- M7.8 Manual Play: RO-style tap-to-move / tap-to-attack -------------
+    // `click` normalizes a mouse click AND a touch tap (fires once, after
+    // pointerup) — deliberately NOT hooked on `pointerdown` (that's the
+    // audio-resume listener above) so a drag/scroll gesture never doubles as
+    // a command. Hit-testing itself is a pure, one-way `GameRenderer` query
+    // (`hitTestPointer`); this handler is the integration seam that turns the
+    // result into a store intent, same as every other player input in this
+    // file (drained once/frame above, never applied directly).
+    function onArenaClick(e: MouseEvent): void {
+      if (!arenaEl) return;
+      const rect = arenaEl.getBoundingClientRect();
+      const hit = renderer.hitTestPointer(e.clientX - rect.left, e.clientY - rect.top, state);
+      if (!hit) return;
+      if (hit.kind === "monster") useGameStore.getState().queueAttackTarget(hit.id);
+      else useGameStore.getState().queueMoveTo(hit.x);
+    }
+    arenaEl.addEventListener("click", onArenaClick);
+
+    // Desktop-only cursor affordance (owner directive: comfortable on both
+    // desktop AND mobile) — a crosshair while hovering a live target. Guarded
+    // to `pointerType === "mouse"` so a touch drag never leaves a stuck cursor
+    // style (touch devices don't fire `pointermove` without an active touch,
+    // but this is a defensive no-op guard nonetheless).
+    function onArenaPointerMove(e: PointerEvent): void {
+      if (!arenaEl || e.pointerType !== "mouse") return;
+      const rect = arenaEl.getBoundingClientRect();
+      const hit = renderer.hitTestPointer(e.clientX - rect.left, e.clientY - rect.top, state);
+      arenaEl.style.cursor = hit?.kind === "monster" ? "crosshair" : "";
+    }
+    arenaEl.addEventListener("pointermove", onArenaPointerMove);
+
     // Pixi init + save load run in parallel; the loop starts only after both
     // resolve. Guards against the effect having been cleaned up mid-flight
     // (React Strict Mode's dev mount/unmount/mount) by tearing the renderer
@@ -681,6 +788,7 @@ export function GameClient() {
     const boot = async (): Promise<void> => {
       // ---- load the server-authoritative save (before initGameState) ----
       let loaded: SaveData | undefined;
+      let bootClass: HeroClass | undefined; // fresh-character first boot class
       let offlineSeconds = 0;
       let offlineCapped = false;
       try {
@@ -697,10 +805,23 @@ export function GameClient() {
             // present (possibly empty arrays/nulls pre-character).
             inventory?: ItemInstanceWire[];
             equipped?: { weapon: string | null; armor: string | null };
+            /** M7.6 ตีบวก: the AUTHORITATIVE material balance (DB column) —
+             * overwrites the save blob's own mirror, same precedence rule as
+             * `equipped` below. */
+            materials?: number;
+            /** Authoritative character class (Character.baseClass) — corrects
+             * a save whose hero.cls drifted + seeds a first boot (2026-07-06
+             * "everyone is a swordsman" fix). */
+            baseClass?: HeroClass | null;
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
           if (json.save) loaded = migrate(json.save);
+          // Class repair (2026-07-06): the account's baseClass is authoritative
+          // over the save blob's hero.cls — a corrupted save gets its class
+          // corrected + wrong-primary stat points refunded (engine helper).
+          if (loaded && json.baseClass) loaded = repairHeroClass(loaded, json.baseClass);
+          if (json.baseClass) bootClass = json.baseClass;
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
@@ -709,6 +830,11 @@ export function GameClient() {
           // blob's own `equipped` cache (precedence documented at the API) —
           // overwrite it BEFORE `initGameState` derives max HP from it below.
           if (loaded && json.equipped) loaded.equipped = { ...json.equipped };
+          // M7.6 ตีบวก: the DB `Character.materials` column is authoritative
+          // over the save blob's own counter — same precedence as `equipped`.
+          if (loaded && typeof json.materials === "number") {
+            loaded.materials = json.materials;
+          }
           // Seed the inventory store slice straight from the boot payload —
           // this is the ONLY normal hydration path (InventoryPanel never
           // fetches on its own mount, only on an equip-failure resync).
@@ -731,6 +857,9 @@ export function GameClient() {
       if (cancelled) return;
 
       if (loaded) state = initGameState(seed, loaded);
+      // No save yet (a just-created character): seed the fresh state with the
+      // TRUE class instead of the swordsman default.
+      else if (bootClass) state = initGameState(seed, undefined, bootClass);
 
       // ---- offline-idle catch-up ----
       // Replay the capped offline seconds through the SAME fixed-step primitive
@@ -793,6 +922,8 @@ export function GameClient() {
       if (autosaveTimer) clearInterval(autosaveTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       arenaEl.removeEventListener("pointerdown", onPointerDown);
+      arenaEl.removeEventListener("click", onArenaClick);
+      arenaEl.removeEventListener("pointermove", onArenaPointerMove);
       errorEl?.remove();
       errorEl = null;
       renderer.destroy();

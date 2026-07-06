@@ -26,7 +26,13 @@ import { Environment } from "@/render/environment/Environment";
 import { FxController } from "@/render/fx/FxController";
 import { RENDER_FX } from "@/render/fxConfig";
 import { createBloomFilter } from "@/render/fx/impactFilters";
-import { computeWorldTransform, WORLD_HEIGHT, WORLD_WIDTH, type WorldTransform } from "@/render/layout";
+import {
+  computeWorldTransform,
+  GROUND_Y,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
+  type WorldTransform,
+} from "@/render/layout";
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
 import {
@@ -40,6 +46,21 @@ import {
   updateProjectileView,
   type ProjectileView,
 } from "@/render/views/projectileView";
+
+/**
+ * Manual play (M7.8) tap outcome: a live enemy id (monsters WIN over ground
+ * on overlap) or a raw world-x ground tap (the engine itself clamps
+ * `moveTo.x` to the zone's walkable bounds — see `systems/manual.ts` — so this
+ * just reports the world position under the pointer). `null` for a tap
+ * outside the logical world rect (the letterbox bars).
+ */
+export type PointerHitResult = { kind: "monster"; id: number } | { kind: "ground"; x: number } | null;
+
+/** Minimum on-screen touch half-extent (CSS px, NOT world units) a monster
+ * hit-test guarantees regardless of the current letterbox scale — the task's
+ * "≥24px half-extent on mobile" requirement. Converted to world units per-call
+ * via the live `baseTransform.scale` (see `hitTestPointer()`). */
+const TOUCH_HALF_EXTENT_PX = 24;
 
 interface Layers {
   /** Static sky/ground/grid, drawn once. */
@@ -324,6 +345,43 @@ export class GameRenderer {
       this.baseTransform.x + shake.x + punchOffset.x,
       this.baseTransform.y + shake.y + punchOffset.y,
     );
+  }
+
+  /**
+   * Manual play (M7.8): convert a canvas-relative pointer position (CSS px —
+   * e.g. `clientX/Y` minus the mount element's `getBoundingClientRect()`, see
+   * `GameClient.tsx`'s tap handler) into a tap outcome. Monsters win over
+   * ground on overlap (checked first). Uses the LETTERBOX transform
+   * (`baseTransform`), never the shaking/punching live `world` transform, so
+   * a tap target never jitters mid-shake. Entities are effectively 1D on `x`
+   * (every view derives its y from `GROUND_Y` + fixed offsets — see
+   * `enemyView.ts`'s doc comment), so the hit-test is an x/y ellipse around
+   * each enemy's approximate body center, generous enough for a comfortable
+   * touch target at any zoom level.
+   */
+  hitTestPointer(canvasX: number, canvasY: number, state: GameState): PointerHitResult {
+    if (!this.app) return null;
+    const t = this.baseTransform;
+    const wx = (canvasX - t.x) / t.scale;
+    const wy = (canvasY - t.y) / t.scale;
+    if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
+
+    const touchHalf = TOUCH_HALF_EXTENT_PX / t.scale;
+    let bestId: number | null = null;
+    let bestDist = Infinity;
+    for (const e of state.enemies) {
+      const rx = Math.max(touchHalf, 16 * e.size);
+      const ry = Math.max(touchHalf, 22 * e.size);
+      const dx = (wx - e.x) / rx;
+      const dy = (wy - (GROUND_Y - 14 * e.size)) / ry;
+      const dist = dx * dx + dy * dy;
+      if (dist <= 1 && dist < bestDist) {
+        bestDist = dist;
+        bestId = e.id;
+      }
+    }
+    if (bestId !== null) return { kind: "monster", id: bestId };
+    return { kind: "ground", x: wx };
   }
 
   /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */

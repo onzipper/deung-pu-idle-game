@@ -5,7 +5,8 @@
  */
 
 import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL } from "@/engine/config";
-import { emptyEquipped, ITEM_TEMPLATES, type EquippedGear } from "@/engine/config/items";
+import { emptyEquipped, ITEM_TEMPLATES, refineOf, type EquippedGear } from "@/engine/config/items";
+import { refinedStat } from "@/engine/config/refine";
 import type { Rng } from "@/engine/core/rng";
 import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
 import type {
@@ -48,10 +49,17 @@ export function makeHero(
 ): Hero {
   const t = HERO_TYPES[cls];
   // Max HP folds in equipped armor's flat HP (0 for an unarmored hero, so a fresh
-  // hero is unchanged). Mirrors `heroMaxHpOf` without importing it (avoids a cycle).
+  // hero is unchanged), each item's HP scaled by its refine level (M7.6). Mirrors
+  // `heroMaxHpOf`/`equipStatSum` without importing them (avoids a cycle).
   const armorHp =
-    (equipped.weapon ? (ITEM_TEMPLATES[equipped.weapon]?.stats.hp ?? 0) : 0) +
-    (equipped.armor ? (ITEM_TEMPLATES[equipped.armor]?.stats.hp ?? 0) : 0);
+    refinedStat(
+      equipped.weapon ? (ITEM_TEMPLATES[equipped.weapon]?.stats.hp ?? 0) : 0,
+      refineOf(equipped, "weapon"),
+    ) +
+    refinedStat(
+      equipped.armor ? (ITEM_TEMPLATES[equipped.armor]?.stats.hp ?? 0) : 0,
+      refineOf(equipped, "armor"),
+    );
   const maxHp = heroMaxHp(cls, level, tier, stats.vit) + armorHp;
   const maxMana = heroMaxMana(cls, stats.int);
   return {
@@ -78,7 +86,13 @@ export function makeHero(
     stats,
     autoSlots,
     quest,
-    equipped: { weapon: equipped.weapon, armor: equipped.armor },
+    equipped: {
+      weapon: equipped.weapon,
+      armor: equipped.armor,
+      refine: { weapon: refineOf(equipped, "weapon"), armor: refineOf(equipped, "armor") },
+    },
+    // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
+    command: null,
   };
 }
 
