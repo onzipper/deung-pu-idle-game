@@ -91,7 +91,13 @@ const WEAPON_ATK: Record<number, number> = {
   1: 3, 2: 5, 3: 8, 4: 11, 5: 15, 6: 22,
   7: 30, 8: 40, 9: 53, 10: 70,
 };
-/** Per-tier universal-armor [def, hp]. Tiers 7-10 continue the t1-6 curve. */
+/** Per-tier universal-armor [def, hp]. Tiers 1-6 (s1-15) are UNCHANGED (byte-identical
+ * pre-s16 balance). M7.9 s16-30 rebalance (docs/balance-m79.md): t7-t10 def is ~2× the
+ * first-pass values — armor DEF is FLAT per-hit mitigation (damage.ts `amount - def`),
+ * so a bigger def directly counters the aggressive-belt death-spiral (many high-atk
+ * hits) that walled the squishy classes, and is exactly the sanctioned "gear
+ * contribution" survival lever for s16-30 (it can't touch s1-15 — that band wears
+ * t1-6). HP eased up modestly in step. These are the tier-3 hero's survival scaling. */
 const ARMOR_STATS: Record<number, [number, number]> = {
   1: [1, 20],
   2: [2, 35],
@@ -99,10 +105,10 @@ const ARMOR_STATS: Record<number, [number, number]> = {
   4: [6, 85],
   5: [9, 130],
   6: [12, 190],
-  7: [16, 270],
-  8: [21, 380],
-  9: [27, 530],
-  10: [35, 740],
+  7: [30, 300],
+  8: [46, 430],
+  9: [66, 760],
+  10: [92, 1050],
 };
 
 function weapon(
@@ -183,9 +189,12 @@ const CATALOG: ItemTemplate[] = [
   armor("a_obsidian_t9_scale", 9, "rare", null),
   armor("a_infernal_t10_aegis", 10, "epic", null),
   // ---- class-specific armor (tier-8 flavour splits: tanky / mobile / caster) ----
-  armor("a_sword_t8_bulwark", 8, "rare", "swordsman", [30, 250]),
-  armor("a_archer_t8_stalker", 8, "rare", "archer", [14, 470]),
-  armor("a_mage_t8_seer", 8, "rare", "mage", [11, 520]),
+  // M7.9 rebalance: t8 class splits keep their tanky/mobile/caster identity but their
+  // def is lifted onto the new t8 flat-mitigation baseline (~46) — the sword split stays
+  // the def-heavy pick, the archer/mage splits trade some def for their bigger HP pools.
+  armor("a_sword_t8_bulwark", 8, "rare", "swordsman", [64, 290]),
+  armor("a_archer_t8_stalker", 8, "rare", "archer", [34, 520]),
+  armor("a_mage_t8_seer", 8, "rare", "mage", [30, 560]),
 ];
 
 /** The item catalog, keyed by templateId (== DB `ItemInstance.templateId`). */

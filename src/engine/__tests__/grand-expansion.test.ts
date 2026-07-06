@@ -121,10 +121,19 @@ describe("M7.9 hunt / aggro belt continues the ramp across new maps", () => {
     return zoneSpawnParams(farms[farms.length - 1]).aggroFraction;
   };
 
-  it("the aggressive fraction at each map's last farm rises map3 → map6", () => {
-    expect(lastFarmFrac("map4")).toBeGreaterThan(lastFarmFrac("map3"));
+  // M7.9 s16-30 rebalance (docs/balance-m79.md): the first-pass design continued the
+  // aggressive belt ABOVE map3 (map4>map3>…), but at s16-30 the geometric enemyAtk is so
+  // high that a map3-sized belt fraction was a death-spiral for the squishy classes (the
+  // #aggressive × per-hit-burst product exploded). The belt was therefore TRIMMED to sit
+  // BELOW map3's tail — danger at the frontier now comes from tougher mobs + the boss
+  // soft-walls, not raw aggressive body count (the same "not a self-inflicted swarm" rule
+  // map3 itself follows). The belt still RAMPS monotonically ACROSS the new maps (map4 →
+  // map5 → map6), just from a lower floor.
+  it("the aggressive fraction at each new map's last farm ramps map4 → map6, trimmed below map3", () => {
+    expect(lastFarmFrac("map4")).toBeLessThan(lastFarmFrac("map3"));
     expect(lastFarmFrac("map5")).toBeGreaterThan(lastFarmFrac("map4"));
     expect(lastFarmFrac("map6")).toBeGreaterThan(lastFarmFrac("map5"));
+    expect(lastFarmFrac("map6")).toBeLessThanOrEqual(lastFarmFrac("map3"));
   });
 
   it("aggro fraction stays within [0,1] and ramps within each new map", () => {

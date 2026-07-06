@@ -241,12 +241,16 @@ describe("M7.9 boss SUMMON (map5 s25)", () => {
     // Adds are engaged-on-spawn (immediately hunt the hero).
     expect(s.enemies.every((e) => e.engaged)).toBe(true);
 
-    // Drop below the SECOND threshold -> a second wave.
-    b.hp = b.maxHp * (S.thresholds[1] - 0.01);
+    // M7.9 s16-30 rebalance (docs/balance-m79.md): summon is now a SINGLE mid-fight wave
+    // (thresholds trimmed [0.6,0.3] → [0.45], addKinds ["fast","normal"] → ["normal"]) so
+    // the squishy single-target archer isn't overwhelmed during its long s25 kill. Assert
+    // that dropping further does NOT fire a second wave (only one threshold exists).
+    expect(S.thresholds.length).toBe(1);
+    b.hp = b.maxHp * 0.05;
     muteHero(s);
     step(s, {});
-    expect(s.enemies.length).toBe(S.addKinds.length * 2);
-    expect(b.variety!.summonsFired).toBe(2);
+    expect(s.enemies.length).toBe(S.addKinds.length);
+    expect(b.variety!.summonsFired).toBe(1);
   });
 
   it("summoned adds despawn when killed (reaped in the boss phase) and on boss death", () => {

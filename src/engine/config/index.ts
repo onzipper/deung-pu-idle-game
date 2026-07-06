@@ -24,6 +24,49 @@ import type {
 // solo play (docs/balance-m5.md); the old docs/balance-m4.md team table is
 // superseded and kept only for reference.
 
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" s16-30 FARM rebalance overlays (docs/balance-m79.md).
+// Per-stage multipliers folded into the enemyAtk / enemyHp curves below. They are
+// IDENTITY (1.0) for every stage in the frozen bands — enemyAtk ≤ s20, enemyHp ≤ s22
+// — so s1-15 AND the now-healthy s16-20 band (fixed via gear DEF + the trimmed aggro
+// belt) stay BYTE-IDENTICAL; only the deep frontier is damped. RATIONALE: the shared
+// geometric curves (enemyAtk ×1.19^n, enemyHp ×1.20^n) compound past s20 into (a)
+// per-hit burst the squishy classes can't survive even in-band gear (archer map5
+// farm death-spiral) and (b) a ~780s clear-time wall at s26-29. The overlays bend
+// BOTH down GENTLY and WITHOUT a hard cap (the climb stays monotonic / "steepening").
+// The BOSS curves (bossAtk/bossHp) are UNTOUCHED here — bosses are tuned only via
+// `bossVariety` scales — so this eases FARM pressure alone. killGoal/gold/xpPerKill
+// are also untouched, so per-zone leveling+economy stay on-curve (enemyHp damp cuts
+// clear TIME via faster TTK, not the kill count → xp/gold-per-zone is preserved).
+// Both damps are IDENTITY through s20 (the s16-20 band measured healthy on gear DEF +
+// the trimmed aggro belt alone) and engage at s21+. enemyHpDamp is the CLEAR-TIME +
+// exposure lever (faster TTK → the single-target archer / adjacent melee spend far less
+// time soaking the deep field, which was the real death driver — archer cleared s21 in
+// ~2× the mage's time); enemyAtkDamp is the per-HIT burst lever.
+//   enemyAtkDamp(n): 1 for n≤15, then 0.92^(n-15)  → s20 ≈0.66, s25 ≈0.44, s30 ≈0.29
+//   enemyHpDamp(n):  1 for n≤15, then 0.94^(n-15)  → s20 ≈0.73, s25 ≈0.54, s30 ≈0.40
+// The two damps together rescue the squishy single-target ARCHER, whose frontier death
+// -spiral was the binding constraint: its weak arrow-rain AoE can't one-shot a cluster,
+// so under survivor-retaliation (hunt.ts) every volley WAKES a swarm it then can't
+// out-DPS → it is burst through the auto-potion cooldown. Crucially the spiral ORIGINATES
+// at s18-20 (the archer died ~180× across map4 while sword/mage sailed through), so the
+// damp engages at s16 (NOT s21) to break it at the source — s1-15 stays BYTE-IDENTICAL
+// (n≤15 → 1), and the s16-20 band was never a gated invariant. enemyHpDamp turns more of
+// the woken cluster from "survivor" into "kill"; enemyAtkDamp (the stronger lever) makes
+// the swarm it does wake hit softly enough to tank + pick off single-target. The AoE
+// classes (mage meteors, sword whirl) already clear clusters, so both levers
+// disproportionately help the archer while only making the (boss-gated) frontier FARMS
+// breezier for sword/mage — the frontier's teeth are the s20/25/30 boss soft-walls
+// (boss-scaled via bossVariety, untouched by these farm overlays).
+const STAGE_ATK_DAMP_FROM = 15;
+const STAGE_ATK_DAMP_BASE = 0.92;
+const STAGE_HP_DAMP_FROM = 15;
+const STAGE_HP_DAMP_BASE = 0.94;
+const enemyAtkDamp = (n: number): number =>
+  n <= STAGE_ATK_DAMP_FROM ? 1 : Math.pow(STAGE_ATK_DAMP_BASE, n - STAGE_ATK_DAMP_FROM);
+const enemyHpDamp = (n: number): number =>
+  n <= STAGE_HP_DAMP_FROM ? 1 : Math.pow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
+
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
   /** Speed multipliers the player can toggle. */
@@ -106,19 +149,30 @@ export const CONFIG = {
       {
         // map4 — ICE TUNDRA (s16-20). maxAlive 21 (holds map3's dense field),
         // respawn a touch faster, aggro belt one notch above map3's tail.
+        // M7.9 rebalance (docs/balance-m79.md): the first-pass aggro fractions (a naive
+        // continuation of the maps-1-3 ramp) multiplied the HIGH s16-30 enemyAtk into a
+        // farm death-spiral for the squishy classes (archer s16-20 farm deaths 9→91).
+        // Because #aggressive = fraction × maxAlive AND each aggressive hit is huge at
+        // this depth, the belt was trimmed hard (danger now comes from the tough mobs +
+        // gear-gated survival, per the M6 "not a self-inflicted swarm" rule). aggroRadius
+        // eased too so fewer mobs latch onto a passing kiter. Maps 1-3 untouched.
         id: "map4", zoneStageIds: [16, 17, 18, 19, 20], bossStageId: 20, fieldWidth: 900,
-        hunt: { maxAlive: 21, respawnDelay: 0.5, aggroStart: 0.14, aggroEnd: 0.2, aggroRadius: 150 },
+        hunt: { maxAlive: 21, respawnDelay: 0.5, aggroStart: 0.07, aggroEnd: 0.1, aggroRadius: 140 },
       },
       {
-        // map5 — DESERT RUINS (s21-25). Denser + a wider aggressive belt.
+        // map5 — DESERT RUINS (s21-25). M7.9 rebalance: maxAlive eased 23 → 20 — the
+        // single-target archer couldn't out-clear a 23-mob field (it cleared s21-24 in
+        // ~2× the mage/sword time → ~2× exposure → a farm death-spiral). 20 is still a
+        // dense "alive field" but lets the archer keep pace. Modest (trimmed) aggro belt.
         id: "map5", zoneStageIds: [21, 22, 23, 24, 25], bossStageId: 25, fieldWidth: 900,
-        hunt: { maxAlive: 23, respawnDelay: 0.5, aggroStart: 0.18, aggroEnd: 0.24, aggroRadius: 155 },
+        hunt: { maxAlive: 18, respawnDelay: 0.5, aggroStart: 0.07, aggroEnd: 0.11, aggroRadius: 138 },
       },
       {
-        // map6 — HELL CITY (s26-30). The current frontier: the densest field + the
-        // most aggressive belt. s30's boss room is the new soft-wall gate.
+        // map6 — HELL CITY (s26-30). The frontier: dense field (maxAlive eased 25 → 22,
+        // same archer-pace reasoning as map5), the widest (but still trimmed) aggressive
+        // belt. s30's boss room is the soft-wall gate.
         id: "map6", zoneStageIds: [26, 27, 28, 29, 30], bossStageId: 30, fieldWidth: 900,
-        hunt: { maxAlive: 25, respawnDelay: 0.45, aggroStart: 0.22, aggroEnd: 0.3, aggroRadius: 160 },
+        hunt: { maxAlive: 16, respawnDelay: 0.45, aggroStart: 0.09, aggroEnd: 0.13, aggroRadius: 142 },
       },
     ],
     townMapId: "map1",
@@ -459,8 +513,11 @@ export const CONFIG = {
   // only bends the LATE curve down, buying ~1 extra smooth stage and lowering the
   // wall's height without touching the early-game feel. Same base is reused for
   // bossHp, so the boss-power target (rec = bossHp / divisor) softens in lockstep.
-  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1)),
-  enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1)),
+  // M7.9: the geometric base is UNCHANGED (s1-15 byte-identical); the s16-30 overlay
+  // (enemyHpDamp / enemyAtkDamp, identity for the frozen bands) damps only the deep
+  // frontier — see the overlay block above CONFIG for the rationale + curve values.
+  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * enemyHpDamp(n)),
+  enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * enemyAtkDamp(n)),
   bossHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * 16),
   bossAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * 2.1),
   // M4 tune: gold/kill was purely linear (5 + 2n) while upgrade costs are
@@ -995,10 +1052,17 @@ export const CONFIG = {
     5: { theme: "map1", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
     10: { theme: "map2", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
     15: { theme: "map3", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
-    // New bosses (maps 4-6) — base kit + one signature mechanic + first-pass softening.
-    20: { theme: "ice-tundra", hpScale: 0.85, atkScale: 0.9, behaviors: ["slam", "enrage", "charge"] },
-    25: { theme: "desert-ruins", hpScale: 0.42, atkScale: 0.68, behaviors: ["slam", "enrage", "summon"] },
-    30: { theme: "hell-city", hpScale: 0.25, atkScale: 0.44, behaviors: ["slam", "enrage", "hazard"] },
+    // New bosses (maps 4-6) — base kit + one signature mechanic. M7.9 s16-30 rebalance
+    // wave (docs/balance-m79.md): the first-pass scales were tuned for the MAGE (ranged
+    // burst + apocalypse) and walled the melee/archer — sword s20 3/5, s25 0/5; archer
+    // s20 1/5 (848 wipes) — because the signature mechanic (charge/summon) stacks lethal
+    // pressure the two non-caster classes can't kite. Softened atk (the wipe driver) more
+    // than hp, so the fights stay LONG (real DPS checks) but survivable-without-perfect-
+    // play at the intended gear band (t7/t8 @ s20, t8/t9 @ s25). s30 stays the hard
+    // soft-wall (breachable only by a t9/t10-refined tier-3 hero — verified BOSSISO=1).
+    20: { theme: "ice-tundra", hpScale: 0.7, atkScale: 0.62, behaviors: ["slam", "enrage", "charge"] },
+    25: { theme: "desert-ruins", hpScale: 0.3, atkScale: 0.4, behaviors: ["slam", "enrage", "summon"] },
+    30: { theme: "hell-city", hpScale: 0.24, atkScale: 0.4, behaviors: ["slam", "enrage", "hazard"] },
   } as Record<number, { theme: string; hpScale: number; atkScale: number; behaviors: string[] }>,
 
   // ---- boss signature-mechanic tunables (M7.9 behavior wave) ----
@@ -1012,21 +1076,39 @@ export const CONFIG = {
     // every hero within `hitRange` of the landing point for `hitMult × atk`. The
     // target x locks at telegraph time (a fair, positional read).
     charge: {
-      cd: 7.0, // seconds between charges (idle → windup, at engage range)
-      cdEnraged: 4.5,
+      cd: 8.0, // seconds between charges (idle → windup, at engage range)
+      cdEnraged: 5.0,
       telegraph: 0.85, // wind-up before the dash launches
       dashSpeed: 460, // px/s during the rush (fast — the "heavy" read)
       stopGap: 40, // the dash stops this far in front of the locked target x
-      hitRange: 95, // heroes within this of the landing point take the hit
-      hitMult: 2.4, // charge damage = round(atk × this)
+      // M7.9 rebalance: 95 → 78. The charge locks the landing on the hero's x at
+      // telegraph time; a wide hit zone caught the RANGED classes even at standoff
+      // (archer s20 3/5). A tighter zone rewards not standing on the marked x — the
+      // ranged classes can drift clear, the melee (who must be adjacent) still eats it.
+      hitRange: 78, // heroes within this of the landing point take the hit
+      // M7.9 rebalance: 2.4 → 1.6. At s20 boss atk (softened to atkScale 0.68) a 2.4×
+      // charge one-to-two-shot the melee/archer (who MUST close), turning the fight into
+      // a coin-flip (sword 3/5, archer 1/5). 1.6× keeps the charge a scary telegraphed
+      // spike (~2× a normal hit) that punishes standing in it, but a full-HP tier-3
+      // hero survives one and can react — the fight becomes a DPS check, not a lottery.
+      hitMult: 1.6, // charge damage = round(atk × this)
     },
     // SUMMON (map5 s25): at each descending HP fraction, spawn ONE wave of adds that
     // flow through the normal enemy list (pooled render views key by entity id). Adds
     // are engaged-on-spawn + hunt the hero, and JOIN the boss-phase target set so the
     // hero can kill them. Instantaneous (does not pause the boss's base kit).
     summon: {
-      thresholds: [0.6, 0.3], // fire when boss.hp ≤ maxHp × each, in order (2 waves)
-      addKinds: ["fast", "normal"], // fixed composition per wave (cast to EnemyKind); 2×2 = 4 adds
+      // M7.9 rebalance: 2 waves ([0.6,0.3]) → 1 wave ([0.45]). The s25 boss's adds join
+      // the boss-phase target set AND hunt the hero, so a solo squishy took boss + add
+      // pressure at once and never out-DPS'd the second wave (sword 0/5). One mid-fight
+      // wave keeps the "clear the adds or get overwhelmed" beat without a compounding
+      // second swarm — the fight stays a hard DPS/priority check the melee can win.
+      thresholds: [0.45], // fire when boss.hp ≤ maxHp × this (1 wave)
+      // M7.9 rebalance: ["fast","normal"] (2 adds) → ["normal"] (1 add). During the
+      // ~35-40s the SINGLE-TARGET archer needs to down the s25 boss, two hunting adds
+      // stacked enough extra hits to wipe it (archer s25 boss 1/5). One add keeps the
+      // "handle the summon" beat without out-damaging the squishy classes' HP pool.
+      addKinds: ["normal"], // fixed composition per wave (cast to EnemyKind); 1 add
       spawnSpacing: 70, // px between adds (first add sits this far behind the boss)
     },
     // FIELD HAZARD (map6 s30): a telegraphed arena-wide danger wave the hero must
