@@ -252,10 +252,12 @@ describe("auto-allocate v2 (ratio distribution)", () => {
   });
 
   it("spills to the cap then leaves the remainder unspent when room runs out", () => {
-    // vit near cap (room 3), str capped → 3 points fill vit, the rest stay unspent.
+    // Sword ratio {str:4,vit:1,int:1}: vit near cap (room 3), str + int capped →
+    // 3 points fill vit, the rest stay unspent.
     const s = initGameState(1, soloSave("swordsman", 1));
     s.autoAllocate = true;
     s.heroes[0].stats.str = CONFIG.stats.cap;
+    s.heroes[0].stats.int = CONFIG.stats.cap;
     s.heroes[0].stats.vit = CONFIG.stats.cap - 3;
     s.heroes[0].statPoints = 10;
     step(s, {});
@@ -264,9 +266,11 @@ describe("auto-allocate v2 (ratio distribution)", () => {
   });
 
   it("leaves points unspent when every ratio stat is capped", () => {
+    // Sword ratio {str:4,vit:1,int:1}: cap all three so no ratio stat has room.
     const s = initGameState(1, soloSave("swordsman", 1));
     s.autoAllocate = true;
     s.heroes[0].stats.str = CONFIG.stats.cap;
+    s.heroes[0].stats.int = CONFIG.stats.cap;
     s.heroes[0].stats.vit = CONFIG.stats.cap;
     s.heroes[0].statPoints = 5;
     step(s, {});

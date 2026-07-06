@@ -651,26 +651,33 @@ export const CONFIG = {
     // The RATIOS below are SIM-CHOSEN, not the ROADMAP draft — the M7.7-world sim
     // (denser fields + เบิ้ม skills) overruled the 3/2:1/2:1 draft (see the sweep table
     // in docs/balance-m7.md "Auto-allocate v2"). Verdict per class:
-    //  - swordsman 4 STR : 1 VIT — a light VIT trickle collapses the melee's boss-gate
-    //    death loop (dump-primary: 183 deaths / 162 boss wipes → 24 / 2) at ~+7% clear
-    //    time. 4:1 edged 3:1 (fewer deaths, more retained DPS), so it keeps most of the
-    //    class's damage identity while curing the wipe spiral its hpMult(1.5) couldn't.
-    //  - archer PURE DEX — the sweep DISPROVED the draft: the archer is a DPS-race
-    //    kiter (DEX is its damage AND atk-speed), so diverting to VIT strictly LOWERS
-    //    throughput → longer field exposure → MORE deaths (2:1 → 263 & a NEW s15-farm
-    //    soft-wall; 4:1 → 269; pure DEX → 238, all farm 5/5). Every VIT share regressed,
-    //    so the archer's optimum genuinely is pure primary. Its frontier squishiness is
-    //    a content-balance matter (docs/balance-m6.md), not fixable by allocation.
+    //  - swordsman 4 STR : 1 VIT : 1 INT — the VIT trickle already collapsed the melee's
+    //    boss-gate death loop (dump-primary: 183 deaths / 162 boss wipes → 24 / 2). The
+    //    owner then asked for a small INT share to ease mana-potion dependency ("มี INT
+    //    เพิ่มหน่อย", 2026-07-07): swapping the 4:1 for 4:1:1 HALVES mana-potion burn
+    //    (44 → 20 /run, −55%) while farm-zone deaths s1-s14 stay ~identical (the 4:1 → 4:1:1
+    //    sweep moved s11-14 farm deaths 0/1/4/3 → 0/1/2/3) at only ~+2% s15 clear time. The
+    //    smaller 8:2:1 share gave NO mana relief (still 44/run — INT too diluted), so 4:1:1
+    //    is the pick. STR stays the 4/6 majority, so the class's damage identity holds.
+    //  - archer 4 DEX : 1 INT — the earlier sweep DISPROVED a VIT share (DEX is damage AND
+    //    atk-speed, so diverting to VIT strictly lowered throughput → longer exposure → MORE
+    //    deaths; every VIT share regressed, pure DEX was the DEX-vs-VIT optimum). INT is the
+    //    exception the owner wanted: the archer was mana-STARVED (114 potions/run cut into
+    //    arrow-rain uptime), so a 1/5 INT share RESTORES skill uptime — the recovered AoE DPS
+    //    offsets the small DEX loss, so mana-potion burn HALVES (114 → 50 /run, −56%) with
+    //    farm deaths FLAT (261 → 266) and s15 clear actually a touch FASTER (315 → 272s).
+    //    8:1 gave only −20% (91/run), so 4:1 is the pick. DEX stays the 4/5 majority.
     //  - mage 3 INT : 1 VIT — INT is damage AND the mana pool/regen that fuels the
     //    skill-uptime the caster SURVIVES on, so the mage's safety scales with INT, not
     //    HP: 3:1 (20 deaths / 0 boss wipes) beat both 2:1 (43 / 26) and dump-primary
-    //    (50 / 34). A light VIT third adds a little floor without starving mana.
-    // The primary/damage stat stays the MAJORITY (or all) for every class, so no single
-    // build is trivialised and the leveling→power trajectory (class-change s5, s15
-    // soft-wall) holds. Sweepable: the sim reads this table directly.
+    //    (50 / 34). A light VIT third adds a little floor without starving mana. (Unchanged
+    //    by the 2026-07-07 INT pass — the mage already has all the INT it can use.)
+    // The primary/damage stat stays the MAJORITY for every class, so no single build is
+    // trivialised and the leveling→power trajectory (class-change s5, s15 soft-wall) holds.
+    // Sweepable: the sim reads this table directly.
     autoAllocRatio: {
-      swordsman: { str: 4, vit: 1 },
-      archer: { dex: 1 },
+      swordsman: { str: 4, vit: 1, int: 1 },
+      archer: { dex: 4, int: 1 },
       mage: { int: 3, vit: 1 },
     } as Record<HeroClass, Partial<Record<StatKey, number>>>,
   },
