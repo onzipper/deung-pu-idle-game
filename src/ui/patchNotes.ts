@@ -42,6 +42,17 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-07.items.botTrip",
     ],
   },
+  {
+    id: "2026-07-07b",
+    date: "2026-07-07",
+    items: [
+      "releases.2026-07-07b.items.autoAdvance",
+      "releases.2026-07-07b.items.classAura",
+      "releases.2026-07-07b.items.gaugeFix",
+      "releases.2026-07-07b.items.bossGateFix",
+      "releases.2026-07-07b.items.copySweep",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

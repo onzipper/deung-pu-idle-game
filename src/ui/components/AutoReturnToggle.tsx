@@ -30,3 +30,27 @@ export function AutoReturnToggle() {
     </button>
   );
 }
+
+/** Auto next-zone toggle (2026-07-07): quota met -> walk into the next
+ * unlocked FARM zone automatically (never auto-enters a boss room). Same
+ * UI-owned mirror pattern as `AutoReturnToggle` above. */
+export function AutoAdvanceToggle() {
+  const autoAdvance = useGameStore((s) => s.autoAdvance);
+  const toggle = useGameStore((s) => s.toggleAutoAdvance);
+  const t = useTranslations("world");
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={autoAdvance}
+      className={`min-h-11 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-semibold transition-colors ${
+        autoAdvance
+          ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-300"
+          : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
+      }`}
+    >
+      {autoAdvance ? t("autoAdvanceOn") : t("autoAdvanceOff")}
+    </button>
+  );
+}

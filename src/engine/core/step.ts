@@ -36,6 +36,7 @@ import {
   advanceToNextMap,
   checkZoneUnlock,
   enterBossRoom,
+  maybeAutoAdvance,
   startFastTravel,
   tickFastTravel,
   updateTransit,
@@ -340,6 +341,7 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   updateProjectiles(state);
   resolveDeaths(state); // enemy kills / boss kill / death->town respawn / bossReady
   checkZoneUnlock(state); // farm-zone quota met -> unlock the next zone (M6)
+  maybeAutoAdvance(state); // toggle-gated auto walk into the next unlocked farm zone
   // Fast-travel channel tick (M7.5): after combat so this step's damage cancels it;
   // completion warps to the target zone's gate-side x.
   tickFastTravel(state);

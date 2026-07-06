@@ -484,6 +484,8 @@
     "lockedTooltip": "Locked — clear this zone’s quota first",
     "enterBossRoom": "Enter Boss Room",
     "autoReturnOn": "Auto: return to farming",
+    "autoAdvanceOn": "Auto: advance to next zone",
+    "autoAdvanceOff": "Advance manually (auto off)",
     "autoReturnOff": "Auto: wait in town",
     "frontier": "End of the frontier for now",
     "fastTravelButton": "Warp",
@@ -632,6 +634,15 @@
           "kiteFix": "🏹 Archer/Mage now glide smoothly while kiting — no more jittery bouncing",
           "statTapFix": "👆 Stat + buttons now register every tap with instant feedback — mash away",
           "botTrip": "🏃 The bot works harder: one town trip now clears every chore you enabled — potions, selling, and salvaging in a single visit"
+        }
+      },
+      "2026-07-07b": {
+        "items": {
+          "autoAdvance": "🚶 New! Auto-advance — quota done, walk straight into the next zone (toggle in Settings)",
+          "classAura": "🔥 Epic weapon auras now match your class — crimson blade / emerald bow / azure staff",
+          "gaugeFix": "🔓 Zone-unlock gauge no longer resets on warps/town trips/logout — remembered per zone",
+          "bossGateFix": "⚔ The challenge button only lights up at the real boss door — no more dead glowing button",
+          "copySweep": "📝 Goal/tutorial copy fully updated to the hunting-field + boss-door model"
         }
       }
     }
