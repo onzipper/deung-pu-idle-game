@@ -625,7 +625,11 @@
           "bot": "🤖 The bot got smarter: set each rarity to sell for gold or salvage into refine materials (in Settings)",
           "autoAllocate": "📊 New auto-allocate: stat points now go where your class actually needs them, no more scattergun spending",
           "prestige": "🔥 +8/+9/+10 gear now flaunts an escalating divine aura — hit +10 and the whole field will know it",
-          "announce": "📣 Land a +8 or higher and the WHOLE server hears about it — get ready to show off!"
+          "announce": "📣 Land a +8 or higher and the WHOLE server hears about it — get ready to show off!",
+          "intShare": "🧪 Swordsman/Archer now auto-invest some INT — mana potion burden cut by more than half",
+          "catchUp": "⏰ Switch tabs or fold your phone as long as you like — the game now catches up all your progress when you return",
+          "botFix": "🛠 Fixed the bot reaching town but refusing to sell/salvage — every trip now completes its chores",
+          "kiteFix": "🏹 Archer/Mage now glide smoothly while kiting — no more jittery bouncing"
         }
       }
     }

@@ -34,6 +34,10 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-07.items.autoAllocate",
       "releases.2026-07-07.items.prestige",
       "releases.2026-07-07.items.announce",
+      "releases.2026-07-07.items.intShare",
+      "releases.2026-07-07.items.catchUp",
+      "releases.2026-07-07.items.botFix",
+      "releases.2026-07-07.items.kiteFix",
     ],
   },
 ];
