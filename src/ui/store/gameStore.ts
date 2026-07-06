@@ -420,6 +420,32 @@ export function writeSeenTip(id: string, seen: readonly string[]): string[] {
   return next;
 }
 
+/** localStorage key for the "what's new" patch-notes modal's last-
+ * acknowledged release id (UAT task) — same client-preference tier as
+ * `TIPS_SEEN_STORAGE_KEY` above, but a single scalar (not a set) since only
+ * "have you seen at least up to the LATEST release" matters (see
+ * `resolvePatchNotesDecision` in `ui/patchNotes.ts`).
+ * // M5+: fold into server save (cross-device sync). */
+const PATCH_NOTES_SEEN_STORAGE_KEY = "ddp-seen-patch.v1";
+
+export function readStoredSeenPatchNotes(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(PATCH_NOTES_SEEN_STORAGE_KEY);
+  } catch {
+    return null; // storage blocked/corrupt — treat as "never seen" this session
+  }
+}
+
+export function writeSeenPatchNotes(id: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PATCH_NOTES_SEEN_STORAGE_KEY, id);
+  } catch {
+    /* storage blocked — this just won't persist across reloads */
+  }
+}
+
 /** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
  * salvage-by-rarity) — same client-preference tier as `soundMuted`/
  * `ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't game progress;
@@ -678,6 +704,14 @@ export interface HudState {
    * gated-in); `0..N-1` = index into `ONBOARDING_STEPS` currently shown. */
   onboardingStepIndex: number;
 
+  /** "What's new" patch-notes modal (UAT task) — same store-owned pattern as
+   * `onboardingStepIndex` (a plain store action flips this, never a raw
+   * component `useState` setter called from inside an effect — keeps
+   * `usePatchNotes.ts`'s gate-in effect clean of the
+   * `react-hooks/set-state-in-effect` lint rule). See `ui/patchNotes.ts` for
+   * the pure decision logic that decides when to flip it. */
+  patchNotesVisible: boolean;
+
   // ---- intent queue: drained by the integration loop into FrameInput ----
   pendingInput: PendingInput;
 
@@ -714,6 +748,13 @@ export interface HudState {
    * `useOnboardingController`'s one-shot gate (which only fires once per
    * mount) since the overlay renders directly off `onboardingStepIndex`. */
   resetOnboarding: () => void;
+
+  /** `usePatchNotes.ts`-only: show the modal (gate already resolved to "show"). */
+  showPatchNotes: () => void;
+  /** Acknowledge button: hides the modal (persistence is the caller's job via
+   * `writeSeenPatchNotes`, same "the hook owns localStorage, the store just
+   * carries the visible flag" split as `ftueCompleted`/`setFtueCompleted`). */
+  dismissPatchNotes: () => void;
 
   /** Queue a manual cast of `skillId` for the solo hero (deduped by skill id;
    * consumed on next drain — a click casts exactly once at any speed). */
@@ -875,6 +916,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   hasSyncedOnce: false,
   ftueCompleted: true,
   onboardingStepIndex: -1,
+  patchNotesVisible: false,
 
   pendingInput: emptyPendingInput(),
 
@@ -908,6 +950,9 @@ export const useGameStore = create<HudState>((set, get) => ({
     writeFtueCompleted(false);
     set({ ftueCompleted: false, onboardingStepIndex: 0 });
   },
+
+  showPatchNotes: () => set({ patchNotesVisible: true }),
+  dismissPatchNotes: () => set({ patchNotesVisible: false }),
 
   castSkill: (skillId) =>
     set((s) => ({

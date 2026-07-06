@@ -76,6 +76,7 @@ import {
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
+import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
 import { selectAutoSellSalvageIds } from "@/ui/gear/autoSell";
 import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
@@ -951,5 +952,12 @@ export function GameClient() {
     };
   }, []);
 
-  return <GameHud ref={arenaRef} />;
+  return (
+    <>
+      <GameHud ref={arenaRef} />
+      {/* UAT "what's new" patch-notes modal — mount only; all decision logic
+          lives in `ui/hooks/usePatchNotes.ts` (see that file + `ui/patchNotes.ts`). */}
+      <PatchNotesModal />
+    </>
+  );
 }

@@ -608,5 +608,20 @@
       "network": "Network error — try again",
       "unknown": "Something went wrong — try again"
     }
+  },
+  "patchNotes": {
+    "title": "What's new!",
+    "ackButton": "Let's go!",
+    "releases": {
+      "2026-07-07": {
+        "items": {
+          "refine": "⚒️ Refine (+N gear) is here! Salvage unused gear into materials, then try your luck at the town refine station — +1 to +3 are safe, +4+ can fail and drop a level, +8+ risks shattering!",
+          "manualPlay": "👆 Manual control is in: tap the ground to move, tap a monster to attack (try turning AUTO off)",
+          "skills": "✨ Big skills hit even harder — tier-2 ultimates now cover the whole screen! Monster fields are denser, so bring mana potions along",
+          "bot": "🤖 The bot got smarter: set each rarity to sell for gold or salvage into refine materials (in Settings)",
+          "autoAllocate": "📊 New auto-allocate: stat points now go where your class actually needs them, no more scattergun spending"
+        }
+      }
+    }
   }
 }
