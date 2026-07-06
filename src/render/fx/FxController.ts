@@ -17,7 +17,7 @@
 import { Container as PixiContainer } from "pixi.js";
 import type { Container } from "pixi.js";
 import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
-import { ITEM_TEMPLATES, type ItemRarity } from "@/engine/config/items";
+import { ITEM_TEMPLATES, refineOf, type ItemRarity } from "@/engine/config/items";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
@@ -356,6 +356,12 @@ const ITEM_DROP_PARTICLE_LIFE = { common: 0.32, rare: 0.4, epic: 0.5 } as const;
  * this reads as "a small pop right where the kill happened" rather than
  * trusting `ev.y`. */
 const ITEM_DROP_POP_Y = GROUND_Y - 6;
+
+/** M7.6 ตีบวก — refine +level thresholds that step the M7 gear-wow hooks up
+ * one notch early (see `updateGearFx`'s doc). Chosen to land on the spec's own
+ * "+7/+10" band language (+7 = the "พลาดลดขั้น" ceiling, +10 = max). */
+const REFINE_AURA_THRESHOLD = 7;
+const REFINE_SPARKLE_THRESHOLD = 7;
 
 function itemDropAccentColor(rarity: ItemRarity): number {
   if (rarity === "epic") return PALETTE.gearEpic;
@@ -945,8 +951,17 @@ export class FxController {
         ? ITEM_TEMPLATES[h.equipped.weapon]?.rarity
         : undefined;
       const armorTier = h.equipped.armor ? (ITEM_TEMPLATES[h.equipped.armor]?.tier ?? 0) : 0;
+      // M7.6 ตีบวก: a heavily-refined weapon/armor earns the SAME aura/sparkle
+      // hooks a naturally-tier-6/epic piece would, one step earlier than the
+      // catalog's own +10 max would otherwise imply — a subtle "this thing is
+      // special now" readout without any new rig geometry (per spec).
+      const weaponRefine = refineOf(h.equipped, "weapon");
+      const armorRefine = refineOf(h.equipped, "armor");
 
-      const auraOn = !!view && weaponRarity === "epic" && getWeaponAnchorPos(view, this.weaponAnchorScratch);
+      const auraOn =
+        !!view &&
+        (weaponRarity === "epic" || weaponRefine >= REFINE_AURA_THRESHOLD) &&
+        getWeaponAnchorPos(view, this.weaponAnchorScratch);
       this.gearAura.setSlot(
         slot,
         auraOn,
@@ -955,7 +970,10 @@ export class FxController {
         PALETTE.auraFlame,
       );
 
-      const sparkleOn = !!view && armorTier >= 5 && getArmorAnchorPos(view, this.armorAnchorScratch);
+      const sparkleOn =
+        !!view &&
+        (armorTier >= 5 || armorRefine >= REFINE_SPARKLE_THRESHOLD) &&
+        getArmorAnchorPos(view, this.armorAnchorScratch);
       this.gearSparkle.setSlot(slot, sparkleOn, this.armorAnchorScratch.x, this.armorAnchorScratch.y);
     });
     this.gearAura.update(dt);

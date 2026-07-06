@@ -541,7 +541,12 @@
     "sellOneButton": "ขายชิ้นนี้",
     "sellAllButton": "ขายทั้งหมด ({count})",
     "sellAllCommonButton": "ขาย common ทั้งหมด",
-    "confirmSell": "ยืนยันขาย?"
+    "confirmSell": "ยืนยันขาย?",
+    "refinePlus": "+{level}",
+    "salvageOneButton": "ย่อยชิ้นนี้ (+{yield})",
+    "salvageAllButton": "ย่อยทั้งหมด ({count}) (+{yield})",
+    "salvageJunkCommonButton": "ย่อยของเก่า common",
+    "confirmSalvage": "ยืนยันย่อย?"
   },
   "dropFeed": {
     "gotItem": "ได้ไอเทม: {name}"
@@ -563,6 +568,40 @@
       "boss": "อยู่ระหว่างสู้บอส วาร์ปไม่ได้",
       "invalid": "วาร์ปไปโซนนั้นไม่ได้",
       "damaged": "โดนโจมตี วาร์ปถูกยกเลิก"
+    }
+  },
+  "refine": {
+    "openButton": "ตีบวก",
+    "title": "ตู้ตีบวก",
+    "emptyHint": "ช่องนี้ไม่มีของให้ตีบวก",
+    "townOnlyHint": "ตีบวกได้เฉพาะในเมือง",
+    "currentLabel": "+{level}",
+    "nextLabel": "+{level}",
+    "successChanceLabel": "โอกาสสำเร็จ {pct}%",
+    "band": {
+      "safe": "ปลอดภัย — พลาดก็ไม่เสียอะไร",
+      "degrade": "พลาด = ลดขั้นลง 1 ระดับ",
+      "break": "พลาด = ของแตกสลาย!"
+    },
+    "refineButton": "ตีบวก!",
+    "refiningButton": "กำลังตี...",
+    "outcomeBreak": "แตกแล้ว!",
+    "outcomeSafeFail": "พลาด แต่ของยังปลอดภัย",
+    "disabled": {
+      "pickItem": "เลือกของที่จะตีบวกก่อน",
+      "townOnly": "ตีบวกได้เฉพาะในเมือง",
+      "maxLevel": "ถึงขั้นสูงสุดแล้ว (+10)",
+      "insufficientMaterials": "วัสดุไม่พอ",
+      "insufficientGold": "ทองไม่พอ"
+    },
+    "apiError": {
+      "not_found": "ไม่พบไอเทมนี้ (ลองรีเฟรชดู)",
+      "max": "ถึงขั้นสูงสุดแล้ว",
+      "insufficient_materials": "วัสดุไม่พอ",
+      "insufficient_gold": "ทองไม่พอ",
+      "unknown_template": "ไม่รู้จักไอเทมนี้",
+      "network": "เน็ตมีปัญหา ลองใหม่อีกที",
+      "unknown": "มีอะไรผิดพลาด ลองใหม่อีกที"
     }
   }
 }

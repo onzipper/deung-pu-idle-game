@@ -18,15 +18,18 @@
  */
 
 import { useTranslations } from "next-intl";
+import { MaterialIcon } from "@/ui/components/icons";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { useGameStore } from "@/ui/store/gameStore";
 
 export function HudBar() {
   const stage = useGameStore((s) => s.stage);
   const gold = useGameStore((s) => s.gold);
+  const materials = useGameStore((s) => s.materials);
   const t = useTranslations("hud");
 
   const goldPulse = usePulseOnIncrease(gold);
+  const materialsPulse = usePulseOnIncrease(materials);
 
   return (
     <div className="flex w-full items-center gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-4 py-3 text-ddp-ink shadow-(--ddp-shadow-panel) backdrop-blur-sm">
@@ -51,6 +54,16 @@ export function HudBar() {
           className={`text-2xl font-extrabold text-ddp-gold tabular-nums ${goldPulse ? "animate-gold-pulse" : ""}`}
         >
           {gold.toLocaleString()}
+        </span>
+      </div>
+      {/* M7.6 ตีบวก: refine-material counter, secondary to gold (smaller, cooler
+          hue) so the hierarchy stays gold-first. */}
+      <div className="flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-violet-400/25 bg-violet-400/10 px-2.5 py-1.5">
+        <MaterialIcon className="h-4 w-4" />
+        <span
+          className={`text-base font-bold text-violet-300 tabular-nums ${materialsPulse ? "animate-gold-pulse" : ""}`}
+        >
+          {materials.toLocaleString()}
         </span>
       </div>
     </div>

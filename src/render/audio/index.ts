@@ -7,3 +7,10 @@
 export { AudioController } from "@/render/audio/AudioController";
 export { AudioEngine } from "@/render/audio/AudioEngine";
 export { SFX_MIN_INTERVAL_MS, SFX_PARAMS } from "@/render/audio/sfxMap";
+export {
+  createRefineAudio,
+  playRefineBreak,
+  playRefineChargeTick,
+  playRefineDegrade,
+  playRefineSuccess,
+} from "@/render/audio/refineSfx";

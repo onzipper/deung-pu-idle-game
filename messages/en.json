@@ -541,7 +541,12 @@
     "sellOneButton": "Sell one",
     "sellAllButton": "Sell all ({count})",
     "sellAllCommonButton": "Sell all common",
-    "confirmSell": "Confirm sell?"
+    "confirmSell": "Confirm sell?",
+    "refinePlus": "+{level}",
+    "salvageOneButton": "Salvage (+{yield})",
+    "salvageAllButton": "Salvage all ({count}) (+{yield})",
+    "salvageJunkCommonButton": "Salvage junk common",
+    "confirmSalvage": "Confirm salvage?"
   },
   "dropFeed": {
     "gotItem": "Item obtained: {name}"
@@ -563,6 +568,40 @@
       "boss": "Mid boss fight — can't warp",
       "invalid": "Can't warp there",
       "damaged": "You took damage — warp cancelled"
+    }
+  },
+  "refine": {
+    "openButton": "Refine",
+    "title": "Refine Station",
+    "emptyHint": "Nothing to refine in this slot",
+    "townOnlyHint": "Refining only works in town",
+    "currentLabel": "+{level}",
+    "nextLabel": "+{level}",
+    "successChanceLabel": "{pct}% success",
+    "band": {
+      "safe": "Safe — nothing is lost on a miss",
+      "degrade": "Miss = drops one level",
+      "break": "Miss = the item SHATTERS!"
+    },
+    "refineButton": "Refine!",
+    "refiningButton": "Refining...",
+    "outcomeBreak": "Shattered!",
+    "outcomeSafeFail": "Miss — nothing lost",
+    "disabled": {
+      "pickItem": "Pick an item to refine",
+      "townOnly": "Refining only works in town",
+      "maxLevel": "Already at max (+10)",
+      "insufficientMaterials": "Not enough materials",
+      "insufficientGold": "Not enough gold"
+    },
+    "apiError": {
+      "not_found": "Item not found (try refreshing)",
+      "max": "Already at max level",
+      "insufficient_materials": "Not enough materials",
+      "insufficient_gold": "Not enough gold",
+      "unknown_template": "Unknown item",
+      "network": "Network error — try again",
+      "unknown": "Something went wrong — try again"
     }
   }
 }

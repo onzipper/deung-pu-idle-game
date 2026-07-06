@@ -7,6 +7,7 @@ import type { GearSlot } from "@/engine";
 import type {
   InventoryItem,
   ItemInstanceWire,
+  SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
 import { toInventoryItem } from "@/ui/gear/types";
@@ -86,6 +87,47 @@ export function removeSoldItems(
   );
   if (gone.size === 0) return items.slice();
   return items.filter((i) => !gone.has(i.instanceId));
+}
+
+/**
+ * Applies a `/api/items/salvage` batch result (M7.6 ตีบวก) to the local
+ * inventory slice — same "gone means gone" rule as `removeSoldItems`:
+ * `"salvaged"` (this call destroyed it) AND `"already"` (a stale local copy)
+ * are both removed; `"rejected"` (equipped, or not_found) is left untouched.
+ */
+export function removeSalvagedItems(
+  items: readonly InventoryItem[],
+  results: readonly SalvageItemResultWire[],
+): InventoryItem[] {
+  const gone = new Set(
+    results
+      .filter((r) => r.status === "salvaged" || r.status === "already")
+      .map((r) => r.itemId),
+  );
+  if (gone.size === 0) return items.slice();
+  return items.filter((i) => !gone.has(i.instanceId));
+}
+
+/**
+ * Applies a successful refine (M7.6 ตีบวก) that did NOT destroy the item —
+ * patches the target instance's `refineLevel` in place (a `success`/`degrade`/
+ * `safe` outcome always leaves the item alive, just at a new +level).
+ */
+export function applyRefineLevelChange(
+  items: readonly InventoryItem[],
+  instanceId: string,
+  refineLevel: number,
+): InventoryItem[] {
+  return items.map((i) => (i.instanceId === instanceId ? { ...i, refineLevel } : i));
+}
+
+/** Removes one destroyed instance (M7.6 refine "break" outcome) from the
+ * local slice — the item no longer exists server-side. */
+export function removeInstanceId(
+  items: readonly InventoryItem[],
+  instanceId: string,
+): InventoryItem[] {
+  return items.filter((i) => i.instanceId !== instanceId);
 }
 
 /**

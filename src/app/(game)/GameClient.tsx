@@ -299,6 +299,9 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     bot: { ...state.bot },
     autoHunt: state.autoHunt,
     unlockedZones: { ...state.unlockedZones },
+    // M7.6 ตีบวก material counter — same one-way "engine carries it, store just
+    // reflects it" pattern as `gold`.
+    materials: state.materials,
   };
 }
 
@@ -519,6 +522,9 @@ export function GameClient() {
         setAutoHunt: pending.setAutoHunt ?? undefined,
         fastTravel: pending.fastTravel ?? undefined,
         goldCredit: pending.goldCredit ?? undefined,
+        // M7.6 ตีบวก: signed material-counter delta (salvage +, refine −), see
+        // `PendingInput.materialsDelta`'s doc.
+        materialsDelta: pending.materialsDelta ?? undefined,
         // M7.5: the sell-trip bot's trigger — the engine knows nothing about
         // item instances, so the client feeds this transient count every frame
         // (see `FrameInput.inventoryCount`'s doc).
@@ -749,6 +755,10 @@ export function GameClient() {
             // present (possibly empty arrays/nulls pre-character).
             inventory?: ItemInstanceWire[];
             equipped?: { weapon: string | null; armor: string | null };
+            /** M7.6 ตีบวก: the AUTHORITATIVE material balance (DB column) —
+             * overwrites the save blob's own mirror, same precedence rule as
+             * `equipped` below. */
+            materials?: number;
             /** Authoritative character class (Character.baseClass) — corrects
              * a save whose hero.cls drifted + seeds a first boot (2026-07-06
              * "everyone is a swordsman" fix). */
@@ -770,6 +780,11 @@ export function GameClient() {
           // blob's own `equipped` cache (precedence documented at the API) —
           // overwrite it BEFORE `initGameState` derives max HP from it below.
           if (loaded && json.equipped) loaded.equipped = { ...json.equipped };
+          // M7.6 ตีบวก: the DB `Character.materials` column is authoritative
+          // over the save blob's own counter — same precedence as `equipped`.
+          if (loaded && typeof json.materials === "number") {
+            loaded.materials = json.materials;
+          }
           // Seed the inventory store slice straight from the boot payload —
           // this is the ONLY normal hydration path (InventoryPanel never
           // fetches on its own mount, only on an equip-failure resync).

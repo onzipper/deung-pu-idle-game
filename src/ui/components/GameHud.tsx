@@ -32,6 +32,7 @@ import { GoalLadder } from "@/ui/components/GoalLadder";
 import { HudBar } from "@/ui/components/HudBar";
 import { InventoryButton } from "@/ui/components/InventoryButton";
 import { NoticeToast } from "@/ui/components/NoticeToast";
+import { RefineButton } from "@/ui/components/RefineButton";
 import { ShopPanel } from "@/ui/components/ShopPanel";
 import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
@@ -119,6 +120,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           <SwitchCharacterLink />
           <div className="flex flex-wrap items-center gap-2">
             <InventoryButton />
+            <RefineButton />
             <CodexButton />
             <SettingsButton />
           </div>

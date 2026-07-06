@@ -167,11 +167,14 @@ export interface FrameInput {
    */
   fastTravel?: WorldLocation;
   /**
-   * Credit gold from a SERVER-confirmed NPC sale (M7.5): the sell endpoint's
-   * `totalGold`, applied once per drained input. Trusted the same way as the
-   * rest of the client-simmed economy — the ItemEvent ledger (price recorded at
-   * sell time) is the audit trail for later server re-derivation, so a spoofed
-   * credit is detectable after the fact. Non-finite/negative values are ignored.
+   * A SERVER-confirmed, SIGNED gold delta, applied once per drained input:
+   * positive from an NPC sale (M7.5, the sell endpoint's `totalGold`), negative
+   * from a M7.6 ตีบวก refine attempt's gold cost (the engine never rolls or
+   * prices a refine — server-authoritative, `config/refine.ts`'s `refineCost`).
+   * Trusted the same way as the rest of the client-simmed economy — the
+   * ItemEvent ledger (price/cost recorded server-side at the time) is the audit
+   * trail for later server re-derivation, so a spoofed credit is detectable
+   * after the fact. Non-finite values are ignored; the result floors at 0.
    */
   goldCredit?: number;
   /**
@@ -230,13 +233,12 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // intents below so a scroll+walk in the same frame resolves scroll-first.
   if (input.buyShopItem) buyShopItem(state, input.buyShopItem.item, input.buyShopItem.qty ?? 1);
   if (input.useReturnScroll) applyReturnScroll(state);
-  // Server-confirmed NPC-sale gold (M7.5) — see FrameInput.goldCredit contract.
-  if (
-    input.goldCredit !== undefined &&
-    Number.isFinite(input.goldCredit) &&
-    input.goldCredit > 0
-  ) {
-    state.gold += Math.floor(input.goldCredit);
+  // Server-confirmed gold delta (M7.5 NPC-sale credit, M7.6 ตีบวก refine cost
+  // debit — see FrameInput.goldCredit contract). SIGNED since M7.6: a refine
+  // attempt's gold cost arrives as a negative delta; floored at 0 so a stale/
+  // out-of-order client application can never drive gold negative.
+  if (input.goldCredit !== undefined && Number.isFinite(input.goldCredit) && input.goldCredit !== 0) {
+    state.gold = Math.max(0, state.gold + Math.floor(input.goldCredit));
   }
 
   // --- world navigation (M6 "World & Town") ---

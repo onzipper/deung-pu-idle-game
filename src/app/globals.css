@@ -200,6 +200,117 @@ body {
   animation: buy-pulse 0.3s ease-out;
 }
 
+/* ---------------------------------------------------------------------------
+ * M7.6 ตีบวก (Refine) juice — `RefinePanel.tsx`. Plain CSS keyframes, same
+ * "no Framer Motion/GSAP for one-shot pulses" convention as the M4 juice above.
+ * ------------------------------------------------------------------------- */
+
+/* Anticipation build-up: the anvil glow ring grows + brightens over the
+ * ~1s suspense window (duration set inline to match RefinePanel's own timing
+ * constant so the two never drift apart). */
+@keyframes ddp-refine-charge {
+  0% {
+    transform: scale(0.88);
+    box-shadow: 0 0 0 rgba(242, 177, 52, 0);
+  }
+  100% {
+    transform: scale(1.1);
+    box-shadow: 0 0 28px 9px rgba(242, 177, 52, 0.6);
+  }
+}
+.animate-refine-charge {
+  animation-name: ddp-refine-charge;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+
+/* One hammer-strike pulse (synced to `playRefineChargeTick`'s SFX beats via a
+ * `key`-remounted, per-strike `animation-delay`). */
+@keyframes ddp-refine-strike {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.22);
+  }
+}
+.animate-refine-strike {
+  animation: ddp-refine-strike 0.2s ease-out;
+}
+
+/* Success: "+N!" rises and fades. */
+@keyframes ddp-refine-rise {
+  0% {
+    transform: translateY(4px) scale(0.9);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+    transform: translateY(0) scale(1.05);
+  }
+  100% {
+    transform: translateY(-30px) scale(1);
+    opacity: 0;
+  }
+}
+.animate-refine-rise {
+  animation: ddp-refine-rise 1.1s ease-out forwards;
+}
+
+/* Degrade: "-1" falls and fades — a dull setback, not a catastrophe. */
+@keyframes ddp-refine-fall {
+  0% {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(22px);
+    opacity: 0;
+  }
+}
+.animate-refine-fall {
+  animation: ddp-refine-fall 1s ease-in forwards;
+}
+
+/* Break: a shard flies outward + spins + shrinks (per-shard direction via
+ * --dx/--dy custom properties set inline by RefinePanel). */
+@keyframes ddp-refine-shatter {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx, 20px), var(--dy, -20px)) rotate(220deg) scale(0.2);
+    opacity: 0;
+  }
+}
+.animate-refine-shatter {
+  animation: ddp-refine-shatter 0.6s ease-out forwards;
+}
+
+/* Break: a somber full-viewport red vignette pulse (screen-edge flash) — kept
+ * subtle (peak ~0.4) same restraint as `fx/arenaFlash.ts`'s in-canvas flashes,
+ * never a strobe. Plain CSS radial gradient (DOM overlay, not a Pixi/canvas
+ * gradient call — unrelated to the POC gradient-crash footgun). */
+@keyframes ddp-refine-edge-flash {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.animate-refine-edge-flash {
+  animation: ddp-refine-edge-flash 0.7s ease-out forwards;
+}
+
 /* Onboarding/FTUE (M4.8) — the spotlighted control's "gentle pulse" ring:
  * box-shadow-only (no layout thrash), reusing this same CSS-first vocabulary
  * rather than pulling in Framer Motion/GSAP for a one-shot breathing glow. */

@@ -41,10 +41,17 @@ import type {
   WorldLocation,
   ZoneKind,
 } from "@/engine";
-import { mergeClaimedItems, removeSoldItems } from "@/ui/gear/inventoryOps";
+import {
+  applyRefineLevelChange,
+  mergeClaimedItems,
+  removeInstanceId,
+  removeSalvagedItems,
+  removeSoldItems,
+} from "@/ui/gear/inventoryOps";
 import type {
   InventoryItem,
   ItemInstanceWire,
+  SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
 
@@ -211,6 +218,11 @@ export interface EngineSnapshot {
   /** Per-map unlocked-zone counts (M6 SAVE v8 field), surfaced for the M7.5
    * fast-travel picker's lock/unlock read (`isZoneUnlockedUi`). */
   unlockedZones: Record<string, number>;
+  /** M7.6 ตีบวก material counter (`state.materials`, SAVE v14) — read straight
+   * off the engine, same throttled-display pattern as `gold` (server-owned
+   * transactions; the engine just carries the count, see `HudState.materials`'s
+   * doc). */
+  materials: number;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -244,8 +256,11 @@ export interface PendingInput {
    * (M7), or `null` (last-wins per frame — a tap equips exactly once). Queued
    * ONLY after the `/api/items/equip`|`/api/items/unequip` POST already
    * succeeded server-side (see `InventoryPanel.tsx`) — this keeps the sim's
-   * applied stats and the server's item ledger from ever disagreeing. */
-  equip: { slot: GearSlot; templateId: string | null } | null;
+   * applied stats and the server's item ledger from ever disagreeing.
+   * `refineLevel` (M7.6 ตีบวก, optional — default +0) lets a refine on the
+   * CURRENTLY-equipped item re-send the same slot/template at its new +level
+   * so the sim's applied stats stay current (see `ui/gear/refineFlow.ts`). */
+  equip: { slot: GearSlot; templateId: string | null; refineLevel?: number } | null;
   /** Idle-bot settings patch (M7.5), or `null`. Same-frame calls MERGE (not
    * last-wins) so toggling two fields in one tick never drops one of them —
    * the engine's own `setBotSettings` intent handler already merges onto
@@ -263,6 +278,11 @@ export interface PendingInput {
    * (SAVE v12) — the HUD button queues this and reads the current value back
    * from the snapshot's `autoHunt`, never shadow-owning it. */
   setAutoHunt: boolean | null;
+  /** Signed material-counter delta (M7.6 ตีบวก): salvage grants +, refine spends
+   * −, decided SERVER-side. SUMMED across same-frame calls (not last-wins) —
+   * same pattern as `goldCredit`, since a bulk salvage + an overlapping single
+   * refine in the same tick must never drop one. `null`/`0` = nothing pending. */
+  materialsDelta: number | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -283,6 +303,7 @@ function emptyPendingInput(): PendingInput {
     fastTravel: null,
     goldCredit: null,
     setAutoHunt: null,
+    materialsDelta: null,
   };
 }
 
@@ -539,6 +560,8 @@ export interface HudState {
   autoHunt: boolean;
   /** Per-map unlocked-zone counts (M6 SAVE v8), for the fast-travel picker. */
   unlockedZones: Record<string, number>;
+  /** M7.6 ตีบวก material counter — see `EngineSnapshot.materials`'s doc. */
+  materials: number;
 
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
@@ -678,8 +701,9 @@ export interface HudState {
   useReturnScroll: () => void;
   /** Queue an equip/unequip intent for the solo hero (M7, once per frame) —
    * call ONLY after the corresponding `/api/items/*` POST already succeeded
-   * (see `InventoryPanel.tsx`'s equip flow doc). */
-  queueEquip: (slot: GearSlot, templateId: string | null) => void;
+   * (see `InventoryPanel.tsx`'s equip flow doc). `refineLevel` (M7.6, optional)
+   * re-derives stats for the SAME slot/template at a new +level. */
+  queueEquip: (slot: GearSlot, templateId: string | null, refineLevel?: number) => void;
   /** Queue an idle-bot settings patch (M7.5, merges across same-frame calls —
    * see `PendingInput.setBotSettings`'s doc). */
   setBotSettings: (patch: Partial<BotSettings>) => void;
@@ -690,8 +714,12 @@ export interface HudState {
    * attempt. */
   queueFastTravel: (target: WorldLocation) => void;
   /** Queue a server-confirmed gold credit from an NPC sale (M7.5, SUMS across
-   * same-frame calls — see `PendingInput.goldCredit`'s doc). */
+   * same-frame calls — see `PendingInput.goldCredit`'s doc). Also used by
+   * `ui/gear/refineFlow.ts` for a refine's (negative) gold cost. */
   creditGold: (amount: number) => void;
+  /** Queue a signed material-counter delta (M7.6 ตีบวก, SUMS across same-frame
+   * calls — see `PendingInput.materialsDelta`'s doc). */
+  creditMaterials: (amount: number) => void;
 
   // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
   // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
@@ -713,6 +741,14 @@ export interface HudState {
   /** Remove sold instances from the inventory slice (M7.5, manual + auto-sell
    * flows — see `gear/inventoryOps.ts`'s `removeSoldItems`). */
   removeSoldFromInventory: (results: SellItemResultWire[]) => void;
+  /** Remove salvaged instances from the inventory slice (M7.6 ตีบวก — see
+   * `gear/inventoryOps.ts`'s `removeSalvagedItems`). */
+  removeSalvagedFromInventory: (results: SalvageItemResultWire[]) => void;
+  /** Patch one instance's refine +level after a non-destroying refine outcome
+   * (M7.6 ตีบวก — see `gear/inventoryOps.ts`'s `applyRefineLevelChange`). */
+  setInventoryRefineLevel: (instanceId: string, refineLevel: number) => void;
+  /** Remove one instance destroyed by a refine "break" outcome (M7.6 ตีบวก). */
+  removeInventoryInstance: (instanceId: string) => void;
 
   // ---- M7.5: generic notice toasts + fast-travel channel UI state ----
   /** Push a one-line notice toast (M7.5) — capped, oldest evicted first. */
@@ -762,6 +798,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   bot: defaultBotSettings(),
   autoHunt: true,
   unlockedZones: {},
+  materials: 0,
 
   inventory: [],
   dropFeed: [],
@@ -872,8 +909,10 @@ export const useGameStore = create<HudState>((set, get) => ({
   useReturnScroll: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, useReturnScroll: true } })),
 
-  queueEquip: (slot, templateId) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, equip: { slot, templateId } } })),
+  queueEquip: (slot, templateId, refineLevel) =>
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, equip: { slot, templateId, refineLevel } },
+    })),
 
   setBotSettings: (patch) =>
     set((s) => ({
@@ -897,6 +936,14 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
+  creditMaterials: (amount) =>
+    set((s) => ({
+      pendingInput: {
+        ...s.pendingInput,
+        materialsDelta: (s.pendingInput.materialsDelta ?? 0) + amount,
+      },
+    })),
+
   setInventory: (items) => set({ inventory: items }),
   mergeInventory: (claimed) =>
     set((s) => ({ inventory: mergeClaimedItems(s.inventory, claimed) })),
@@ -915,6 +962,14 @@ export const useGameStore = create<HudState>((set, get) => ({
     set({ sessionKnownTemplateIds: [...new Set(ids)] }),
   removeSoldFromInventory: (results) =>
     set((s) => ({ inventory: removeSoldItems(s.inventory, results) })),
+  removeSalvagedFromInventory: (results) =>
+    set((s) => ({ inventory: removeSalvagedItems(s.inventory, results) })),
+  setInventoryRefineLevel: (instanceId, refineLevel) =>
+    set((s) => ({
+      inventory: applyRefineLevelChange(s.inventory, instanceId, refineLevel),
+    })),
+  removeInventoryInstance: (instanceId) =>
+    set((s) => ({ inventory: removeInstanceId(s.inventory, instanceId) })),
 
   pushNotice: (messageKey, params) =>
     set((s) => ({

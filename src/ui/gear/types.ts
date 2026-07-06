@@ -20,6 +20,10 @@ export interface InventoryItem {
   slot: GearSlot;
   /** Which slot it's CURRENTLY equipped in, or null. */
   equippedSlot: GearSlot | null;
+  /** M7.6 ตีบวก RO-style refine +level (+0..+REFINE.maxRefine). Distinct
+   * instances of the same templateId can sit at different levels — see
+   * `ui/gear/stacking.ts`'s compound `templateId:refineLevel` grouping. */
+  refineLevel: number;
 }
 
 /** The wire shape returned by GET /api/items and the `item` field of
@@ -31,6 +35,8 @@ export interface ItemInstanceWire {
   equippedSlot: GearSlot | null;
   origin: string;
   acquiredAt: string;
+  /** M7.6 ตีบวก (mirrors `server/items.ts`'s `ItemInstanceDTO.refineLevel`). */
+  refineLevel: number;
 }
 
 export function toInventoryItem(dto: ItemInstanceWire): InventoryItem {
@@ -39,6 +45,7 @@ export function toInventoryItem(dto: ItemInstanceWire): InventoryItem {
     templateId: dto.templateId,
     slot: dto.slot,
     equippedSlot: dto.equippedSlot,
+    refineLevel: dto.refineLevel ?? 0,
   };
 }
 
@@ -59,3 +66,28 @@ export type SellItemResultWire =
   | { itemId: string; status: "sold"; price: number }
   | { itemId: string; status: "already"; price: 0 }
   | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+
+/** One salvage result, mirroring `server/items.ts`'s `SalvageItemResult` (M7.6).
+ * Same "already gone / rejected leaves it alone" shape as sell above. */
+export type SalvageItemResultWire =
+  | { itemId: string; status: "salvaged"; yield: number }
+  | { itemId: string; status: "already"; yield: 0 }
+  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+
+/** M7.6 ตีบวก refine outcome (mirrors `server/items.ts`'s `RefineOutcome`). */
+export type RefineOutcome = "success" | "degrade" | "break" | "safe";
+
+/** POST /api/items/refine success shape (mirrors `server/items.ts`'s
+ * `RefineResult`'s `ok: true` branch). */
+export interface RefineApiSuccess {
+  ok: true;
+  outcome: RefineOutcome;
+  refineLevel: number;
+  destroyed: boolean;
+  materials: number;
+  materialsDelta: number;
+  goldDelta: number;
+  cost: { materials: number; gold: number };
+}
+
+export type RefineApiResult = RefineApiSuccess | { ok: false; reason: string };
