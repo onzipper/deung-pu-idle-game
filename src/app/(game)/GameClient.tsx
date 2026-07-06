@@ -293,6 +293,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // doc) + per-map unlocked-zone counts (M6 SAVE v8 field, surfaced for the
     // fast-travel picker's lock read).
     bot: { ...state.bot },
+    autoHunt: state.autoHunt,
     unlockedZones: { ...state.unlockedZones },
   };
 }
@@ -453,6 +454,7 @@ export function GameClient() {
         useReturnScroll: pending.useReturnScroll || undefined,
         equip: pending.equip ?? undefined,
         setBotSettings: pending.setBotSettings ?? undefined,
+        setAutoHunt: pending.setAutoHunt ?? undefined,
         fastTravel: pending.fastTravel ?? undefined,
         goldCredit: pending.goldCredit ?? undefined,
         // M7.5: the sell-trip bot's trigger — the engine knows nothing about

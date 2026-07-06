@@ -9,6 +9,10 @@
   "hud": {
     "stageLabel": "Stage",
     "waveLabel": "Wave",
+    "autoHuntOn": "AUTO",
+    "autoHuntOff": "MANUAL",
+    "autoHuntAriaOn": "Turn auto-hunt off",
+    "autoHuntAriaOff": "Turn auto-hunt on",
     "zoneUnlockLabel": "Unlock next zone",
     "victoryTitle": "🎉 Stage {stage} cleared!",
     "nextStageButton": "Next Stage →",

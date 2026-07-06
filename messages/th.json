@@ -9,6 +9,10 @@
   "hud": {
     "stageLabel": "ด่าน",
     "waveLabel": "เวฟ",
+    "autoHuntOn": "ออโต้",
+    "autoHuntOff": "หยุดตี",
+    "autoHuntAriaOn": "ปิดการตีมอนอัตโนมัติ",
+    "autoHuntAriaOff": "เปิดการตีมอนอัตโนมัติ",
     "zoneUnlockLabel": "ปลดโซนถัดไป",
     "victoryTitle": "🎉 ชนะด่าน {stage}!",
     "nextStageButton": "ด่านถัดไป →",

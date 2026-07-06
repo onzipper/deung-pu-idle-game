@@ -205,6 +205,9 @@ export interface EngineSnapshot {
    * `setBotSettings` intent and reads the current values back from here,
    * never shadow-owning the config itself). */
   bot: BotSettings;
+  /** Auto-hunt flag (M7.5, engine-persisted SAVE v12) — read-only display
+   * source for the HUD AUTO button (changes go via the `setAutoHunt` intent). */
+  autoHunt: boolean;
   /** Per-map unlocked-zone counts (M6 SAVE v8 field), surfaced for the M7.5
    * fast-travel picker's lock/unlock read (`isZoneUnlockedUi`). */
   unlockedZones: Record<string, number>;
@@ -256,6 +259,10 @@ export interface PendingInput {
    * calls (not last-wins) — a bulk sell + an overlapping manual sell in the
    * same tick must never drop one credit. `null`/`0` = nothing pending. */
   goldCredit: number | null;
+  /** Auto-hunt toggle (M7.5), or `null` (last-wins per frame). Engine-persisted
+   * (SAVE v12) — the HUD button queues this and reads the current value back
+   * from the snapshot's `autoHunt`, never shadow-owning it. */
+  setAutoHunt: boolean | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -275,6 +282,7 @@ function emptyPendingInput(): PendingInput {
     setBotSettings: null,
     fastTravel: null,
     goldCredit: null,
+    setAutoHunt: null,
   };
 }
 
@@ -502,6 +510,8 @@ export interface HudState {
   /** Idle-bot settings (M7.5, engine-persisted SAVE v11) — see
    * `EngineSnapshot.bot`'s doc. */
   bot: BotSettings;
+  /** Auto-hunt flag (M7.5, SAVE v12) — HUD AUTO button display source. */
+  autoHunt: boolean;
   /** Per-map unlocked-zone counts (M6 SAVE v8), for the fast-travel picker. */
   unlockedZones: Record<string, number>;
 
@@ -646,6 +656,8 @@ export interface HudState {
   /** Queue an idle-bot settings patch (M7.5, merges across same-frame calls —
    * see `PendingInput.setBotSettings`'s doc). */
   setBotSettings: (patch: Partial<BotSettings>) => void;
+  /** Queue the auto-hunt toggle intent (M7.5; last-wins per frame). */
+  queueSetAutoHunt: (on: boolean) => void;
   /** Queue a fast-travel channel start (M7.5, last-wins per frame) — the
    * engine no-ops/rejects (`fastTravelBlocked`) an invalid/locked/aggro'd
    * attempt. */
@@ -718,6 +730,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   },
   shop: emptyShop,
   bot: defaultBotSettings(),
+  autoHunt: true,
   unlockedZones: {},
 
   inventory: [],
@@ -841,6 +854,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   queueFastTravel: (target) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, fastTravel: target } })),
+
+  queueSetAutoHunt: (on) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, setAutoHunt: on } })),
 
   creditGold: (amount) =>
     set((s) => ({
