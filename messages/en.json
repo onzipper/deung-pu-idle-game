@@ -131,7 +131,7 @@
       "sellCommon": "Sell common",
       "sellRare": "Sell rare",
       "sellEpic": "Sell epic (locked off)",
-      "keepBetterStat": "Keep items that beat what's equipped"
+      "keepBetterStat": "Protect good gear (upgrades over equipped + best piece for an empty slot)"
     }
   },
   "onboarding": {

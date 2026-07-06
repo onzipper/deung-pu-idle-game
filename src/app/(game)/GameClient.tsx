@@ -308,11 +308,16 @@ function buildSnapshot(state: GameState): EngineSnapshot {
  */
 async function performAutoSell(): Promise<void> {
   const store = useGameStore.getState();
-  const ids = selectAutoSellItemIds(store.inventory, ITEM_TEMPLATES, {
-    sellCommon: store.autoSellCommon,
-    sellRare: store.autoSellRare,
-    keepBetterStat: store.autoSellKeepBetterStat,
-  });
+  const ids = selectAutoSellItemIds(
+    store.inventory,
+    ITEM_TEMPLATES,
+    {
+      sellCommon: store.autoSellCommon,
+      sellRare: store.autoSellRare,
+      keepBetterStat: store.autoSellKeepBetterStat,
+    },
+    store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
+  );
   if (ids.length === 0) {
     // Bag full but the rules matched nothing — the engine latches its sell-trip
     // watermark and stops tripping; tell the player WHY the bot gave up (fix =

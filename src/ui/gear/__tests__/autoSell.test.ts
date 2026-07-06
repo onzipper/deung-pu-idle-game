@@ -91,19 +91,47 @@ describe("selectAutoSellItemIds", () => {
     expect(ids).toEqual([]); // "better" is kept, "equipped" is never touched
   });
 
-  it("REGRESSION keep-guard: an EMPTY slot keeps nothing (rarity rule alone decides)", () => {
+  it("REGRESSION keep-guard: an EMPTY slot keeps ONLY the best backup, sells the rest", () => {
     // 2026-07-06 bug: an empty slot baselined to 0, so EVERY item "beat" it and
     // was kept — auto-sell matched nothing and the sell-trip bot warp-looped.
+    // v1.1: keep the single best candidate per empty slot, sell the copies.
     const items = [
       item({ instanceId: "w1", templateId: "common_sword" }),
+      item({ instanceId: "w2", templateId: "common_sword" }),
+      item({ instanceId: "w3", templateId: "rare_sword" }), // best weapon backup
       item({ instanceId: "a1", templateId: "common_armor" }),
+      item({ instanceId: "a2", templateId: "common_armor" }), // a1 wins the id tie-break
     ]; // NOTHING equipped in either slot
     const ids = selectAutoSellItemIds(items, TEMPLATES, {
       sellCommon: true,
-      sellRare: false,
+      sellRare: true,
       keepBetterStat: true,
     });
-    expect(ids.sort()).toEqual(["a1", "w1"]);
+    expect(ids.sort()).toEqual(["a2", "w1", "w2"]); // w3 + a1 kept as backups
+  });
+
+  it("empty-slot backup is scoped to the hero's class (foreign-class gear sells)", () => {
+    const templates = {
+      ...TEMPLATES,
+      archer_bow: {
+        rarity: "rare",
+        slot: "weapon",
+        stats: { atk: 8 },
+        classReq: "archer",
+      } as const,
+    };
+    const items = [
+      item({ instanceId: "bow", templateId: "archer_bow" }), // unwearable by a swordsman
+      item({ instanceId: "sword", templateId: "common_sword" }),
+    ];
+    const ids = selectAutoSellItemIds(
+      items,
+      templates,
+      { sellCommon: true, sellRare: true, keepBetterStat: true },
+      "swordsman",
+    );
+    // The bow can't be this hero's backup → sold; the wearable sword is kept.
+    expect(ids).toEqual(["bow"]);
   });
 
   it("keep-guard: still sells a candidate that does NOT beat the equipped item", () => {

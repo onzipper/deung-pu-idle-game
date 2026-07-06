@@ -388,7 +388,7 @@ export function writeSeenTip(id: string, seen: readonly string[]): string[] {
  * that's actually save-persisted). Owner-locked defaults (ROADMAP.md M7.5):
  * sell common ON, rare OFF, epic never (no field — see `ui/gear/autoSell.ts`),
  * keep-guard ON (don't auto-sell a stat upgrade over what's equipped). */
-const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules";
+const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2"; // v2 (2026-07-06): sellRare default flipped ON (tier-3+ drops are ALL rare; common-only sold nothing mid-game) — key versioned so existing players re-default
 
 export interface StoredAutoSellRules {
   sellCommon: boolean;
@@ -398,7 +398,7 @@ export interface StoredAutoSellRules {
 
 const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
   sellCommon: true,
-  sellRare: false,
+  sellRare: true, // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
   keepBetterStat: true,
 };
 
