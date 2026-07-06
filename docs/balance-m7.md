@@ -356,7 +356,9 @@ draft (sword 3:1, bow 2:1, mage 2:1) was **overruled** by the data. Totals over 
 | mage | 2 INT : 1 VIT | 43 | 26 | 5/5 | marginal |
 | **mage** | **3 INT : 1 VIT** ✅ | **20** | **0** | **5/5** | chosen — mage survives on skill uptime (INT→mana), not HP |
 
-**Chosen ratios:** sword `{str:4, vit:1}` · archer `{dex:1}` · mage `{int:3, vit:1}`.
+**Chosen ratios (M7.7):** sword `{str:4, vit:1}` · archer `{dex:1}` · mage `{int:3, vit:1}`.
+_(Superseded 2026-07-07 by the owner INT pass below — sword `{str:4, vit:1, int:1}`, archer
+`{dex:4, int:1}`; mage unchanged.)_
 
 **Gates (all held on the chosen set):** class-change quest completes ~**s5** (all classes,
 all seeds) · **s15 boss soft-wall intact** (0/5, every class) · **0 stalls** (every farm
@@ -370,6 +372,47 @@ so no single build is trivialised.
 - **Mage safety scales with INT, not VIT** — more INT deepens the mana pool that sustains
   the skill uptime the caster survives on, so the *less*-VIT 3:1 both out-survived and
   out-cleared the heavier 2:1 (0 boss wipes vs 26).
+
+### Owner INT pass (2026-07-07) — ease mana-potion dependency for sword + archer
+
+Owner directive ("มี INT เพิ่มหน่อย"): the M7.7 mana governor left the martial classes
+leaning hard on mana potions (sword ~44/run, archer ~114/run on this sim baseline), so give
+sword + archer a small INT share in auto-allocate. **Mage left untouched** (already 3 INT :
+1 VIT). Same rig as above (`SIM_SECONDS=1800`, seeds `1,2,3,42,1337`, no-gear). The metric
+the owner cares about is **mana-potion burn/run**; per the owner's ruling a few-% clear-time
+drift is an accepted trade, so a candidate is only vetoed if it breaks a hard gate.
+
+| class | ratio | mana pot/run | Δ vs base | total deaths | s11-14 farm deaths | s15 farm clear | gates |
+|---|---|---:|---:|---:|---|---:|---|
+| sword | 4 STR : 1 VIT (base) | 44 | — | 24 | 0/1/4/3 | 131s | ok |
+| sword | 8 STR : 2 VIT : 1 INT | 44 | **0%** | 77 | — | 128s | INT too diluted → no relief |
+| **sword** | **4 STR : 1 VIT : 1 INT** ✅ | **20** | **−55%** | 48 | 0/1/2/3 | 134s (+2%) | chosen |
+| archer | 4 DEX (pure, base) | 114 | — | 261 | 8/9/37/50 | 315s | ok |
+| archer | 8 DEX : 1 INT | 91 | −20% | 245 | — | 254s | relief too small |
+| **archer** | **4 DEX : 1 INT** ✅ | **50** | **−56%** | 266 | 8/9/37/50 | 272s (−14%) | chosen |
+
+**Chosen (updated):** sword `{str:4, vit:1, int:1}` · archer `{dex:4, int:1}` · mage
+`{int:3, vit:1}` (unchanged).
+
+- **Sword 4:1:1** — halves mana burn (44→20). Farm-zone deaths **through s14 stay flat**
+  (0/1/2/3 vs the baseline 0/1/4/3); the raw total-death jump (24→48) is entirely the
+  **unbeatable s15 frontier boss retry loop** (s15-boss "deaths/wipes" 3→25 — a content-
+  ceiling artefact, not farmable degradation), so no gate breaks. The smaller **8:2:1 gave
+  ZERO relief** (INT diluted to 1/11 barely lifts the pool) *and* was noisier/deadlier, so
+  it's rejected — 4:1:1 is both the owner's preferred draft and the only sword share that
+  actually moves the metric.
+- **Archer 4:1 — INT is the one off-primary share that helps.** The earlier sweep proved
+  every *VIT* share regressed (VIT gives no throughput on a DPS-race kiter), but INT is
+  different: the archer was **mana-STARVED** (114 pot/run bleeding arrow-rain uptime), so a
+  1/5 INT share **restores skill uptime**, and the recovered AoE DPS **offsets the small DEX
+  loss** — deaths stay flat (261→266), s15 clear even drops 315→272s, and mana burn halves.
+  8:1 relieved only −20%, so 4:1 is the pick. DEX stays the 4/5 majority (damage identity
+  intact). Note the archer's map3 frontier squishiness is unchanged and remains a
+  content/gear matter, per the original v2 note.
+
+**Gates (both chosen sets):** class-change ~**s5** (all seeds) · **s15 boss soft-wall intact**
+(0/5) · **s15 farm 5/5** (no new frontier wall) · **0 stalls**. Accepted trade (owner-chosen):
+sword s15 clear +2%; archer s15 clear actually improved.
 
 ---
 

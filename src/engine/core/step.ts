@@ -106,12 +106,17 @@ export interface FrameInput {
    */
   acceptQuest?: number;
   /**
-   * Allocate `amount` unspent base-stat points into `stat` for the solo hero (M5
-   * "Base stats"). Honoured across phases; a no-op if the amount is invalid,
-   * exceeds the unspent pool, or breaches the cap. Applied once per drained input
-   * (a click allocates exactly once, at any speed — like `evolveHero`).
+   * Allocate unspent base-stat points into one or more stats for the solo hero
+   * (M5 "Base stats", batch shape since the M7.9 stat-tap-fix). A map of stat ->
+   * amount, applied entry-by-entry (fixed str/dex/int/vit order for determinism)
+   * through the same guarded `allocateStat()` as before — an invalid amount, an
+   * over-spend, or a cap breach on ANY one entry is a no-op for just that entry
+   * (the others still apply). This lets several taps queued within one dropped/
+   * slow real frame (mobile, dense fields) all land instead of last-wins
+   * silently dropping one — see `PendingInput.allocateStat`'s doc in
+   * `ui/store/gameStore.ts`. Applied once per drained input, at any speed.
    */
-  allocateStat?: { stat: StatKey; amount: number };
+  allocateStat?: Partial<Record<StatKey, number>>;
   /**
    * Buy `qty` (default 1) of an NPC-shop consumable (M6 "เมืองหลัก"). ONLY valid
    * while standing in the TOWN zone (the NPC is there — GDD); a no-op elsewhere,

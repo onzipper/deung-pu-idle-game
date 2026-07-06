@@ -75,7 +75,9 @@ import {
 } from "@/engine";
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
+import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
+import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
 import { selectAutoSellSalvageIds } from "@/ui/gear/autoSell";
 import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
@@ -93,6 +95,7 @@ import {
   type ShopSummary,
   type SkillSummary,
 } from "@/ui/store/gameStore";
+import { resolveCatchUp } from "./catchUp";
 import { TimeDirector } from "./timeDirector";
 
 /** Mirrors `server/items.ts`'s `MAX_CLAIM_BATCH` (server zone, not importable
@@ -107,9 +110,21 @@ const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
 /**
  * Clamp per-frame elapsed wall time (tab-away, debugger pauses, dropped
  * frames) so a stall never dumps a huge burst of sub-steps into one rAF.
- * Real offline-idle catch-up is a separate, capped M3 concern (`server/offline.ts`).
+ * A hidden-tab gap longer than `CATCHUP_MIN_HIDDEN_MS` is instead replayed
+ * explicitly by the tab-return catch-up below (`resolveCatchUp` +
+ * `replayFixedSteps`) — this clamp only protects the ORDINARY per-frame case
+ * (a dropped frame, a debugger pause) from ever dumping a huge sub-step burst.
  */
 const MAX_FRAME_SECONDS = 0.25;
+
+/**
+ * Minimum hidden-tab wall-clock gap that triggers the explicit catch-up
+ * replay below. Below this the ordinary `MAX_FRAME_SECONDS` clamp on the next
+ * real rAF frame already handles it fine (losing at most a quarter second of
+ * sim time is imperceptible); above it we'd otherwise silently lose real
+ * elapsed time to that same clamp (tab switch, mobile screen fold, …).
+ */
+const CATCHUP_MIN_HIDDEN_MS = 5_000;
 
 /** Wall time between periodic autosave POSTs. */
 const AUTOSAVE_INTERVAL_MS = 30_000;
@@ -121,6 +136,11 @@ const AUTOSAVE_INTERVAL_MS = 30_000;
  * remainder. Bounded by wall time (not a fixed step count) so it stays jank-free
  * on any machine. Exact long-idle fidelity is an M4 concern (a coarse
  * closed-form idle-rate model, or a chunked/worker catch-up).
+ *
+ * Reused verbatim by the mid-session tab-return catch-up (`replayFixedSteps`)
+ * below — same budget, same drop-the-remainder behavior, same forced
+ * `autoReturn` — so a long tab-away gap gets identical treatment to a boot
+ * offline-idle gap.
  */
 const OFFLINE_SYNC_BUDGET_MS = 250;
 
@@ -379,12 +399,23 @@ async function performAutoSell(): Promise<void> {
       count: sellResult.soldCount,
       gold: sellResult.totalGold.toLocaleString(),
     });
+  } else if (!sellResult.ok) {
+    // POST/network failure — the bag stays full, so the engine re-trips the warp
+    // and this retries next trip. Log it: a SILENT failure here is exactly what
+    // makes the "warps but sells nothing" report undiagnosable in the field.
+    console.warn("[GameClient] auto-sell POST failed; bag stays full, will retry", {
+      requested: sellIds.length,
+    });
   }
   const salvageResult = await executeSalvage(salvageIds);
   if (salvageResult.ok && salvageResult.salvagedCount > 0) {
     useGameStore.getState().pushNotice("autoSalvageDone", {
       count: salvageResult.salvagedCount,
       materials: salvageResult.totalMaterials.toLocaleString(),
+    });
+  } else if (!salvageResult.ok) {
+    console.warn("[GameClient] auto-salvage POST failed; bag stays full, will retry", {
+      requested: salvageIds.length,
     });
   }
 }
@@ -452,6 +483,24 @@ export function GameClient() {
     // Previous rAF frame's event batch — TimeDirector reacts to these (a
     // one-frame trigger latency is expected/fine; see timeDirector.ts).
     let lastFrameEvents: GameEvent[] = [];
+    // ---- backgrounded-tab catch-up (owner request 2026-07) ----
+    // `hiddenAt` = wall-clock `Date.now()` at the moment the tab went hidden
+    // (set in `onVisibility` below); cleared once consumed. `lastActiveAt` is
+    // a fallback reference for `pageshow` (bfcache restore) in case it fires
+    // without a preceding `visibilitychange` hidden event on some mobile
+    // browsers — it's just "the last time a real rAF frame ran," which is
+    // exactly when the tab stopped being driven. Both use `Date.now()`, never
+    // `performance.now()`, so a device-sleep gap (which can distort monotonic
+    // clocks on some platforms) is measured the same way the boot offline-idle
+    // path measures its own gap (server `lastSeen` wall-clock delta).
+    let hiddenAt: number | null = null;
+    let lastActiveAt = Date.now();
+    // Guards the rAF `frame()` tick from ever running WHILE a catch-up replay
+    // is in flight. The replay itself is synchronous (same shape as the boot
+    // offline-idle loop), so in practice a queued rAF can never fire mid-replay
+    // on a single JS thread — this is a cheap defensive belt-and-suspenders in
+    // case that assumption ever changes (e.g. a future chunked/async replay).
+    let catchingUp = false;
     // M7.5 bot-status toast trackers (frame-to-frame transition detection).
     let botPrevTravelReason: string | null = null;
     let botPrevDwell = false;
@@ -485,11 +534,98 @@ export function GameClient() {
       errorEl.textContent = tRef.current("fatalError", { reason });
     }
 
+    /**
+     * Shared fixed-step replay primitive for BOTH the boot offline-idle
+     * catch-up and the mid-session backgrounded-tab catch-up
+     * (`handleReturnFromBackground` below) — same wall-clock-bounded loop,
+     * same forced `autoReturn`, same "drop the remainder past the budget"
+     * behavior, so a long tab-away gap gets identical treatment to a boot
+     * offline-idle gap. Never called from inside `frame()` itself — this is
+     * strictly the "outside the rAF tick" replay path.
+     */
+    function replayFixedSteps(steps: number, budgetMs: number): number {
+      // Forces auto-return (M6): a hero dead at the snapshot must respawn +
+      // walk back to farm during the replay so idle earnings never stall in
+      // town, regardless of the live UI toggle — the next real `frame()` tick
+      // re-applies the store's own toggle anyway (see `frame()`'s UI-owned
+      // flags block), so nothing needs restoring here.
+      state.autoReturn = true;
+      const deadline = performance.now() + budgetMs;
+      let ran = 0;
+      for (; ran < steps; ran++) {
+        step(state, {});
+        // Amortise the clock read so it doesn't dominate the tight loop.
+        if ((ran & 0x3ff) === 0 && performance.now() >= deadline) {
+          ran++;
+          break;
+        }
+      }
+      return ran;
+    }
+
+    /**
+     * Backgrounded-tab catch-up (owner request 2026-07): fires when the tab
+     * returns from `hidden` (via `onVisibility`) or a bfcache `pageshow`
+     * restore. Reuses the SAME bounded replay + cap the boot offline-idle
+     * path uses (`resolveCatchUp`/`replayFixedSteps`/`OFFLINE_SYNC_BUDGET_MS`)
+     * so the two mechanisms behave identically — the only difference is the
+     * elapsed gap's source (a hidden-tab timestamp vs. the server's
+     * `lastSeen`).
+     *
+     * Event-flood suppression: like the boot replay, this calls `step()`
+     * directly and never touches `frameEvents`/`renderer.draw`/
+     * `audio.consumeEvents`/drop-claim buffering — the replayed steps' events
+     * are simply discarded (same as boot: a `itemDrop` rolled during a replay
+     * is not claimed, an accepted parity with the existing offline-idle
+     * behavior). The very next live `frame()` tick draws + UI-syncs the
+     * POST-replay state normally, so the HUD just "jumps" to the caught-up
+     * numbers instead of visibly fast-forwarding.
+     */
+    function handleReturnFromBackground(): void {
+      const since = hiddenAt ?? lastActiveAt;
+      hiddenAt = null;
+      const elapsedMs = Date.now() - since;
+      if (elapsedMs < CATCHUP_MIN_HIDDEN_MS) return;
+      const { steps, capped } = resolveCatchUp(elapsedMs, {
+        fixedDtSeconds: FIXED_DT,
+        capHours: CONFIG.offlineCapHours,
+      });
+      if (steps <= 0) return;
+      catchingUp = true;
+      try {
+        const goldBefore = state.gold;
+        const ran = replayFixedSteps(steps, OFFLINE_SYNC_BUDGET_MS);
+        // TODO(M4): surface this in the HUD instead of the console (same gap
+        // as the boot offline-idle path's own TODO).
+        console.log(
+          `กลับมาที่แท็บ ได้ทอง +${state.gold - goldBefore} ` +
+            `(${Math.round(elapsedMs / 1000)}s${capped ? ", capped" : ""}, ` +
+            `simulated ${ran}/${steps} steps)`,
+        );
+      } finally {
+        catchingUp = false;
+        // Prevents the next real frame() from seeing a huge `now - lastTime`
+        // (it'd be clamped by MAX_FRAME_SECONDS anyway, but this keeps the
+        // accounting honest) and clears stale events so TimeDirector doesn't
+        // react to anything from before the gap.
+        lastTime = performance.now();
+        lastActiveAt = Date.now();
+        lastFrameEvents = [];
+      }
+    }
+
     function frame(now: number) {
       rafId = requestAnimationFrame(frame);
 
+      // A catch-up replay is a synchronous, blocking call (see
+      // `replayFixedSteps`/`handleReturnFromBackground` below) so this should
+      // never actually be true when a rAF callback runs — kept as a defensive
+      // no-op guard (see `catchingUp`'s doc above).
+      if (catchingUp) return;
+
       const elapsed = Math.min((now - lastTime) / 1000, MAX_FRAME_SECONDS);
       lastTime = now;
+      lastActiveAt = Date.now();
 
       const store = useGameStore.getState();
 
@@ -527,6 +663,9 @@ export function GameClient() {
         walkToZone: pending.walkToZone ?? undefined,
         evolveHero: pending.evolveHero ?? undefined,
         acceptQuest: pending.acceptQuest ?? undefined,
+        // M7.9 stat-tap-fix: a per-stat batch map (accumulated by the store,
+        // not last-wins — see `PendingInput.allocateStat`'s doc), passed
+        // straight through; the engine applies every entry in one step().
         allocateStat: pending.allocateStat ?? undefined,
         buyShopItem: pending.buyShopItem ?? undefined,
         useConsumable: pending.useConsumable ?? undefined,
@@ -627,8 +766,17 @@ export function GameClient() {
           // dropped auto-sell just retries on the NEXT full-inventory trip).
           if (ev.reason === "sell" || ev.reason === "restockSell") {
             // Equip first so the keep-guard baseline reflects the NEW gear —
-            // the displaced pieces then vendor in this same trip.
-            void performAutoEquip().then(performAutoSell);
+            // the displaced pieces then vendor in this same trip. The dispose
+            // sweep MUST still run if auto-equip rejects (the whole point of the
+            // trip is to empty the bag): gating it on the equip promise settling
+            // cleanly means a single equip failure silently skips sell+salvage,
+            // leaving the bag full so the engine re-trips the warp forever — the
+            // "bot warps but never sells/salvages" bug. Run dispose on BOTH the
+            // fulfil and reject paths.
+            void performAutoEquip().then(performAutoSell, (err) => {
+              console.warn("[GameClient] auto-equip failed; disposing anyway", err);
+              return performAutoSell();
+            });
           }
         } else if (ev.type === "fastTravelCastStart") {
           useGameStore.getState().startFastTravelChannel(ev.mapId, ev.zoneIdx);
@@ -665,9 +813,18 @@ export function GameClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(serialize()),
         keepalive: true,
-      }).catch(() => {
-        /* offline / transient failure — next autosave retries */
-      });
+      })
+        .then((res) => (res.ok ? (res.json() as Promise<{ announcements?: AnnouncementWire[] }>) : null))
+        .then((json) => {
+          // M7.9: the polling piggyback — every autosave response carries any
+          // recent server-wide high-refine landing (no websockets this phase).
+          if (json?.announcements) {
+            useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
+        })
+        .catch(() => {
+          /* offline / transient failure — next autosave retries */
+        });
       // Same cadence as the save POST (see the drop-claim flush's own doc below).
       flushClaims();
     }
@@ -721,25 +878,42 @@ export function GameClient() {
 
     // On tab-hide (covers most real "closing the game" cases): sendBeacon is
     // guaranteed to flush during unload where a normal fetch may be killed.
+    // ALSO doubles as the backgrounded-tab catch-up's hide/show boundary
+    // (owner request 2026-07): records `hiddenAt` on the way out, replays the
+    // gap via `handleReturnFromBackground` on the way back in.
     function onVisibility(): void {
-      if (document.visibilityState !== "hidden") return;
-      const blob = new Blob([JSON.stringify(serialize())], {
-        type: "application/json",
-      });
-      navigator.sendBeacon("/api/save", blob);
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        const blob = new Blob([JSON.stringify(serialize())], {
+          type: "application/json",
+        });
+        navigator.sendBeacon("/api/save", blob);
 
-      // Best-effort drop-claim flush via the same fire-and-forget beacon
-      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
-      // accepted v1 loss (no response to merge into the inventory slice even
-      // if it lands) — documented tradeoff, see this function's doc comment.
-      if (pendingClaims.length > 0) {
-        const claimBlob = new Blob(
-          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
-          { type: "application/json" },
-        );
-        navigator.sendBeacon("/api/items/claim", claimBlob);
-        pendingClaims = [];
+        // Best-effort drop-claim flush via the same fire-and-forget beacon
+        // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
+        // accepted v1 loss (no response to merge into the inventory slice even
+        // if it lands) — documented tradeoff, see this function's doc comment.
+        if (pendingClaims.length > 0) {
+          const claimBlob = new Blob(
+            [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+            { type: "application/json" },
+          );
+          navigator.sendBeacon("/api/items/claim", claimBlob);
+          pendingClaims = [];
+        }
+        return;
       }
+      if (document.visibilityState === "visible") handleReturnFromBackground();
+    }
+
+    // bfcache restore (mobile back/forward navigation, some screen-fold cases)
+    // fires `pageshow` with `persisted: true` INSTEAD OF a fresh page load —
+    // `visibilitychange` may or may not have fired first depending on the
+    // browser, so `handleReturnFromBackground` falls back to `lastActiveAt`
+    // when `hiddenAt` is unset (see its doc comment). Idempotent if both fire
+    // (`hiddenAt` is cleared after the first call).
+    function onPageShow(e: PageTransitionEvent): void {
+      if (e.persisted) handleReturnFromBackground();
     }
 
     // Browsers block audio output until a real user gesture — resume() is
@@ -813,6 +987,13 @@ export function GameClient() {
              * a save whose hero.cls drifted + seeds a first boot (2026-07-06
              * "everyone is a swordsman" fix). */
             baseClass?: HeroClass | null;
+            /** M7.9: this client's own active characterId (self-exclusion key
+             * for the announcement banner — see `myCharacterId`'s doc). */
+            activeCharacterId?: string | null;
+            /** M7.9: a fresh login's recent server-wide high-refine feed
+             * (last 5 min, LIMIT 10, newest-first) — same shape the autosave
+             * POST response carries every ~30s thereafter. */
+            announcements?: AnnouncementWire[];
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -822,6 +1003,16 @@ export function GameClient() {
           // corrected + wrong-primary stat points refunded (engine helper).
           if (loaded && json.baseClass) loaded = repairHeroClass(loaded, json.baseClass);
           if (json.baseClass) bootClass = json.baseClass;
+          // M7.9: record OUR OWN characterId (self-exclusion for the
+          // announcement banner) before ingesting the boot feed, so a
+          // same-poll self-landing (unlikely at boot, but cheap to guard) is
+          // correctly filtered.
+          if ("activeCharacterId" in json) {
+            useGameStore.getState().setMyCharacterId(json.activeCharacterId ?? null);
+          }
+          if (json.announcements) {
+            useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
@@ -862,25 +1053,17 @@ export function GameClient() {
       else if (bootClass) state = initGameState(seed, undefined, bootClass);
 
       // ---- offline-idle catch-up ----
-      // Replay the capped offline seconds through the SAME fixed-step primitive
-      // the live loop uses, bounded by OFFLINE_SYNC_BUDGET_MS (see its comment).
-      const totalOfflineSteps = Math.floor(offlineSeconds / FIXED_DT);
+      // Replay the capped offline seconds through the SAME fixed-step/cap
+      // primitive the mid-session backgrounded-tab catch-up reuses below
+      // (`resolveCatchUp`/`replayFixedSteps`), bounded by OFFLINE_SYNC_BUDGET_MS
+      // (see its comment).
+      const { steps: totalOfflineSteps } = resolveCatchUp(offlineSeconds * 1000, {
+        fixedDtSeconds: FIXED_DT,
+        capHours: CONFIG.offlineCapHours,
+      });
       if (totalOfflineSteps > 0) {
-        // Offline idle FORCES auto-return (M6): a hero dead at the snapshot must
-        // respawn + walk back to farm during the replay so idle earnings never
-        // stall in town (regardless of the live UI toggle).
-        state.autoReturn = true;
         const goldBefore = state.gold;
-        const deadline = performance.now() + OFFLINE_SYNC_BUDGET_MS;
-        let ran = 0;
-        for (; ran < totalOfflineSteps; ran++) {
-          step(state, {});
-          // Amortise the clock read so it doesn't dominate the tight loop.
-          if ((ran & 0x3ff) === 0 && performance.now() >= deadline) {
-            ran++;
-            break;
-          }
-        }
+        const ran = replayFixedSteps(totalOfflineSteps, OFFLINE_SYNC_BUDGET_MS);
         // TODO(M4): surface this in the HUD instead of the console.
         console.log(
           `ได้ทองระหว่างออฟไลน์ +${state.gold - goldBefore} ` +
@@ -902,8 +1085,10 @@ export function GameClient() {
 
       autosaveTimer = setInterval(autosave, AUTOSAVE_INTERVAL_MS);
       document.addEventListener("visibilitychange", onVisibility);
+      window.addEventListener("pageshow", onPageShow);
 
       lastTime = performance.now();
+      lastActiveAt = Date.now();
       rafId = requestAnimationFrame(frame);
     };
 
@@ -921,6 +1106,7 @@ export function GameClient() {
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
       arenaEl.removeEventListener("pointerdown", onPointerDown);
       arenaEl.removeEventListener("click", onArenaClick);
       arenaEl.removeEventListener("pointermove", onArenaPointerMove);
@@ -931,5 +1117,12 @@ export function GameClient() {
     };
   }, []);
 
-  return <GameHud ref={arenaRef} />;
+  return (
+    <>
+      <GameHud ref={arenaRef} />
+      {/* UAT "what's new" patch-notes modal — mount only; all decision logic
+          lives in `ui/hooks/usePatchNotes.ts` (see that file + `ui/patchNotes.ts`). */}
+      <PatchNotesModal />
+    </>
+  );
 }

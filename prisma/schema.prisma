@@ -146,6 +146,34 @@ model ItemEvent {
   @@index([itemId]) // read an item's full history (ordered by createdAt in-memory)
 }
 
+// M7.9 server-wide high-refine announcement feed (owner-approved design; NO
+// websockets this phase — polling piggybacked on the existing autosave cycle,
+// see `src/server/items.ts`'s `recentAnnouncements`). A row is written ONLY
+// when a refine attempt SUCCEEDS and lands the item at +8/+9/+10, in the SAME
+// tx as the refine mutation itself (`refineItem`) — a row can therefore never
+// exist without the refine having actually landed.
+//
+// Deliberately NOT a relation to Character (raw denormalized fields, mirrors
+// `ItemEvent.fromCharacterId`'s "immutable ledger, no FK" convention): this is
+// a TRANSIENT feed, not a permanent audit ledger — rows are opportunistically
+// pruned after ~1h (piggybacked on the write path, no cron) to keep the table
+// tiny, so a cascading FK buys nothing and would only complicate a
+// soft-deleted character's row.
+//
+// `templateId` (NOT a display name) — the client localizes it client-side via
+// its own item-catalog i18n (`content.items.<templateId>.name`), so this
+// table never bakes in a server-side locale.
+model RefineAnnouncement {
+  id          String   @id @default(cuid())
+  characterId String
+  charName    String   @db.VarChar(24)
+  templateId  String   @db.VarChar(64)
+  refineLevel Int
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt]) // feed reads ("last 5 minutes") + the opportunistic prune sweep
+}
+
 // One row per player save slot. `data` holds the versioned SaveData JSON blob
 // (see src/engine/state). `lastSeen` drives capped offline-idle earnings.
 // `version` mirrors SaveData.version so migrations can target rows by schema age.

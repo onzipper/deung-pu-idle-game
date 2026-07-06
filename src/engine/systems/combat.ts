@@ -79,7 +79,15 @@ function approachGoalX(h: Hero, t: HeroType, tgt: CombatTarget): number {
   }
   const standoff = t.range * hunt.rangedStandoffFrac;
   if (dist > standoff) return tgt.x - dir * standoff; // close in to firing range
-  if (dist < CONFIG.kiteDist) return h.x - dir * CONFIG.rangedKiteStep; // crowded: step back
+  // Crowded: SERVO back to a fixed target-relative kite distance, mirroring the
+  // approach branch above. The old form (`h.x - dir*rangedKiteStep`) was a fixed
+  // LUNGE relative to the hero's OWN position: when a chasing mob stabilised at
+  // exactly `kiteDist`, the hero over-shot ~2.9px past the threshold, held 2 frames
+  // while the mob closed the gap, then lunged again — a 20Hz stop-start STUTTER
+  // ("ตัวเด้ง ๆ"). Anchoring the goal to `tgt.x` (like the approach standoff) makes
+  // the hero glide to hold exactly `kiteDist`: the per-step move-clamp tracks the
+  // mob's slower approach continuously, so no dead-zone chatter at the boundary.
+  if (dist < CONFIG.kiteDist) return tgt.x - dir * CONFIG.kiteDist; // crowded: hold at kite distance
   return h.x; // hold and fire
 }
 

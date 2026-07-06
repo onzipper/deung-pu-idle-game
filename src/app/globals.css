@@ -155,6 +155,47 @@ body {
   animation-fill-mode: forwards;
 }
 
+/* M7.9 server-wide high-refine announcement banner (`AnnouncementBanner.tsx`)
+ * — a single self-timed keyframe drives slide-in -> hold -> slide-out over
+ * ~5s (matches the component's `DISPLAY_MS`) so a `key`-remounted div (fresh
+ * per queued entry, same "restart via remount" convention as the fast-travel
+ * fill bar above) needs no second effect just to trigger the exit. */
+@keyframes ddp-announce-banner {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  8% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  92% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+}
+.animate-ddp-announce-banner {
+  animation: ddp-announce-banner 5s ease-in-out forwards;
+}
+
+/* Gold shimmer sweep across the banner while it's held — the "richer than a
+ * toast" beat the owner asked for. */
+@keyframes ddp-announce-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+.animate-ddp-announce-shimmer {
+  animation: ddp-announce-shimmer 1.6s ease-in-out infinite;
+}
+
 .animate-gold-pulse {
   display: inline-block;
   animation: gold-pulse 0.26s ease-out;

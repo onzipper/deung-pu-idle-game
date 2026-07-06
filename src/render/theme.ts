@@ -121,6 +121,17 @@ export const PALETTE = {
    * distinct from `dmgSkill`'s pale yellow and `warn`'s red-alert tone. */
   orderAttack: 0xffd23f,
   orderAttackDark: 0x6b4c00,
+
+  // ---- M7.6+ refine-prestige ladder (+8/+9/+10, `fx/refinePrestige.ts`) ----
+  // Same jewel-tone "aura flame" FAMILY as `auraFlame*` above (never a
+  // clashing new hue) but a brighter, whiter-hot variant — a heavily refined
+  // piece should read as "hotter/rarer", not a different material. Kept
+  // visually distinct from the plain `auraFlame*` tones so a +10 refined
+  // tier-3 weapon never gets mistaken for a naturally-rolled tier-6/epic one
+  // (owner spec) even though `gearAura.ts`'s base flames are shared.
+  refinePrestige: 0xffe9a8,
+  refinePrestigeCore: 0xfffbe0,
+  refinePrestigeDark: 0x8a5a00,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

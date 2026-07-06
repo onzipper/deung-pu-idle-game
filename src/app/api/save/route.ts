@@ -15,7 +15,12 @@ import { getOrCreateUserId } from "@/server/identity";
 import { resolveActiveCharacterId } from "@/server/activeCharacter";
 import { getOwnedLiveCharacterClass } from "@/server/characters";
 import { loadSave, persistSave } from "@/server/save";
-import { loadInventory, equippedLoadoutFrom, loadMaterials } from "@/server/items";
+import {
+  loadInventory,
+  equippedLoadoutFrom,
+  loadMaterials,
+  recentAnnouncements,
+} from "@/server/items";
 
 // This route reads/writes cookies and the DB per request — never static.
 export const dynamic = "force-dynamic";
@@ -35,6 +40,10 @@ export async function GET() {
         inventory: [],
         equipped: { weapon: null, armor: null, refine: { weapon: 0, armor: 0 } },
         materials: 0,
+        // M7.9: still worth surfacing even pre-character (a fresh login lands
+        // here for a beat before a character is selected) — see the POST
+        // branch's doc for the feed shape.
+        announcements: await recentAnnouncements(),
       });
     }
     // M7 boot payload: additively include the character's inventory + equipped
@@ -43,7 +52,7 @@ export async function GET() {
     // client must hydrate gear from `inventory`/`equipped` here, not from the
     // save's own copy (an item is not re-derivable from the save; persistence-m7).
     const userId2 = userId; // (identity already resolved above)
-    const [{ save, offline }, inventory, character, materials] = await Promise.all([
+    const [{ save, offline }, inventory, character, materials, announcements] = await Promise.all([
       loadSave(characterId),
       loadInventory(characterId),
       getOwnedLiveCharacterClass(userId2, characterId),
@@ -51,6 +60,10 @@ export async function GET() {
       // blob) — the client seeds its `materials` mirror from this on boot, same as
       // `equipped` is seeded from the DB ledger over the save's cache.
       loadMaterials(characterId),
+      // M7.9: a fresh login should see a recent server-wide high-refine
+      // landing too, not just players who happen to be online across an
+      // autosave tick — see `recentAnnouncements`'s doc (last 5 min, LIMIT 10).
+      recentAnnouncements(),
     ]);
     // `baseClass` is the AUTHORITATIVE class (immutable at creation) — the
     // client must correct/seed the save's `hero.cls` from it (the 2026-07-06
@@ -63,6 +76,7 @@ export async function GET() {
       inventory,
       equipped: equippedLoadoutFrom(inventory),
       materials,
+      announcements,
     });
   } catch (err) {
     console.error("[api/save] GET failed:", err);
@@ -92,7 +106,15 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
-    return NextResponse.json({ ok: true, lastSeen: result.lastSeen });
+    // M7.9 server-wide high-refine announcements: piggyback on the existing
+    // autosave polling cycle (owner-approved design, no websockets this
+    // phase) — every online player's next autosave POST picks up any
+    // recent (last 5 min, LIMIT 10, newest first) landing within one cycle.
+    return NextResponse.json({
+      ok: true,
+      lastSeen: result.lastSeen,
+      announcements: await recentAnnouncements(),
+    });
   } catch (err) {
     console.error("[api/save] POST failed:", err);
     return NextResponse.json({ error: "internal error" }, { status: 500 });

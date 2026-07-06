@@ -54,6 +54,8 @@ import type {
   SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
+import { ingestAnnouncements } from "@/ui/announcements/queue";
+import type { AnnouncementEntry, AnnouncementWire } from "@/ui/announcements/types";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -246,9 +248,15 @@ export interface PendingInput {
   /** Hero slot index to accept the class-change quest for (M5 task 5), or `null`
    * (last-wins per frame — a single tap accepts once). */
   acceptQuest: number | null;
-  /** Base-stat allocation for the solo hero (M5), or `null`. Last-wins per frame
-   * (a click allocates once; the engine no-ops an invalid/over-cap amount). */
-  allocateStat: { stat: StatKey; amount: number } | null;
+  /** Base-stat allocation for the solo hero (M5, batch shape since the M7.9
+   * stat-tap-fix), or `null`. A per-stat map, ACCUMULATED across same-frame
+   * calls (not last-wins) — several taps in one real frame (low-fps mobile,
+   * dense fields) all sum onto their own stat instead of the last tap silently
+   * dropping an earlier one; taps on DIFFERENT stats in the same frame also all
+   * survive (see `allocateStat`'s action doc below). The engine applies each
+   * entry through the same guarded `allocateStat()` (cap/over-spend no-op per
+   * entry). */
+  allocateStat: Partial<Record<StatKey, number>> | null;
   /** Buy an NPC-shop item (M6), or `null` (last-wins per frame). Town-only —
    * the engine no-ops it elsewhere / when unaffordable / at the stack cap. */
   buyShopItem: { item: ShopItemId; qty: number } | null;
@@ -420,6 +428,32 @@ export function writeSeenTip(id: string, seen: readonly string[]): string[] {
   return next;
 }
 
+/** localStorage key for the "what's new" patch-notes modal's last-
+ * acknowledged release id (UAT task) — same client-preference tier as
+ * `TIPS_SEEN_STORAGE_KEY` above, but a single scalar (not a set) since only
+ * "have you seen at least up to the LATEST release" matters (see
+ * `resolvePatchNotesDecision` in `ui/patchNotes.ts`).
+ * // M5+: fold into server save (cross-device sync). */
+const PATCH_NOTES_SEEN_STORAGE_KEY = "ddp-seen-patch.v1";
+
+export function readStoredSeenPatchNotes(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(PATCH_NOTES_SEEN_STORAGE_KEY);
+  } catch {
+    return null; // storage blocked/corrupt — treat as "never seen" this session
+  }
+}
+
+export function writeSeenPatchNotes(id: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PATCH_NOTES_SEEN_STORAGE_KEY, id);
+  } catch {
+    /* storage blocked — this just won't persist across reloads */
+  }
+}
+
 /** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
  * salvage-by-rarity) — same client-preference tier as `soundMuted`/
  * `ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't game progress;
@@ -579,6 +613,17 @@ export interface FastTravelChannelState {
   zoneIdx: number;
 }
 
+/** M7.9 server-wide high-refine announcement feed — session-memory (in-
+ * process, NOT localStorage) dedup set. Module-level like `dropFeedSeq`
+ * above (a plain implementation detail of the ingest action, not something
+ * that itself needs to trigger a re-render), owned exclusively by
+ * `ingestAnnouncementFeed`. */
+let seenAnnouncementIds = new Set<string>();
+/** Cap on the queued-but-not-yet-shown announcements — a burst of high
+ * rolls across the server shouldn't grow this unboundedly (oldest kept,
+ * matching the feed's own LIMIT 10). */
+const MAX_ANNOUNCEMENT_QUEUE = 10;
+
 export interface HudState {
   // ---- throttled engine snapshot (~CONFIG.uiSyncHz) ----
   gold: number;
@@ -628,6 +673,19 @@ export interface HudState {
    * `fastTravelBlocked` (see `GameClient.tsx`'s frame-event handling). */
   fastTravelChannel: FastTravelChannelState | null;
 
+  // ---- M7.9 server-wide high-refine announcement feed (no websockets — the
+  // feed is polled off the existing autosave/boot response, see
+  // `GameClient.tsx`) ----
+  /** This client's OWN active characterId (from the boot/`activeCharacterId`
+   * field), or `null` pre-boot. Used ONLY to self-exclude a landing from the
+   * banner queue (the refiner already gets the local refine-juice
+   * celebration) — never a trust boundary, purely a display filter. */
+  myCharacterId: string | null;
+  /** Queued-but-not-yet-shown announcements, oldest-first — `AnnouncementBanner.tsx`
+   * always displays `announcementQueue[0]` and shifts it off after its
+   * display timer. Capped at `MAX_ANNOUNCEMENT_QUEUE`. */
+  announcementQueue: AnnouncementEntry[];
+
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted UI preference,
   // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
   autoSellCommon: AutoSellAction;
@@ -655,6 +713,17 @@ export interface HudState {
   autoManaPotion: boolean;
   autoHpThreshold: number;
   autoManaThreshold: number;
+  /** M7.9 stat-tap-fix: base-stat points optimistically already queued
+   * (`allocateStat` calls not yet reflected by a throttled snapshot), keyed by
+   * stat. The panel renders `statPoints - sum(this)` and `stats[stat] +
+   * this[stat]` so a tap shows an instant result instead of waiting up to
+   * ~100ms for the next `CONFIG.uiSyncHz` sync (see `StatPanel.tsx`). Cleared
+   * wholesale on every `syncFromEngine` call — safe because the integration
+   * loop always drains + steps pending input in the SAME real frame, well
+   * before that frame's (possible) sync, so by the time any snapshot lands the
+   * engine has already applied every tap queued up to that point; nothing
+   * queued after a sync is touched until the NEXT sync clears it. */
+  optimisticStatSpend: Partial<Record<StatKey, number>>;
   /** Client-side sound preference (persisted to localStorage, NOT SaveData —
    * see `SOUND_MUTED_STORAGE_KEY`'s comment). The integration loop reads this
    * every frame and applies it to the `AudioController`, same pattern as
@@ -677,6 +746,14 @@ export interface HudState {
   /** `-1` = onboarding not running (either finished/skipped, or not yet
    * gated-in); `0..N-1` = index into `ONBOARDING_STEPS` currently shown. */
   onboardingStepIndex: number;
+
+  /** "What's new" patch-notes modal (UAT task) — same store-owned pattern as
+   * `onboardingStepIndex` (a plain store action flips this, never a raw
+   * component `useState` setter called from inside an effect — keeps
+   * `usePatchNotes.ts`'s gate-in effect clean of the
+   * `react-hooks/set-state-in-effect` lint rule). See `ui/patchNotes.ts` for
+   * the pure decision logic that decides when to flip it. */
+  patchNotesVisible: boolean;
 
   // ---- intent queue: drained by the integration loop into FrameInput ----
   pendingInput: PendingInput;
@@ -715,6 +792,13 @@ export interface HudState {
    * mount) since the overlay renders directly off `onboardingStepIndex`. */
   resetOnboarding: () => void;
 
+  /** `usePatchNotes.ts`-only: show the modal (gate already resolved to "show"). */
+  showPatchNotes: () => void;
+  /** Acknowledge button: hides the modal (persistence is the caller's job via
+   * `writeSeenPatchNotes`, same "the hook owns localStorage, the store just
+   * carries the visible flag" split as `ftueCompleted`/`setFtueCompleted`). */
+  dismissPatchNotes: () => void;
+
   /** Queue a manual cast of `skillId` for the solo hero (deduped by skill id;
    * consumed on next drain — a click casts exactly once at any speed). */
   castSkill: (skillId: string) => void;
@@ -731,8 +815,12 @@ export interface HudState {
   /** Queue accepting the class-change quest for hero slot `i` (last-wins per
    * frame) — the engine no-ops it unless the quest is offerable. */
   acceptQuest: (slot: number) => void;
-  /** Queue a base-stat allocation for the solo hero (last-wins per frame) — the
-   * engine no-ops an invalid/over-cap/over-spend amount. */
+  /** Queue a base-stat allocation for the solo hero (M7.9 stat-tap-fix:
+   * ACCUMULATES onto the pending batch — same-stat taps sum, different-stat
+   * taps all survive within one real frame) — the engine no-ops an invalid/
+   * over-cap/over-spend amount per-entry. Also bumps `optimisticStatSpend` so
+   * the panel can render the spend instantly, before the next throttled
+   * snapshot confirms it (see that field's doc). */
   allocateStat: (stat: StatKey, amount: number) => void;
   /** Queue an NPC-shop buy (M6, town-only, last-wins per frame). */
   buyShopItem: (item: ShopItemId, qty: number) => void;
@@ -809,6 +897,17 @@ export interface HudState {
   /** Clear the fast-travel channel progress UI (arrival or block/cancel). */
   clearFastTravelChannel: () => void;
 
+  // ---- M7.9 server-wide high-refine announcement feed ----
+  /** Boot-only: record this client's own characterId (see `myCharacterId`'s doc). */
+  setMyCharacterId: (characterId: string | null) => void;
+  /** Ingest one poll of the `/api/save` (GET or POST) `announcements` field —
+   * pure filtering/dedup lives in `ui/announcements/queue.ts`'s
+   * `ingestAnnouncements`; this action just applies the result. */
+  ingestAnnouncementFeed: (wire: AnnouncementWire[]) => void;
+  /** `AnnouncementBanner.tsx`-only: pop the currently-shown entry after its
+   * display timer, advancing to the next queued one (if any). */
+  shiftAnnouncementQueue: () => void;
+
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
   setAutoSellCommon: (action: AutoSellAction) => void;
   setAutoSellRare: (action: AutoSellAction) => void;
@@ -855,6 +954,9 @@ export const useGameStore = create<HudState>((set, get) => ({
   notices: [],
   fastTravelChannel: null,
 
+  myCharacterId: null,
+  announcementQueue: [],
+
   // Safe defaults pre-hydration; a mount effect (`SettingsPanel`'s bot/auto-sell
   // section) applies the persisted values once via `hydrateAutoSellRules` —
   // same two-step pattern as `soundMuted`/`setSoundMuted`.
@@ -870,15 +972,21 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
   autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
   autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
+  optimisticStatSpend: {},
   soundMuted: false,
 
   hasSyncedOnce: false,
   ftueCompleted: true,
   onboardingStepIndex: -1,
+  patchNotesVisible: false,
 
   pendingInput: emptyPendingInput(),
 
-  syncFromEngine: (snapshot) => set({ ...snapshot, hasSyncedOnce: true }),
+  syncFromEngine: (snapshot) =>
+    // The just-arrived snapshot already reflects every allocateStat tap that
+    // was queued up to (and drained/stepped within) this frame — see
+    // `optimisticStatSpend`'s doc — so the overlay always clears clean here.
+    set({ ...snapshot, hasSyncedOnce: true, optimisticStatSpend: {} }),
 
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
   toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
@@ -908,6 +1016,9 @@ export const useGameStore = create<HudState>((set, get) => ({
     writeFtueCompleted(false);
     set({ ftueCompleted: false, onboardingStepIndex: 0 });
   },
+
+  showPatchNotes: () => set({ patchNotesVisible: true }),
+  dismissPatchNotes: () => set({ patchNotesVisible: false }),
 
   castSkill: (skillId) =>
     set((s) => ({
@@ -947,7 +1058,23 @@ export const useGameStore = create<HudState>((set, get) => ({
     set((s) => ({ pendingInput: { ...s.pendingInput, acceptQuest: slot } })),
 
   allocateStat: (stat, amount) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, allocateStat: { stat, amount } } })),
+    set((s) => ({
+      pendingInput: {
+        ...s.pendingInput,
+        // Accumulate: same-stat taps sum, different-stat taps all survive
+        // within one real frame's batch (M7.9 stat-tap-fix).
+        allocateStat: {
+          ...s.pendingInput.allocateStat,
+          [stat]: (s.pendingInput.allocateStat?.[stat] ?? 0) + amount,
+        },
+      },
+      // Instant local feedback ahead of the next throttled snapshot — cleared
+      // wholesale in `syncFromEngine` once the engine's own numbers catch up.
+      optimisticStatSpend: {
+        ...s.optimisticStatSpend,
+        [stat]: (s.optimisticStatSpend[stat] ?? 0) + amount,
+      },
+    })),
 
   buyShopItem: (item, qty) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, buyShopItem: { item, qty } } })),
@@ -1041,6 +1168,25 @@ export const useGameStore = create<HudState>((set, get) => ({
       fastTravelChannel: { key: (s.fastTravelChannel?.key ?? 0) + 1, mapId, zoneIdx },
     })),
   clearFastTravelChannel: () => set({ fastTravelChannel: null }),
+
+  setMyCharacterId: (characterId) => set({ myCharacterId: characterId }),
+  ingestAnnouncementFeed: (wire) =>
+    set((s) => {
+      const { toQueue, seenIds } = ingestAnnouncements(
+        wire,
+        seenAnnouncementIds,
+        s.myCharacterId,
+      );
+      seenAnnouncementIds = seenIds;
+      if (toQueue.length === 0) return {};
+      return {
+        announcementQueue: [...s.announcementQueue, ...toQueue].slice(
+          -MAX_ANNOUNCEMENT_QUEUE,
+        ),
+      };
+    }),
+  shiftAnnouncementQueue: () =>
+    set((s) => ({ announcementQueue: s.announcementQueue.slice(1) })),
 
   setAutoSellCommon: (action) =>
     set((s) => {

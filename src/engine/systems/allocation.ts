@@ -127,11 +127,23 @@ export function autoAllocateStats(state: GameState): void {
 /**
  * Per-step allocation pass: apply the manual intent (to the solo hero) first, then
  * auto-allocate when the toggle is on. Called from `step()`.
+ *
+ * `alloc` is a batch map (M7.9 stat-tap-fix — see `FrameInput.allocateStat`'s
+ * doc): several stats (or several taps on the SAME stat, pre-summed by the UI
+ * store) can all be queued from one real frame's input and must ALL apply, not
+ * last-wins. Applied in the fixed str/dex/int/vit order for determinism; each
+ * entry goes through the same guarded `allocateStat()` — a rejected entry
+ * (invalid amount / over-spend / cap breach) no-ops just that entry.
  */
 export function processStatAllocation(
   state: GameState,
-  alloc: { stat: StatKey; amount: number } | undefined,
+  alloc: Partial<Record<StatKey, number>> | undefined,
 ): void {
-  if (alloc) allocateStat(state, state.heroes[0], alloc.stat, alloc.amount);
+  if (alloc) {
+    for (const stat of STAT_ORDER) {
+      const amount = alloc[stat];
+      if (amount !== undefined) allocateStat(state, state.heroes[0], stat, amount);
+    }
+  }
   if (state.autoAllocate) autoAllocateStats(state);
 }

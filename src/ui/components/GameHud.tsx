@@ -24,6 +24,7 @@
  */
 
 import { forwardRef, type ReactNode } from "react";
+import { AnnouncementBanner } from "@/ui/components/AnnouncementBanner";
 import { CodexButton } from "@/ui/components/CodexButton";
 import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { DropFeed } from "@/ui/components/DropFeed";
@@ -64,6 +65,13 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           sibling — gated so the two are never active at the same time. */}
       <OnboardingOverlay />
       <ContextualTipOverlay />
+      {/* M7.9: server-wide high-refine announcements — a full-width slide-down
+          strip at the very top of the viewport (z-75), deliberately ABOVE
+          the modal panels (z-70) and the DropFeed/NoticeToast toasts (z-60)
+          per the owner's "more prominent/special" directive. Never overlaps
+          the goal card / console dock below (it lives in the page's top
+          safe-area strip, not inside the HUD flow). */}
+      <AnnouncementBanner />
       {/* M7 Gear & Drops: drop-notification toasts, store-driven off claim
           results — sits above the arena, below the modal panels (z-70). */}
       <DropFeed />

@@ -120,7 +120,7 @@ describe("allocateStat intent", () => {
   it("spends points into the chosen stat exactly once per drained input", () => {
     const s = withPoints();
     const before = s.heroes[0].stats.str;
-    step(s, { allocateStat: { stat: "str", amount: 3 } });
+    step(s, { allocateStat: { str: 3 } });
     expect(s.heroes[0].stats.str).toBe(before + 3);
     expect(s.heroes[0].statPoints).toBe(6);
   });
@@ -130,7 +130,7 @@ describe("allocateStat intent", () => {
     const h = s.heroes[0];
     h.hp = h.maxHp;
     const maxBefore = h.maxHp;
-    step(s, { allocateStat: { stat: "vit", amount: 5 } });
+    step(s, { allocateStat: { vit: 5 } });
     expect(h.maxHp).toBeGreaterThan(maxBefore);
     expect(h.hp).toBe(maxBefore + (h.maxHp - maxBefore));
   });
@@ -138,7 +138,7 @@ describe("allocateStat intent", () => {
   it("rejects an over-spend (more than unspent points) — no-op", () => {
     const s = withPoints(1, 2);
     const before = { ...s.heroes[0].stats };
-    step(s, { allocateStat: { stat: "dex", amount: 5 } });
+    step(s, { allocateStat: { dex: 5 } });
     expect(s.heroes[0].stats).toEqual(before);
     expect(s.heroes[0].statPoints).toBe(2);
   });
@@ -147,7 +147,7 @@ describe("allocateStat intent", () => {
     for (const amount of [-3, 0, 1.5]) {
       const s = withPoints();
       const before = { ...s.heroes[0].stats };
-      step(s, { allocateStat: { stat: "str", amount } });
+      step(s, { allocateStat: { str: amount } });
       expect(s.heroes[0].stats).toEqual(before);
       expect(s.heroes[0].statPoints).toBe(9);
     }
@@ -156,14 +156,14 @@ describe("allocateStat intent", () => {
   it("rejects an allocation that would breach the per-stat cap — no-op", () => {
     const s = withPoints(1, 5);
     s.heroes[0].stats.str = CONFIG.stats.cap - 2;
-    step(s, { allocateStat: { stat: "str", amount: 5 } });
+    step(s, { allocateStat: { str: 5 } });
     expect(s.heroes[0].stats.str).toBe(CONFIG.stats.cap - 2);
     expect(s.heroes[0].statPoints).toBe(5);
   });
 
   it("emits a statAllocated event ONLY on a manual (accepted) allocation", () => {
     const s = withPoints();
-    step(s, { allocateStat: { stat: "int", amount: 2 } });
+    step(s, { allocateStat: { int: 2 } });
     const evts = s.events.filter((e) => e.type === "statAllocated");
     expect(evts.length).toBe(1);
     const e = evts[0];
@@ -173,8 +173,31 @@ describe("allocateStat intent", () => {
 
   it("emits nothing on a rejected allocation", () => {
     const s = withPoints(1, 1);
-    step(s, { allocateStat: { stat: "int", amount: 99 } });
+    step(s, { allocateStat: { int: 99 } });
     expect(s.events.some((e) => e.type === "statAllocated")).toBe(false);
+  });
+
+  it("batch (M7.9 stat-tap-fix): applies MULTIPLE stats queued in one drained input", () => {
+    // Simulates several taps across different stats accumulated in one real
+    // frame (low-fps mobile) — all must land, not last-wins.
+    const s = withPoints(1, 9);
+    step(s, { allocateStat: { str: 2, dex: 1, vit: 3 } });
+    expect(s.heroes[0].stats.str).toBe(ST.base.swordsman.str + 2);
+    expect(s.heroes[0].stats.dex).toBe(ST.base.swordsman.dex + 1);
+    expect(s.heroes[0].stats.vit).toBe(ST.base.swordsman.vit + 3);
+    expect(s.heroes[0].statPoints).toBe(3);
+    // One statAllocated event per applied entry (three stats touched).
+    const evts = s.events.filter((e) => e.type === "statAllocated");
+    expect(evts.length).toBe(3);
+  });
+
+  it("batch: a rejected entry (over-cap) no-ops just that stat; others still apply", () => {
+    const s = withPoints(1, 9);
+    s.heroes[0].stats.str = CONFIG.stats.cap - 1;
+    step(s, { allocateStat: { str: 5, dex: 2 } }); // str breaches cap -> rejected
+    expect(s.heroes[0].stats.str).toBe(CONFIG.stats.cap - 1);
+    expect(s.heroes[0].stats.dex).toBe(ST.base.swordsman.dex + 2);
+    expect(s.heroes[0].statPoints).toBe(7); // only dex's 2 spent
   });
 });
 
@@ -252,10 +275,12 @@ describe("auto-allocate v2 (ratio distribution)", () => {
   });
 
   it("spills to the cap then leaves the remainder unspent when room runs out", () => {
-    // vit near cap (room 3), str capped → 3 points fill vit, the rest stay unspent.
+    // Sword ratio {str:4,vit:1,int:1}: vit near cap (room 3), str + int capped →
+    // 3 points fill vit, the rest stay unspent.
     const s = initGameState(1, soloSave("swordsman", 1));
     s.autoAllocate = true;
     s.heroes[0].stats.str = CONFIG.stats.cap;
+    s.heroes[0].stats.int = CONFIG.stats.cap;
     s.heroes[0].stats.vit = CONFIG.stats.cap - 3;
     s.heroes[0].statPoints = 10;
     step(s, {});
@@ -264,9 +289,11 @@ describe("auto-allocate v2 (ratio distribution)", () => {
   });
 
   it("leaves points unspent when every ratio stat is capped", () => {
+    // Sword ratio {str:4,vit:1,int:1}: cap all three so no ratio stat has room.
     const s = initGameState(1, soloSave("swordsman", 1));
     s.autoAllocate = true;
     s.heroes[0].stats.str = CONFIG.stats.cap;
+    s.heroes[0].stats.int = CONFIG.stats.cap;
     s.heroes[0].stats.vit = CONFIG.stats.cap;
     s.heroes[0].statPoints = 5;
     step(s, {});
@@ -357,7 +384,7 @@ describe("base stats persist + migrate v4 -> v5", () => {
   it("round-trips statPoints + stats through toSaveData -> initGameState", () => {
     const s = initGameState(3, soloSave("mage", 4));
     s.heroes[0].statPoints = 7;
-    step(s, { allocateStat: { stat: "int", amount: 4 } }); // int 8 -> 12, points 7 -> 3
+    step(s, { allocateStat: { int: 4 } }); // int 8 -> 12, points 7 -> 3
     const save = toSaveData(s);
     expect(save.hero.statPoints).toBe(3);
     expect(save.hero.stats.int).toBe(ST.base.mage.int + 4);
