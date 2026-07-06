@@ -71,14 +71,14 @@
 - [x] UI เล็ก: readout มานา/ยามานาเด่นขึ้นตามบทบาทใหม่ (แถบใหญ่ขึ้น + เตือนต่ำกว่า 25% + badge จำนวนยามานา)
 - [x] **Auto-allocate v2 (ต่อท้าย — เคาะ 2026-07-07)**: เปลี่ยนจาก "เทหมดลง primary" เป็น**สัดส่วนตายตัวต่อคลาส** (distributor "ให้แต้มถัดไปกับ stat ที่ต่ำกว่าเป้า `stats[s]/weight[s]` สุด" วัดจาก stat ปัจจุบัน — self-correct กับการแจกมือ, ไม่ต้องเก็บ counter). ผล sim M7.7 **คว่ำร่างเดิม**: **ดาบ 4 STR:1 VIT** (ตาย 183→24, บอสไวป์ 162→2), **ธนู PURE DEX** (VIT ทุกสัดส่วนแย่ลง — 2:1→263+กำแพงใหม่ s15-farm, pure→238 เคลียร์ครบ; ธนูเป็น DPS-race กิน DEX ทั้งดาเมจ+สปีด), **เวท 3 INT:1 VIT** (ตาย 50→20, บอสไวป์ 34→0 — เวทรอดด้วย uptime สกิล/มานาซึ่งโต INT ไม่ใช่ HP). Gate ครบ: เปลี่ยนคลาส s5, กำแพง s15-boss คงอยู่ (0/5), ไม่มี stall (farm 5/5 ทุกคลาส). ไม่แตะ SAVE_VERSION. รายละเอียด: docs/balance-m7.md "Auto-allocate v2"
 
-## M7.6 — ตีบวก (Refine, RO แท้)
+## ✅ M7.6 — ตีบวก (Refine, RO แท้) (เสร็จ 2026-07-07)
 
 > เคาะแล้ว: **มีลุ้นแตก** — +1-3 ปลอดภัย / +4-7 พลาดลดขั้น / +8-10 พลาดแตก (ItemEvent destroyed) · ย่อยของซ้ำเป็นวัสดุ → ใช้วัสดุ+ทองตีบวก · DB: เพิ่มคอลัมน์ `refineLevel` (additive db push) + ItemEvent `refined`/`salvaged` · SAVE v14 (equipped ต้องพก refine — โน้ตเดิมเขียน v11 ตอนเคาะ แต่ v11-13 ถูกใช้ไปกับ bots/auto-hunt/zoneKills แล้ว) · วัสดุ v1 = ชนิดเดียว yield ตาม tier/rarity (ต่อขยายเป็นหลายชนิดได้ภายหลัง) · stat ต่อบวกและอัตราพลาดต้องผ่าน sim + คิดผลต่อ HOF power
 
-- [ ] Salvage: ย่อยของเป็นวัสดุตาม tier/rarity (server tx: destroy + mint material — โมเดลวัสดุเป็น counter ต่อ character ไม่ใช่ instance)
-- [ ] Refine core: server-authoritative roll (กันโกง — ห้าม client ทอย), ItemEvent ทุกครั้ง, engine รับ refineLevel เข้า stat/power
-- [ ] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ
-- [ ] Sim ผลต่อ curve: ของ +10 ต้องไม่ทะลุ s15 wall เร็วกว่าที่ตั้งใจ; อัตราแตกคุมเงินเฟ้อวัสดุ
+- [x] Salvage: ย่อยของเป็นวัสดุตาม tier/rarity (server tx: destroy + mint material — โมเดลวัสดุเป็น counter ต่อ character ไม่ใช่ instance) — `POST /api/items/salvage` batch tx เดียว กัน double-credit, yield = tier × {common 1, rare 2, epic 4}, UI ย่อยรายชิ้น + bulk พร้อม preview
+- [x] Refine core: server-authoritative roll (crypto ฝั่ง server, engine ไม่ทอย), ItemEvent `refined`/`salvaged` ทุกครั้ง, engine รับ refineLevel เข้า stat/power — `refinedStat = base×(1+N×8%)`, SAVE v14, สำเร็จ +1-3 การันตี / +4-7 = .85-.55 / +8-10 = .45-.25, compare-and-set กันกดซ้อน, แตก = destroy+unequip
+- [x] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ — ตอกค้อน ~1s → สำเร็จ "+N!" เด้ง/ลดขั้นทึบ/แตกกระจาย+แฟลชขอบจอ (CSS+synth SFX), ตัวนับวัสดุใน HUD, stack แยกตาม +N, ออร่า step-up ที่ +7, desktop+mobile
+- [x] Sim ผลต่อ curve: **เลขร่างผ่านทุกเกตโดยไม่แก้** — s15 wall อยู่ 0/15 แม้ refine-stress, เปลี่ยนคลาส s5, วัสดุ sink จริง (ของใส่วน +1~4 ไม่นั่ง +10), ตี +10 ~359 ครั้ง, แตก ~1% ของดรอป; knobs REFINE=1/sweep/STRESS ใน balance-sim (ตาราง: balance-m7.md "M7.6 — Refine")
 
 ## M7.8 — Manual Play (เคาะกับเจ้าของ 2026-07-06)
 
