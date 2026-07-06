@@ -46,6 +46,13 @@ export {
   classChangeQuestId,
   isClassChangeQuestOffered,
   isQuestComplete,
+  // M7.9 "Grand Expansion" tier-3 quest reads (the UI derives the tier-2 -> tier-3
+  // affordance from these): the per-class tier-3 quest def/id, the tier -> quest
+  // resolver, and the general (tier-aware) offer predicate.
+  tier3QuestFor,
+  tier3QuestId,
+  evolutionQuestFor,
+  isEvolutionQuestOffered,
 } from "@/engine/systems/quests";
 
 // Read-only boss-hint data for the UI panel. The sim itself is driven only

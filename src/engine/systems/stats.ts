@@ -39,14 +39,18 @@ export function primaryStat(cls: HeroClass): StatKey {
 }
 
 /**
- * Per-hero TIER multipliers (M5 class evolution). Tier 1 yields exactly 1.0, so a
- * non-evolved hero is unchanged. Tier 2 applies the permanent evolution
- * multipliers, compounding MULTIPLICATIVELY on top of the level + stat bonus.
+ * Per-hero TIER multipliers (M5 class evolution + M7.9 tier 3). Tier 1 yields exactly
+ * 1.0, so a non-evolved hero is unchanged. Tier 2 applies the permanent evolution
+ * multipliers, compounding MULTIPLICATIVELY on top of the level + stat bonus. Tier 3
+ * (M7.9 "Grand Expansion") compounds the tier-3 multiplier ON TOP of the tier-2 one
+ * (tier2mult × tier3mult) — the designed power spike that breaks the s15 wall.
  */
-export function tierAtkMult(tier: 1 | 2): number {
+export function tierAtkMult(tier: 1 | 2 | 3): number {
+  if (tier >= 3) return CONFIG.evolution.atkMult * CONFIG.evolution.tier3.atkMult;
   return tier === 2 ? CONFIG.evolution.atkMult : 1;
 }
-export function tierHpMult(tier: 1 | 2): number {
+export function tierHpMult(tier: 1 | 2 | 3): number {
+  if (tier >= 3) return CONFIG.evolution.hpMult * CONFIG.evolution.tier3.hpMult;
   return tier === 2 ? CONFIG.evolution.hpMult : 1;
 }
 
@@ -60,7 +64,7 @@ export function tierHpMult(tier: 1 | 2): number {
 export function heroAtk(
   cls: HeroClass,
   level = 1,
-  tier: 1 | 2 = 1,
+  tier: 1 | 2 | 3 = 1,
   primaryValue: number = ST.base[cls][PRIMARY_STAT[cls]],
 ): number {
   const allocPrimary = primaryValue - ST.base[cls][PRIMARY_STAT[cls]];
@@ -90,7 +94,7 @@ export function heroAtkSpeed(
 export function heroMaxHp(
   cls: HeroClass,
   level = 1,
-  tier: 1 | 2 = 1,
+  tier: 1 | 2 | 3 = 1,
   vitValue: number = ST.base[cls].vit,
 ): number {
   const allocVit = vitValue - ST.base[cls].vit;
@@ -105,9 +109,16 @@ export function heroMaxHp(
  * str/dex classes sit on the flat base. `intValue` defaults to the class base
  * (= base pool, no bonus).
  */
-export function heroMaxMana(cls: HeroClass, intValue: number = ST.base[cls].int): number {
+export function heroMaxMana(
+  cls: HeroClass,
+  intValue: number = ST.base[cls].int,
+  tier: 1 | 2 | 3 = 1,
+): number {
   const allocInt = Math.max(0, intValue - ST.base[cls].int);
-  return Math.round(MN.base + allocInt * MN.perIntPoint);
+  // M7.9 tier-3 pool bonus: a flat bump so the grander skill-4 (cost ~120) is castable
+  // yet gating (see config `mana.tier3PoolBonus`). Only tier 3 gets it.
+  const tier3 = tier >= 3 ? MN.tier3PoolBonus : 0;
+  return Math.round(MN.base + allocInt * MN.perIntPoint + tier3);
 }
 
 /**
@@ -174,7 +185,7 @@ export function heroMaxHpOf(h: Hero): number {
   return heroMaxHp(h.cls, h.level, h.tier, h.stats.vit) + equipHpOf(h);
 }
 export function heroMaxManaOf(h: Hero): number {
-  return heroMaxMana(h.cls, h.stats.int);
+  return heroMaxMana(h.cls, h.stats.int, h.tier);
 }
 export function heroManaRegenOf(h: Hero): number {
   return heroManaRegen(h.cls, h.stats.int);

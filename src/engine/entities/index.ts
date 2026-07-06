@@ -152,6 +152,13 @@ export type QuestObjectiveType = "kill" | "killBoss";
 export interface QuestObjective {
   type: QuestObjectiveType;
   count: number;
+  /**
+   * Optional MAP SCOPE (M7.9 tier-3 quest): when set, the objective only counts an
+   * event that happens while the hero is in this map (`state.location.mapId`). The
+   * tier-3 quest uses it to require kills in MAP3 + a REPEAT MAP2-boss defeat; the
+   * tier-2 class-change quest leaves it unset (counts anywhere — unchanged behaviour).
+   */
+  mapId?: string;
 }
 
 /** A static quest definition (catalog data — see systems/quests `classChangeQuestFor`). */
@@ -244,8 +251,13 @@ export interface Hero {
    * see systems/quests + systems/evolution). It grants a permanent atk/hp
    * multiplier that compounds with levels + stats. Persisted per hero. Single path
    * in M5.
+   *
+   * M7.9 "Grand Expansion": a THIRD tier (3 = จอมอัศวิน/ราชันพราน/อาร์คเมจ) is added.
+   * The tier-2 -> tier-3 change is gated by the tier-3 quest (kills in map3 + a repeat
+   * map2-boss defeat) and grants a further multiplicative atk/hp spike (the s15-wall
+   * breaker) + a 4th auto-cast slot + skill-4. `evolveHero` increments the tier.
    */
-  tier: 1 | 2;
+  tier: 1 | 2 | 3;
   /**
    * Active class-change quest instance (M5 task 5), or null. `null` while below the
    * level gate, once evolved (tier 2, quest consumed), OR when the quest is

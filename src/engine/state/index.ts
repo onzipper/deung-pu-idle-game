@@ -16,7 +16,7 @@ import { emptyEquipped, refineOf, type EquippedGear } from "@/engine/config/item
 import { clampRefine } from "@/engine/config/refine";
 import { clamp } from "@/engine/core/math";
 import { splitmix32 } from "@/engine/core/hash";
-import { makeHero, defaultAutoSlots } from "@/engine/entities";
+import { makeHero, defaultAutoSlots, autoSlotCapacity } from "@/engine/entities";
 import type {
   Hero,
   Enemy,
@@ -33,7 +33,7 @@ import type {
 } from "@/engine/entities";
 import { emptyConsumables } from "@/engine/systems/consumables";
 import { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
-import { classChangeQuestFor } from "@/engine/systems/quests";
+import { evolutionQuestFor } from "@/engine/systems/quests";
 import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import {
   firstFarmLocation,
@@ -257,8 +257,8 @@ export interface CharacterSave {
   cls: HeroClass;
   level: number;
   xp: number;
-  /** Class-advancement tier (1 = base, 2 = evolved). */
-  tier: 1 | 2;
+  /** Class-advancement tier (1 = base, 2 = evolved, 3 = M7.9 grand-expansion tier 3). */
+  tier: 1 | 2 | 3;
   /** Unspent base-stat points (M5 "Base stats", SAVE v5). */
   statPoints: number;
   /** Allocated base-stat block (absolute values, M5 "Base stats", SAVE v5). */
@@ -393,7 +393,11 @@ export function repairHeroClass(save: SaveData, trueClass: HeroClass): SaveData 
       // Wrong-class slotted skills can never be learned by the true class —
       // reset the loadout to the class defaults (the quest is re-derived
       // against the corrected class by initGameState's normalizeHeroQuest).
-      autoSlots: defaultAutoSlots(trueClass),
+      // Tier-scoped length so a tier-3 hero keeps its 4-slot loadout.
+      autoSlots: defaultAutoSlots(
+        trueClass,
+        save.hero.tier === 3 ? 3 : save.hero.tier === 2 ? 2 : 1,
+      ),
     },
   };
 }
@@ -500,7 +504,7 @@ export function initGameState(
     const h = state.heroes[0];
     h.level = clamp(save.hero.level, 1, CONFIG.leveling.levelCap);
     h.xp = Math.max(0, save.hero.xp);
-    h.tier = save.hero.tier === 2 ? 2 : 1;
+    h.tier = save.hero.tier === 3 ? 3 : save.hero.tier === 2 ? 2 : 1;
     // Restore allocated base stats (M5 "Base stats"). A well-formed v5 save always
     // carries them (migrate backfills older shapes); default defensively to the
     // class base if a field is somehow absent.
@@ -531,10 +535,10 @@ export function initGameState(
     // SAVE v6). maxMana is derived from int; current mana is clamped into it.
     h.maxMana = heroMaxManaOf(h);
     h.mana = clamp(save.hero.mana ?? h.maxMana, 0, h.maxMana);
-    h.autoSlots = normalizeAutoSlots(h.cls, save.hero.autoSlots);
-    // Restore the class-change quest (M5 task 5, SAVE v7). A tier-2 hero has no
-    // quest; a saved accepted quest is validated against the current class def
-    // (unknown/foreign or un-accepted -> re-offer by leaving it null).
+    h.autoSlots = normalizeAutoSlots(h.cls, h.tier, save.hero.autoSlots);
+    // Restore the active evolution quest (M5 task 5 + M7.9 tier-3, SAVE v7/v15). A
+    // tier-3 hero has no quest; a saved accepted quest is validated against the tier's
+    // current quest def (unknown/foreign or un-accepted -> re-offer by leaving it null).
     h.quest = normalizeHeroQuest(h.cls, h.tier, save.hero.quest);
   }
   return state;
@@ -548,11 +552,11 @@ export function initGameState(
  */
 function normalizeHeroQuest(
   cls: HeroClass,
-  tier: 1 | 2,
+  tier: 1 | 2 | 3,
   saved: HeroQuest | null | undefined,
 ): HeroQuest | null {
-  if (tier === 2 || !saved || saved.accepted !== true) return null;
-  const def = classChangeQuestFor(cls);
+  const def = evolutionQuestFor(cls, tier); // null at tier 3 (fully evolved, no quest)
+  if (!def || !saved || saved.accepted !== true) return null;
   if (saved.id !== def.id) return null;
   const progress = def.objectives.map((_, i) => {
     const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
@@ -568,11 +572,14 @@ function normalizeHeroQuest(
  */
 function normalizeAutoSlots(
   cls: HeroClass,
+  tier: 1 | 2 | 3,
   saved: (SkillId | null)[] | undefined,
 ): (SkillId | null)[] {
-  const fallback = defaultAutoSlots(cls);
+  const fallback = defaultAutoSlots(cls, tier);
   if (!Array.isArray(saved)) return fallback;
-  const out: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  // Length is tier-scoped (`autoSlotCapacity`): 3 for tiers 1-2, 4 for tier 3. A
+  // pre-tier-3 save's length-3 loadout round-trips byte-identically.
+  const out: (SkillId | null)[] = new Array(autoSlotCapacity(tier)).fill(null);
   for (let i = 0; i < out.length; i++) {
     const id = saved[i];
     out[i] = typeof id === "string" || id === null ? (id ?? null) : fallback[i];

@@ -218,7 +218,7 @@ interface HeroAnimState {
    * same one-time-build-on-edge convention as `initialized`/`wasDead`. Tier
    * only ever increases (single evolution path in M5), so this never needs
    * to un-build anything. */
-  tierBuilt: 1 | 2;
+  tierBuilt: 1 | 2 | 3;
   /**
    * Rig-flip state (open hunting field, 86d3jv7m3 follow-up): the whole rig
    * is drawn facing +x (bow/blade/staff all built on the +x side — see

@@ -12,7 +12,8 @@ import { emptyEquipped, type EquippedGear } from "@/engine/config/items";
 import { clampRefine } from "@/engine/config/refine";
 import { splitmix32 } from "@/engine/core/hash";
 import { heroMaxMana } from "@/engine/systems/stats";
-import { classChangeQuestFor } from "@/engine/systems/quests";
+import { evolutionQuestFor } from "@/engine/systems/quests";
+import { autoSlotCapacity } from "@/engine/entities";
 import {
   farmLocationForStage,
   isValidLocation,
@@ -105,7 +106,19 @@ import type {
 // config/refine.ts); this only PERSISTS the server-decided level. A v14 save's own
 // values are preserved (refine clamped to [0, max]; materials floored non-negative —
 // idempotent for the server's migrate-on-every-save).
-export const SAVE_VERSION = 14;
+// v14 -> v15 (M7.9 "Grand Expansion" — tier 3): the character-advancement `tier`
+// domain WIDENS from {1,2} to {1,2,3} (จอมอัศวิน/ราชันพราน/อาร์คเมจ), and with it two
+// derived shapes shift: (a) a tier-2 hero can now hold the NEW tier-3 QUEST (kills in
+// map3 + a repeat map2-boss kill — id `tier3_<cls>`), where before a tier-2 hero always
+// had `quest: null`; (b) a tier-3 hero's `autoSlots` array grows to LENGTH 4 (the 4th
+// auto-cast slot), while tiers 1-2 keep the historical length-3 loadout. There is NO
+// brand-new top-level field, so migrating a v14 save is a pure DOMAIN widening: a v14
+// save has tier <= 2, so its tier/quest/autoSlots normalise byte-identically to before
+// (tier-2 quest stays null -> re-offered at L40, autoSlots stays length 3). A genuine
+// v15 save's tier-3 quest + 4-slot loadout are preserved (validated against the tier's
+// quest def; idempotent for the server's migrate-on-every-save). Skill-4 is DERIVED
+// from tier/level (not persisted); the tier-3 mana bonus is re-derived on load.
+export const SAVE_VERSION = 15;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -212,11 +225,11 @@ function normalizeStats(cls: HeroClass, stats: UnknownStats | undefined): HeroSt
  */
 function normalizeQuest(
   cls: HeroClass,
-  tier: 1 | 2,
+  tier: 1 | 2 | 3,
   saved: HeroQuest | null | undefined,
 ): HeroQuest | null {
-  if (tier === 2 || !saved || saved.accepted !== true) return null;
-  const def = classChangeQuestFor(cls);
+  const def = evolutionQuestFor(cls, tier); // null at tier 3 (fully evolved, no quest)
+  if (!def || !saved || saved.accepted !== true) return null;
   if (saved.id !== def.id) return null;
   const progress = def.objectives.map((_, i) => {
     const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
@@ -225,11 +238,17 @@ function normalizeQuest(
   return { id: def.id, accepted: true, progress };
 }
 
-/** Default auto-slot loadout for a migrated save: signature in slot 0, rest empty. */
-function defaultAutoSlotsFor(cls: HeroClass): (SkillId | null)[] {
-  const slots: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+/** Default auto-slot loadout for a migrated save: signature in slot 0, rest empty. The
+ * LENGTH is tier-scoped (`autoSlotCapacity`) — 3 for tiers 1-2, 4 for tier 3 (M7.9). */
+function defaultAutoSlotsFor(cls: HeroClass, tier: 1 | 2 | 3): (SkillId | null)[] {
+  const slots: (SkillId | null)[] = new Array(autoSlotCapacity(tier)).fill(null);
   slots[0] = SIGNATURE_SKILL[cls];
   return slots;
+}
+
+/** Coerce a possibly-malformed saved tier to the {1,2,3} domain (M7.9). */
+function asTier(v: number | undefined): 1 | 2 | 3 {
+  return v === 3 ? 3 : v === 2 ? 2 : 1;
 }
 
 /**
@@ -239,11 +258,12 @@ function defaultAutoSlotsFor(cls: HeroClass): (SkillId | null)[] {
  */
 function normalizeAutoSlots(
   cls: HeroClass,
+  tier: 1 | 2 | 3,
   saved: (SkillId | null)[] | undefined,
 ): (SkillId | null)[] {
-  const fallback = defaultAutoSlotsFor(cls);
+  const fallback = defaultAutoSlotsFor(cls, tier);
   if (!Array.isArray(saved)) return fallback;
-  const out: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+  const out: (SkillId | null)[] = new Array(autoSlotCapacity(tier)).fill(null);
   for (let i = 0; i < out.length; i++) {
     const id = saved[i];
     out[i] = typeof id === "string" ? id : id === null ? null : fallback[i];
@@ -367,21 +387,23 @@ export function migrate(save: UnknownSave): SaveData {
     // v4/v5 single-character shape.
     const cls = asClass(save.hero.cls);
     const level = save.hero.level ?? 1;
+    const tier = asTier(save.hero.tier); // v15: {1,2,3} domain
     const stats = normalizeStats(cls, save.hero.stats);
-    const maxMana = heroMaxMana(cls, stats.int);
+    const maxMana = heroMaxMana(cls, stats.int, tier);
     hero = {
       cls,
       level,
       xp: save.hero.xp ?? 0,
-      tier: save.hero.tier === 2 ? 2 : 1,
+      tier,
       // v5 keeps the saved points; a v4 save (no statPoints) gets the retro grant.
       statPoints: asStat(save.hero.statPoints, level * PPL),
       stats,
       // v6 keeps the saved mana (clamped into the pool); a v5 save defaults to full.
       mana: clampMana(save.hero.mana, maxMana),
-      autoSlots: normalizeAutoSlots(cls, save.hero.autoSlots),
-      // v7 keeps a saved accepted quest; a pre-v7 save (no quest) -> null (re-offer).
-      quest: normalizeQuest(cls, save.hero.tier === 2 ? 2 : 1, save.hero.quest),
+      autoSlots: normalizeAutoSlots(cls, tier, save.hero.autoSlots),
+      // v7/v15 keeps a saved accepted evolution quest (validated against the tier's
+      // def); a pre-v7 save (no quest) -> null (re-offered on load if eligible).
+      quest: normalizeQuest(cls, tier, save.hero.quest),
     };
   } else {
     // Pre-v4 team save: adopt the highest-level unlocked hero, then grant stats.
@@ -399,16 +421,17 @@ export function migrate(save: UnknownSave): SaveData {
     const p = progress[bestIdx];
     const cls = asClass(unlocked[bestIdx]);
     const level = p?.level ?? 1;
+    const tier = asTier(p?.tier);
     const stats = normalizeStats(cls, undefined);
     hero = {
       cls,
       level,
       xp: p?.xp ?? 0,
-      tier: p?.tier === 2 ? 2 : 1,
+      tier,
       statPoints: level * PPL,
       stats,
-      mana: heroMaxMana(cls, stats.int),
-      autoSlots: defaultAutoSlotsFor(cls),
+      mana: heroMaxMana(cls, stats.int, tier),
+      autoSlots: defaultAutoSlotsFor(cls, tier),
       // Pre-v4 team saves predate quests entirely -> null (re-offered if eligible).
       quest: null,
     };

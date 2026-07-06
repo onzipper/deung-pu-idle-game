@@ -141,11 +141,16 @@ describe("parseSaveData — rejects", () => {
     );
   });
 
-  it("rejects a hero tier outside 1..2", () => {
+  it("rejects a hero tier outside 1..3 (M7.9 widened the domain to include tier 3)", () => {
     expect(parseSaveData(validSave({ hero: { cls: "archer", level: 1, xp: 0, tier: 0 } })).ok).toBe(
       false,
     );
+    // Tier 3 is now VALID (M7.9 "Grand Expansion" tier-3 class).
     expect(parseSaveData(validSave({ hero: { cls: "archer", level: 1, xp: 0, tier: 3 } })).ok).toBe(
+      true,
+    );
+    // The new upper bound: tier 4 is still rejected.
+    expect(parseSaveData(validSave({ hero: { cls: "archer", level: 1, xp: 0, tier: 4 } })).ok).toBe(
       false,
     );
   });

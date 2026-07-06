@@ -20,9 +20,20 @@ import type {
   SkillId,
 } from "@/engine/entities";
 
-/** The default auto-slot loadout: signature in slot 0, the rest empty. */
-export function defaultAutoSlots(cls: HeroClass): (SkillId | null)[] {
-  const slots: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+/**
+ * How many auto-cast slots a hero of `tier` HOLDS (its `autoSlots` array LENGTH).
+ * The 4th slot (M7.9) is tier-3-only, so tiers 1-2 keep the historical 3-slot loadout
+ * — a pre-tier-3 save's persisted `autoSlots` stays byte-identical (length 3). Derived
+ * from `autoSlots.tierRequired` so the config table stays the single source of truth.
+ */
+export function autoSlotCapacity(tier: 1 | 2 | 3 = 1): number {
+  return CONFIG.autoSlots.tierRequired.filter((t) => t <= tier).length;
+}
+
+/** The default auto-slot loadout: signature in slot 0, the rest empty. The array
+ * LENGTH is tier-scoped (`autoSlotCapacity`) — 3 for tiers 1-2, 4 for tier 3. */
+export function defaultAutoSlots(cls: HeroClass, tier: 1 | 2 | 3 = 1): (SkillId | null)[] {
+  const slots: (SkillId | null)[] = new Array(autoSlotCapacity(tier)).fill(null);
   slots[0] = SIGNATURE_SKILL[cls];
   return slots;
 }
@@ -39,11 +50,11 @@ export function makeHero(
   cls: HeroClass,
   level = 1,
   xp = 0,
-  tier: 1 | 2 = 1,
+  tier: 1 | 2 | 3 = 1,
   statPoints: number = (level - 1) * CONFIG.stats.pointsPerLevel,
   stats: HeroStats = baseStats(cls),
   mana?: number,
-  autoSlots: (SkillId | null)[] = defaultAutoSlots(cls),
+  autoSlots: (SkillId | null)[] = defaultAutoSlots(cls, tier),
   quest: HeroQuest | null = null,
   equipped: EquippedGear = emptyEquipped(),
 ): Hero {
@@ -61,7 +72,7 @@ export function makeHero(
       refineOf(equipped, "armor"),
     );
   const maxHp = heroMaxHp(cls, level, tier, stats.vit) + armorHp;
-  const maxMana = heroMaxMana(cls, stats.int);
+  const maxMana = heroMaxMana(cls, stats.int, tier);
   return {
     id,
     cls,

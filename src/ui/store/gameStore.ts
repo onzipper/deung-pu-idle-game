@@ -131,8 +131,8 @@ export interface HeroSummary {
    * ships the cap number itself, just this precomputed flag (same "no raw
    * curve math in the store" rule as `xpProgress`). */
   atLevelCap: boolean;
-  /** Class-advancement tier (M5 evolution). 1 = base, 2 = evolved. */
-  tier: 1 | 2;
+  /** Class-advancement tier. 1 = base, 2 = evolved, 3 = M7.9 grand-expansion tier 3. */
+  tier: 1 | 2 | 3;
   /** Precomputed `canEvolveHero(state, hero)` read (tier 1, class-change quest
    * complete) — the store never runs engine logic itself, just carries this
    * one-way display flag (same pattern as `atLevelCap`). */

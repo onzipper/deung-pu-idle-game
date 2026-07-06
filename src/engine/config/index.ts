@@ -558,6 +558,58 @@ export const CONFIG = {
     { dx: 420, ry: 30 },
   ] as const,
 
+  // ---- archer STORM (tier-3 skill-4 "พายุธนูถล่มต่อเนื่อง ~4 วิ") drop pattern (M7.9) ----
+  // A SUSTAINED barrage: 20 drops whose LANDINGS SPREAD over ~4s of real time. Same
+  // NO-RNG contract as the tables above (length MUST equal archer_storm's `targets` =
+  // 20). Reuses the rainArrow fall — NO new ProjectileKind (footgun #6). The ~4s window
+  // is engineered PURELY through spawn-height stagger (`ry`): a taller `ry` spawns the
+  // drop higher, so it falls LONGER before landing. At the skill's projSpeed 260 the
+  // fall-time delta ≈ ry/260 s, so the ry ramp 0 -> 1045 gives a ≈4.0s first-to-last
+  // landing window (same trick barrage/arrowRain use, just a bigger table + a MUCH
+  // taller stagger). `dx` spans ~±430 so the storm blankets the whole ~900px field.
+  // Deterministic (constant table). Verified in the grand-expansion suite's window test.
+  stormOffsets: [
+    { dx: -430, ry: 0 },
+    { dx: 380, ry: 55 },
+    { dx: -300, ry: 110 },
+    { dx: 250, ry: 165 },
+    { dx: -170, ry: 220 },
+    { dx: 120, ry: 275 },
+    { dx: -40, ry: 330 },
+    { dx: 60, ry: 385 },
+    { dx: -220, ry: 440 },
+    { dx: 300, ry: 495 },
+    { dx: -360, ry: 550 },
+    { dx: 420, ry: 605 },
+    { dx: -110, ry: 660 },
+    { dx: 180, ry: 715 },
+    { dx: -260, ry: 770 },
+    { dx: 340, ry: 825 },
+    { dx: -400, ry: 880 },
+    { dx: 0, ry: 935 },
+    { dx: 230, ry: 990 },
+    { dx: -150, ry: 1045 },
+  ] as const,
+
+  // ---- mage APOCALYPSE (tier-3 skill-4 "วันสิ้นโลก") meteor-volley pattern (M7.9) ----
+  // Several METEOR-kind drops (length MUST equal mage_apocalypse's `targets` = 8) on a
+  // FIXED offset table, staggered by spawn height so the volley lands over a window (the
+  // meteor counterpart of `stormOffsets`). REUSES the existing meteor ProjectileKind —
+  // the skill stays `kind:"meteor"` and the skill code spawns MANY when `targets > 0`
+  // (NO new SkillKind, NO new ProjectileKind — footgun #6). `dx` scatters the impacts
+  // around the nearest-target centroid; `ry` spreads the landings (at projSpeed 360 the
+  // ry ramp 0 -> 980 gives a ≈2.7s volley window). Deterministic (constant table).
+  apocalypseOffsets: [
+    { dx: -240, ry: 0 },
+    { dx: 180, ry: 140 },
+    { dx: -120, ry: 280 },
+    { dx: 260, ry: 420 },
+    { dx: -300, ry: 560 },
+    { dx: 60, ry: 700 },
+    { dx: -60, ry: 840 },
+    { dx: 200, ry: 980 },
+  ] as const,
+
   // ---- skills ----
   skills: {
     meteorSpawnY: -48, // meteor projectile spawns at this absolute y (falls to impact)
@@ -746,6 +798,15 @@ export const CONFIG = {
     // for all three classes (str/dex classes, on the flat pool, drain in seconds).
     // The signature-cast guarantee is untouched (baseRegen alone sustains it).
     regenPerIntPoint: 0.05, // +mana/sec per INT point above base (caster identity)
+    // ---- M7.9 "Grand Expansion" tier-3 mana-pool bonus ----
+    // Tier 3 grants a FLAT pool bump (systems/stats `heroMaxMana`, tier 3 only) so the
+    // grander tier-3 skill-4 (cost ~120) is CASTABLE but still GATING — same philosophy
+    // as the tier-2 ultimates (see sword_quake / archer_barrage: cost≈pool so a cast
+    // nearly empties it). A str/dex class sits on the flat base pool (60); +90 -> 150
+    // lets it afford the 120 skill-4 with ~30 to spare, so a cast drains the pool and
+    // the next waits on regen (mana potions stay a real sink). The INT-fed mage already
+    // has the deepest pool; this lifts its ceiling in step. Applied on evolve to tier 3.
+    tier3PoolBonus: 90,
   },
 
   // ---- auto-cast slots (M5 "skill framework v2") ----
@@ -755,9 +816,17 @@ export const CONFIG = {
   // cooldown, and affordable. The player assigns skills to slots (setAutoSlot
   // intent); slot 0 defaults to the class signature so a fresh hero auto-casts it.
   autoSlots: {
-    max: 3,
-    // Level thresholds that unlock slot 0 / 1 / 2 (length MUST equal `max`).
-    unlockLevels: [1, 15, 30] as const,
+    // M7.9 "Grand Expansion": raised 3 -> 4 (a tier-3 FOURTH slot). The array LENGTH a
+    // hero actually holds is tier-scoped (`autoSlotCapacity`): tiers 1-2 keep the
+    // historical 3-slot loadout (persisted saves stay byte-identical — slot 3 exists
+    // only for a tier-3 hero), so this bump changes NOTHING for a pre-tier-3 save.
+    max: 4,
+    // Level thresholds that unlock slot 0 / 1 / 2 / 3 (length MUST equal `max`).
+    unlockLevels: [1, 15, 30, 40] as const,
+    // TIER required to unlock each slot (length MUST equal `max`). The 4th slot (index
+    // 3) is gated behind tier 3 AS WELL AS level 40 — `unlockedAutoSlotCount(level,
+    // tier)` requires BOTH. Tiers 1-2 therefore only ever see 3 usable slots (unchanged).
+    tierRequired: [1, 1, 1, 3] as const,
   },
 
   // ---- combat power ("พลังต่อสู้") — the HOF metric + boss-hint gauge ----
@@ -807,6 +876,20 @@ export const CONFIG = {
     // solo hero break the boss gate. Sim-tuned per class — see docs/balance-m5.md.
     atkMult: 1.35,
     hpMult: 1.5,
+    // ---- M7.9 "Grand Expansion" tier-3 class advancement ----
+    // The SECOND evolution: tier 2 -> tier 3 (จอมอัศวิน/ราชันพราน/อาร์คเมจ). Gated by
+    // the tier-3 quest (kills in map3 + a REPEAT map2-boss kill, no refine condition —
+    // see systems/quests). The tier-3 multipliers compound MULTIPLICATIVELY on top of
+    // the tier-2 ones (systems/stats `tierAtkMult`/`tierHpMult`): tier 3 effective atk =
+    // atkMult × tier3.atkMult, hp = hpMult × tier3.hpMult. This is the designed POWER
+    // SPIKE that breaks the s15 wall -> beat the s15 boss -> enter map4. Level gate 40
+    // (needs the L90 cap headroom from the world foundation). First-pass numbers; the
+    // s16-30 rebalance wave will sim-tune them.
+    tier3: {
+      levelRequired: 40,
+      atkMult: 1.6,
+      hpMult: 1.7,
+    },
   },
 
   // ---- class-change quest (M5 "เปลี่ยนคลาสผ่านเควส" v1, ROADMAP task 5) ----
@@ -825,6 +908,23 @@ export const CONFIG = {
       kills: 60,
       // Boss defeats required (a stage-clear milestone — proves real progress).
       bossKills: 1,
+    },
+    // ---- M7.9 "Grand Expansion" tier-3 (class-3) quest ----
+    // The tier-2 -> tier-3 evolution key (offered at level >= evolution.tier3.
+    // levelRequired while tier 2). Objectives are MAP-SCOPED (systems/quests +
+    // QuestObjective.mapId): grind kills in MAP3, then defeat the MAP2 boss AGAIN —
+    // a REPEAT boss kill (the boss room stays unlocked, so walking back re-fights it;
+    // no new mechanic needed — see systems/world). NO refine-level condition by design
+    // (owner). Completing it enables the tier-3 class change (systems/evolution), the
+    // power spike that breaks the s15 wall. Same numbers per class in this pass;
+    // per-class quest IDS (`tier3QuestId`) let a later pass diverge them.
+    tier3: {
+      // Kills to bank in map3 (the grind portion — bigger than the tier-2 grind).
+      kills: 120,
+      killMapId: "map3",
+      // Repeat map2-boss defeats required (proves the player can re-clear it).
+      bossKills: 1,
+      bossMapId: "map2",
     },
   },
 
@@ -1057,8 +1157,9 @@ export interface SkillType {
   /** Unique, class-namespaced id (the key into `SKILLS`). */
   id: string;
   cls: HeroClass;
-  /** Hero TIER required to have learned this skill (1 = base kit, 2 = evolution). */
-  tier: 1 | 2;
+  /** Hero TIER required to have learned this skill (1 = base kit, 2 = evolution,
+   * 3 = M7.9 grand-expansion tier-3 skill-4). */
+  tier: 1 | 2 | 3;
   /** Hero LEVEL required to have learned it (unlock-by-level within the tier). */
   unlockLevel: number;
   kind: SkillKind;
@@ -1135,6 +1236,17 @@ const SKILL_LIST = [
     cost: 50, cd: 10, radius: 460, mult: 6.5, targets: 0, projSpeed: 0, range: 500,
     buffMult: 1, buffDuration: 0,
   },
+  // SKYFALL BLADE (tier-3 skill-4 "ดาบฟ้าผ่าสนาม") — a FIELD-WIDE sky-strike: an instant
+  // AoE (reuses the `strike` quake/field mechanism, r500 spans the ~900px field) at a
+  // grander mult than the quake. The time-freeze/flash beat is timeDirector/render's
+  // job — the engine only emits the skillCast event + the damage. cost 120 needs the
+  // tier-3 mana bonus (str pool 60+90=150) to be castable; it nearly empties the pool,
+  // so it's a hard gate (mana potions bite). Learned at tier 3 + level 40.
+  {
+    id: "sword_skyfall", cls: "swordsman", tier: 3, unlockLevel: 40, kind: "strike",
+    cost: 120, cd: 14, radius: 500, mult: 10.0, targets: 0, projSpeed: 0, range: 540,
+    buffMult: 1, buffDuration: 0,
+  },
 
   // ---- archer (zone artillery) ----
   // Signature: ARROW RAIN — 9 drops fall over the cluster. Bigger per-drop radius +
@@ -1161,6 +1273,17 @@ const SKILL_LIST = [
     cost: 50, cd: 10, radius: 80, mult: 1.0, targets: 13, projSpeed: 950, range: 820,
     buffMult: 1, buffDuration: 0,
   },
+  // STORM (tier-3 skill-4 "พายุธนูถล่มต่อเนื่อง ~4 วิ") — a SUSTAINED storm: 20 rain drops
+  // whose LANDINGS SPREAD over ~4s of real time via spawn-height stagger (`stormOffsets`,
+  // a wide 20-row table with a TALL ry ramp). Reuses the rainArrow fall — NO new
+  // ProjectileKind. The DELIBERATELY slow projSpeed (260) is what stretches the ry
+  // stagger into the ~4s window (see stormOffsets). cost 120 gates it on the tier-3 pool.
+  // Learned at tier 3 + level 40. `targets` MUST equal stormOffsets.length.
+  {
+    id: "archer_storm", cls: "archer", tier: 3, unlockLevel: 40, kind: "rain",
+    cost: 120, cd: 15, radius: 80, mult: 1.1, targets: 20, projSpeed: 260, range: 900,
+    buffMult: 1, buffDuration: 0,
+  },
 
   // ---- mage (heavy nuker) ----
   // Signature: METEOR — a single falling AoE nuke. Bigger + cheaper + faster than M7
@@ -1183,6 +1306,17 @@ const SKILL_LIST = [
   {
     id: "mage_cataclysm", cls: "mage", tier: 2, unlockLevel: 15, kind: "meteor",
     cost: 90, cd: 11, radius: 460, mult: 13.0, targets: 0, projSpeed: 560, range: 500,
+    buffMult: 1, buffDuration: 0,
+  },
+  // APOCALYPSE (tier-3 skill-4 "วันสิ้นโลก") — a METEOR VOLLEY: 8 meteor-kind drops on the
+  // fixed `apocalypseOffsets` table, staggered by spawn height so they rain down over a
+  // window. Reuses the meteor kind — the skill stays `kind:"meteor"` and the skill code
+  // spawns MANY when `targets > 0` (NO new SkillKind / ProjectileKind — footgun #6).
+  // `targets` MUST equal apocalypseOffsets.length. cost 120 gates it (the mage's deep
+  // INT pool affords it, but continuous spam still drains). Learned at tier 3 + level 40.
+  {
+    id: "mage_apocalypse", cls: "mage", tier: 3, unlockLevel: 40, kind: "meteor",
+    cost: 120, cd: 16, radius: 150, mult: 8.0, targets: 8, projSpeed: 360, range: 520,
     buffMult: 1, buffDuration: 0,
   },
 ] as const satisfies readonly SkillType[];

@@ -50,7 +50,7 @@ export interface GoalRungState {
  * `onboarding/steps.ts`'s `OnboardingHeroSnapshot`). Only the fields the
  * rung-selection rule actually needs. */
 export interface GoalLadderHero {
-  tier: 1 | 2;
+  tier: 1 | 2 | 3;
   /** `null` below the quest's level gate (mirrors `HeroQuestSummary | null`);
    * otherwise present regardless of offered/accepted/complete — ANY non-null
    * quest means "the class-change milestone is now the active one". */
