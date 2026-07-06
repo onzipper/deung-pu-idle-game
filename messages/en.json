@@ -14,8 +14,8 @@
     "autoHuntAriaOn": "Turn auto-hunt off",
     "autoHuntAriaOff": "Turn auto-hunt on",
     "zoneUnlockLabel": "Unlock next zone",
-    "victoryTitle": "🎉 Stage {stage} cleared!",
-    "nextStageButton": "Next Stage →",
+    "victoryTitle": "🎉 Map boss down (stage {stage})!",
+    "nextStageButton": "Next Map →",
     "bossHpLabel": "Boss HP",
     "bossAtkLabel": "Attack Power",
     "recommendedPowerLabel": "Recommended Power",
@@ -43,11 +43,11 @@
     },
     "zoneBoss": {
       "farmingHint": "Kill enemies to unlock the next zone",
-      "readyHint": "Your power is ready — challenge the boss!",
+      "readyHint": "The boss-room door is open — walk in and challenge it!",
       "fightingHint": "⚔ Fighting the boss…",
         "townHint": "Resting in town - head out to hunt toward the next unlock",
         "freeFarmHint": "This zone is already cleared - free-farm for loot and levels",
-      "victoryHint": "Push into the next stage to keep growing stronger."
+      "victoryHint": "Walk into the next map to keep growing stronger."
     },
     "powerRatioLabel": "Power {pct}%",
     "bossStatsLabel": "Boss HP {hp} · ATK {atk}"
@@ -146,7 +146,7 @@
     "steps": {
       "welcome": {
         "title": "Welcome, {className}!",
-        "body": "Your character just picked the {className} class. It charges through enemy waves automatically — your job is to spend stat points, cast skills, and take it to the boss to keep growing stronger. Let's take a look!"
+        "body": "Your character just picked the {className} class. It hunts the mobs scattered across the field automatically — your job is to spend stat points, cast skills, and take it to the boss to keep growing stronger. Let's take a look!"
       },
       "watchFight": {
         "title": "Let your hero fight",
@@ -165,8 +165,8 @@
         "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (up to 3, unlocked by level). Skills outside a slot still need a manual tap."
       },
       "bossChallenge": {
-        "title": "Challenge the stage boss",
-        "body": "Once your power is ready, the Challenge Boss button lights up. Tap it to fight the boss and unlock the next stage!"
+        "title": "Challenge the map boss",
+        "body": "Fill each zone's hunt quota to unlock the next zone. At the last zone the boss-room door opens — walk in to duel the boss and unlock the next map!"
       },
       "settingsTour": {
         "title": "Tune your play here",
@@ -208,7 +208,7 @@
       },
       "bossWipe": {
         "title": "Your hero got wiped — but it's not over!",
-        "body": "Your hero revives with no penalty and goes back to normal waves. Spend a few more stat points or grind a bit more, then challenge the boss again."
+        "body": "Your hero revives in town with no penalty and goes back to hunting. Spend a few more stat points or grind a bit more, then challenge the boss again."
       }
     }
   },
@@ -233,7 +233,7 @@
     "entries": {
       "coreLoop": {
         "title": "Kill → bank XP/gold → grow stronger → boss",
-        "body": "Your hero charges through enemy waves on its own, all the time. Every kill banks XP (level-ups + stat points) and gold, and pushes the kill counter closer to the stage's boss. Use skills to help clear faster, then challenge the boss to unlock the next stage. Then it loops again."
+        "body": "Your hero hunts the scattered field mobs on its own, all the time. Every kill banks XP (level-ups + stat points) and gold, and pushes the hunt tally toward the next zone unlock. Cast skills to speed things up and walk the world as you grow."
       },
       "characterSlots": {
         "title": "Characters & 3 slots",
@@ -261,8 +261,8 @@
         "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
       },
       "boss": {
-        "title": "Challenging the stage boss",
-        "body": "The panel below the arena shows the boss's HP, attack power, recommended power, and your current power. The Challenge Boss button unlocks once your power meets the recommended threshold. If your hero dies, the boss retreats, your hero fully revives with no penalty, waves resume, and you can challenge again right away. Winning pays out a big gold reward and unlocks the next stage."
+        "title": "Challenging the map boss",
+        "body": "The goal card under the arena shows a bar comparing your power to the recommendation. Fill every zone's hunt quota and the boss-room door at the end of the map opens — walk in to duel. If your hero dies the boss retreats, you revive in town with no penalty, hunting resumes, and you can walk right back in. Winning pays a big gold reward and unlocks the next map."
       },
       "autoCast": {
         "title": "✨ Auto Skill",
@@ -340,7 +340,7 @@
       },
       "mage_frostnova": {
         "name": "Frost Nova",
-        "desc": "A quick, cheap frost blast for clearing waves"
+        "desc": "A quick, cheap frost blast for clearing packs"
       },
       "mage_cataclysm": {
         "name": "Cataclysm",
