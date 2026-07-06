@@ -14,6 +14,7 @@
  */
 
 import type { GameEvent } from "@/engine";
+import { ITEM_TEMPLATES } from "@/engine/config/items";
 import { AudioEngine } from "@/render/audio/AudioEngine";
 import { SFX_MIN_INTERVAL_MS } from "@/render/audio/sfxMap";
 import {
@@ -27,6 +28,7 @@ import {
   playHeroRevived,
   playHeroWalkHome,
   playHit,
+  playItemDrop,
   playKill,
   playLevelUp,
   playMobAggroed,
@@ -142,6 +144,13 @@ export class AudioController {
           // same instant on a busy field collapse into one short bark.
           if (this.engine.allow("mobAggroed", SFX_MIN_INTERVAL_MS.mobAggroed)) {
             playMobAggroed(this.engine);
+          }
+          break;
+        case "itemDrop":
+          // Shared throttle key — a farm kill can fire these often on a busy
+          // field; several drops in the same instant collapse into one chime.
+          if (this.engine.allow("itemDrop", SFX_MIN_INTERVAL_MS.itemDrop)) {
+            playItemDrop(this.engine, ITEM_TEMPLATES[ev.templateId]?.rarity ?? "common");
           }
           break;
         default:

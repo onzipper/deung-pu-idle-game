@@ -17,6 +17,7 @@
 import { Container as PixiContainer } from "pixi.js";
 import type { Container } from "pixi.js";
 import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
+import { ITEM_TEMPLATES, type ItemRarity } from "@/engine/config/items";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
@@ -30,6 +31,8 @@ import { CorpseEchoPool } from "@/render/fx/corpseEcho";
 import { CrescentPool } from "@/render/fx/crescent";
 import { FlashLinePool } from "@/render/fx/flashLines";
 import { FloatingTextPool } from "@/render/fx/floatingText";
+import { GearAuraController } from "@/render/fx/gearAura";
+import { GearSparklePool } from "@/render/fx/gearSparkle";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
@@ -46,7 +49,9 @@ import { SoulWispPool } from "@/render/fx/soulWisp";
 import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
 import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
 import {
+  getArmorAnchorPos,
   getSwordTipPos,
+  getWeaponAnchorPos,
   isCastHolding,
   isSwordSwinging,
   peekSwordSwing,
@@ -290,6 +295,30 @@ interface BossDeathStage extends BossDeathStageSpec {
   y: number;
 }
 
+// ---- M7 gear-wow: itemDrop ground pop (task "Drop beat in the field") ----
+// A small, rarity-tinted ground sparkle/pop wherever `systems/gear`'s
+// `itemDrop` event fires (farm kill or the boss's guaranteed roll) — kept
+// deliberately small/cheap since farm drops can fire often on a busy field;
+// epic gets a visibly bigger version so the milestone reads as special.
+const ITEM_DROP_RING_R0 = { common: 2, rare: 3, epic: 4 } as const;
+const ITEM_DROP_RING_R1 = { common: 16, rare: 20, epic: 27 } as const;
+const ITEM_DROP_RING_DURATION = { common: 0.28, rare: 0.32, epic: 0.42 } as const;
+const ITEM_DROP_PARTICLE_COUNT = { common: 5, rare: 7, epic: 11 } as const;
+const ITEM_DROP_PARTICLE_SPEED = { common: 70, rare: 85, epic: 105 } as const;
+const ITEM_DROP_PARTICLE_LIFE = { common: 0.32, rare: 0.4, epic: 0.5 } as const;
+/** Ground-anchored — the raw `itemDrop.y` field is near-unused engine state
+ * (entities are effectively 1D on `x`; see `FxController`'s own note above
+ * about views deriving screen position from `GROUND_Y` + fixed offsets), so
+ * this reads as "a small pop right where the kill happened" rather than
+ * trusting `ev.y`. */
+const ITEM_DROP_POP_Y = GROUND_Y - 6;
+
+function itemDropAccentColor(rarity: ItemRarity): number {
+  if (rarity === "epic") return PALETTE.gearEpic;
+  if (rarity === "rare") return PALETTE.gearRare;
+  return PALETTE.steel;
+}
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -364,6 +393,18 @@ export class FxController {
   private readonly armorShards: ArmorShardPool;
   private readonly soulWisps: SoulWispPool;
   private readonly lightPillars: LightPillarPool;
+
+  // ---- M7 gear-wow: tier-6/epic weapon aura + tier-5+ armor sparkle -------
+  // Continuous (not event-driven) — driven every frame in `updateGearFx()`
+  // from live `GameState`, same convention as `updateWeaponTrail()`/
+  // `updateCastAura()`.
+  private readonly gearAura: GearAuraController;
+  private readonly gearSparkle: GearSparklePool;
+  /** Reused every frame — `getWeaponAnchorPos()`/`getArmorAnchorPos()` write
+   * into these instead of allocating a fresh point (zero steady-state
+   * allocation), same convention as `tipScratch` above. */
+  private readonly weaponAnchorScratch = { x: 0, y: 0 };
+  private readonly armorAnchorScratch = { x: 0, y: 0 };
 
   /** Last-seen "does a boss currently exist" — `state.boss` transitions
    * null -> object with no dedicated event (the player's `challengeBoss`
@@ -455,6 +496,8 @@ export class FxController {
     this.flashLines = new FlashLinePool(this.heroFxLayer);
     this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer);
     this.castAura = new CastAuraController(this.heroFxLayer);
+    this.gearAura = new GearAuraController(this.heroFxLayer);
+    this.gearSparkle = new GearSparklePool(this.heroFxLayer);
     this.rings = new RingPool(this.ringsLayer);
     this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
@@ -621,6 +664,9 @@ export class FxController {
         case "mapUnlocked":
           this.onProgressUnlocked(ev.type, state);
           break;
+        case "itemDrop":
+          this.onItemDrop(ev);
+          break;
         default:
           break; // stageCleared / upgradeBought: no fx-layer reaction
       }
@@ -662,6 +708,7 @@ export class FxController {
     this.updateEnemySpawns(state);
     this.updateBossDeathStages(dt);
     this.detectBossEntrance(state);
+    this.updateGearFx(dt, state);
   }
 
   destroy(): void {
@@ -681,6 +728,8 @@ export class FxController {
     this.runeGlyphs.destroy();
     this.meteorSky.destroy();
     this.castAura.destroy();
+    this.gearAura.destroy();
+    this.gearSparkle.destroy();
     this.impactFilters.destroy();
     this.rings.destroy();
     this.levelUpBursts.destroy();
@@ -696,6 +745,37 @@ export class FxController {
     this.ringsLayer.destroy();
     this.particlesLayer.destroy();
     this.textLayer.destroy();
+  }
+
+  /** M7 gear-wow (continuous, not event-driven — same convention as
+   * `updateWeaponTrail()`/`updateCastAura()`): per hero slot, activates the
+   * tier-6/epic weapon aura (`gearAura`) and/or tier-5+ armor sparkle
+   * (`gearSparkle`) when that hero's live view + equipped template say so,
+   * else eases the slot back to invisible. Reads `ITEM_TEMPLATES` directly
+   * (not `HeroView.gearWeaponTier`/`gearArmorRarity`, though those exist too)
+   * since `state.heroes` is already being walked here regardless. */
+  private updateGearFx(dt: number, state: GameState): void {
+    state.heroes.forEach((h, slot) => {
+      const view = h.dead ? null : this.lookupHeroView(h.id);
+      const weaponRarity: ItemRarity | undefined = h.equipped.weapon
+        ? ITEM_TEMPLATES[h.equipped.weapon]?.rarity
+        : undefined;
+      const armorTier = h.equipped.armor ? (ITEM_TEMPLATES[h.equipped.armor]?.tier ?? 0) : 0;
+
+      const auraOn = !!view && weaponRarity === "epic" && getWeaponAnchorPos(view, this.weaponAnchorScratch);
+      this.gearAura.setSlot(
+        slot,
+        auraOn,
+        this.weaponAnchorScratch.x,
+        this.weaponAnchorScratch.y,
+        PALETTE.auraFlame,
+      );
+
+      const sparkleOn = !!view && armorTier >= 5 && getArmorAnchorPos(view, this.armorAnchorScratch);
+      this.gearSparkle.setSlot(slot, sparkleOn, this.armorAnchorScratch.x, this.armorAnchorScratch.y);
+    });
+    this.gearAura.update(dt);
+    this.gearSparkle.update(dt);
   }
 
   /** Continuous (not event-driven) per-frame read of `state.heroes` +
@@ -1300,6 +1380,37 @@ export class FxController {
       duration: 0.45,
       width: 3,
       color: PALETTE.gold,
+    });
+  }
+
+  /** M7 gear-wow "drop beat" (task 4): a small, rarity-tinted ground
+   * sparkle/pop wherever `systems/gear`'s `itemDrop` fired — a farm kill can
+   * emit these often on a busy field, so this stays cheap/subtle; the boss's
+   * guaranteed roll is always epic-tier-or-better on-curve gear via
+   * `bossDropTableForStage`, so it isn't specially distinguished here beyond
+   * whatever rarity it actually rolled. The chime lives in
+   * `audio/sfxMap.ts`'s `playItemDrop` (`AudioController` reads the same
+   * `ITEM_TEMPLATES` lookup independently). */
+  private onItemDrop(ev: Extract<GameEvent, { type: "itemDrop" }>): void {
+    const rarity: ItemRarity = ITEM_TEMPLATES[ev.templateId]?.rarity ?? "common";
+    const color = itemDropAccentColor(rarity);
+    const y = ITEM_DROP_POP_Y;
+
+    this.rings.spawn({
+      x: ev.x,
+      y,
+      r0: ITEM_DROP_RING_R0[rarity],
+      r1: ITEM_DROP_RING_R1[rarity],
+      duration: ITEM_DROP_RING_DURATION[rarity],
+      width: rarity === "epic" ? 2.5 : 2,
+      color,
+    });
+    burst(this.particles, ev.x, y, ITEM_DROP_PARTICLE_COUNT[rarity], color, {
+      speed: ITEM_DROP_PARTICLE_SPEED[rarity],
+      life: ITEM_DROP_PARTICLE_LIFE[rarity],
+      radius: rarity === "epic" ? 3 : 2.2,
+      gravity: -20, // slight rise — a "loot glimmer", not falling debris
+      drag: 0.3,
     });
   }
 

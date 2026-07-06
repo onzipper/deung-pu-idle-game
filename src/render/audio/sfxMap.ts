@@ -27,6 +27,7 @@
  */
 
 import type { GameEvent } from "@/engine";
+import type { ItemRarity } from "@/engine/config/items";
 import type { AudioEngine } from "@/render/audio/AudioEngine";
 
 /** Per-event tunable synth parameters. Retune freely; no code changes needed
@@ -138,6 +139,20 @@ export const SFX_PARAMS = {
     blipDuration: 0.08,
     blipGain: 0.16,
   },
+  /** M7 gear-wow "drop beat": a soft synthesized chime, rarity-tiered — a
+   * plain rising sweep for common/rare (rare pitches a touch higher/richer),
+   * a short 3-note arpeggio for epic so the milestone drop is unmistakable.
+   * Deliberately quiet (farm drops can fire often on a busy field). */
+  itemDrop: {
+    common: { freq: 720, freqEnd: 960, duration: 0.13, gain: 0.11 },
+    rare: { freq: 740, freqEnd: 1160, duration: 0.15, gain: 0.13 },
+    epic: {
+      notes: [740, 987.77, 1244.51], // F#5 B5 D#6
+      noteGap: 0.06,
+      noteDecay: 0.18,
+      noteGain: 0.16,
+    },
+  },
 } as const;
 
 /** Minimum ms between two sounds sharing a throttle key — the "same-type
@@ -160,6 +175,7 @@ export const SFX_MIN_INTERVAL_MS = {
   levelUp: 200,
   evolve: 400,
   upgradeBought: 40,
+  itemDrop: 180,
 } as const;
 
 type Ev<T extends GameEvent["type"]> = Extract<GameEvent, { type: T }>;
@@ -426,6 +442,26 @@ export function playEvolve(engine: AudioEngine): void {
     gain: p.shimmerGain,
     delay: p.notes.length * p.noteGap * 0.5,
   });
+}
+
+/** M7 gear-wow "drop beat": a soft chime, rarity-tiered (see
+ * `SFX_PARAMS.itemDrop`'s doc comment). */
+export function playItemDrop(engine: AudioEngine, rarity: ItemRarity): void {
+  const p = SFX_PARAMS.itemDrop;
+  if (rarity === "epic") {
+    p.epic.notes.forEach((freq, i) => {
+      engine.tone(freq, {
+        shape: "triangle",
+        attack: 0.003,
+        decay: p.epic.noteDecay,
+        gain: p.epic.noteGain,
+        delay: i * p.epic.noteGap,
+      });
+    });
+    return;
+  }
+  const cfg = rarity === "rare" ? p.rare : p.common;
+  engine.sweep(cfg.freq, cfg.freqEnd, { shape: "sine", duration: cfg.duration, gain: cfg.gain });
 }
 
 /** Upgrade bought: a tiny click followed by a rising confirmation blip. Kept
