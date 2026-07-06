@@ -61,3 +61,23 @@ export async function hasResolvableActiveCharacter(): Promise<boolean> {
     return true;
   }
 }
+
+/**
+ * True only for a visitor with NO identity cookie at all — i.e. someone who
+ * has genuinely never touched the game before. Used by the game page (M6.5b
+ * UI Skin, wave 1) to decide "show the title screen" vs. an existing account
+ * that just needs to pick/create a character (which still skips straight to
+ * `/characters`, unchanged). Read-only, same cookie mirror as the check
+ * above; fails CLOSED (returns false) on an unexpected read error so a
+ * broken cookie read degrades to the pre-existing redirect behavior rather
+ * than stranding a returning player on a title screen.
+ */
+export async function isBrandNewVisitor(): Promise<boolean> {
+  try {
+    const store = await cookies();
+    return !store.get(USER_COOKIE)?.value;
+  } catch (err) {
+    console.error("[characterGate] read failed, failing closed:", err);
+    return false;
+  }
+}
