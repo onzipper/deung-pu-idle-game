@@ -22,6 +22,30 @@
     "challengeBossAriaReady": "Challenge Boss",
     "challengeBossAriaNotReady": "Challenge Boss (not available yet)"
   },
+  "ladder": {
+    "rungs": {
+      "levelUp": "Next level",
+      "classQuest": "Class change",
+      "zoneBoss": "Clear the map",
+      "hallOfFame": "Hall of Fame"
+    },
+    "hallOfFameHint": "Coming soon",
+    "levelUp": {
+      "progress": "Lv.{level} → Lv.{gate} unlocks the class-change quest"
+    },
+    "classQuest": {
+      "locked": "🔒 Lv.{gate}",
+      "readyHint": "Quest complete! See the skill bar below to change class."
+    },
+    "zoneBoss": {
+      "farmingHint": "Kill enemies to unlock the next zone",
+      "readyHint": "Your power is ready — challenge the boss!",
+      "fightingHint": "⚔ Fighting the boss…",
+      "victoryHint": "Push into the next stage to keep growing stronger."
+    },
+    "powerRatioLabel": "Power {pct}%",
+    "bossStatsLabel": "Boss HP {hp} · ATK {atk}"
+  },
   "panels": {
     "skillsLabel": "Skills",
     "heroDeadBadge": "Dead",
@@ -80,7 +104,13 @@
     "soundOff": "Mute",
     "localeLabel": "Language",
     "localeTh": "ไทย",
-    "localeEn": "EN"
+    "localeEn": "EN",
+    "openButton": "⚙ Settings",
+    "title": "Settings",
+    "closeButton": "Close",
+    "autoBehaviorGroup": "Auto-behavior",
+    "audioLanguageGroup": "Audio & language",
+    "deathBehaviorLabel": "When your hero dies"
   },
   "onboarding": {
     "mascotName": "Deung",
@@ -115,7 +145,7 @@
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Mute/unmute sound, switch languages, or tap \"📖 Guide\" to reopen the game guide anytime from this row."
+        "body": "Tap \"⚙ Settings\" to mute/unmute sound, switch languages, or tune auto-behavior, and tap \"📖 Guide\" to reopen the game guide anytime from this row."
       },
       "outro": {
         "title": "You're ready!",

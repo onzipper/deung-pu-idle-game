@@ -6,9 +6,10 @@
  * per frame by GameClient); a locked neighbour is disabled with a reason tooltip.
  * The right arrow reads "เข้าห้องบอส" when the next zone is the map's boss room.
  *
- * Functional-only for M6 — theming + the goal-ladder polish are later tasks. The
- * boss-hint banner (BossPanel) and its challenge/next buttons still work alongside
- * this (they also resolve to walk intents in the engine).
+ * Functional-only for M6 — theming polish is a later task. The goal-ladder's
+ * core-loop card (`GoalLadder.tsx`, replaced `BossPanel`) and its challenge/
+ * next-stage buttons still work alongside this (they also resolve to walk
+ * intents in the engine).
  */
 
 import { useTranslations } from "next-intl";

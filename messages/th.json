@@ -22,6 +22,30 @@
     "challengeBossAriaReady": "ท้าบอส",
     "challengeBossAriaNotReady": "ท้าบอส (ยังท้าไม่ได้ตอนนี้)"
   },
+  "ladder": {
+    "rungs": {
+      "levelUp": "เลเวลถัดไป",
+      "classQuest": "เปลี่ยนคลาส",
+      "zoneBoss": "ล้างด่าน",
+      "hallOfFame": "ทำเนียบเกียรติยศ"
+    },
+    "hallOfFameHint": "เร็วๆ นี้",
+    "levelUp": {
+      "progress": "Lv.{level} → Lv.{gate} ปลดเควสเปลี่ยนคลาส"
+    },
+    "classQuest": {
+      "locked": "🔒 Lv.{gate}",
+      "readyHint": "เควสครบแล้ว! ไปกดที่แถบสกิลด้านล่างเพื่อเปลี่ยนคลาส"
+    },
+    "zoneBoss": {
+      "farmingHint": "ฆ่ามอนให้ครบเพื่อปลดโซนถัดไป",
+      "readyHint": "พลังพร้อมแล้ว — ไปท้าบอสได้เลย!",
+      "fightingHint": "⚔ กำลังต่อสู้กับบอส...",
+      "victoryHint": "ไปด่านถัดไปเพื่อแข็งแกร่งขึ้นต่อ"
+    },
+    "powerRatioLabel": "พลัง {pct}%",
+    "bossStatsLabel": "HP บอส {hp} · โจมตี {atk}"
+  },
   "panels": {
     "skillsLabel": "สกิล",
     "heroDeadBadge": "ตาย",
@@ -80,7 +104,13 @@
     "soundOff": "ปิดเสียง",
     "localeLabel": "ภาษา",
     "localeTh": "ไทย",
-    "localeEn": "EN"
+    "localeEn": "EN",
+    "openButton": "⚙ ตั้งค่า",
+    "title": "ตั้งค่า",
+    "closeButton": "ปิด",
+    "autoBehaviorGroup": "พฤติกรรมอัตโนมัติ",
+    "audioLanguageGroup": "เสียง & ภาษา",
+    "deathBehaviorLabel": "เมื่อฮีโร่ตาย"
   },
   "onboarding": {
     "mascotName": "น้องดึ๋ง",
@@ -115,7 +145,7 @@
       },
       "settingsTour": {
         "title": "ปรับแต่งการเล่นได้ตรงนี้",
-        "body": "เปิด/ปิดเสียง สลับภาษา หรือกด \"📖 คู่มือ\" เพื่อเปิดคู่มือเกมย้อนดูได้ทุกเมื่อจากแถบนี้"
+        "body": "กด \"⚙ ตั้งค่า\" เพื่อเปิด/ปิดเสียง สลับภาษา หรือปรับพฤติกรรมอัตโนมัติ และกด \"📖 คู่มือ\" เพื่อเปิดคู่มือเกมย้อนดูได้ทุกเมื่อจากแถบนี้"
       },
       "outro": {
         "title": "พร้อมลุยแล้ว!",

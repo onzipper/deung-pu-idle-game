@@ -2,11 +2,12 @@
 
 /**
  * Base-stat panel (M5 "Base stats"): per-stat +buttons, an unspent-points badge,
- * an auto-allocate toggle, and the combat-power ("พลังต่อสู้") readout for the solo
- * hero. Functional-plain on purpose — the pretty pass lands with the goal-ladder
- * UI in M6. Mirrors the SkillBar's dock conventions (label + chips + trailing
- * toggle). All numbers come from the throttled `HeroSummary` snapshot; a +tap
- * queues an `allocateStat` intent (drained once per real frame, like evolve).
+ * and the combat-power ("พลังต่อสู้") readout for the solo hero. All numbers come
+ * from the throttled `HeroSummary` snapshot; a +tap queues an `allocateStat`
+ * intent (drained once per real frame, like evolve). The auto-allocate ON/OFF
+ * toggle itself moved into the settings drawer (M6 settings-panel task,
+ * `SettingsPanel.tsx`) — this panel still READS `autoAllocate` (below) to
+ * disable manual +taps while it's on, since auto owns the primary stat then.
  */
 
 import { useTranslations } from "next-intl";
@@ -63,8 +64,6 @@ function StatRow({ hero, stat }: { hero: HeroSummary; stat: StatKey }) {
 
 export function StatPanel() {
   const heroes = useGameStore((s) => s.heroes);
-  const autoAllocate = useGameStore((s) => s.autoAllocate);
-  const toggleAutoAllocate = useGameStore((s) => s.toggleAutoAllocate);
   const t = useTranslations("stats");
 
   // Solo gameplay: the stat panel drives the single active character.
@@ -72,7 +71,10 @@ export function StatPanel() {
   if (!hero) return null;
 
   return (
-    <div data-onboarding-anchor="stat-panel" className="flex flex-wrap items-center gap-2">
+    <div
+      data-onboarding-anchor="stat-panel"
+      className="flex flex-wrap items-center gap-2"
+    >
       <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("title")}
       </span>
@@ -95,25 +97,6 @@ export function StatPanel() {
           <StatRow key={stat} hero={hero} stat={stat} />
         ))}
       </div>
-
-      <div className="flex-1" />
-
-      <button
-        type="button"
-        onClick={toggleAutoAllocate}
-        aria-pressed={autoAllocate}
-        className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-bold shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.97] ${
-          autoAllocate
-            ? "border-emerald-400 bg-emerald-400 text-emerald-950"
-            : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
-        }`}
-      >
-        <span
-          aria-hidden
-          className={`h-1.5 w-1.5 rounded-full ${autoAllocate ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
-        />
-        {t("autoAllocateToggle", { state: autoAllocate ? "on" : "off" })}
-      </button>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # `ui/` — React HUD, menus, panels
 
-React components for everything around the game canvas: gold/level HUD, base-stat panel (STR/DEX/INT/VIT + auto-allocate toggle), skill bar (mana costs, per-skill auto-cast slotting, class-change quest affordance), boss hint panel. (The player-facing 1x/2x/3x speed selector was removed, M6.7 — the integration loop always runs 1 fixed sub-step per real frame now.)
+React components for everything around the game canvas: gold/level HUD, base-stat panel (STR/DEX/INT/VIT), skill bar (mana costs, per-skill auto-cast slotting, class-change quest affordance), the goal ladder (see below, replaced the old boss hint panel), and a settings drawer gathering the auto-behavior/audio/language toggles. (The player-facing 1x/2x/3x speed selector was removed, M6.7 — the integration loop always runs 1 fixed sub-step per real frame now.)
 
 **M5 Character Pivot note**: the old gold-bought atk/speed/hp upgrade lines (`UpgradePanel`, `panels.upgradesLabel`/`upgradeAriaLabel`/`autoUpgradeToggle`) are GONE — a solo hero's power now comes from level + base stats (`StatPanel.tsx`, `allocateStat` intent) + class/skills (`SkillBar.tsx`, mana + cooldown + up to 3 auto-cast slots) + the class-change quest (tier 1 -> 2). Don't resurrect "upgrade" copy/components for this system; see `docs/GDD.md`/`docs/ROADMAP.md` for the current vision.
 
@@ -8,6 +8,18 @@ React components for everything around the game canvas: gold/level HUD, base-sta
 - `store/` — the Zustand store. React reads game numbers from a **throttled** engine snapshot (~10 Hz), never from a per-frame subscription. See `store/gameStore.ts`.
 
 UI dispatches player intent (allocate stat, cast skill, set auto-cast slot, accept/complete the class-change quest) into the engine; it does not run game logic itself.
+
+## Goal ladder (M6, ROADMAP.md line 32)
+
+`src/ui/goalLadder.ts` is a pure, headlessly-tested (`__tests__/goalLadder.test.ts`) rung-selection module for the HUD's single "what do I do next" element, rendered by `components/GoalLadder.tsx` (replaced `BossPanel.tsx`, deleted). The motivation ladder is fixed: `levelUp` (grinding toward the Lv.15 class-change-quest gate) -> `classQuest` (offered/accepted/complete) -> `zoneBoss` (unlock the next zone / beat the map boss room, repeats forever post-evolution) -> `hallOfFame` (ALWAYS a dimmed/locked tail rung — M9 doesn't exist yet).
+
+Two pieces render off it, deliberately decoupled:
+- The **breadcrumb** (`buildGoalLadder()`) — all 4 rungs always visible (current bright, earlier "done", later "upcoming"/"locked"), purely narrative/read-only.
+- The **core-loop card** (`selectZoneBossDetail(phase, bossReady)`) — the direct `BossPanel` replacement (challenge-boss CTA / victory -> next-stage / the zone-unlock kill bar, integrated here and no longer duplicated in `HudBar.tsx`). This is driven PURELY by `phase`/`bossReady`, independent of which narrative rung is current, because the challenge CTA is the loop's biggest beat and must stay correct from a fresh Lv.1 hero through post-evolution farming — this is also what keeps the FTUE's `boss-panel`/`kill-progress` anchors resolvable regardless of the hero's level/quest state. An optional milestone card (levelUp XP / classQuest kill+boss progress) renders additionally, above the core-loop card, only while one of those is the current rung — the interactive accept/change-class controls themselves stay in `SkillBar.tsx`'s `ClassQuestAffordance`, never duplicated.
+
+## Settings drawer (M6, ROADMAP.md line 29)
+
+`components/SettingsPanel.tsx` (opened via `SettingsButton.tsx`, same local-`useState` modal pattern as `CodexButton.tsx`) gathers the previously-scattered UI-owned toggles into one place: auto-allocate stat points, auto-return-to-farm after death, auto-potion use + thresholds, sound, and language. `autoCast`'s per-skill auto-slot assignment stays in `SkillBar.tsx` — it's part of the skill block (which skill goes in which slot), not a generic on/off preference.
 
 ## i18n
 
