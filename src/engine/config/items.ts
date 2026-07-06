@@ -200,6 +200,25 @@ export function bossDropTableForStage(stage: number): DropTableEntry[] {
 }
 
 /**
+ * NPC vendor sell price in gold (M7.5 contract — server's sell endpoint imports
+ * this; the ledger records the price in ItemEvent meta for future re-derivation).
+ * Town-only selling is enforced engine/client-side, not here. PLACEHOLDER
+ * formula — the engine/balance task tunes magnitudes vs the per-stage gold
+ * income tables (sell income must stay a minor share of kill gold; see
+ * docs/balance-m7.md).
+ */
+export function vendorPriceForTemplate(templateId: string): number {
+  const t = ITEM_TEMPLATES[templateId];
+  if (!t) return 0;
+  const rarityMult = t.rarity === "epic" ? 4 : t.rarity === "rare" ? 2 : 1;
+  return Math.round(3 * t.tier * t.tier * rarityMult);
+}
+
+/** M7.5 inventory cap (instances per character) — bot sell-trip trigger + the
+ * server-side claim backstop both read this. */
+export const INVENTORY_CAP = 100;
+
+/**
  * Server plausibility guard: the max summed per-kill FARM drop chance across any
  * stage — used to cap accepted claims per elapsed playtime. Computed HONESTLY
  * from the live tables (self-maintaining when the catalog changes). Boss drops
