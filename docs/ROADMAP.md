@@ -95,6 +95,15 @@
 
 - [ ] (แขวน) เก็บ reference รสนิยมจากเจ้าของ → tokens + title → เคาะ → roll out หน้าเลือกตัว + HUD
 
+## ✅ UAT polish batch (2026-07-07 — จาก playtest เจ้าของ + เตรียมขึ้น UAT)
+
+- [x] fix: บอทวาปแล้วไม่ขาย/ไม่ย่อย — ท่อ auto-equip ล้มแล้วกลืนขั้นขายเงียบ ๆ + POST ล้มไม่มี log (แก้ทั้งคู่, เจ้าของยืนยันหาย)
+- [x] fix: ธนู/เวทตัวเด้งตอนหนีมอน — branch ถอยหนีคำนวณแบบ hero-relative lunge (ตัวเดียวที่ไม่ servo เทียบเป้า) → stutter ~20Hz; แก้บรรทัดเดียว + เทสต์กันเด้ง, sim ไม่ขยับ
+- [x] balance (คำขอเจ้าของ): ดาบ/ธนูได้ INT — ดาบ 4STR:1VIT:1INT, ธนู 4DEX:1INT → ยามานา −55%/−56% ต่อรอบ, เกตครบ (ธนู s15 เร็วขึ้นด้วยซ้ำ)
+- [x] +8/+9/+10 prestige ladder (คำขอเจ้าของ): ออร่าไล่ระดับบน paper-doll — +8 วงนอกหนาแน่น / +9 ประกายแวบเป็นจังหวะ / +10 เสา ember+halo โคจร+พื้นระยิบ เห็นข้ามสนาม (แยกชัดจากออร่า t6, pooled/capped พิสูจน์ด้วยเทสต์)
+- [x] UAT patch-notes modal: "มีอะไรใหม่!" เด้งครั้งเดียวต่อ release id ภาษาผู้เล่น th/en, ผู้เล่นใหม่ไม่โดนซ้อน FTUE, เพิ่มรอบหน้าแค่ append entry เดียว
+- [x] Tab-return catch-up: สลับ tab/พับจอกลับมา >5s → replay เวลาที่หายผ่านท่อ offline เดิม (cap 8 ชม., budget 250ms, กัน fx/toast ทะลัก) — มือถือล็อกจอ = ได้ progress ย้อนหลังแบบเดียวกับ offline idle
+
 ## M8 — Party
 
 - [ ] Websocket infra spike: ประเมิน VPS/Node server + ห้องปาร์ตี้ (ตัดสินใจ infra ก่อนเริ่ม)

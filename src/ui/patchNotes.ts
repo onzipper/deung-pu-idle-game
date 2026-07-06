@@ -32,6 +32,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-07.items.skills",
       "releases.2026-07-07.items.bot",
       "releases.2026-07-07.items.autoAllocate",
+      "releases.2026-07-07.items.prestige",
     ],
   },
 ];

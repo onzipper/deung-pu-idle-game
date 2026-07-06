@@ -619,7 +619,8 @@
           "manualPlay": "👆 Manual control is in: tap the ground to move, tap a monster to attack (try turning AUTO off)",
           "skills": "✨ Big skills hit even harder — tier-2 ultimates now cover the whole screen! Monster fields are denser, so bring mana potions along",
           "bot": "🤖 The bot got smarter: set each rarity to sell for gold or salvage into refine materials (in Settings)",
-          "autoAllocate": "📊 New auto-allocate: stat points now go where your class actually needs them, no more scattergun spending"
+          "autoAllocate": "📊 New auto-allocate: stat points now go where your class actually needs them, no more scattergun spending",
+          "prestige": "🔥 +8/+9/+10 gear now flaunts an escalating divine aura — hit +10 and the whole field will know it"
         }
       }
     }
