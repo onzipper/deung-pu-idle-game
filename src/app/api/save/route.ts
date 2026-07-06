@@ -14,6 +14,7 @@ import { NextResponse } from "next/server";
 import { getOrCreateUserId } from "@/server/identity";
 import { resolveActiveCharacterId } from "@/server/activeCharacter";
 import { loadSave, persistSave } from "@/server/save";
+import { loadInventory, equippedLoadoutFrom } from "@/server/items";
 
 // This route reads/writes cookies and the DB per request — never static.
 export const dynamic = "force-dynamic";
@@ -29,10 +30,26 @@ export async function GET() {
         save: null,
         offline: { creditedSeconds: 0, capped: false },
         activeCharacterId: null,
+        inventory: [],
+        equipped: { weapon: null, armor: null },
       });
     }
-    const { save, offline } = await loadSave(characterId);
-    return NextResponse.json({ save, offline, activeCharacterId: characterId });
+    // M7 boot payload: additively include the character's inventory + equipped
+    // loadout alongside the save. PRECEDENCE: the ItemInstance table is
+    // AUTHORITATIVE over any equipped cache serialized in the save blob — the
+    // client must hydrate gear from `inventory`/`equipped` here, not from the
+    // save's own copy (an item is not re-derivable from the save; persistence-m7).
+    const [{ save, offline }, inventory] = await Promise.all([
+      loadSave(characterId),
+      loadInventory(characterId),
+    ]);
+    return NextResponse.json({
+      save,
+      offline,
+      activeCharacterId: characterId,
+      inventory,
+      equipped: equippedLoadoutFrom(inventory),
+    });
   } catch (err) {
     console.error("[api/save] GET failed:", err);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
