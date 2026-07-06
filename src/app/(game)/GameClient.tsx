@@ -435,6 +435,10 @@ export function GameClient() {
     // Previous rAF frame's event batch — TimeDirector reacts to these (a
     // one-frame trigger latency is expected/fine; see timeDirector.ts).
     let lastFrameEvents: GameEvent[] = [];
+    // M7.5 bot-status toast trackers (frame-to-frame transition detection).
+    let botPrevTravelReason: string | null = null;
+    let botPrevDwell = false;
+    let botTownActivityUntil = 0;
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
@@ -471,6 +475,15 @@ export function GameClient() {
       lastTime = now;
 
       const store = useGameStore.getState();
+
+      // M7.5 bot-status toasts ("มันเกิดขึ้นไวไป มองไม่ทัน" — owner request):
+      // capture pre-step consumable counts so a town restock this frame can be
+      // reported with real numbers after the sub-steps run.
+      const potsBefore = {
+        hp: state.consumables.hpPotion,
+        mp: state.consumables.manaPotion,
+        scroll: state.consumables.returnScroll,
+      };
 
       // UI-owned flags the engine reads directly (not part of FrameInput).
       state.autoCast = store.autoCast;
@@ -534,6 +547,42 @@ export function GameClient() {
 
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
+
+      // ---- M7.5 bot-status toasts (transition detection; engine untouched) ----
+      // The bot's town round trip resolves in seconds (warps are instant), so
+      // without these the player only sees the hero teleport around. Signals:
+      // traveling.reason "bot" = the walk out; botDwell = standing selling; a
+      // potion-count jump without a manual buy = the restock; a "walk" transit
+      // shortly after town activity = the walk home.
+      const travelReason = state.traveling?.reason ?? null;
+      if (travelReason === "bot" && botPrevTravelReason !== "bot") {
+        store.pushNotice("botTripStart");
+      }
+      const dwellNow = state.botDwell !== null;
+      if (dwellNow && !botPrevDwell) store.pushNotice("botSelling");
+      const potGain = {
+        hp: Math.max(0, state.consumables.hpPotion - potsBefore.hp),
+        mp: Math.max(0, state.consumables.manaPotion - potsBefore.mp),
+        scroll: Math.max(0, state.consumables.returnScroll - potsBefore.scroll),
+      };
+      if ((potGain.hp || potGain.mp || potGain.scroll) && !pending.buyShopItem) {
+        // A stock jump the player didn't click for = the bot restocked.
+        store.pushNotice("botRestocked", potGain);
+        botTownActivityUntil = now + 15_000;
+      }
+      if (frameEvents.some((e) => e.type === "townArrived") || dwellNow) {
+        botTownActivityUntil = now + 15_000;
+      }
+      if (
+        travelReason === "walk" &&
+        botPrevTravelReason !== "walk" &&
+        now < botTownActivityUntil
+      ) {
+        store.pushNotice("botReturning");
+        botTownActivityUntil = 0;
+      }
+      botPrevTravelReason = travelReason;
+      botPrevDwell = dwellNow;
 
       // M7 Gear & Drops: buffer every `itemDrop` this frame for the batched
       // server claim (flushed on the autosave cadence / tab-hide below). The
