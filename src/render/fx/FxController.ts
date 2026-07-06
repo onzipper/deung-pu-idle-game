@@ -27,6 +27,7 @@ import { ArmorShardPool } from "@/render/fx/armorShard";
 import { BossEcho } from "@/render/fx/bossEcho";
 import { CameraPunch } from "@/render/fx/cameraPunch";
 import { CastAuraController } from "@/render/fx/castAura";
+import { TargetLockReticle } from "@/render/fx/commandMarkers";
 import { CorpseEchoPool } from "@/render/fx/corpseEcho";
 import { CrescentPool } from "@/render/fx/crescent";
 import { CurtainSweepPool } from "@/render/fx/curtainSweep";
@@ -363,6 +364,25 @@ const ITEM_DROP_POP_Y = GROUND_Y - 6;
 const REFINE_AURA_THRESHOLD = 7;
 const REFINE_SPARKLE_THRESHOLD = 7;
 
+// ---- M7.8 "Manual Play" command feedback (tap-to-move / tap-to-attack) ----
+// Ground click-marker (`moveOrdered`): 3 concentric fading rings via the
+// shared `RingPool` (same started-together-different-radii trick as a sonar
+// ping, no dedicated pool needed for a one-shot). Target-lock pulse
+// (`targetLocked`): a quick single ring at the locked monster, layered on top
+// of `TargetLockReticle`'s own PERSISTENT reticle (continuous per-frame read
+// of `hero.command`, see `updateTargetLock()`).
+const MOVE_MARKER_RINGS: readonly { r0: number; r1: number; duration: number }[] = [
+  { r0: 2, r1: 18, duration: 0.32 },
+  { r0: 8, r1: 30, duration: 0.42 },
+  { r0: 14, r1: 42, duration: 0.52 },
+];
+const TARGET_LOCK_PULSE_R0 = 4;
+const TARGET_LOCK_PULSE_R1 = 22;
+const TARGET_LOCK_PULSE_DURATION = 0.22;
+/** Ground-anchored — mirrors every other "entities are effectively 1D on x"
+ * convention in this file (see `ITEM_DROP_POP_Y`'s doc). */
+const TARGET_LOCK_Y = GROUND_Y - 6;
+
 function itemDropAccentColor(rarity: ItemRarity): number {
   if (rarity === "epic") return PALETTE.gearEpic;
   if (rarity === "rare") return PALETTE.gearRare;
@@ -547,6 +567,11 @@ export class FxController {
    * shared shape, topmost" convention as `meteorSky`/`flash` below. */
   private readonly skyDarken: SkyDarkenOverlay;
 
+  // ---- M7.8 "Manual Play" command feedback ---------------------------------
+  // Continuous per-frame read of `state.heroes[0].command` (same convention
+  // as `gearAura`/`castAura` above) — see `updateTargetLock()`.
+  private readonly targetLock: TargetLockReticle;
+
   // ---- M7.5 world-gate navigation (fast-travel channel swirl) --------------
   private readonly travelPortal: TravelPortalController;
   /** Reused every frame — `getWeaponAnchorPos()`/`getArmorAnchorPos()` write
@@ -655,6 +680,9 @@ export class FxController {
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
     this.travelPortal = new TravelPortalController(this.heroFxLayer);
+    // Manual play (M7.8): the persistent target-lock reticle lives in the
+    // rings layer (same z-order family as the transient lock-on pulse below).
+    this.targetLock = new TargetLockReticle(this.ringsLayer);
     // Ring pool cap bumped 12->24 (M7.7): the BARRAGE ultimate's 13 landing
     // pops (each spawning a ring) can now overlap with unrelated concurrent
     // rings (mobAggroed/itemDrop/etc.) on a busy 21-mob field.
@@ -848,8 +876,18 @@ export class FxController {
           // was running — e.g. tapping a locked zone never started one).
           this.travelPortal.cancelChannel();
           break;
+        case "moveOrdered":
+          this.onMoveOrdered(ev.x);
+          break;
+        case "targetLocked":
+          this.onTargetLocked(ev.id, state);
+          break;
         default:
-          break; // stageCleared / upgradeBought / townArrived: no fx-layer reaction
+          // stageCleared / upgradeBought / townArrived / commandCancelled: no
+          // fx-layer reaction — `commandCancelled` is covered structurally by
+          // `updateTargetLock()`'s continuous read (the reticle eases itself
+          // out the instant `hero.command` goes null, see its doc comment).
+          break;
       }
     }
   }
@@ -894,10 +932,12 @@ export class FxController {
     this.updatePendingFieldFx(dt);
     this.detectBossEntrance(state);
     this.updateGearFx(dt, state);
+    this.updateTargetLock(dt, state);
     this.travelPortal.update(dt);
   }
 
   destroy(): void {
+    this.targetLock.destroy();
     this.hitFlash.destroy();
     this.corpseEcho.destroy();
     this.scorches.destroy();
@@ -978,6 +1018,57 @@ export class FxController {
     });
     this.gearAura.update(dt);
     this.gearSparkle.update(dt);
+  }
+
+  /** Manual play (M7.8): tap-the-ground order — a small "sonar ping" of 3
+   * concentric fading rings at the (already-clamped) `moveOrdered.x`, jewel-
+   * tone `orderMove` on the shared `RingPool` (flat-alpha stroked circles,
+   * never additive — footgun 10). Ground-anchored like every other
+   * effectively-1D-on-x beat in this file. */
+  private onMoveOrdered(x: number): void {
+    for (const r of MOVE_MARKER_RINGS) {
+      this.rings.spawn({
+        x,
+        y: GROUND_Y,
+        r0: r.r0,
+        r1: r.r1,
+        duration: r.duration,
+        width: 2,
+        color: PALETTE.orderMove,
+      });
+    }
+  }
+
+  /** Manual play (M7.8): tap-a-monster order — a quick "lock-on" pulse ring
+   * at the target's CURRENT position (on top of `updateTargetLock()`'s own
+   * persistent reticle, which keeps tracking it every frame after). A no-op
+   * if the target already despawned the same instant (render lags the
+   * engine by nothing here, but a defensive lookup costs nothing). */
+  private onTargetLocked(id: number, state: GameState): void {
+    const enemy = state.enemies.find((e) => e.id === id);
+    if (!enemy) return;
+    this.rings.spawn({
+      x: enemy.x,
+      y: TARGET_LOCK_Y,
+      r0: TARGET_LOCK_PULSE_R0,
+      r1: TARGET_LOCK_PULSE_R1,
+      duration: TARGET_LOCK_PULSE_DURATION,
+      width: 2,
+      color: PALETTE.orderAttack,
+    });
+  }
+
+  /** Manual play (M7.8): continuous per-frame read of `hero.command` (same
+   * convention as `updateGearFx()`/`updateWeaponTrail()`) — while an ATTACK
+   * command is active and its target is still alive, the reticle tracks it;
+   * otherwise it eases itself out (see `TargetLockReticle.update()`'s doc).
+   * Solo-hero read (`state.heroes[0]`), matching `applyManualCommand`'s own
+   * scope in `engine/systems/manual.ts`. */
+  private updateTargetLock(dt: number, state: GameState): void {
+    const cmd = state.heroes[0]?.command;
+    const enemy =
+      cmd?.kind === "attack" ? state.enemies.find((e) => e.id === cmd.targetId) : undefined;
+    this.targetLock.update(dt, enemy ? { x: enemy.x, y: TARGET_LOCK_Y } : null);
   }
 
   /** Continuous (not event-driven) per-frame read of `state.heroes` +

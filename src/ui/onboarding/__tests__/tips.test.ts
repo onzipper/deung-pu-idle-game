@@ -18,6 +18,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     phase: "battle",
     autoCast: false,
     autoAllocate: false,
+    autoHunt: true,
     // Non-zero cooldown so a bare `snapshot()` is a true "nothing to report"
     // baseline (autoCastAvailable's trigger checks "any hero ready", which a
     // bare `skillCd: 0` would satisfy by default).
@@ -173,6 +174,16 @@ describe("individual tip triggers", () => {
     const wipeNext = snapshot({ phase: "battle" });
     expect(tip.trigger(bootPrev, bootNext)).toBe(false);
     expect(tip.trigger(wipePrev, wipeNext)).toBe(true);
+  });
+
+  it("manualPlayHint fires only the instant autoHunt flips off, not at boot", () => {
+    const tip = idOf("manualPlayHint");
+    const bootPrev = snapshot({ autoHunt: false });
+    const bootNext = snapshot({ autoHunt: false });
+    const onPrev = snapshot({ autoHunt: true });
+    const offNext = snapshot({ autoHunt: false });
+    expect(tip.trigger(bootPrev, bootNext)).toBe(false);
+    expect(tip.trigger(onPrev, offNext)).toBe(true);
   });
 });
 

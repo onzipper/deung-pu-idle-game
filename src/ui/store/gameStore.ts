@@ -154,6 +154,10 @@ export interface HeroSummary {
    * stay in sync because the equip flow writes the DB THEN queues the engine
    * intent, see `GameClient.tsx`). */
   equipped: EquippedGear;
+  /** Manual play (M7.8): whether this hero currently has an active move/attack
+   * command (`hero.command != null`) — drives the "✕ ยกเลิกคำสั่ง" cancel chip.
+   * Read-only display flag, same one-way pattern as `canEvolve`. */
+  hasCommand: boolean;
 }
 
 /** One adjacent zone's walk-arrow state (M6 "World & Town"). */
@@ -283,6 +287,16 @@ export interface PendingInput {
    * same pattern as `goldCredit`, since a bulk salvage + an overlapping single
    * refine in the same tick must never drop one. `null`/`0` = nothing pending. */
   materialsDelta: number | null;
+  /** Manual play (M7.8): tap-the-ground move order, or `null` (last-wins per
+   * frame — a tap walks to exactly one x; the engine clamps it to the zone's
+   * walkable bounds). */
+  moveTo: { x: number } | null;
+  /** Manual play (M7.8): tap-a-monster attack order, or `null` (last-wins per
+   * frame). An invalid/dead/despawned id is a no-op engine-side. */
+  attackTarget: { id: number } | null;
+  /** Manual play (M7.8): cancel the solo hero's active move/attack command,
+   * once per frame. */
+  cancelCommand: boolean;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -304,6 +318,9 @@ function emptyPendingInput(): PendingInput {
     goldCredit: null,
     setAutoHunt: null,
     materialsDelta: null,
+    moveTo: null,
+    attackTarget: null,
+    cancelCommand: false,
   };
 }
 
@@ -720,6 +737,14 @@ export interface HudState {
   /** Queue a signed material-counter delta (M7.6 ตีบวก, SUMS across same-frame
    * calls — see `PendingInput.materialsDelta`'s doc). */
   creditMaterials: (amount: number) => void;
+  /** Queue a manual play (M7.8) tap-the-ground move order (last-wins per
+   * frame) — see `PendingInput.moveTo`'s doc. */
+  queueMoveTo: (x: number) => void;
+  /** Queue a manual play (M7.8) tap-a-monster attack order (last-wins per
+   * frame) — see `PendingInput.attackTarget`'s doc. */
+  queueAttackTarget: (id: number) => void;
+  /** Queue a manual play (M7.8) cancel of the active move/attack command. */
+  queueCancelCommand: () => void;
 
   // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
   // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
@@ -943,6 +968,14 @@ export const useGameStore = create<HudState>((set, get) => ({
         materialsDelta: (s.pendingInput.materialsDelta ?? 0) + amount,
       },
     })),
+
+  queueMoveTo: (x) => set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
+
+  queueAttackTarget: (id) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, attackTarget: { id } } })),
+
+  queueCancelCommand: () =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
 
   setInventory: (items) => set({ inventory: items }),
   mergeInventory: (claimed) =>

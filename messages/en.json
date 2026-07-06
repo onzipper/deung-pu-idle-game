@@ -13,6 +13,8 @@
     "autoHuntOff": "MANUAL",
     "autoHuntAriaOn": "Turn auto-hunt off",
     "autoHuntAriaOff": "Turn auto-hunt on",
+    "cancelCommandButton": "✕ Cancel Command",
+    "cancelCommandAria": "Cancel the current move/attack command",
     "zoneUnlockLabel": "Unlock next zone",
     "victoryTitle": "🎉 Map boss down (stage {stage})!",
     "nextStageButton": "Next Map →",
@@ -209,6 +211,10 @@
       "bossWipe": {
         "title": "Your hero got wiped — but it's not over!",
         "body": "Your hero revives in town with no penalty and goes back to hunting. Spend a few more stat points or grind a bit more, then challenge the boss again."
+      },
+      "manualPlayHint": {
+        "title": "You can play manually now!",
+        "body": "Tap the ground to walk, tap a monster to attack. Tap \"✕ Cancel Command\" to stop, or turn AUTO back on to let your hero hunt on its own again."
       }
     }
   },

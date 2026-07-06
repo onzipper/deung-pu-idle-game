@@ -239,6 +239,8 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       // doc — distinct from, but kept in sync with, the DB-hydrated `inventory`
       // store slice). Shallow-copied like `stats` above (never alias engine state).
       equipped: { ...h.equipped },
+      // M7.8 Manual Play: read-only display flag for the "✕ ยกเลิกคำสั่ง" chip.
+      hasCommand: h.command != null,
     };
   });
 
@@ -529,6 +531,11 @@ export function GameClient() {
         // item instances, so the client feeds this transient count every frame
         // (see `FrameInput.inventoryCount`'s doc).
         inventoryCount: store.inventory.length,
+        // M7.8 Manual Play: RO-style tap-to-move / tap-to-attack, queued by the
+        // canvas tap handler below (see `hitTestPointer()`/`onArenaClick()`).
+        moveTo: pending.moveTo ?? undefined,
+        attackTarget: pending.attackTarget ?? undefined,
+        cancelCommand: pending.cancelCommand || undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -731,6 +738,37 @@ export function GameClient() {
     }
     arenaEl.addEventListener("pointerdown", onPointerDown);
 
+    // ---- M7.8 Manual Play: RO-style tap-to-move / tap-to-attack -------------
+    // `click` normalizes a mouse click AND a touch tap (fires once, after
+    // pointerup) — deliberately NOT hooked on `pointerdown` (that's the
+    // audio-resume listener above) so a drag/scroll gesture never doubles as
+    // a command. Hit-testing itself is a pure, one-way `GameRenderer` query
+    // (`hitTestPointer`); this handler is the integration seam that turns the
+    // result into a store intent, same as every other player input in this
+    // file (drained once/frame above, never applied directly).
+    function onArenaClick(e: MouseEvent): void {
+      if (!arenaEl) return;
+      const rect = arenaEl.getBoundingClientRect();
+      const hit = renderer.hitTestPointer(e.clientX - rect.left, e.clientY - rect.top, state);
+      if (!hit) return;
+      if (hit.kind === "monster") useGameStore.getState().queueAttackTarget(hit.id);
+      else useGameStore.getState().queueMoveTo(hit.x);
+    }
+    arenaEl.addEventListener("click", onArenaClick);
+
+    // Desktop-only cursor affordance (owner directive: comfortable on both
+    // desktop AND mobile) — a crosshair while hovering a live target. Guarded
+    // to `pointerType === "mouse"` so a touch drag never leaves a stuck cursor
+    // style (touch devices don't fire `pointermove` without an active touch,
+    // but this is a defensive no-op guard nonetheless).
+    function onArenaPointerMove(e: PointerEvent): void {
+      if (!arenaEl || e.pointerType !== "mouse") return;
+      const rect = arenaEl.getBoundingClientRect();
+      const hit = renderer.hitTestPointer(e.clientX - rect.left, e.clientY - rect.top, state);
+      arenaEl.style.cursor = hit?.kind === "monster" ? "crosshair" : "";
+    }
+    arenaEl.addEventListener("pointermove", onArenaPointerMove);
+
     // Pixi init + save load run in parallel; the loop starts only after both
     // resolve. Guards against the effect having been cleaned up mid-flight
     // (React Strict Mode's dev mount/unmount/mount) by tearing the renderer
@@ -872,6 +910,8 @@ export function GameClient() {
       if (autosaveTimer) clearInterval(autosaveTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       arenaEl.removeEventListener("pointerdown", onPointerDown);
+      arenaEl.removeEventListener("click", onArenaClick);
+      arenaEl.removeEventListener("pointermove", onArenaPointerMove);
       errorEl?.remove();
       errorEl = null;
       renderer.destroy();

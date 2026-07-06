@@ -108,6 +108,19 @@ export const PALETTE = {
   /** Cataclysm's brief sky-darken overlay tint — a dark arcane violet-black,
    * flat alpha only (footgun 10: never additive over the daytime biome sky). */
   skyDarkTint: 0x140026,
+
+  // ---- M7.8 "Manual Play" command feedback accents (tap-to-move / tap-to-
+  // attack) — deliberately distinct from every combat/skill/travel accent so
+  // a player-issued order reads as "your command", not a spell or an aggro
+  // cue. Footgun 10: flat/solid on NORMAL blend + a darker outline, never
+  // additive. ----
+  /** Ground click-marker ripple (`moveOrdered`) — a cool jewel-tone teal. */
+  orderMove: 0x4fd1c5,
+  orderMoveDark: 0x144a44,
+  /** Target-lock reticle + lock-on pulse (`targetLocked`) — a warm amber,
+   * distinct from `dmgSkill`'s pale yellow and `warn`'s red-alert tone. */
+  orderAttack: 0xffd23f,
+  orderAttackDark: 0x6b4c00,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

@@ -57,6 +57,9 @@ export interface OnboardingSnapshot {
   autoCast: boolean;
   /** UI-owned "auto-allocate stat points" toggle (M5) — mirrors `autoCast`. */
   autoAllocate: boolean;
+  /** Engine-persisted auto-hunt toggle (M6.6/M7.5, SAVE v12) — drives the
+   * M7.8 "Manual Play" contextual tip (fires the first time it flips off). */
+  autoHunt: boolean;
   heroes: OnboardingHeroSnapshot[];
 }
 
@@ -74,6 +77,7 @@ export function toOnboardingSnapshot(s: {
   phase: Phase;
   autoCast: boolean;
   autoAllocate: boolean;
+  autoHunt: boolean;
   heroes: {
     skillCd: number;
     dead: boolean;
@@ -91,6 +95,7 @@ export function toOnboardingSnapshot(s: {
     phase: s.phase,
     autoCast: s.autoCast,
     autoAllocate: s.autoAllocate,
+    autoHunt: s.autoHunt,
     heroes: s.heroes.map((h) => ({
       skillCd: h.skillCd,
       dead: h.dead,

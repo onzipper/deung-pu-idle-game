@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
 import { AutoHuntToggle } from "@/ui/components/AutoHuntToggle";
+import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
 import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
 import { useGameStore, type NavNeighborSummary } from "@/ui/store/gameStore";
 
@@ -75,6 +76,11 @@ export function WalkControls() {
             onWalk={walkToZone}
           />
         </div>
+      </div>
+      {/* M7.8 Manual Play: only rendered while the hero has an active
+          move/attack command — see `CancelCommandChip`'s own doc. */}
+      <div className="flex justify-center">
+        <CancelCommandChip />
       </div>
       <FastTravelChannelBar />
       {fastTravelOpen && <FastTravelPicker onClose={() => setFastTravelOpen(false)} />}
