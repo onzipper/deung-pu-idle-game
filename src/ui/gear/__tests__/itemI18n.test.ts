@@ -9,8 +9,8 @@ import { ITEM_TEMPLATES } from "@/engine";
 describe("gear catalog i18n coverage", () => {
   const ids = Object.keys(ITEM_TEMPLATES);
 
-  it("has exactly 27 catalog templates (frozen contract — see config/items.ts)", () => {
-    expect(ids.length).toBe(27);
+  it("has exactly 46 catalog templates (frozen contract — see config/items.ts; 27 t1-6 + 19 M7.9 t7-10)", () => {
+    expect(ids.length).toBe(46);
   });
 
   it("every templateId resolves a `content.items.<id>.name` string in both locales", () => {

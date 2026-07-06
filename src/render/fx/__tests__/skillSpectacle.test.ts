@@ -15,8 +15,11 @@
 
 import { Container } from "pixi.js";
 import { describe, expect, it } from "vitest";
+import { ArrowSwarmPool } from "@/render/fx/arrowSwarm";
 import { CurtainSweepPool } from "@/render/fx/curtainSweep";
+import { GroundArrowPool } from "@/render/fx/rainScene";
 import { GroundCrackPool } from "@/render/fx/groundCrack";
+import { HazardBandOverlay } from "@/render/fx/hazardBand";
 import { RingPool } from "@/render/fx/rings";
 import { SkyDarkenOverlay } from "@/render/fx/skyDarken";
 
@@ -81,13 +84,144 @@ describe("M7.7 skill-spectacle fx pools", () => {
     expect(() => overlay.destroy()).not.toThrow();
   });
 
-  it("RingPool: an explicit cap argument (M7.7 bumped the shared instance 12->24) holds", () => {
+  it("RingPool: an explicit cap argument (M7.9 bumped the shared instance 24->32) holds", () => {
     const container = new Container();
-    const pool = new RingPool(container, 24);
-    for (let i = 0; i < 40; i++) {
+    const pool = new RingPool(container, 32);
+    for (let i = 0; i < 50; i++) {
       pool.spawn({ x: i, y: 0, r1: 10, color: 0xffffff });
+    }
+    expect(container.children.length).toBe(32);
+    expect(() => pool.destroy()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" tier-3 skill-4 additions: STORM's arrow-swarm band
+// + longer-lived/finale-glinting ground arrows, and APOCALYPSE/STORM's
+// sky-darken sustained-hold override.
+// ---------------------------------------------------------------------------
+describe("M7.9 tier-3 skill-4 fx pools", () => {
+  it("ArrowSwarmPool: spawnBand schedules one cluster per slot, delay-then-drift, cap holds", () => {
+    const container = new Container();
+    const pool = new ArrowSwarmPool(container, 6);
+
+    expect(() => pool.spawnBand(450, 7, 26, 0x13210f, 4)).not.toThrow();
+    // More clusters requested than the cap — should silently ring-buffer,
+    // never grow the container's child count past the cap.
+    expect(container.children.length).toBe(6);
+
+    for (let i = 0; i < 60; i++) pool.update(0.1);
+    expect(container.children.length).toBe(6);
+    expect(() => pool.destroy()).not.toThrow();
+  });
+
+  it("GroundArrowPool: per-spawn `life` overrides the default, cap holds at 24", () => {
+    const container = new Container();
+    const pool = new GroundArrowPool(container);
+
+    // Default-life spawn (signature/barrage) + a much-longer STORM spawn.
+    pool.spawn(0, 0, 0xffffff);
+    pool.spawn(10, 0, 0xffffff, 4.5);
+
+    for (let i = 0; i < 6; i++) pool.update(0.1); // 0.6s — default-life arrow should be gone
+    // (no direct slot introspection — this just proves update()/spawn() with
+    // an explicit `life` never throws across many steps)
+
+    for (let i = 0; i < 30; i++) {
+      pool.spawn(i, 0, 0xffffff, 4.5);
     }
     expect(container.children.length).toBe(24);
     expect(() => pool.destroy()).not.toThrow();
+  });
+
+  it("GroundArrowPool: finaleGlintAndFadeAll() resets every active slot and never throws on an empty field", () => {
+    const container = new Container();
+    const pool = new GroundArrowPool(container);
+
+    // Empty-field call first — must be a no-op, not a throw.
+    expect(() => pool.finaleGlintAndFadeAll(0.5)).not.toThrow();
+
+    for (let i = 0; i < 8; i++) pool.spawn(i, 0, 0xffffff, 4.5);
+    expect(() => pool.finaleGlintAndFadeAll(0.55)).not.toThrow();
+    for (let i = 0; i < 10; i++) pool.update(0.1);
+    expect(() => pool.destroy()).not.toThrow();
+  });
+
+  it("SkyDarkenOverlay: a longer `hold` override (STORM/APOCALYPSE) sustains visibility past the default 0.4s hold", () => {
+    const overlay = new SkyDarkenOverlay(900, 300);
+    overlay.trigger(0x0d001f, 0.56, 2.6); // APOCALYPSE-style: darker + much longer hold
+
+    // Past the OLD default total (~0.85s) the overlay must still be visible —
+    // proves the hold override actually extends the sustain, not just alpha.
+    for (let i = 0; i < 10; i++) overlay.update(0.1); // 1.0s elapsed
+    expect(overlay.view.visible).toBe(true);
+
+    for (let i = 0; i < 30; i++) overlay.update(0.1); // well past total (~3.05s)
+    expect(overlay.view.visible).toBe(false);
+    // Floating-point residue from ~40 repeated `-= 0.1` steps (vs the
+    // original cataclysm test's fewer steps) can leave a near-zero, not
+    // exactly-zero, alpha — `closeTo` is the correct tolerance here, not a
+    // stuck-alpha bug.
+    expect(overlay.view.alpha).toBeCloseTo(0, 5);
+
+    expect(() => overlay.destroy()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7.9 boss-variety mechanic render follow-up (charge/summon/hazard, maps
+// 4-6, commit 993c315's events): `HazardBandOverlay` is the one NEW pooled
+// primitive this task adds (charge/summon reuse existing rings/flashLines/
+// particles/runeGlyphs pools — no new class needed for those).
+// ---------------------------------------------------------------------------
+describe("M7.9 boss-variety mechanic fx: HazardBandOverlay", () => {
+  it("pulses visibly during the warn hold, then fully fades back to invisible", () => {
+    const overlay = new HazardBandOverlay(900, 300);
+    overlay.trigger(0xff260e, 0.4, 1.3); // map6 infernal accent + the engine's own telegraph window
+
+    expect(overlay.view.visible).toBe(true);
+
+    // Sample alpha across the hold — it should visibly PULSE (vary), not sit
+    // at one flat value, and never exceed the peak or go negative.
+    const samples: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      overlay.update(0.1);
+      samples.push(overlay.view.alpha);
+    }
+    for (const a of samples) {
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThanOrEqual(0.4);
+    }
+    expect(new Set(samples.map((a) => a.toFixed(4))).size).toBeGreaterThan(1);
+
+    // Well past the total duration — must resolve cleanly, no stuck alpha.
+    for (let i = 0; i < 10; i++) overlay.update(0.2);
+    expect(overlay.view.visible).toBe(false);
+    expect(overlay.view.alpha).toBeCloseTo(0, 5);
+
+    expect(() => overlay.destroy()).not.toThrow();
+  });
+
+  it("a retrigger while already active takes the brighter peak / longer window (never shrinks)", () => {
+    const overlay = new HazardBandOverlay(900, 300);
+    overlay.trigger(0xff260e, 0.2, 0.5);
+    overlay.update(0.05);
+    overlay.trigger(0xff260e, 0.5, 1.3);
+
+    // A few steps in, well past the first (shorter) trigger's own total —
+    // still visible thanks to the retrigger's longer window.
+    for (let i = 0; i < 6; i++) overlay.update(0.1);
+    expect(overlay.view.visible).toBe(true);
+
+    expect(() => overlay.destroy()).not.toThrow();
+  });
+
+  it("never throws across zero/negative-leaning update steps (safeRadius clamping)", () => {
+    const overlay = new HazardBandOverlay(900, 300);
+    expect(() => overlay.update(0.1)).not.toThrow(); // idle, never triggered
+    overlay.trigger(0xffffff, 0.3, 0.05); // a near-zero duration window
+    expect(() => overlay.update(1)).not.toThrow();
+    expect(overlay.view.visible).toBe(false);
+    expect(() => overlay.destroy()).not.toThrow();
   });
 });

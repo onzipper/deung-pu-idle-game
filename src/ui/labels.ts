@@ -39,6 +39,10 @@ export const SKILL_ICONS_BY_ID: Record<string, string> = {
   mage_meteor: "☄️", // ☄️ meteor
   mage_frostnova: "❄️", // ❄️ frost nova
   mage_cataclysm: "\u{1F525}", // 🔥 cataclysm
+  // M7.9 "Grand Expansion" tier-3 skill 4 (all pre-2020, Win10-safe emoji)
+  sword_skyfall: "\u{26A1}", // ⚡ skyfall strike
+  archer_storm: "\u{1F32A}️", // 🌪️ arrow storm
+  mage_apocalypse: "\u{1F480}", // 💀 apocalypse
 };
 
 /** M7 Gear & Drops — per-slot icon (pre-2020 emoji, Win10-safe — footgun #4). */

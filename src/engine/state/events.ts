@@ -59,6 +59,20 @@ export type GameEvent =
   | { type: "bossEnraged"; x: number; y: number }
   | { type: "bossDefeated"; x: number; y: number; goldGained: number }
   | { type: "bossRetreat"; x: number; y: number }
+  // M7.9 "Grand Expansion" boss-variety mechanics (maps 4-6). Render wiring is a
+  // FOLLOW-UP: an as-yet-unhandled kind falls to the FxController/audio switch
+  // DEFAULT (a no-op) + partial `SFX_PARAMS` maps, so these degrade gracefully (no
+  // crash). Payloads are minimal + positional; deterministic (no RNG draw).
+  //  - bossChargeTelegraph: map4 boss winds up a dash; `targetX` = the locked rush x.
+  //  - bossChargeHit: the dash lands at `x`; `connected` = it caught a hero.
+  //  - bossSummon: map5 boss spawned `count` adds (normal Enemy entities) near `x`.
+  //  - bossHazardWarn: map6 boss telegraphs an arena-wide danger window (`x` = boss).
+  //  - bossHazardStrike: one arena-wide hazard damage tick fired (`x` = boss).
+  | { type: "bossChargeTelegraph"; x: number; targetX: number }
+  | { type: "bossChargeHit"; x: number; connected: boolean }
+  | { type: "bossSummon"; x: number; count: number }
+  | { type: "bossHazardWarn"; x: number }
+  | { type: "bossHazardStrike"; x: number }
   // A mob AGGROED onto the hero (M6 "สนามล่ามอน"): an aggressive mob's aggro radius
   // triggered, so it starts hunting the hero. One-way (render may hook a growl/alert
   // beat). Replaces the retired march-model `waveSpawn` (there are no waves now).

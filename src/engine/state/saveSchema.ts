@@ -86,7 +86,8 @@ export const saveDataSchema = z
         cls: z.enum(KNOWN_CLASSES),
         level: z.number().int().min(1).max(CONFIG.leveling.levelCap),
         xp: z.number().min(0).finite(),
-        tier: z.number().int().min(1).max(2),
+        // M7.9 "Grand Expansion": tier domain widened {1,2} -> {1,2,3} (tier-3 class).
+        tier: z.number().int().min(1).max(3),
         statPoints: z.number().int().min(0).optional(),
         stats: statBlockSchema.optional(),
         // M5 "mana + skill framework v2" (SAVE v6). Both OPTIONAL so a payload

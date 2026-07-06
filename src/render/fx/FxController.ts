@@ -16,14 +16,23 @@
 
 import { Container as PixiContainer } from "pixi.js";
 import type { Container } from "pixi.js";
+import { zoneAt } from "@/engine";
 import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
 import { ITEM_TEMPLATES, refineOf, type ItemRarity } from "@/engine/config/items";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
-import { ENEMY_COLORS, HERO_COLORS, PALETTE, PROJECTILE_COLORS } from "@/render/theme";
+import {
+  BOSS_COLORS,
+  ENEMY_COLORS,
+  HERO_COLORS,
+  PALETTE,
+  PROJECTILE_COLORS,
+  type BossMapId,
+} from "@/render/theme";
 import { ArenaFlash } from "@/render/fx/arenaFlash";
 import { ArmorShardPool } from "@/render/fx/armorShard";
+import { ArrowSwarmPool } from "@/render/fx/arrowSwarm";
 import { BossEcho } from "@/render/fx/bossEcho";
 import { CameraPunch } from "@/render/fx/cameraPunch";
 import { CastAuraController } from "@/render/fx/castAura";
@@ -37,6 +46,7 @@ import { GearAuraController } from "@/render/fx/gearAura";
 import { GearSparklePool } from "@/render/fx/gearSparkle";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { GroundCrackPool } from "@/render/fx/groundCrack";
+import { HazardBandOverlay } from "@/render/fx/hazardBand";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
 import { LevelUpBurstPool } from "@/render/fx/levelUp";
@@ -123,24 +133,25 @@ const RAIN_LAUNCH_STREAK_COUNT = 4;
 const RAIN_LAUNCH_STREAK_HEIGHT = 30;
 const RAIN_LAUNCH_STREAK_SPREAD = 10;
 /** Clutter guard: at most this many drops are tracked for the falling-shadow
- * + landing sequence at once — the BARRAGE ultimate's 13 drops per cast + a
- * little slack for 3x-speed volley overlap (M7.7: bumped 12->16, matching
- * `rainScene.ts`'s `SHADOW_CAP`/`GROUND_ARROW_CAP` bump); extra drops beyond
+ * + landing sequence at once — M7.9's STORM tier-3 skill-4 pushes 20 drops
+ * per cast (bumped 16->24, matching `rainScene.ts`'s `SHADOW_CAP`/
+ * `GROUND_ARROW_CAP` bump, M7.7's BARRAGE was 13 + slack); extra drops beyond
  * the cap are silently skipped (the pools underneath also cap+drop on their
  * own, this just avoids growing an unbounded tracking array). */
-const MAX_PENDING_RAIN_ARROWS = 16;
+const MAX_PENDING_RAIN_ARROWS = 24;
 /** Dirt + a few archer-tinted feather motes on landing (small, NOT the boss-
  * slam-sized impact burst — this is a hail of small arrows, not a nuke). */
 const RAIN_LAND_DIRT_COUNT = 4;
 const RAIN_LAND_FEATHER_COUNT = 3;
 
 // ---- mage: meteor scene (item 11) ------------------------------------------
-/** At most 1-2 meteors are ever realistically in flight at once (12s skill
- * cooldown, <1s flight) — capped small regardless. Bumped 2->3 (M7.7): the
- * cataclysm ultimate reuses the SAME `meteor` kind (footgun #6 — no new
- * ProjectileKind), so a signature meteor's tail end can now briefly overlap
- * a cataclysm cast. */
-const MAX_PENDING_METEORS = 3;
+/** At most 1-2 meteors are ever realistically in flight at once for the
+ * signature/cataclysm (12s skill cooldown, <1s flight) — bumped 2->3 (M7.7:
+ * cataclysm reuses the SAME `meteor` kind, footgun #6, so a signature
+ * meteor's tail end can briefly overlap a cataclysm cast) -> 3->10 (M7.9:
+ * APOCALYPSE's tier-3 skill-4 fires an 8-meteor volley in ONE cast — a
+ * little slack on top of 8 covers a signature/cataclysm overlap too). */
+const MAX_PENDING_METEORS = 10;
 const METEOR_RUNE_RADIUS = 46;
 const METEOR_RUNE_TICKS = 10;
 
@@ -465,6 +476,123 @@ const CATACLYSM_EMBER_COUNT = 24;
 const CATACLYSM_EMBER_LIFE = 1.1;
 const CATACLYSM_SCATTER_SCORCH_SPAN = 240; // +/- px around the true impact x
 
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" tier-3 skill-4 spectacles — each MUST clearly
+// OUT-SPECTACLE its own class's tier-2 ultimate above (owner spec). All three
+// reuse the SAME mechanisms/pools the tier-2 ultimates already do (field-
+// scatter scheduling, rain-arrow tracking, meteor tracking) rather than
+// inventing new ones — see each cast handler's doc comment.
+// ---------------------------------------------------------------------------
+
+// ---- sword: SKYFALL BLADE ("sword_skyfall") --------------------------------
+// A field-wide (r500 > quake's r460) lightning-sword strike: the biggest
+// shake in the sword kit, several instant lightning bolts dropping from the
+// sky at scattered field positions (not just the caster's feet, since
+// `strike` resolves its AoE damage instantly with no projectile to wait on),
+// plus a real TIME-FREEZE beat (`timeDirector.ts`'s `FREEZE_SWORD_SKYFALL`) —
+// the only tier-3 skill-4 beat that stops SIM time outright rather than just
+// camera/shake juice.
+const SKYFALL_SHAKE = 20; // above quake's 15 — biggest shake in the sword kit
+const SKYFALL_RING_R1 = 500; // matches SKILLS.sword_skyfall.radius
+const SKYFALL_RING_DURATION = 0.65;
+const SKYFALL_CRACK_RADIUS = 130; // bigger than quake's 90
+const SKYFALL_BOLT_COUNT = 5; // lightning bolts scattered across the field
+const SKYFALL_BOLT_SPAN = 210; // +/- px per side from the caster
+const SKYFALL_BOLT_HEIGHT = 260; // sky-to-ground drop height
+/** Extra scatter beats beyond quake's own `QUAKE_SCATTER_COUNT` — a wider,
+ * bigger field-scatter selling the r500 reach past quake's r460. */
+const SKYFALL_SCATTER_EXTRA = 2;
+const SKYFALL_SCATTER_SPAN_MULT = 1.25;
+
+// ---- archer: STORM ("archer_storm") ----------------------------------------
+// A SUSTAINED ~4s storm: a green-tinted sky-darken + an arrow-swarm
+// silhouette band sweeping the top of the sky (both held for the whole
+// storm), 20 rain-arrow drops whose ground-stuck decals linger 4-5s (vs the
+// signature's 0.6s default) so the field visibly bristles with arrows by the
+// finale — which fires the instant the LAST tracked drop lands: a big
+// field-wide ring + closing shake + every ground-stuck arrow glinting then
+// fading together (see `onStormFinale()`).
+const STORM_CAST_SHAKE = 6; // modest at cast — the spectacle builds over the storm
+const STORM_SKY_ALPHA = 0.3;
+const STORM_SKY_HOLD = 3.7; // real seconds, matches the ~4s drop spread
+const STORM_SWARM_COUNT = 7;
+const STORM_SWARM_Y = 26; // near the top of the WORLD_HEIGHT=300 sky band
+const STORM_GROUND_ARROW_LIFE = 4.5; // vs the signature/barrage default 0.6s
+const STORM_FINALE_SHAKE = 13; // above barrage's 11 cast / 4 land shakes
+const STORM_FINALE_RING_R1 = 320; // bigger than barrage's 30 landing ring
+const STORM_FINALE_RING_DURATION = 0.65;
+const STORM_FINALE_PARTICLE_COUNT = 22;
+const STORM_FINALE_FADE_DURATION = 0.55; // every ground arrow glints then fades over this
+
+// ---- mage: APOCALYPSE ("mage_apocalypse") ----------------------------------
+// An 8-meteor volley reading as world-ending: the sky-darken HOLDS much
+// longer + darker than cataclysm's brief pulse, and each of the 8 landings
+// gets its own (smaller than cataclysm's single big) impact beat — repeated
+// re-triggers over the volley's landing window read as SUSTAINED devastation
+// rather than one flash.
+const APOCALYPSE_SKY_ALPHA = 0.56; // darker than cataclysm's 0.42
+const APOCALYPSE_SKY_HOLD = 2.6; // vs cataclysm's fixed 0.4
+const APOCALYPSE_IMPACT_SHAKE = 9; // per-meteor; retriggered per landing (max policy)
+const APOCALYPSE_RING_R1 = 130;
+const APOCALYPSE_RUNE_RADIUS = METEOR_RUNE_RADIUS * 1.3;
+
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" boss-variety MECHANIC telegraphs (charge/summon/
+// hazard, maps 4-6) — render follow-up for the events introduced in 993c315
+// (see `engine/state/events.ts`'s own doc comment; the engine side already
+// shipped, this file was the "unhandled kind -> default no-op" gap). Telegraph
+// colors stay the UNIVERSAL `PALETTE.warn` (the same "red = danger" language
+// as `bossSlamTelegraph`/`bossView.ts`'s telegraph ring) with a per-map BOSS
+// TINT ACCENT (`BOSS_COLORS[mapId].crown`, resolved via `zoneAt(state.location)`
+// — same plumbing convention as `bossView.ts`'s own `ctx.mapId`) layered on
+// top, so each mechanic still reads as "that boss's own attack". Every beat
+// reuses an EXISTING pool (rings/flashLines/particles/runeGlyphs) — the one
+// new primitive is `hazardBand.ts`'s field-wide warn overlay, which has no
+// existing single-shape effect to repurpose (same reasoning as
+// `skyDarken.ts`/`arenaFlash.ts` each earning their own reusable shape).
+// ---------------------------------------------------------------------------
+
+// ---- CHARGE (map4 s20, ice-tundra) -----------------------------------------
+/** Low, ground-hugging streak from the boss toward the locked dash target —
+ * a "look out, it's coming from there" read distinct from the boss's own
+ * body (which stays readable, unobscured). */
+const CHARGE_STREAK_Y = GROUND_Y - 14;
+const CHARGE_STREAK_WIDTH = 3;
+const CHARGE_STREAK_ALPHA = 0.55;
+/** Boss-side windup flash — a small tightening ring at the boss's own
+ * position, echoing `bossSlamTelegraph`'s ring but tighter/faster (a dash
+ * windup is quicker than a slam). */
+const CHARGE_WINDUP_RING_R0 = 8;
+const CHARGE_WINDUP_RING_R1 = 34;
+const CHARGE_HIT_SHAKE_CONNECTED = 9;
+const CHARGE_HIT_SHAKE_WHIFF = 4;
+const CHARGE_HIT_RING_R1_CONNECTED = 80;
+const CHARGE_HIT_RING_R1_WHIFF = 42;
+const CHARGE_HIT_PARTICLE_COUNT_CONNECTED = 16;
+const CHARGE_HIT_PARTICLE_COUNT_WHIFF = 7;
+
+// ---- SUMMON (map5 s25, desert-ruins) ---------------------------------------
+/** A brief arcane glyph pulse at the boss (reuses the mage meteor's rune-
+ * glyph shape/pool — a "calling forth" read fits the same vocabulary) + a
+ * small spawn puff at each add's own arrival point (computed from the SAME
+ * `CONFIG.bossBehavior.summon.spawnSpacing` the engine used to place them —
+ * no new event field needed). */
+const SUMMON_GLYPH_RADIUS = 42;
+const SUMMON_GLYPH_LIFE = 0.55;
+const SUMMON_PUFF_PARTICLE_COUNT = 6;
+
+// ---- FIELD HAZARD (map6 s30, hell-city) ------------------------------------
+/** Warn window uses `hazardBand.ts`'s pulsing ground band/edge glow, held for
+ * the engine's own telegraph duration (`CONFIG.bossBehavior.hazard.telegraph`)
+ * so the read resolves right as the first strike tick lands. Each strike tick
+ * (fires ~3-4x across the 1s strike window) gets its own modest re-punch
+ * (shake + a quick arena flash + a small burst at the boss) — NOT the big
+ * one-shot beats above, since this one repeats. */
+const HAZARD_WARN_PEAK_ALPHA = 0.4;
+const HAZARD_STRIKE_SHAKE = 6;
+const HAZARD_STRIKE_FLASH_ALPHA = 0.2;
+const HAZARD_STRIKE_PARTICLE_COUNT = 10;
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -473,10 +601,19 @@ interface KnockbackEntry {
 }
 
 interface PendingMeteor {
+  /** M7.9: tracked by projectile id (not just `tx` proximity) so several
+   * concurrent APOCALYPSE drops with nearby target x's can't be confused
+   * with one another — the signature/cataclysm single-meteor case still
+   * works fine keyed this way too. */
+  id: number;
   tx: number;
-  /** True for `mage_cataclysm` — resolves the bigger ultimate impact beat
-   * instead of the signature meteor's plain scorch-on-landing. */
+  /** True for `mage_cataclysm`/`mage_apocalypse` — resolves a bigger-than-
+   * signature impact beat instead of the plain scorch-on-landing. */
   isUltimate: boolean;
+  /** True ONLY for `mage_apocalypse` (M7.9 tier-3 skill-4) — routes to the
+   * per-meteor `onApocalypseMeteorImpact()` beat instead of cataclysm's
+   * single big `onCataclysmImpact()`. */
+  isApocalypse?: boolean;
 }
 
 /** One in-flight ARROW RAIN drop being tracked from cast to landing — `id`
@@ -486,18 +623,26 @@ interface PendingRainArrow {
   id: number;
   tx: number;
   ty: number;
-  /** True for `archer_barrage` — a bigger landing pop than the signature
-   * rain's small dirt/feather puff. */
+  /** True for `archer_barrage`/`archer_storm` — a bigger landing dirt/feather
+   * puff than the signature rain's small one. */
   big: boolean;
+  /** True ONLY for `archer_storm` (M7.9 tier-3 skill-4) — routes its landing
+   * decal through the much-longer `STORM_GROUND_ARROW_LIFE` and counts down
+   * `stormArrowsRemaining` toward the finale beat instead of BARRAGE's
+   * per-landing ring/shake. */
+  isStorm?: boolean;
 }
 
-/** One scheduled field-wide beat (M7.7 quake ultimate) — a ground crack +
- * dust burst fired `t` real seconds after cast, at a fixed `x`, so the
- * shockwave reads as spreading across the field over time rather than
- * everything popping in at once. Capped small (`QUAKE_SCATTER_COUNT`). */
+/** One scheduled field-wide beat (M7.7 quake ultimate, M7.9 skyfall) — a
+ * ground crack + dust burst fired `t` real seconds after cast, at a fixed
+ * `x`, so the shockwave reads as spreading across the field over time rather
+ * than everything popping in at once. Capped small (`QUAKE_SCATTER_COUNT`). */
 interface PendingFieldFx {
   t: number;
   x: number;
+  /** M7.9: a bigger scatter beat for the SKYFALL ultimate (vs quake's plain
+   * scatter) — a larger crack/dust/ring at this scheduled point. */
+  big?: boolean;
 }
 
 export class FxController {
@@ -575,9 +720,24 @@ export class FxController {
   // bars for legibility on a busy 21-mob field (the readability guard).
   private readonly groundCracks: GroundCrackPool;
   private readonly curtainStreaks: CurtainSweepPool;
-  /** Full-bleed sky-darken overlay for the CATACLYSM ultimate — same "one
-   * shared shape, topmost" convention as `meteorSky`/`flash` below. */
+  /** Full-bleed sky-darken overlay for the CATACLYSM/APOCALYPSE ultimates —
+   * same "one shared shape, topmost" convention as `meteorSky`/`flash` below. */
   private readonly skyDarken: SkyDarkenOverlay;
+  /** M7.9 boss-variety FIELD HAZARD warn overlay (map6) — see the knobs block
+   * above and `fx/hazardBand.ts`'s own doc comment. */
+  private readonly hazardBand: HazardBandOverlay;
+
+  // ---- M7.9 "Grand Expansion" tier-3 skill-4 additions ---------------------
+  /** STORM's arrow-swarm silhouette band — lives alongside `skyDarken` as the
+   * "swarm" half of the same sustained sky event (see `onArcherStormCast()`). */
+  private readonly arrowSwarm: ArrowSwarmPool;
+  /** Countdown toward the STORM finale beat (`onStormFinale()`) — incremented
+   * once per tracked drop at cast time, decremented as each lands (see
+   * `updateRainArrowTracking()`). Deliberately a flat counter rather than a
+   * per-batch id: an overlapping double-cast (3x speed) just merges into one
+   * counter and fires one finale once BOTH batches finish landing — a
+   * render-only simplification, never a correctness concern. */
+  private stormArrowsRemaining = 0;
 
   // ---- M7.8 "Manual Play" command feedback ---------------------------------
   // Continuous per-frame read of `state.heroes[0].command` (same convention
@@ -675,30 +835,43 @@ export class FxController {
     );
 
     this.corpseEcho = new CorpseEchoPool(this.corpseLayer);
-    this.scorches = new ScorchPool(this.corpseLayer);
+    // Bumped 6->12 (M7.9): APOCALYPSE's 8-meteor volley + a concurrent
+    // signature/cataclysm scorch shouldn't self-evict mid-volley.
+    this.scorches = new ScorchPool(this.corpseLayer, 12);
     this.portals = new PortalPool(this.corpseLayer);
     this.armorShards = new ArmorShardPool(this.corpseLayer);
     this.rainShadows = new RainShadowPool(this.corpseLayer);
     this.groundArrows = new GroundArrowPool(this.corpseLayer);
-    this.groundCracks = new GroundCrackPool(this.corpseLayer);
+    // Bumped 8->14 (M7.9): SKYFALL's own bigger scatter (`SKYFALL_SCATTER_EXTRA`
+    // on top of quake's own count) needs a little more headroom than quake alone.
+    this.groundCracks = new GroundCrackPool(this.corpseLayer, 14);
     this.weaponTrail = new WeaponTrailController(this.trailLayer);
     this.tracers = new TracerPool(this.trailLayer);
-    this.curtainStreaks = new CurtainSweepPool(this.trailLayer);
+    // Bumped 24->40 (M7.9): STORM's 20 concurrent falling-curtain streaks
+    // (one per drop) need more headroom than BARRAGE's 13 alone did.
+    this.curtainStreaks = new CurtainSweepPool(this.trailLayer, 40);
     this.crescents = new CrescentPool(this.heroFxLayer);
     this.ghostBlades = new GhostBladePool(this.heroFxLayer);
-    this.flashLines = new FlashLinePool(this.heroFxLayer);
-    this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer);
+    // Bumped 8->24 (M7.9): SKYFALL's scattered lightning bolts (2 strokes
+    // each) share this pool with the archer's volley-launch streaks/
+    // zone-whoosh/gate-glow beats — more concurrent users need more slots.
+    this.flashLines = new FlashLinePool(this.heroFxLayer, 24);
+    // Bumped 4->12 (M7.9): APOCALYPSE's 8 concurrent ground rune glyphs (plus
+    // the mage's per-orb cast glyph) need far more than the old "a cast
+    // glyph or two plus one meteor rune" headroom.
+    this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer, 12);
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
+    this.arrowSwarm = new ArrowSwarmPool(this.heroFxLayer);
     this.travelPortal = new TravelPortalController(this.heroFxLayer);
     // Manual play (M7.8): the persistent target-lock reticle lives in the
     // rings layer (same z-order family as the transient lock-on pulse below).
     this.targetLock = new TargetLockReticle(this.ringsLayer);
-    // Ring pool cap bumped 12->24 (M7.7): the BARRAGE ultimate's 13 landing
-    // pops (each spawning a ring) can now overlap with unrelated concurrent
-    // rings (mobAggroed/itemDrop/etc.) on a busy 21-mob field.
-    this.rings = new RingPool(this.ringsLayer, 24);
+    // Ring pool cap bumped 12->24 (M7.7, BARRAGE) -> 32 (M7.9: SKYFALL's
+    // scatter beats + STORM's finale + APOCALYPSE's 8 per-meteor impact
+    // rings can now overlap with unrelated concurrent rings on a busy field).
+    this.rings = new RingPool(this.ringsLayer, 32);
     this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
     this.particles = new ParticlePool(this.particlesLayer);
@@ -711,8 +884,15 @@ export class FxController {
     this.flash = new ArenaFlash(WORLD_WIDTH, WORLD_HEIGHT);
     this.meteorSky = new MeteorSkyFlash(WORLD_WIDTH);
     this.skyDarken = new SkyDarkenOverlay(WORLD_WIDTH, WORLD_HEIGHT);
+    this.hazardBand = new HazardBandOverlay(WORLD_WIDTH, WORLD_HEIGHT);
     this.impactFilters = new ImpactFilterController(world);
-    fxContainer.addChild(this.bossEcho.view, this.meteorSky.view, this.skyDarken.view, this.flash.view);
+    fxContainer.addChild(
+      this.bossEcho.view,
+      this.meteorSky.view,
+      this.skyDarken.view,
+      this.hazardBand.view,
+      this.flash.view,
+    );
   }
 
   get shakeOffset(): { x: number; y: number } {
@@ -810,6 +990,21 @@ export class FxController {
           break;
         case "bossEnraged":
           this.flash.trigger(PALETTE.enrageAura, 0.28);
+          break;
+        case "bossChargeTelegraph":
+          this.onBossChargeTelegraph(ev, state);
+          break;
+        case "bossChargeHit":
+          this.onBossChargeHit(ev);
+          break;
+        case "bossSummon":
+          this.onBossSummon(ev, state);
+          break;
+        case "bossHazardWarn":
+          this.onBossHazardWarn(ev, state);
+          break;
+        case "bossHazardStrike":
+          this.onBossHazardStrike(ev);
           break;
         case "bossDefeated":
           this.onBossDefeated(ev);
@@ -921,6 +1116,7 @@ export class FxController {
     this.groundCracks.update(dt);
     this.curtainStreaks.update(dt);
     this.skyDarken.update(dt);
+    this.hazardBand.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
     this.levelUpBursts.update(dt);
@@ -949,6 +1145,7 @@ export class FxController {
     this.updateGearFx(dt, state);
     this.updateTargetLock(dt, state);
     this.travelPortal.update(dt);
+    this.arrowSwarm.update(dt);
   }
 
   destroy(): void {
@@ -971,9 +1168,11 @@ export class FxController {
     this.runeGlyphs.destroy();
     this.meteorSky.destroy();
     this.skyDarken.destroy();
+    this.hazardBand.destroy();
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
+    this.arrowSwarm.destroy();
     this.travelPortal.destroy();
     this.impactFilters.destroy();
     this.rings.destroy();
@@ -1477,6 +1676,9 @@ export class FxController {
       case "sword_quake":
         this.onSwordQuakeCast(x);
         break;
+      case "sword_skyfall":
+        this.onSwordSkyfallCast(x);
+        break;
       case "archer_rain":
         this.onArcherRainCast(x, colors.light, state, false);
         break;
@@ -1486,6 +1688,9 @@ export class FxController {
       case "archer_barrage":
         this.onArcherRainCast(x, colors.light, state, true);
         break;
+      case "archer_storm":
+        this.onArcherStormCast(x, colors.light, state);
+        break;
       case "mage_meteor":
         this.onMageMeteorCast(x, colors.light, state, false);
         break;
@@ -1494,6 +1699,9 @@ export class FxController {
         break;
       case "mage_cataclysm":
         this.onMageMeteorCast(x, colors.light, state, true);
+        break;
+      case "mage_apocalypse":
+        this.onMageApocalypseCast(x, state);
         break;
       default:
         break; // unknown skill id — no fx beat rather than guessing wrong
@@ -1648,38 +1856,132 @@ export class FxController {
     }
   }
 
-  /** Advances the quake ultimate's scheduled scatter beats (ground crack +
-   * dust burst + a small ring) queued by `onSwordQuakeCast()` — same
-   * "small array, real-time countdown, fire-then-remove" shape as
-   * `updateBossDeathStages()`. */
+  /** Swordsman tier-3 skill-4 (SKYFALL BLADE, "sword_skyfall", M7.9 "Grand
+   * Expansion") — a field-wide (r500 > quake's r460) lightning-sword strike:
+   * the biggest shake in the sword kit, several instant lightning bolts
+   * dropping from the sky at SCATTERED field positions (not just the
+   * caster's feet — `strike` resolves its AoE damage instantly, so there is
+   * no separate impact moment to wait for, same as quake), a bigger ground
+   * crack at the caster's own feet, and the SAME scatter-scheduling
+   * mechanism `onSwordQuakeCast()` uses (`pendingFieldFx`, now generalized
+   * with a `big` flag for a bigger scatter beat — see
+   * `updatePendingFieldFx()`) — plus a real TIME-FREEZE beat
+   * (`timeDirector.ts`'s `FREEZE_SWORD_SKYFALL`, wired off this same
+   * `skillCast` event) that quake never had, selling "clearly bigger than
+   * quake" per the owner's out-spectacle spec. */
+  private onSwordSkyfallCast(x: number): void {
+    this.punch.trigger("swordSkyfall", x);
+    this.shake.trigger(SKYFALL_SHAKE);
+    this.impactFilters.triggerShockwave(x, GROUND_Y);
+
+    this.rings.spawn({
+      x,
+      y: GROUND_Y,
+      r0: 30,
+      r1: SKYFALL_RING_R1,
+      duration: SKYFALL_RING_DURATION,
+      width: 7,
+      color: PALETTE.swordLightningGlow,
+    });
+    this.groundCracks.spawn({
+      x,
+      y: GROUND_Y,
+      radius: SKYFALL_CRACK_RADIUS,
+      spokes: 10,
+      life: 0.8,
+      darkColor: PALETTE.swordCrackDark,
+      glowColor: PALETTE.swordLightningGlow,
+    });
+    burst(this.particles, x, GROUND_Y - 6, QUAKE_DUST_PARTICLE_COUNT + 4, PALETTE.muted, {
+      speed: 140,
+      life: 0.5,
+      radius: 4,
+    });
+
+    // Scattered lightning bolts dropping from the sky at field positions —
+    // a glow underlayer (thicker, dimmer) + a bright white-hot core on top,
+    // both flat/solid on the default blend, never additive (footgun 10).
+    for (let i = 0; i < SKYFALL_BOLT_COUNT; i++) {
+      const frac = SKYFALL_BOLT_COUNT <= 1 ? 0 : i / (SKYFALL_BOLT_COUNT - 1) - 0.5;
+      const bx = clamp(x + frac * SKYFALL_BOLT_SPAN * 2, 0, WORLD_WIDTH);
+      const topY = GROUND_Y - SKYFALL_BOLT_HEIGHT;
+      this.flashLines.spawn({
+        x1: bx,
+        y1: topY,
+        x2: bx + (Math.random() - 0.5) * 14,
+        y2: GROUND_Y,
+        color: PALETTE.swordLightningGlow,
+        width: 5,
+        life: 0.22,
+        alpha: 0.55,
+      });
+      this.flashLines.spawn({
+        x1: bx,
+        y1: topY,
+        x2: bx + (Math.random() - 0.5) * 6,
+        y2: GROUND_Y,
+        color: PALETTE.swordLightningCore,
+        width: 2,
+        life: 0.18,
+        alpha: 0.9,
+      });
+    }
+
+    // Reuse quake's own field-scatter scheduling, just wider/bigger (`big`
+    // flag) and with a couple more scatter points — sells the r500 reach
+    // past quake's r460 without a single dominating stroked circle.
+    this.pendingFieldFx.length = 0;
+    const scatterCount = QUAKE_SCATTER_COUNT + SKYFALL_SCATTER_EXTRA;
+    for (let i = 0; i < scatterCount; i++) {
+      const side = i % 2 === 0 ? 1 : -1;
+      const frac = (Math.floor(i / 2) + 1) / Math.ceil(scatterCount / 2);
+      const fx = clamp(
+        x + side * frac * QUAKE_SCATTER_SPAN * SKYFALL_SCATTER_SPAN_MULT,
+        0,
+        WORLD_WIDTH,
+      );
+      this.pendingFieldFx.push({ t: frac * QUAKE_SCATTER_DURATION, x: fx, big: true });
+    }
+  }
+
+  /** Advances the quake/skyfall ultimates' scheduled scatter beats (ground
+   * crack + dust burst + a small ring) queued by `onSwordQuakeCast()`/
+   * `onSwordSkyfallCast()` — same "small array, real-time countdown,
+   * fire-then-remove" shape as `updateBossDeathStages()`. SKYFALL's entries
+   * (`entry.big`) get a bigger/brighter version of the same beat (M7.9). */
   private updatePendingFieldFx(dt: number): void {
     if (!this.pendingFieldFx.length) return;
     for (let i = this.pendingFieldFx.length - 1; i >= 0; i--) {
       const entry = this.pendingFieldFx[i];
       entry.t -= dt;
       if (entry.t <= 0) {
+        const bigMult = entry.big ? 1.4 : 1;
+        const glow = entry.big ? PALETTE.swordLightningGlow : PALETTE.swordEmber;
         this.groundCracks.spawn({
           x: entry.x,
           y: GROUND_Y,
-          radius: QUAKE_CRACK_SCATTER_RADIUS * 0.8,
-          spokes: 5,
-          life: 0.5,
+          radius: QUAKE_CRACK_SCATTER_RADIUS * 0.8 * bigMult,
+          spokes: entry.big ? 7 : 5,
+          life: entry.big ? 0.65 : 0.5,
           darkColor: PALETTE.swordCrackDark,
-          glowColor: PALETTE.swordEmber,
+          glowColor: glow,
         });
-        burst(this.particles, entry.x, GROUND_Y - 6, QUAKE_DUST_PARTICLE_COUNT, PALETTE.muted, {
-          speed: 100,
-          life: 0.4,
-          radius: 3,
-        });
+        burst(
+          this.particles,
+          entry.x,
+          GROUND_Y - 6,
+          Math.round(QUAKE_DUST_PARTICLE_COUNT * bigMult),
+          PALETTE.muted,
+          { speed: entry.big ? 130 : 100, life: entry.big ? 0.5 : 0.4, radius: entry.big ? 4 : 3 },
+        );
         this.rings.spawn({
           x: entry.x,
           y: GROUND_Y,
           r0: 8,
-          r1: 60,
-          duration: 0.35,
-          width: 3,
-          color: PALETTE.swordEmber,
+          r1: entry.big ? 90 : 60,
+          duration: entry.big ? 0.45 : 0.35,
+          width: entry.big ? 4 : 3,
+          color: glow,
         });
         this.pendingFieldFx.splice(i, 1);
       }
@@ -1753,30 +2055,38 @@ export class FxController {
     }
   }
 
-  /** Continuous per-frame check of the ARROW RAIN/BARRAGE drops queued by
-   * `onArcherRainCast()`: the frame a tracked drop's id disappears from
-   * `state.projectiles` (i.e. it just resolved on the ground — same
-   * "vanished this frame" detection `updateMeteorTracking()` uses), fires
-   * the landing puff + ground-stuck-arrow decal. */
+  /** Continuous per-frame check of the ARROW RAIN/BARRAGE/STORM drops queued
+   * by `onArcherRainCast()`/`onArcherStormCast()`: the frame a tracked drop's
+   * id disappears from `state.projectiles` (i.e. it just resolved on the
+   * ground — same "vanished this frame" detection `updateMeteorTracking()`
+   * uses), fires the landing puff + ground-stuck-arrow decal, and — for a
+   * STORM drop — counts down toward the finale beat (`onStormFinale()`). */
   private updateRainArrowTracking(state: GameState): void {
     if (!this.pendingRainArrows.length) return;
     for (let i = this.pendingRainArrows.length - 1; i >= 0; i--) {
       const entry = this.pendingRainArrows[i];
       const stillFalling = state.projectiles.some((p) => p.id === entry.id);
       if (!stillFalling) {
-        this.onRainArrowLanded(entry.tx, entry.ty, entry.big);
+        this.onRainArrowLanded(entry.tx, entry.ty, entry.big, entry.isStorm);
         this.pendingRainArrows.splice(i, 1);
+        if (entry.isStorm) {
+          this.stormArrowsRemaining = Math.max(0, this.stormArrowsRemaining - 1);
+          if (this.stormArrowsRemaining === 0) this.onStormFinale();
+        }
       }
     }
   }
 
-  /** One ARROW RAIN/BARRAGE drop resolving: a small dirt + feather puff (NOT
-   * the bigger AOE impact burst class — this is a hail of small arrows, not
-   * a nuke) plus a brief arrow-stuck-in-ground decal. BARRAGE (`big`) gets a
-   * bigger burst + a small emerald impact ring + a mild re-punch shake, so
-   * the ultimate's blanket reads as staggered impacts ACROSS the field over
-   * real time, not just its one cast-time announcement. */
-  private onRainArrowLanded(x: number, y: number, big: boolean): void {
+  /** One ARROW RAIN/BARRAGE/STORM drop resolving: a small dirt + feather puff
+   * (NOT the bigger AOE impact burst class — this is a hail of small arrows,
+   * not a nuke) plus a ground-stuck-arrow decal. BARRAGE (`big`, not
+   * `isStorm`) gets a bigger burst + a small emerald impact ring + a mild
+   * re-punch shake per landing; STORM (`isStorm`) gets the same bigger burst
+   * but SKIPS the per-landing ring/shake (20 of those would be noisy) —
+   * instead its decal lingers much longer (`STORM_GROUND_ARROW_LIFE`) so the
+   * field bristles with arrows by the time `onStormFinale()` fires the one
+   * big field-wide beat. */
+  private onRainArrowLanded(x: number, y: number, big: boolean, isStorm = false): void {
     burst(this.particles, x, y, big ? RAIN_LAND_DIRT_COUNT + 2 : RAIN_LAND_DIRT_COUNT, PALETTE.muted, {
       speed: big ? 75 : 55,
       life: big ? 0.28 : 0.22,
@@ -1790,8 +2100,8 @@ export class FxController {
       HERO_COLORS.archer.light,
       { speed: big ? 55 : 35, life: big ? 0.38 : 0.3, radius: 1.8 },
     );
-    this.groundArrows.spawn(x, y, HERO_COLORS.archer.light);
-    if (big) {
+    this.groundArrows.spawn(x, y, HERO_COLORS.archer.light, isStorm ? STORM_GROUND_ARROW_LIFE : undefined);
+    if (big && !isStorm) {
       this.rings.spawn({
         x,
         y,
@@ -1803,6 +2113,96 @@ export class FxController {
       });
       this.shake.trigger(BARRAGE_LAND_SHAKE);
     }
+  }
+
+  /** Archer tier-3 skill-4 (STORM, "archer_storm", M7.9 "Grand Expansion") —
+   * a SUSTAINED ~4s storm: shares the volley-launch cast cue with the
+   * signature/barrage (`onArcherRainCast()`), but adds a green-tinted
+   * sky-darken + an arrow-swarm silhouette band (`arrowSwarm`), both HELD for
+   * the whole storm (vs cataclysm's brief pulse), and tracks its 20 drops as
+   * STORM-flagged entries so `updateRainArrowTracking()` fires
+   * `onStormFinale()` the instant the last one lands. */
+  private onArcherStormCast(x: number, color: number, state: GameState): void {
+    // Bow flash + volley launch streaks — same cast-time cue as the
+    // signature/barrage.
+    this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 12, duration: 0.16, width: 2.4, color });
+    burst(this.particles, x, HERO_MID_Y, 6, color, { speed: 65, life: 0.22, radius: 2 });
+    for (let i = 0; i < RAIN_LAUNCH_STREAK_COUNT + 2; i++) {
+      const jitter = (Math.random() - 0.5) * RAIN_LAUNCH_STREAK_SPREAD;
+      const height = RAIN_LAUNCH_STREAK_HEIGHT * (0.8 + Math.random() * 0.6);
+      this.flashLines.spawn({
+        x1: x + jitter,
+        y1: HERO_MID_Y,
+        x2: x + jitter * 1.3,
+        y2: HERO_MID_Y - height,
+        color,
+        width: 1.8,
+        life: 0.18,
+        alpha: 0.65,
+      });
+    }
+
+    this.punch.trigger("archerStorm", x);
+    this.shake.trigger(STORM_CAST_SHAKE);
+
+    // Archer-flavored sky event: a green-tinted storm cast sustained for the
+    // whole ~4s drop window (vs cataclysm's brief mage-violet pulse), plus a
+    // dark arrow-swarm silhouette band sweeping the top of the sky.
+    this.skyDarken.trigger(PALETTE.archerStormSky, STORM_SKY_ALPHA, STORM_SKY_HOLD);
+    this.arrowSwarm.spawnBand(
+      x,
+      STORM_SWARM_COUNT,
+      STORM_SWARM_Y,
+      PALETTE.archerSwarmDark,
+      STORM_SKY_HOLD + 0.6,
+    );
+
+    const drops = state.projectiles.filter((p) => p.team === "hero" && p.kind === "rainArrow");
+    for (const p of drops) {
+      if (this.pendingRainArrows.length >= MAX_PENDING_RAIN_ARROWS) break;
+      const fallDist = Math.hypot(p.tx - p.x, p.ty - p.y);
+      const fallTime = Math.max(0.1, fallDist / Math.max(1, p.speed));
+      this.rainShadows.trySpawn({ x: p.tx, y: p.ty, life: fallTime, color: PALETTE.archerEmerald });
+      this.curtainStreaks.spawn({
+        x: p.tx,
+        topY: HERO_TOP_Y - 50,
+        bottomY: p.ty,
+        life: fallTime,
+        color: PALETTE.archerEmerald,
+        glintColor: PALETTE.archerGoldGlint,
+        width: BARRAGE_CURTAIN_WIDTH,
+        alpha: BARRAGE_CURTAIN_ALPHA,
+      });
+      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: true, isStorm: true });
+      this.stormArrowsRemaining++;
+    }
+  }
+
+  /** STORM's finale beat (M7.9): fires the instant `stormArrowsRemaining`
+   * drains to 0 — one big field-wide ring + a closing shake at the arena
+   * center, plus every still-ground-stuck arrow glinting then fading
+   * together (`GroundArrowPool.finaleGlintAndFadeAll()`) instead of each
+   * fading independently, reading as "the whole battlefield settling at
+   * once". */
+  private onStormFinale(): void {
+    const cx = WORLD_WIDTH / 2;
+    this.punch.trigger("archerStorm", cx);
+    this.shake.trigger(STORM_FINALE_SHAKE);
+    this.rings.spawn({
+      x: cx,
+      y: GROUND_Y - 20,
+      r0: 40,
+      r1: STORM_FINALE_RING_R1,
+      duration: STORM_FINALE_RING_DURATION,
+      width: 6,
+      color: PALETTE.archerEmerald,
+    });
+    burst(this.particles, cx, GROUND_Y - 20, STORM_FINALE_PARTICLE_COUNT, PALETTE.archerGoldGlint, {
+      speed: 170,
+      life: 0.5,
+      radius: 3,
+    });
+    this.groundArrows.finaleGlintAndFadeAll(STORM_FINALE_FADE_DURATION);
   }
 
   /** Archer UTILITY (POWER SHOT, "archer_powershot") — a single high-damage
@@ -1860,7 +2260,10 @@ export class FxController {
       fadeInFrac: 0.15,
     });
     if (this.pendingMeteors.length < MAX_PENDING_METEORS) {
-      this.pendingMeteors.push({ tx, isUltimate });
+      // `meteor` is guaranteed by the cast guard (`castSkill` requires ≥1
+      // target before committing) — the `-1` fallback only matters for a
+      // render-side defensive read, never a real gameplay path.
+      this.pendingMeteors.push({ id: meteor ? meteor.id : -1, tx, isUltimate });
     }
 
     // Cast flourish at the staff.
@@ -1869,6 +2272,47 @@ export class FxController {
       life: 0.3,
       radius: 2.5,
     });
+  }
+
+  /** Mage tier-3 skill-4 (APOCALYPSE, "mage_apocalypse", M7.9 "Grand
+   * Expansion") — an 8-meteor volley reading as world-ending: the sky-darken
+   * HOLDS much longer + darker than cataclysm's brief pulse (still the
+   * mage's own violet/azure sky-event language), and every one of the 8
+   * concurrently-tracked drops gets its own ground rune + (on landing, via
+   * `updateMeteorTracking()`) its own smaller impact beat
+   * (`onApocalypseMeteorImpact()`) — repeated re-triggers across the
+   * volley's staggered landing window read as SUSTAINED devastation rather
+   * than cataclysm's one single flash. Tracked by projectile id (not `tx`
+   * proximity — several drops can share nearby target x's here). */
+  private onMageApocalypseCast(x: number, state: GameState): void {
+    const meteors = state.projectiles.filter((p) => p.team === "hero" && p.kind === "meteor");
+    const alreadyTracked = new Set(this.pendingMeteors.map((m) => m.id));
+
+    this.meteorSky.trigger(PALETTE.mageAzure, 0.4);
+    this.skyDarken.trigger(PALETTE.mageVoidTint, APOCALYPSE_SKY_ALPHA, APOCALYPSE_SKY_HOLD);
+
+    const fallTime = estimateMeteorFallTime();
+    for (const m of meteors) {
+      if (alreadyTracked.has(m.id)) continue;
+      if (this.pendingMeteors.length >= MAX_PENDING_METEORS) break;
+      this.runeGlyphs.spawn({
+        x: m.tx,
+        y: GROUND_Y,
+        radius: APOCALYPSE_RUNE_RADIUS,
+        ticks: METEOR_RUNE_TICKS + 2,
+        color: PALETTE.mageAzure,
+        life: fallTime,
+        rotationSpeed: 2.4,
+        alpha: 0.5,
+        fadeInFrac: 0.15,
+      });
+      this.pendingMeteors.push({ id: m.id, tx: m.tx, isUltimate: true, isApocalypse: true });
+    }
+
+    // Cast flourish at the staff — bigger than the signature/cataclysm's,
+    // reading as "channeling the whole volley at once".
+    burst(this.particles, x, HERO_TOP_Y, 14, PALETTE.mageAzure, { speed: 55, life: 0.32, radius: 2.8 });
+    this.punch.trigger("mageApocalypse", x);
   }
 
   /** CATACLYSM ultimate's impact beat (M7.7, fired from `updateMeteorTracking()`
@@ -1909,6 +2353,32 @@ export class FxController {
       radius: 2.5,
       gravity: -18,
       drag: 0.5,
+    });
+  }
+
+  /** APOCALYPSE's per-meteor impact beat (M7.9, fired from
+   * `updateMeteorTracking()` the frame each tracked drop resolves) — smaller
+   * than cataclysm's single big impact, but retriggered up to 8 times across
+   * the volley's staggered landing window (`ScreenShake.trigger()`'s "max
+   * wins" policy means these don't stack additively — the READ is sustained
+   * repeated pulses, not one bigger spike). */
+  private onApocalypseMeteorImpact(tx: number): void {
+    this.shake.trigger(APOCALYPSE_IMPACT_SHAKE);
+    this.impactFilters.triggerShockwave(tx, GROUND_Y);
+    this.scorches.spawn(clamp(tx, 0, WORLD_WIDTH), GROUND_Y, PALETTE.mageAzure);
+    this.rings.spawn({
+      x: tx,
+      y: GROUND_Y,
+      r0: 14,
+      r1: APOCALYPSE_RING_R1,
+      duration: 0.4,
+      width: 4,
+      color: PALETTE.mageAzure,
+    });
+    burst(this.particles, tx, GROUND_Y - 8, 12, HERO_COLORS.mage.light, {
+      speed: 150,
+      life: 0.35,
+      radius: 3,
     });
   }
 
@@ -2297,22 +2767,25 @@ export class FxController {
   }
 
   /** Watches the in-flight mage meteors this controller is tracking (queued
-   * by `onMageMeteorCast()`) and, the frame one disappears from
-   * `state.projectiles` (i.e. it just resolved/hit the ground), spawns the
-   * glowing scorch patch at its target point (item 11) — or, for the
-   * CATACLYSM ultimate (M7.7, `entry.isUltimate`), the much bigger
-   * `onCataclysmImpact()` beat instead. The existing shockwave/impact-burst
-   * on the actual damage `hit` stays unchanged — this only adds the ground
-   * decal (+ the ultimate's extra spectacle). */
+   * by `onMageMeteorCast()`/`onMageApocalypseCast()`) and, the frame one
+   * disappears from `state.projectiles` (i.e. it just resolved/hit the
+   * ground — matched by projectile `id`, not `tx` proximity, so several
+   * concurrent APOCALYPSE drops with nearby target x's can't be confused
+   * with one another), spawns the glowing scorch patch at its target point
+   * (item 11) — or, for CATACLYSM (M7.7, `entry.isUltimate`), the bigger
+   * `onCataclysmImpact()` beat, or for APOCALYPSE (M7.9, `entry.isApocalypse`),
+   * the smaller-but-repeated `onApocalypseMeteorImpact()` beat. The existing
+   * shockwave/impact-burst on the actual damage `hit` stays unchanged — this
+   * only adds the ground decal (+ each ultimate's extra spectacle). */
   private updateMeteorTracking(state: GameState): void {
     if (!this.pendingMeteors.length) return;
     for (let i = this.pendingMeteors.length - 1; i >= 0; i--) {
       const entry = this.pendingMeteors[i];
-      const stillFalling = state.projectiles.some(
-        (p) => p.team === "hero" && p.kind === "meteor" && Math.abs(p.tx - entry.tx) < 0.5,
-      );
+      const stillFalling = state.projectiles.some((p) => p.id === entry.id);
       if (!stillFalling) {
-        if (entry.isUltimate) {
+        if (entry.isApocalypse) {
+          this.onApocalypseMeteorImpact(entry.tx);
+        } else if (entry.isUltimate) {
           this.onCataclysmImpact(entry.tx);
         } else {
           this.scorches.spawn(entry.tx, GROUND_Y, HERO_COLORS.mage.light);
@@ -2450,6 +2923,144 @@ export class FxController {
     // enrage/defeat/stage-advanced, just tinted dark instead of bright.
     this.flash.trigger(BOSS_ENTRANCE_DARK_TINT, BOSS_ENTRANCE_DARK_ALPHA);
     this.shake.trigger(BOSS_ENTRANCE_SHAKE);
+  }
+
+  /** Resolves the CURRENT boss's map-themed accent tint (`BOSS_COLORS[mapId]
+   * .crown`, same field `bossThemes.ts` uses for the idle crown/eye look) via
+   * `zoneAt(state.location)` — mirrors `bossView.ts`'s own `ctx.mapId`
+   * plumbing (render has no engine `Boss.mapId` field to read directly).
+   * Falls back to the universal `PALETTE.warn` if the map id is ever outside
+   * the configured roster (shouldn't happen — these events only fire while
+   * standing in that map's boss room — but keeps this render-only, never a
+   * crash). */
+  private resolveBossTint(state: GameState): number {
+    const mapId = zoneAt(state.location).mapId as BossMapId;
+    return BOSS_COLORS[mapId]?.crown ?? PALETTE.warn;
+  }
+
+  // ---- CHARGE (map4 s20): telegraphed dash + heavy landing hit -------------
+  /** A low ground streak (universal `PALETTE.warn`, the dominant "danger"
+   * read) from the boss toward the locked dash target, held for the whole
+   * windup, plus a tighter map-tinted windup ring right at the boss so the
+   * tell still reads as "this boss's own attack". */
+  private onBossChargeTelegraph(
+    ev: Extract<GameEvent, { type: "bossChargeTelegraph" }>,
+    state: GameState,
+  ): void {
+    const windup = CONFIG.bossBehavior.charge.telegraph;
+    this.flashLines.spawn({
+      x1: ev.x,
+      y1: CHARGE_STREAK_Y,
+      x2: ev.targetX,
+      y2: CHARGE_STREAK_Y,
+      color: PALETTE.warn,
+      width: CHARGE_STREAK_WIDTH,
+      life: windup,
+      alpha: CHARGE_STREAK_ALPHA,
+    });
+    this.rings.spawn({
+      x: ev.x,
+      y: BOSS_CY,
+      r0: CHARGE_WINDUP_RING_R0,
+      r1: CHARGE_WINDUP_RING_R1,
+      duration: windup,
+      width: 3,
+      color: this.resolveBossTint(state),
+    });
+  }
+
+  /** Impact burst + shake at the dash's landing point — bigger when it
+   * actually `connected` (a whiff still gets a smaller beat so the dash's
+   * resolution always reads, even when dodged). */
+  private onBossChargeHit(ev: Extract<GameEvent, { type: "bossChargeHit" }>): void {
+    this.shake.trigger(ev.connected ? CHARGE_HIT_SHAKE_CONNECTED : CHARGE_HIT_SHAKE_WHIFF);
+    this.punch.trigger("bossSlamLand", ev.x);
+    this.impactFilters.triggerShockwave(ev.x, GROUND_Y);
+    this.rings.spawn({
+      x: ev.x,
+      y: GROUND_Y,
+      r0: 14,
+      r1: ev.connected ? CHARGE_HIT_RING_R1_CONNECTED : CHARGE_HIT_RING_R1_WHIFF,
+      duration: 0.35,
+      width: 4,
+      color: PALETTE.warn,
+    });
+    burst(
+      this.particles,
+      ev.x,
+      GROUND_Y - 8,
+      ev.connected ? CHARGE_HIT_PARTICLE_COUNT_CONNECTED : CHARGE_HIT_PARTICLE_COUNT_WHIFF,
+      PALETTE.warn,
+      { speed: 140, life: 0.3, radius: 3 },
+    );
+  }
+
+  // ---- SUMMON (map5 s25): add-wave arrival beat -----------------------------
+  /** A brief map-tinted arcane glyph pulse at the boss (reuses the mage
+   * meteor's rune-glyph shape — "calling forth" fits the same vocabulary) +
+   * a small dust puff at each add's own arrival point. The engine's
+   * `bossSummon` event carries only `count`, not each add's x — this
+   * recomputes the SAME positions `systems/boss.ts` placed them at via the
+   * shared `CONFIG.bossBehavior.summon.spawnSpacing` constant (no new event
+   * field needed; the adds themselves are normal pooled `enemyView`s that
+   * pop in automatically). */
+  private onBossSummon(
+    ev: Extract<GameEvent, { type: "bossSummon" }>,
+    state: GameState,
+  ): void {
+    this.runeGlyphs.spawn({
+      x: ev.x,
+      y: BOSS_CY,
+      radius: SUMMON_GLYPH_RADIUS,
+      color: this.resolveBossTint(state),
+      life: SUMMON_GLYPH_LIFE,
+      fadeInFrac: 0.15,
+    });
+    const spacing = CONFIG.bossBehavior.summon.spawnSpacing;
+    for (let i = 0; i < ev.count; i++) {
+      const x = ev.x - (i + 1) * spacing;
+      burst(this.particles, x, GROUND_Y - 4, SUMMON_PUFF_PARTICLE_COUNT, PALETTE.muted, {
+        speed: 60,
+        life: 0.35,
+        radius: 3,
+      });
+    }
+  }
+
+  // ---- FIELD HAZARD (map6 s30): arena-wide warn -> repeated strike ticks ----
+  /** `hazardBand.ts`'s pulsing ground band/edge glow, held for the engine's
+   * own `hazard.telegraph` window so the read resolves right as the first
+   * strike tick lands — plus a small map-tinted echo ring at the boss, same
+   * "universal warn + boss-tint accent" split as the charge telegraph above. */
+  private onBossHazardWarn(
+    ev: Extract<GameEvent, { type: "bossHazardWarn" }>,
+    state: GameState,
+  ): void {
+    const telegraph = CONFIG.bossBehavior.hazard.telegraph;
+    this.hazardBand.trigger(PALETTE.warn, HAZARD_WARN_PEAK_ALPHA, telegraph);
+    this.rings.spawn({
+      x: ev.x,
+      y: BOSS_CY,
+      r0: 20,
+      r1: 90,
+      duration: telegraph,
+      width: 3,
+      color: this.resolveBossTint(state),
+    });
+  }
+
+  /** One arena-wide damage tick fired (repeats ~3-4x across the strike
+   * window) — a modest re-punch each time (shake + a quick flash + a small
+   * burst at the boss), deliberately smaller than the one-shot charge-hit/
+   * slam-land beats since this one repeats in quick succession. */
+  private onBossHazardStrike(ev: Extract<GameEvent, { type: "bossHazardStrike" }>): void {
+    this.shake.trigger(HAZARD_STRIKE_SHAKE);
+    this.flash.trigger(PALETTE.warn, HAZARD_STRIKE_FLASH_ALPHA);
+    burst(this.particles, ev.x, GROUND_Y - 10, HAZARD_STRIKE_PARTICLE_COUNT, PALETTE.warn, {
+      speed: 130,
+      life: 0.3,
+      radius: 3,
+    });
   }
 
   /** Best-effort "above the head" y for a hit's damage number (entities are

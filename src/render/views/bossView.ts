@@ -24,6 +24,17 @@
  * GROUND_Y-relative coordinates (exactly as the original flat code did) —
  * never pre-subtract the pivot, or the whole rig collapses toward world y≈0.
  *
+ * M7.9 "Grand Expansion" (per-boss silhouette + palette identity, 6 boss
+ * stages s5/10/15/20/25/30): the body/crown/eye colors and the crown/horn/
+ * shoulder shapes below are resolved from `bossThemes.ts` (`bossThemeForMap`,
+ * keyed by `ctx.mapId`) instead of one hardcoded look — everything else in
+ * this module (the continuous per-frame redraw, the pivoted-rig transform,
+ * telegraph/enrage tells) is UNCHANGED by that task; only WHICH shapes/colors
+ * get drawn each frame varies. Telegraph/enrage stay universal accent colors
+ * across every boss (`PALETTE.warn`/`enrageAura`) so "red = danger" reads
+ * consistently regardless of which boss is on screen — only the boss's own
+ * idle identity comes from the theme.
+ *
  * `state.boss` is set to `null` the SAME engine step `bossDefeated` fires (see
  * `engine/systems/boss.ts`), so `GameRenderer` destroys this view before any
  * "collapse forward" animation could play on it — that beat is therefore
@@ -40,6 +51,7 @@ import type { Boss } from "@/engine/entities";
 import type { GameEvent } from "@/engine/state";
 import { GROUND_Y } from "@/render/layout";
 import { PALETTE, safeRadius } from "@/render/theme";
+import { bossThemeForMap } from "@/render/views/bossThemes";
 
 const CY = GROUND_Y - 30;
 const CORE_R = 34;
@@ -99,6 +111,14 @@ export interface BossFrameContext {
   dt: number;
   /** This frame's collected engine events. */
   events: readonly GameEvent[];
+  /** The map (`CONFIG.world.maps[].id`, e.g. `"map4"`) this boss belongs to —
+   * drives `bossThemeForMap()`'s per-boss silhouette/palette (M7.9). Render
+   * has no engine `Boss.mapId` field to read (the entity itself is map-
+   * agnostic — see `engine/entities/index.ts`), so the caller resolves it via
+   * `zoneAt(state.location).mapId` (only valid while `state.boss` is set,
+   * i.e. standing in that map's boss room) and passes it through here.
+   * Optional/undefined falls back to the map1 "Cave Guardian" theme. */
+  mapId?: string;
 }
 
 export interface BossView extends Container {
@@ -248,11 +268,22 @@ export function updateBossView(view: BossView, boss: Boss, ctx: BossFrameContext
   // ---- continuous, state-driven redraws (unchanged behaviour from before
   // this rig existed — see the module doc comment). Absolute coordinates,
   // per the pivot convention documented above. ------------------------------
-  const color = boss.telegraph > 0 ? PALETTE.warn : PALETTE.boss;
+  const theme = bossThemeForMap(ctx.mapId);
+  const color = boss.telegraph > 0 ? PALETTE.warn : theme.bodyColor;
   const pulse = boss.telegraph > 0 ? 3 * Math.sin(ctx.elapsedMs / 40) : 0;
   const r = safeRadius(CORE_R + pulse);
 
   view.enrageAura.clear();
+  // Footgun (same class as `heroView.ts`'s `gearArmor`, CLAUDE.md #2's family):
+  // an empty-but-VISIBLE Graphics contributes a bounds point at its own local
+  // origin, not wherever its absent content would have been — inside a
+  // pivoted container (`bodyRoot`, pivot=(0, GROUND_Y)) that phantom local
+  // (0,0) point maps to global y≈0, silently exploding `bodyRoot.getBounds()`
+  // whenever the boss is neither enraged nor telegraphing (surfaced by the
+  // M7.9 rig tests, `__tests__/rig.test.ts`). Explicit `visible` toggle, not
+  // just `clear()`, keeps bounds meaningful with zero rendering difference
+  // (an invisible empty Graphics draws nothing either way).
+  view.enrageAura.visible = boss.enraged;
   if (boss.enraged) {
     const auraPulse = 0.18 + 0.1 * Math.sin(ctx.elapsedMs / 220);
     view.enrageAura
@@ -260,13 +291,14 @@ export function updateBossView(view: BossView, boss: Boss, ctx: BossFrameContext
       .stroke({ width: 5, color: PALETTE.enrageAura, alpha: auraPulse });
   }
 
-  // PROCEDURAL V2 (task 86d3k2nj3): crown/horns + armor-plate seams +
-  // menacing eyes, layered onto the same continuously-redrawn hexagon body
-  // (see the module doc comment for why this redraws every frame rather
-  // than build-once — it already did, before this task). Horns/eyes tint to
-  // `PALETTE.enrageAura` while enraged so the menace reads at a glance, on
-  // top of the existing body-color/aura enrage tells.
-  const menaceColor = boss.enraged ? PALETTE.enrageAura : PALETTE.bossLight;
+  // PROCEDURAL V2 (task 86d3k2nj3) + M7.9 per-boss theme: crown/horns +
+  // armor-plate seams + menacing eyes, layered onto the same continuously-
+  // redrawn hexagon body (see the module doc comment for why this redraws
+  // every frame rather than build-once — it already did, before either
+  // task). Horns/eyes tint to the UNIVERSAL `PALETTE.enrageAura` while
+  // enraged (so the menace tell reads consistently across every boss); at
+  // rest they use this boss's own `theme.crownColor`/`eyeColor` identity.
+  const menaceColor = boss.enraged ? PALETTE.enrageAura : theme.crownColor;
 
   const g = view.body;
   g.clear();
@@ -278,26 +310,21 @@ export function updateBossView(view: BossView, boss: Boss, ctx: BossFrameContext
   g.moveTo(-r * 0.4, CY + r * 0.28)
     .lineTo(r * 0.4, CY + r * 0.28)
     .stroke({ width: 2, color: 0x000000, alpha: 0.18 });
-  // Horns + a small crown spike, rising off the top of the hexagon.
-  g.poly(
-    [-r * 0.32, CY - r * 0.85, -r * 0.52, CY - r * 1.55, -r * 0.1, CY - r * 0.95],
-    true,
-  ).fill(menaceColor);
-  g.poly(
-    [r * 0.32, CY - r * 0.85, r * 0.52, CY - r * 1.55, r * 0.1, CY - r * 0.95],
-    true,
-  ).fill(menaceColor);
-  g.poly([-r * 0.1, CY - r * 0.95, r * 0.1, CY - r * 0.95, 0, CY - r * 1.3], true).fill(
-    PALETTE.bossLight,
-  );
+  // Per-boss crown/horns silhouette (M7.9 — see `bossThemes.ts`), plus this
+  // theme's optional extra flourish (shoulder plates / molten cracks).
+  theme.drawCrown(g, r, CY, menaceColor);
+  theme.drawExtra?.(g, r, CY, menaceColor);
   g.circle(0, CY, 10).fill(PALETTE.arenaSky);
-  // Menacing eyes — brighten/redden with the enrage/telegraph state.
-  const eyeColor = boss.telegraph > 0 || boss.enraged ? PALETTE.warn : PALETTE.bossLight;
+  // Menacing eyes — brighten/redden with the enrage/telegraph state, else
+  // this boss's own idle eye color.
+  const eyeColor = boss.telegraph > 0 || boss.enraged ? PALETTE.warn : theme.eyeColor;
   g.circle(-4, CY - 2, 2).fill(eyeColor);
   g.circle(4, CY - 2, 2).fill(eyeColor);
 
   const ring = view.telegraphRing;
   ring.clear();
+  // Same empty-but-visible bounds footgun as `enrageAura` above.
+  ring.visible = boss.telegraph > 0;
   if (boss.telegraph > 0) {
     const total = boss.enraged ? CONFIG.boss.telegraphEnraged : CONFIG.boss.telegraphNormal;
     const frac = total > 0 ? Math.max(0, Math.min(1, boss.telegraph / total)) : 0;

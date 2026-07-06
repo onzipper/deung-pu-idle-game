@@ -219,7 +219,10 @@ function CoreLoopCard() {
   //  - a farm zone whose NEXT zone is already unlocked → free-farm hint.
   if (world.kind === "town") {
     return (
-      <span data-onboarding-anchor="kill-progress" className="text-sm font-medium text-ddp-ink-muted">
+      <span
+        data-onboarding-anchor="kill-progress"
+        className="text-sm font-medium text-ddp-ink-muted"
+      >
         {t("zoneBoss.townHint")}
       </span>
     );
@@ -227,7 +230,10 @@ function CoreLoopCard() {
   const nextUnlocked = world.zoneIdx + 1 < (unlockedZones[world.mapId] ?? 0);
   if (nextUnlocked) {
     return (
-      <span data-onboarding-anchor="kill-progress" className="text-sm font-medium text-ddp-ink-muted">
+      <span
+        data-onboarding-anchor="kill-progress"
+        className="text-sm font-medium text-ddp-ink-muted"
+      >
         {t("zoneBoss.freeFarmHint")}
       </span>
     );

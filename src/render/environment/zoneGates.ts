@@ -17,7 +17,7 @@
 import { CONFIG } from "@/engine/config";
 import type { Zone } from "@/engine";
 
-export type GateFamily = "map1" | "map2" | "map3" | "town";
+export type GateFamily = "map1" | "map2" | "map3" | "map4" | "map5" | "map6" | "town";
 
 function mapConfigOf(mapId: string) {
   return CONFIG.world.maps.find((m) => m.id === mapId);
@@ -72,5 +72,8 @@ export function gateFamilyFor(mapId: string, isTown: boolean): GateFamily {
   if (isTown) return "town";
   if (mapId === "map2") return "map2";
   if (mapId === "map3") return "map3";
+  if (mapId === "map4") return "map4";
+  if (mapId === "map5") return "map5";
+  if (mapId === "map6") return "map6";
   return "map1";
 }

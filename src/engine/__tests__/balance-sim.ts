@@ -20,10 +20,12 @@
  */
 
 import {
+  CONFIG,
   initGameState,
   step,
   canEvolveHero,
-  isClassChangeQuestOffered,
+  isEvolutionQuestOffered,
+  tier3QuestId,
   learnedSkills,
   unlockedAutoSlotCount,
   worldNav,
@@ -187,6 +189,8 @@ interface SeedResult {
   finalLevel: number;
   finalMap: string;
   evolveStage: number | null;
+  tier3Stage: number | null;
+  finalTier: number;
   totalDeaths: number;
   totalWipes: number;
   zones: ZoneMetric[];
@@ -310,10 +314,43 @@ function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
 function navInput(s: GameState): Partial<FrameInput> {
   if (s.traveling) return {};
   const nav = worldNav(s);
+  const hero = s.heroes[0];
   const walkRight = (): Partial<FrameInput> =>
     nav.right?.unlocked
       ? { walkToZone: { mapId: nav.right.zone.mapId, zoneIdx: nav.right.zone.zoneIdx } }
       : {};
+  const walkLeft = (): Partial<FrameInput> =>
+    nav.left?.unlocked
+      ? { walkToZone: { mapId: nav.left.zone.mapId, zoneIdx: nav.left.zone.zoneIdx } }
+      : {};
+
+  // ---- M7.9 "Grand Expansion" tier-3 quest routing ----
+  // The tier-3 quest (offered at Lv40 while tier 2) has a MAP-SCOPED objective pair:
+  // bank kills in MAP3, THEN re-kill the MAP2 boss. The forward-only autopilot would
+  // (a) never bank the map2-boss objective and (b) blow past the s15 boss into map4 as
+  // a still-tier-2 hero (leaving s16+ un-survivable and the s15-wall gate meaningless).
+  // So while the tier-3 quest is ACCEPTED + INCOMPLETE: stay in map3 to bank kills,
+  // then backtrack LEFT to the map2 boss room (which is directly left-adjacent to
+  // map3's first farm zone in the global zone order) to finish it. The evolveHero
+  // intent (driven every step from canEvolveHero) then fires the power spike, after
+  // which the tier-3 hero resumes the normal forward march and breaks the s15 boss.
+  if (hero.tier === 2 && hero.quest?.accepted && hero.quest.id === tier3QuestId(hero.cls)) {
+    const q = CONFIG.quest.tier3;
+    const killsDone = (hero.quest.progress[0] ?? 0) >= q.kills;
+    const bossDone = (hero.quest.progress[1] ?? 0) >= q.bossKills;
+    if (!bossDone) {
+      const kind = nav.current.kind;
+      if (killsDone) {
+        // Map3 kills banked → walk LEFT to the map2 boss room; fight it on arrival.
+        if (kind === "boss") return {};
+        return walkLeft();
+      }
+      // Still banking map3 kills: farm forward INSIDE map3, but never step into the
+      // s15 boss room (a win there advances to map4 and strands the kill objective).
+      if (nav.right?.zone.kind === "boss") return {};
+    }
+  }
+
   if (s.phase === "victory") return walkRight();
   const kind = nav.current.kind;
   if (kind === "town") return walkRight();
@@ -404,6 +441,7 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let prevDead = s.heroes[0].dead;
   let prevTier = s.heroes[0].tier;
   let evolveStage: number | null = null;
+  let tier3Stage: number | null = null;
   let totalDeaths = 0;
   let totalWipes = 0;
   const bestOwned: OwnedBest = { weapon: null, armor: null };
@@ -479,7 +517,7 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
 
   for (let i = 0; i < STEPS; i++) {
     const input: FrameInput = { ...navInput(s), ...shopInput(s) };
-    if (isClassChangeQuestOffered(s.heroes[0])) input.acceptQuest = 0;
+    if (isEvolutionQuestOffered(s.heroes[0])) input.acceptQuest = 0;
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
     const slots = fillAutoSlots(s.heroes[0]);
     if (slots.length) input.setAutoSlots = slots;
@@ -569,7 +607,10 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
         totalWipes++;
       }
     }
-    if (prevTier < s.heroes[0].tier) evolveStage = s.stage;
+    if (prevTier < s.heroes[0].tier) {
+      if (s.heroes[0].tier === 2) evolveStage = s.stage;
+      else if (s.heroes[0].tier === 3) tier3Stage = s.stage;
+    }
 
     // ---- M7.6 refine emulation (post-step, harness-side) ----
     if (REFINE_ACTIVE) {
@@ -618,6 +659,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     finalLevel: s.heroes[0].level,
     finalMap: s.location.mapId,
     evolveStage,
+    tier3Stage,
+    finalTier: s.heroes[0].tier,
     totalDeaths,
     totalWipes,
     zones,
@@ -747,7 +790,9 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
   );
   console.log(
     `  - final levels: ${results.map((r) => r.finalLevel).join(",")} | ` +
-      `class-change stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
+      `class-change(t2) stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
+      `tier3 stage: ${results.map((r) => r.tier3Stage ?? "-").join(",")} | ` +
+      `final tier: ${results.map((r) => r.finalTier).join(",")} | ` +
       `deaths: ${results.reduce((a, r) => a + r.totalDeaths, 0)} | ` +
       `boss wipes: ${results.reduce((a, r) => a + r.totalWipes, 0)}`,
   );
@@ -840,7 +885,111 @@ function runSweep(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// BOSS-ISOLATION mode (BOSSISO=1) — gate 4/6 verifier (M7.9). Drops a MAXED tier-3
+// hero (L90, full t10+10 gear, ratio-allocated stats) at each frontier boss map's
+// last farm zone and walks it into the boss room, then reports WIN + kill time. This
+// isolates the boss fight from the organic grind (the death-only town cadence never
+// reaches +10 gear, so the organic run under-samples the intended endgame band). The
+// gate: all 3 classes win s20/s25/s30 at t10+10 (s30 stays the hard soft-wall — only
+// a maxed, refined tier-3 hero breaches it). Uses the SAME combat machinery as runSeed
+// (auto-cast full kit + auto-potion); no engine internals touched.
+// ---------------------------------------------------------------------------
+const ISO_STATS: Record<HeroClass, { str: number; dex: number; int: number; vit: number }> = {
+  // level-90 hero ≈ 270 allocated points spread on the class auto-ratio, on top of base.
+  swordsman: { str: 188, dex: 4, int: 48, vit: 51 },
+  archer: { str: 4, dex: 224, int: 57, vit: 5 },
+  mage: { str: 3, dex: 4, int: 210, vit: 72 },
+};
+const ISO_GEAR: Record<HeroClass, { weapon: string; armor: string }> = {
+  swordsman: { weapon: "w_sword_t10_apocalypse", armor: "a_infernal_t10_aegis" },
+  archer: { weapon: "w_bow_t10_apocalypse", armor: "a_infernal_t10_aegis" },
+  mage: { weapon: "w_staff_t10_apocalypse", armor: "a_infernal_t10_aegis" },
+};
+// Each frontier boss map: last-farm zoneIdx (just left of the boss room) + full-unlock counts.
+const ISO_BOSSES = [
+  { stage: 20, mapId: "map4", lastFarmIdx: 4 },
+  { stage: 25, mapId: "map5", lastFarmIdx: 4 },
+  { stage: 30, mapId: "map6", lastFarmIdx: 4 },
+];
+
+function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: number): SaveData {
+  const g = ISO_GEAR[cls];
+  return {
+    version: SAVE_VERSION,
+    stage,
+    gold: 0,
+    zoneKills: {},
+    location: { mapId, zoneIdx: lastFarmIdx },
+    // Unlock every zone of every map so the boss room (idx 5) is walkable.
+    unlockedZones: { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6 },
+    lastFarmZone: { mapId, zoneIdx: lastFarmIdx },
+    consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3 },
+    bot: { enabled: false, sellTripEnabled: false, hpPotionTarget: 15, mpPotionTarget: 15, scrollReserve: 3, goldReserve: 0 },
+    autoHunt: true,
+    equipped: { weapon: g.weapon, armor: g.armor, refine: { weapon: 10, armor: 10 } },
+    lootSalt: 1,
+    lootCounter: 0,
+    materials: 0,
+    hero: {
+      cls,
+      level: 90,
+      xp: 0,
+      tier: 3,
+      statPoints: 0,
+      stats: { ...ISO_STATS[cls] },
+      mana: 300,
+      autoSlots: [SIGNATURE_SKILL[cls], null, null, null],
+      quest: null,
+    },
+    lastSeen: 0,
+  };
+}
+
+function runBossIso(): void {
+  console.log(`[boss-iso M7.9] maxed L90 tier-3 hero, full t10+10 gear — win/time per frontier boss\n`);
+  console.log("  " + pad("boss", 10) + CLASSES.map((c) => pad(c, 16)).join(""));
+  for (const boss of ISO_BOSSES) {
+    const cells = CLASSES.map((cls) => {
+      const s = initGameState(1, makeIsoSave(cls, boss.mapId, boss.lastFarmIdx, boss.stage));
+      s.autoCast = true;
+      s.autoAllocate = true;
+      s.autoReturn = false; // isolate the single attempt (no respawn-grind loop)
+      let won = false;
+      let entered = false;
+      let enterTime = 0;
+      const cap = Math.round(240 / FIXED_DT);
+      for (let i = 0; i < cap; i++) {
+        const input: FrameInput = { ...navInput(s) };
+        const slots = fillAutoSlots(s.heroes[0]);
+        if (slots.length) input.setAutoSlots = slots;
+        step(s, input);
+        if (!entered && zoneAt(s.location).kind === "boss") {
+          entered = true;
+          enterTime = s.time;
+        }
+        for (const e of s.events) {
+          if (e.type === "mapUnlocked" || (e.type === "frontierCleared")) won = true;
+        }
+        if (s.phase === "victory") won = true;
+        if (won) break;
+        if (s.heroes[0].dead && s.autoReturn === false && zoneAt(s.location).kind === "boss") {
+          // Died in the boss room with no respawn-grind → a wipe. Give the forced-combat
+          // revive a moment; if still dead next check we count it a loss (break on timeout).
+        }
+      }
+      const dur = entered ? s.time - enterTime : 0;
+      return pad(won ? `WIN ${dur.toFixed(1)}s` : "LOSS", 16);
+    });
+    console.log("  " + pad(`s${boss.stage}`, 10) + cells.join(""));
+  }
+}
+
 function main(): void {
+  if (process.env.BOSSISO === "1") {
+    runBossIso();
+    return;
+  }
   if (REFINE_SWEEP) {
     runSweep();
     return;

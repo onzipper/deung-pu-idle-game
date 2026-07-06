@@ -42,6 +42,7 @@ import { groupIntoStacks, type ItemStack } from "@/ui/gear/stacking";
 import { computeStatDelta, type StatBlock } from "@/ui/gear/statDelta";
 import { toInventoryItem } from "@/ui/gear/types";
 import { MaterialIcon } from "@/ui/components/icons";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import {
   GEAR_SLOT_ICONS,
   HERO_ICONS,
@@ -538,6 +539,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   if (!heroCls) return null;
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -676,5 +678,6 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

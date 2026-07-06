@@ -30,7 +30,7 @@ function expectSaneBounds(b: { x: number; y: number; width: number; height: numb
 }
 
 describe("gateArch (zone-edge archway) — every biome family builds a sane prop", () => {
-  for (const family of ["map1", "map2", "map3", "town"] as const) {
+  for (const family of ["map1", "map2", "map3", "map4", "map5", "map6", "town"] as const) {
     it(`${family}: builds without crashing, non-degenerate bounds`, () => {
       const zone: Zone = { mapId: "map1", zoneIdx: 1, kind: "farm", stage: 1 };
       const biome = biomeForZone(zone);

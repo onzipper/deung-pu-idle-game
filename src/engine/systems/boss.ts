@@ -15,7 +15,8 @@
 
 import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
-import { makeBoss } from "@/engine/entities";
+import { makeBoss, makeBossAdd } from "@/engine/entities";
+import type { Boss, BossBehavior, BossVarietyState, EnemyKind } from "@/engine/entities";
 import { combatPower } from "@/engine/systems/stats";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
@@ -26,6 +27,11 @@ import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targ
 import type { GameState } from "@/engine/state";
 
 const B = CONFIG.boss;
+
+/** Does this boss run mechanic `name`? */
+function has(v: BossVarietyState, name: BossBehavior): boolean {
+  return v.behaviors.includes(name);
+}
 
 /** Begin the boss fight. Precondition (checked by caller): bossReady + battle. */
 export function startBossFight(state: GameState): void {
@@ -44,8 +50,18 @@ export function startBossFight(state: GameState): void {
 export function updateBoss(state: GameState): void {
   const b = state.boss;
   if (!b) return;
+  const v = b.variety;
   const fX = frontHeroX(state);
   const engageX = fX + CONFIG.clash + B.engageExtra;
+
+  // M7.9 CHARGE dash: while committed to a rush the boss is fully occupied — it
+  // moves toward the locked target x and resolves the hit on arrival, skipping the
+  // normal approach / Slam / attack this step. Only bosses carrying "charge" ever
+  // reach the "dash" phase, so classic bosses skip this entirely.
+  if (v && v.chargePhase === "dash") {
+    updateChargeDash(state, b, v);
+    return;
+  }
 
   // Close the distance before doing anything else.
   if (b.x > engageX) {
@@ -56,6 +72,19 @@ export function updateBoss(state: GameState): void {
   if (!b.enraged && b.hp < b.maxHp * B.enrageThreshold) {
     b.enraged = true;
     state.events.push({ type: "bossEnraged", x: b.x, y: b.y });
+  }
+
+  // ---- M7.9 signature mechanics (only fire for a boss that carries them) ----
+  // For classic bosses (s5/s10/s15) `behaviors` is ["slam","enrage"], so none of
+  // these run and control falls straight through to the unchanged Slam/attack kit
+  // below (byte-identical to pre-M7.9).
+  if (v) {
+    // SUMMON is instantaneous — fire any due add waves, then keep the base kit.
+    if (has(v, "summon")) maybeSummon(state, b, v);
+    // CHARGE + HAZARD are CHANNELED: if one is winding up / acting this step it
+    // consumes the boss's action (Slam + normal attack pause) — return early.
+    if (has(v, "charge") && updateChargeWindup(state, b, v)) return;
+    if (has(v, "hazard") && updateHazard(state, b, v)) return;
   }
 
   // Slam: winds up (telegraph) then lands an AOE on the whole living team.
@@ -87,6 +116,132 @@ export function updateBoss(state: GameState): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// M7.9 boss-variety mechanics (deterministic — no RNG-stream draws).
+// ---------------------------------------------------------------------------
+
+/**
+ * CHARGE (map4 s20) — the idle→windup handoff. Returns true if the boss is BUSY
+ * charging this step (windup in progress, or a fresh charge just launched), so the
+ * caller pauses the Slam/normal-attack kit. The dash itself (once `chargePhase`
+ * flips to "dash") is driven by `updateChargeDash` from the top of `updateBoss`.
+ */
+function updateChargeWindup(state: GameState, b: Boss, v: BossVarietyState): boolean {
+  const C = CONFIG.bossBehavior.charge;
+  if (v.chargePhase === "windup") {
+    v.chargeTimer -= FIXED_DT;
+    if (v.chargeTimer <= 0) v.chargePhase = "dash"; // launch next step
+    return true; // busy winding up
+  }
+  // idle: count down toward the next charge; launch when ready.
+  v.chargeCd -= FIXED_DT;
+  if (v.chargeCd <= 0) {
+    const h = nearestAliveHero(state, b.x);
+    const targetX = h ? h.x : frontHeroX(state);
+    v.chargePhase = "windup";
+    v.chargeTimer = C.telegraph;
+    v.chargeTargetX = targetX + C.stopGap; // stop just in front of the target
+    state.events.push({ type: "bossChargeTelegraph", x: b.x, targetX });
+    return true; // busy (windup started)
+  }
+  return false; // not charging → the base kit runs this step
+}
+
+/** CHARGE dash movement + landing hit (the hero sits at lower x than the boss). */
+function updateChargeDash(state: GameState, b: Boss, v: BossVarietyState): void {
+  const C = CONFIG.bossBehavior.charge;
+  const target = v.chargeTargetX;
+  const stepDist = C.dashSpeed * FIXED_DT;
+  if (b.x - target <= stepDist) {
+    // Arrived: snap to the landing point and resolve the heavy hit on every hero
+    // within `hitRange`. `min(target, b.x)` guarantees the dash never moves the boss
+    // AWAY from the hero when a melee hero has already closed INSIDE the target x
+    // (then the boss simply resolves the hit in place); clamped out of the wall.
+    b.x = Math.max(Math.min(target, b.x), CONFIG.hunt.heroMinX);
+    const dmg = Math.round(b.atk * C.hitMult);
+    let connected = false;
+    for (const h of aliveHeroes(state)) {
+      if (Math.abs(h.x - b.x) <= C.hitRange) {
+        applyDamage(state, h, dmg, "slam");
+        connected = true;
+      }
+    }
+    state.events.push({ type: "bossChargeHit", x: b.x, connected });
+    v.chargePhase = "idle";
+    v.chargeCd = b.enraged ? C.cdEnraged : C.cd;
+  } else {
+    b.x -= stepDist; // rush toward the locked target x
+  }
+}
+
+/**
+ * SUMMON (map5 s25) — fire any add waves whose HP threshold the boss has crossed
+ * this step (a `while` so a single big nuke that drops past several thresholds
+ * fires them all, in order). Adds are normal Enemy entities pushed into
+ * `state.enemies` (pooled render views key by id; the boss-phase target set +
+ * `resolveDeaths` reap them). Instantaneous — never pauses the boss's base kit.
+ */
+function maybeSummon(state: GameState, b: Boss, v: BossVarietyState): void {
+  const S = CONFIG.bossBehavior.summon;
+  while (v.summonsFired < S.thresholds.length && b.hp <= b.maxHp * S.thresholds[v.summonsFired]) {
+    const kinds = S.addKinds;
+    for (let i = 0; i < kinds.length; i++) {
+      const add = makeBossAdd(state.nextId++, kinds[i] as EnemyKind, state.stage, i);
+      const x = b.x - (i + 1) * S.spawnSpacing;
+      add.x = x;
+      add.homeX = x;
+      state.enemies.push(add);
+    }
+    state.events.push({ type: "bossSummon", x: b.x, count: kinds.length });
+    v.summonsFired++;
+  }
+}
+
+/**
+ * FIELD HAZARD (map6 s30) — a telegraphed arena-wide danger channel. WARN window
+ * (telegraph) → STRIKE window that ticks damage to EVERY alive hero (position
+ * independent). Returns true while channeling (warn or strike) so the boss's Slam
+ * + normal attack pause; false when idle (base kit runs, cd counting down).
+ */
+function updateHazard(state: GameState, b: Boss, v: BossVarietyState): boolean {
+  const H = CONFIG.bossBehavior.hazard;
+  if (v.hazardPhase === "warn") {
+    v.hazardTimer -= FIXED_DT;
+    if (v.hazardTimer <= 0) {
+      v.hazardPhase = "strike";
+      v.hazardTimer = H.duration;
+      v.hazardTickTimer = 0;
+      v.hazardTicksLeft = Math.max(1, Math.round(H.duration / H.tickInterval));
+    }
+    return true;
+  }
+  if (v.hazardPhase === "strike") {
+    v.hazardTimer -= FIXED_DT;
+    v.hazardTickTimer -= FIXED_DT;
+    if (v.hazardTickTimer <= 0 && v.hazardTicksLeft > 0) {
+      const dmg = Math.round(b.atk * H.tickMult);
+      for (const h of aliveHeroes(state)) applyDamage(state, h, dmg, "slam");
+      state.events.push({ type: "bossHazardStrike", x: b.x });
+      v.hazardTickTimer = H.tickInterval;
+      v.hazardTicksLeft--;
+    }
+    if (v.hazardTimer <= 0) {
+      v.hazardPhase = "idle";
+      v.hazardCd = b.enraged ? H.cdEnraged : H.cd;
+    }
+    return true;
+  }
+  // idle: count down toward the next hazard channel.
+  v.hazardCd -= FIXED_DT;
+  if (v.hazardCd <= 0) {
+    v.hazardPhase = "warn";
+    v.hazardTimer = H.telegraph;
+    state.events.push({ type: "bossHazardWarn", x: b.x });
+    return true;
+  }
+  return false;
+}
+
 /** Boss defeated: pay out and flag victory (nextStage is a separate action). */
 export function onBossKilled(state: GameState): void {
   const goldGained = CONFIG.goldPerBoss(state.stage);
@@ -103,6 +258,9 @@ export function onBossKilled(state: GameState): void {
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;
+  // M7.9: despawn any boss-summoned adds still alive (render frees their pooled
+  // views as the ids disappear). No-op for classic bosses (no adds).
+  state.enemies = [];
   state.phase = "victory";
   state.events.push({ type: "bossDefeated", x: bx, y: by, goldGained });
   state.events.push({ type: "stageCleared", stage: state.stage });

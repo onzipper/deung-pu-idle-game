@@ -495,8 +495,29 @@ export function resolveDeaths(state: GameState): void {
       }
       return true;
     });
-  } else if (state.boss && state.boss.hp <= 0) {
-    onBossKilled(state); // gold reward + phase -> victory
+  } else {
+    // Boss phase. M7.9: reap boss-SUMMONED adds that died (a normal kill payout so
+    // clearing them feels + reads like any other kill — gold/xp/pop/quest credit).
+    // No loot roll (adds are threats, not a loot faucet). For classic bosses the
+    // enemy list is empty, so this filter is a no-op (byte-identical to pre-M7.9).
+    if (state.enemies.length) {
+      state.enemies = state.enemies.filter((e) => {
+        if (e.hp <= 0) {
+          // NB: no `state.kills++` — that's the FARM-zone quota counter; a boss-room
+          // kill must not touch it (checkZoneUnlock is a boss-phase no-op anyway).
+          const goldGained = CONFIG.goldPerKill(state.stage);
+          state.gold += goldGained;
+          grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
+          state.events.push({ type: "kill", kind: e.kind, x: e.x, y: e.y, goldGained });
+          advanceQuestObjective(state, "kill");
+          return false;
+        }
+        return true;
+      });
+    }
+    if (state.boss && state.boss.hp <= 0) {
+      onBossKilled(state); // gold reward + phase -> victory
+    }
   }
 
   // bossReady arming moved to world.checkZoneUnlock (2026-07-07): quota alone

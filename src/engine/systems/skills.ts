@@ -48,7 +48,9 @@ const L = CONFIG.layout;
  * skill's `targets`. NO RNG — both tables are constant, so casts stay deterministic.
  */
 function rainOffsetsFor(def: SkillType): readonly { dx: number; ry: number }[] {
-  return def.id === "archer_barrage" ? CONFIG.barrageOffsets : CONFIG.arrowRainOffsets;
+  if (def.id === "archer_storm") return CONFIG.stormOffsets; // tier-3 sustained storm
+  if (def.id === "archer_barrage") return CONFIG.barrageOffsets;
+  return CONFIG.arrowRainOffsets;
 }
 
 /** Remaining cooldown on a specific skill (0 = ready). */
@@ -69,9 +71,17 @@ export function learnedSkills(hero: Hero): SkillType[] {
   return CLASS_SKILLS[hero.cls].map((id) => SKILLS[id]).filter((def) => isSkillLearned(hero, def));
 }
 
-/** How many auto-cast slots are unlocked at `level` (`autoSlots.unlockLevels`). */
-export function unlockedAutoSlotCount(level: number): number {
-  return CONFIG.autoSlots.unlockLevels.filter((lvl) => level >= lvl).length;
+/**
+ * How many auto-cast slots are unlocked for a hero at `level` / `tier`. A slot unlocks
+ * only when BOTH its level threshold (`autoSlots.unlockLevels`) AND its tier gate
+ * (`autoSlots.tierRequired`) are met. `tier` defaults to 1 so pre-tier-3 callers (and
+ * the UI's level-only read) keep the historical 3-slot behaviour — the M7.9 4th slot
+ * needs level 40 AND tier 3.
+ */
+export function unlockedAutoSlotCount(level: number, tier: 1 | 2 | 3 = 1): number {
+  return CONFIG.autoSlots.unlockLevels.filter(
+    (lvl, i) => level >= lvl && tier >= CONFIG.autoSlots.tierRequired[i],
+  ).length;
 }
 
 /**
@@ -208,26 +218,56 @@ function applySkillEffect(
       return;
     }
     case "meteor": {
-      // A single meteor falls onto the nearest target's x (guard guarantees one).
+      // The mage's meteor family. A SINGLE meteor (signature/cataclysm, `targets` = 0)
+      // falls onto the nearest target's x. The tier-3 APOCALYPSE (`targets` > 0) spawns
+      // a VOLLEY of `targets` meteors on the fixed `apocalypseOffsets` table, centred on
+      // that same x, each staggered by spawn HEIGHT (`ry`) so they land across a window.
+      // REUSES the meteor ProjectileKind (no new kind — footgun #6); the guard
+      // guarantees at least one target for the centroid. Deterministic (constant table).
+      const dmg = Math.round(heroAtkOf(hero) * def.mult);
+      const ty = L.groundY - L.heroProjImpactYOffset;
       const tgt = nearestAny(targets, hero.x);
-      const tx = tgt ? tgt.x : hero.x + CONFIG.skills.mageFallbackAheadX;
+      const cx = tgt ? tgt.x : hero.x + CONFIG.skills.mageFallbackAheadX;
+      if (def.targets > 0) {
+        const offsets = CONFIG.apocalypseOffsets;
+        for (let i = 0; i < def.targets; i++) {
+          const off = offsets[i];
+          const tx = cx + off.dx;
+          const spawnY = CONFIG.skills.meteorSpawnY - off.ry;
+          state.projectiles.push({
+            id: state.nextId++,
+            team: "hero",
+            kind: "meteor",
+            x: tx,
+            y: spawnY,
+            damage: dmg,
+            speed: def.projSpeed,
+            targetId: null,
+            tx,
+            ty,
+            aoe: def.radius,
+          });
+          state.events.push({ type: "projectileSpawn", kind: "meteor", x: tx, y: spawnY });
+        }
+        return;
+      }
       state.projectiles.push({
         id: state.nextId++,
         team: "hero",
         kind: "meteor",
-        x: tx,
+        x: cx,
         y: CONFIG.skills.meteorSpawnY,
-        damage: Math.round(heroAtkOf(hero) * def.mult),
+        damage: dmg,
         speed: def.projSpeed,
         targetId: null,
-        tx,
-        ty: L.groundY - L.heroProjImpactYOffset,
+        tx: cx,
+        ty,
         aoe: def.radius,
       });
       state.events.push({
         type: "projectileSpawn",
         kind: "meteor",
-        x: tx,
+        x: cx,
         y: CONFIG.skills.meteorSpawnY,
       });
       return;
@@ -250,7 +290,7 @@ export function setAutoSlot(
 ): boolean {
   if (!hero) return false;
   if (!Number.isInteger(slot) || slot < 0 || slot >= CONFIG.autoSlots.max) return false;
-  if (slot >= unlockedAutoSlotCount(hero.level)) return false;
+  if (slot >= unlockedAutoSlotCount(hero.level, hero.tier)) return false;
   if (skillId !== null) {
     const def = SKILLS[skillId];
     if (!def || !isSkillLearned(hero, def)) return false;
@@ -279,7 +319,7 @@ export function processSkills(state: GameState, input: FrameInput): void {
   if (state.autoCast) {
     for (const h of aliveHeroes(state)) {
       // Deterministic priority: walk the unlocked slots IN ORDER.
-      const unlocked = unlockedAutoSlotCount(h.level);
+      const unlocked = unlockedAutoSlotCount(h.level, h.tier);
       for (let i = 0; i < unlocked && i < h.autoSlots.length; i++) {
         const id = h.autoSlots[i];
         if (!id) continue;

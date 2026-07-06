@@ -18,6 +18,7 @@ import {
   zonesGroupedByMap,
   type UiZone,
 } from "@/ui/world/zones";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { useGameStore } from "@/ui/store/gameStore";
 
 const ZONES_BY_MAP = zonesGroupedByMap(fastTravelTargets());
@@ -26,7 +27,7 @@ export interface FastTravelPickerProps {
   onClose: () => void;
 }
 
-function ZoneRow({ zone }: { zone: UiZone }) {
+function ZoneRow({ zone, onSelect }: { zone: UiZone; onSelect: () => void }) {
   const t = useTranslations("world");
   const tMaps = useTranslations("content.maps");
   const unlockedZones = useGameStore((s) => s.unlockedZones);
@@ -45,9 +46,14 @@ function ZoneRow({ zone }: { zone: UiZone }) {
     <button
       type="button"
       disabled={!enabled}
-      onClick={() =>
-        enabled && queueFastTravel({ mapId: zone.mapId, zoneIdx: zone.zoneIdx })
-      }
+      onClick={() => {
+        if (!enabled) return;
+        queueFastTravel({ mapId: zone.mapId, zoneIdx: zone.zoneIdx });
+        // Close the picker on select so the channel bar / warp is visible
+        // immediately (owner request 2026-07-07) — engine-side rejects still
+        // surface via the fastTravelBlocked NoticeToast.
+        onSelect();
+      }}
       className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-(--ddp-radius-md) border px-3 py-2 text-left text-xs font-bold transition-colors ${
         enabled
           ? "border-sky-400/50 bg-sky-400/10 text-sky-200 hover:bg-sky-400/20 active:scale-[0.98]"
@@ -71,6 +77,7 @@ export function FastTravelPicker({ onClose }: FastTravelPickerProps) {
   const t = useTranslations("world");
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -101,12 +108,17 @@ export function FastTravelPicker({ onClose }: FastTravelPickerProps) {
           {ZONES_BY_MAP.map((group) => (
             <section key={group.mapId} className="flex flex-col gap-1.5">
               {group.zones.map((zone) => (
-                <ZoneRow key={`${zone.mapId}-${zone.zoneIdx}`} zone={zone} />
+                <ZoneRow
+                  key={`${zone.mapId}-${zone.zoneIdx}`}
+                  zone={zone}
+                  onSelect={onClose}
+                />
               ))}
             </section>
           ))}
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

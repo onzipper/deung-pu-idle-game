@@ -22,11 +22,37 @@ import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
 import { SKILL_ICONS_BY_ID } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
-/** Below this level the class-change affordance isn't shown at all (don't tease
- * the feature before it's remotely relevant) — from here to
- * `CONFIG.evolution.levelRequired` it shows as a disabled "locked" hint, at which
- * point the quest becomes offerable. */
-const QUEST_HINT_LEVEL = 12;
+/** How many levels below an evolution quest's gate the disabled "locked" hint
+ * starts teasing it (don't show it too early — see `questHintLevel`). Same
+ * offset for both the tier-1 class-change gate (Lv.15 -> hint from 12) and the
+ * M7.9 tier-2 -> tier-3 gate (Lv.40 -> hint from 37). */
+const QUEST_HINT_OFFSET = 3;
+
+/** The level gate for hero.tier's NEXT evolution quest (null once tier 3 —
+ * nothing left to gate). Mirrors the private helper in
+ * `engine/systems/quests.ts` (that one isn't exported — this is just a
+ * display-side read of the same two `CONFIG.evolution` fields, no game logic). */
+function evolutionLevelGateForTier(tier: 1 | 2 | 3): number | null {
+  if (tier === 1) return CONFIG.evolution.levelRequired;
+  if (tier === 2) return CONFIG.evolution.tier3.levelRequired;
+  return null;
+}
+
+/** The level at which the disabled "locked" hint starts showing for hero.tier's
+ * next evolution quest (null once tier 3). */
+function questHintLevel(tier: 1 | 2 | 3): number | null {
+  const gate = evolutionLevelGateForTier(tier);
+  return gate === null ? null : gate - QUEST_HINT_OFFSET;
+}
+
+/** The `content.classes.<cls>.<key>` i18n key for hero.tier's display name:
+ * tier 1 = base name, tier 2 = `evolvedName`, tier 3 = `tier3Name` (M7.9
+ * grand-expansion final form). */
+function classNameKeyForTier(tier: 1 | 2 | 3): "name" | "evolvedName" | "tier3Name" {
+  if (tier === 2) return "evolvedName";
+  if (tier === 3) return "tier3Name";
+  return "name";
+}
 
 /** How long an armed (first-tap) class-change button stays armed before it resets. */
 const EVOLVE_ARM_TIMEOUT_MS = 3000;
@@ -52,14 +78,19 @@ function useCastKey(cd: number): number {
 }
 
 /**
- * Class-change QUEST affordance (M5 task 5), rendered next to the level badge. It
- * replaces the old gold-cost evolve trigger with the quest flow:
- *   tier 2                 → the evolved-name badge (class change done)
- *   tier 1, below Lv gate  → a disabled "🔒 Lv.15" hint (from `QUEST_HINT_LEVEL`)
- *   quest offered          → a "รับเควส" (accept) button
- *   quest accepted (WIP)   → a compact "n/60 · boss ✓/✗" progress readout
- *   quest complete         → the "เปลี่ยนคลาส!" button (2-tap confirm + ceremony)
+ * Evolution QUEST affordance (M5 task 5; generalized M7.9 to cover BOTH
+ * evolutions), rendered next to the level badge. Replaces the old gold-cost
+ * evolve trigger with the quest flow, tier-aware:
+ *   tier 3                 → the final-form name badge (no more evolutions)
+ *   tier 1/2, below Lv gate → a disabled "🔒 Lv.N" hint (from `questHintLevel`,
+ *                             N = 15 at tier 1, 40 at tier 2)
+ *   quest offered           → a "รับเควส" (accept) button
+ *   quest accepted           → a compact "n/N · boss ✓/✗" progress readout
+ *   quest complete           → the "เปลี่ยนคลาส!" button (2-tap confirm + ceremony)
  * The 2-tap confirm on the final class change carries over from the pre-quest bar.
+ * `hero.quest` (`HeroQuestSummary`, built by `GameClient.tsx`'s `buildQuestSummary`)
+ * already resolves the RIGHT quest def for the hero's current tier — this
+ * component doesn't need to know which evolution it's showing.
  */
 function ClassQuestAffordance({
   hero,
@@ -86,7 +117,7 @@ function ClassQuestAffordance({
     [],
   );
 
-  if (hero.tier === 2) {
+  if (hero.tier === 3) {
     return (
       <span
         title={tPanels("evolvedBadgeTitle", { name: heroName })}
@@ -98,17 +129,19 @@ function ClassQuestAffordance({
   }
 
   const quest = hero.quest;
+  const gate = evolutionLevelGateForTier(hero.tier);
+  const hintLevel = questHintLevel(hero.tier);
 
-  // Below the level gate: nothing until QUEST_HINT_LEVEL, then a locked hint.
+  // Below the level gate: nothing until hintLevel, then a locked hint.
   if (!quest) {
-    if (hero.level < QUEST_HINT_LEVEL) return null;
+    if (gate === null || hintLevel === null || hero.level < hintLevel) return null;
     return (
       <span
-        title={tq("lockedHint", { level: CONFIG.evolution.levelRequired })}
-        aria-label={tq("ariaLocked", { heroName, level: CONFIG.evolution.levelRequired })}
+        title={tq("lockedHint", { level: gate })}
+        aria-label={tq("ariaLocked", { heroName, level: gate })}
         className="cursor-default rounded-full border border-ddp-border bg-black/40 px-2 py-0.5 text-[11px] font-bold text-ddp-ink-muted"
       >
-        🔒 Lv.{CONFIG.evolution.levelRequired}
+        🔒 Lv.{gate}
       </span>
     );
   }
@@ -119,7 +152,9 @@ function ClassQuestAffordance({
       <button
         type="button"
         onClick={() => acceptQuest(slot)}
-        style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
+        style={
+          { "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties
+        }
         aria-label={tq("ariaAccept", { heroName })}
         className="relative min-h-8 rounded-full border border-(--accent-soft) bg-ddp-panel-strong px-2.5 text-[11px] font-bold whitespace-nowrap text-ddp-gold-bright transition-all duration-100 before:absolute before:-inset-0.5 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_10px_2px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.6s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] active:scale-95"
       >
@@ -204,10 +239,18 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
   const ready = skill.ready;
   const delay = -(skill.maxCd - skill.cd);
   const cdSeconds = Math.ceil(skill.cd);
-  const status = hero.dead ? "dead" : ready ? "none" : skill.cd > 0 ? "cooldown" : "nomana";
+  const status = hero.dead
+    ? "dead"
+    : ready
+      ? "none"
+      : skill.cd > 0
+        ? "cooldown"
+        : "nomana";
 
   const inSlot = skill.autoSlot !== null;
-  const firstFreeSlot = hero.autoSlots.findIndex((id, i) => i < hero.unlockedSlots && id === null);
+  const firstFreeSlot = hero.autoSlots.findIndex(
+    (id, i) => i < hero.unlockedSlots && id === null,
+  );
   const canToggleAuto = inSlot || firstFreeSlot >= 0;
 
   function toggleAuto(): void {
@@ -227,7 +270,9 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
           status,
           seconds: cdSeconds,
         })}
-        style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
+        style={
+          { "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties
+        }
         className={`relative h-20 w-20 rounded-(--ddp-radius-md) border shadow-(--ddp-shadow-btn) transition-transform duration-100 active:translate-y-0.5 active:scale-[0.96] ${
           ready
             ? "border-(--accent-soft) before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:shadow-[0_0_18px_3px_var(--accent-soft)] before:[animation-name:ddp-invite-glow] before:[animation-duration:2.4s] before:[animation-timing-function:ease-in-out] before:[animation-iteration-count:infinite] before:content-[''] hover:brightness-110"
@@ -255,7 +300,10 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
               key={castKey}
               aria-hidden
               className="pointer-events-none absolute inset-x-0 top-0 bg-black/55 [animation-name:ddp-cooldown-sweep] [animation-timing-function:linear] [animation-fill-mode:forwards]"
-              style={{ animationDuration: `${skill.maxCd}s`, animationDelay: `${delay}s` }}
+              style={{
+                animationDuration: `${skill.maxCd}s`,
+                animationDelay: `${delay}s`,
+              }}
             />
           )}
           {skill.cd > 0 && !hero.dead && (
@@ -312,7 +360,7 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const tContent = useTranslations("content");
   const tCommon = useTranslations("common");
   const tPanels = useTranslations("panels");
-  const heroName = tContent(`classes.${hero.cls}.${hero.tier === 2 ? "evolvedName" : "name"}`);
+  const heroName = tContent(`classes.${hero.cls}.${classNameKeyForTier(hero.tier)}`);
   const accent = HERO_ACCENT[hero.cls];
   const leveledUpPulse = usePulseOnIncrease(hero.level, 320);
 
@@ -321,10 +369,18 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
   const manaPct = hero.maxMana > 0 ? Math.max(0, (hero.mana / hero.maxMana) * 100) : 0;
 
   // Next locked auto-slot's unlock level (for the "more slots at Lv.X" hint).
+  // The 4th slot (M7.9) is gated behind BOTH tier 3 AND Lv.40
+  // (`CONFIG.autoSlots.tierRequired`) — when that's the next locked slot, swap
+  // in a tier-aware hint copy so a sub-tier-3 hero past Lv.40 doesn't read a
+  // stale "unlocks at Lv.40" (it also needs the tier-3 class change).
+  const nextSlotIdx = hero.unlockedSlots;
   const nextLockedLevel =
-    hero.unlockedSlots < CONFIG.autoSlots.max
-      ? CONFIG.autoSlots.unlockLevels[hero.unlockedSlots]
+    nextSlotIdx < CONFIG.autoSlots.max
+      ? CONFIG.autoSlots.unlockLevels[nextSlotIdx]
       : null;
+  const nextSlotNeedsHigherTier =
+    nextSlotIdx < CONFIG.autoSlots.max &&
+    CONFIG.autoSlots.tierRequired[nextSlotIdx] > hero.tier;
 
   return (
     <div className="flex flex-col items-center gap-1.5">
@@ -335,13 +391,23 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
             hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
           } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
         >
-          {hero.atLevelCap ? tCommon("maxLabel") : tCommon("levelBadge", { level: hero.level })}
+          {hero.atLevelCap
+            ? tCommon("maxLabel")
+            : tCommon("levelBadge", { level: hero.level })}
         </span>
-        <ClassQuestAffordance hero={hero} slot={slot} heroName={heroName} accent={accent} />
+        <ClassQuestAffordance
+          hero={hero}
+          slot={slot}
+          heroName={heroName}
+          accent={accent}
+        />
       </div>
 
       {/* HP bar */}
-      <div className="h-2 w-full overflow-hidden rounded-full bg-black/50" title={heroName}>
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-black/50"
+        title={heroName}
+      >
         <div
           className={`h-full rounded-full transition-[width] duration-200 ${
             hpPct > 35 ? "bg-emerald-400" : "bg-red-500"
@@ -350,7 +416,10 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
         />
       </div>
       {/* XP bar (gold = progress currency) */}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/50" title={heroName}>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-black/50"
+        title={heroName}
+      >
         <div
           className="h-full rounded-full bg-ddp-gold transition-[width] duration-300"
           style={{ width: `${hero.atLevelCap ? 100 : xpPct}%` }}
@@ -387,7 +456,9 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
       </div>
       {nextLockedLevel !== null && (
         <span className="text-[10px] text-ddp-ink-muted/70">
-          {tPanels("autoSlotNextUnlock", { level: nextLockedLevel })}
+          {nextSlotNeedsHigherTier
+            ? tPanels("autoSlotNextUnlockTier3", { level: nextLockedLevel })
+            : tPanels("autoSlotNextUnlock", { level: nextLockedLevel })}
         </span>
       )}
     </div>

@@ -13,6 +13,7 @@ import type {
   Hero,
   Enemy,
   Boss,
+  BossBehavior,
   HeroClass,
   HeroStats,
   HeroQuest,
@@ -20,9 +21,20 @@ import type {
   SkillId,
 } from "@/engine/entities";
 
-/** The default auto-slot loadout: signature in slot 0, the rest empty. */
-export function defaultAutoSlots(cls: HeroClass): (SkillId | null)[] {
-  const slots: (SkillId | null)[] = new Array(CONFIG.autoSlots.max).fill(null);
+/**
+ * How many auto-cast slots a hero of `tier` HOLDS (its `autoSlots` array LENGTH).
+ * The 4th slot (M7.9) is tier-3-only, so tiers 1-2 keep the historical 3-slot loadout
+ * — a pre-tier-3 save's persisted `autoSlots` stays byte-identical (length 3). Derived
+ * from `autoSlots.tierRequired` so the config table stays the single source of truth.
+ */
+export function autoSlotCapacity(tier: 1 | 2 | 3 = 1): number {
+  return CONFIG.autoSlots.tierRequired.filter((t) => t <= tier).length;
+}
+
+/** The default auto-slot loadout: signature in slot 0, the rest empty. The array
+ * LENGTH is tier-scoped (`autoSlotCapacity`) — 3 for tiers 1-2, 4 for tier 3. */
+export function defaultAutoSlots(cls: HeroClass, tier: 1 | 2 | 3 = 1): (SkillId | null)[] {
+  const slots: (SkillId | null)[] = new Array(autoSlotCapacity(tier)).fill(null);
   slots[0] = SIGNATURE_SKILL[cls];
   return slots;
 }
@@ -39,11 +51,11 @@ export function makeHero(
   cls: HeroClass,
   level = 1,
   xp = 0,
-  tier: 1 | 2 = 1,
+  tier: 1 | 2 | 3 = 1,
   statPoints: number = (level - 1) * CONFIG.stats.pointsPerLevel,
   stats: HeroStats = baseStats(cls),
   mana?: number,
-  autoSlots: (SkillId | null)[] = defaultAutoSlots(cls),
+  autoSlots: (SkillId | null)[] = defaultAutoSlots(cls, tier),
   quest: HeroQuest | null = null,
   equipped: EquippedGear = emptyEquipped(),
 ): Hero {
@@ -61,7 +73,7 @@ export function makeHero(
       refineOf(equipped, "armor"),
     );
   const maxHp = heroMaxHp(cls, level, tier, stats.vit) + armorHp;
-  const maxMana = heroMaxMana(cls, stats.int);
+  const maxMana = heroMaxMana(cls, stats.int, tier);
   return {
     id,
     cls,
@@ -140,17 +152,77 @@ export function makeEnemy(
 
 /** Build the stage boss (Phase B wiring; factory ready now). */
 export function makeBoss(id: number, stage: number): Boss {
-  const hp = CONFIG.bossHp(stage);
+  // M7.9 boss variety: stamp the per-stage behavior snapshot + init the mechanic
+  // timers. `hpScale`/`atkScale` are identity (1) in this first pass, so a boss's
+  // stats stay byte-identical to the parametric curve; a stage with no roster row
+  // (e.g. a test forcing a boss at a non-boss stage) falls back to the classic kit.
+  const bb = CONFIG.bossBehavior;
+  const row = CONFIG.bossVariety[stage];
+  const hpScale = row?.hpScale ?? 1;
+  const atkScale = row?.atkScale ?? 1;
+  const hp = Math.round(CONFIG.bossHp(stage) * hpScale);
   return {
     id,
     x: CONFIG.spawnX,
     y: CONFIG.boss.y,
     hp,
     maxHp: hp,
-    atk: CONFIG.bossAtk(stage),
+    atk: Math.round(CONFIG.bossAtk(stage) * atkScale),
     cd: CONFIG.boss.initialCd,
     skillCd: CONFIG.boss.initialSkillCd,
     telegraph: 0,
     enraged: false,
+    variety: {
+      behaviors: (row?.behaviors ?? ["slam", "enrage"]) as BossBehavior[],
+      chargeCd: bb.charge.cd,
+      chargePhase: "idle",
+      chargeTimer: 0,
+      chargeTargetX: 0,
+      summonsFired: 0,
+      hazardCd: bb.hazard.cd,
+      hazardPhase: "idle",
+      hazardTimer: 0,
+      hazardTickTimer: 0,
+      hazardTicksLeft: 0,
+    },
+  };
+}
+
+/**
+ * Fixed per-add attack-cd + engage-jitter tables (M7.9 boss SUMMON). Deterministic
+ * substitutes for `makeEnemy`'s two RNG draws — boss behaviors must NEVER perturb
+ * the wave-composition stream (CLAUDE.md). Indexed by the add's slot in its wave.
+ */
+const BOSS_ADD_CD = [0.2, 0.5, 0.35, 0.6];
+const BOSS_ADD_ENGAGE_OFFSET = [0, 14, 28, 42];
+
+/**
+ * Build a boss-SUMMONED add (M7.9 map5 SUMMON). Mirrors `makeEnemy`'s stage stat
+ * scaling but is fully DETERMINISTIC (fixed cd/engage tables, NO RNG draw) so a
+ * summon can't shift the seeded stream. Spawned already ENGAGED so it immediately
+ * hunts the hero; the caller sets `x`/`homeX`.
+ */
+export function makeBossAdd(id: number, kind: EnemyKind, stage: number, slot: number): Enemy {
+  const et = ENEMY_TYPES[kind];
+  const hp = Math.round(CONFIG.enemyHp(stage) * et.hpMult);
+  const atk = Math.round(CONFIG.enemyAtk(stage) * et.atkMult);
+  return {
+    id,
+    kind,
+    x: 0,
+    y: CONFIG.layout.enemyY,
+    hp,
+    maxHp: hp,
+    atk,
+    speed: et.speed,
+    size: et.size,
+    behavior: et.behavior,
+    range: et.range,
+    cd: BOSS_ADD_CD[slot % BOSS_ADD_CD.length],
+    engageOffset: BOSS_ADD_ENGAGE_OFFSET[slot % BOSS_ADD_ENGAGE_OFFSET.length],
+    homeX: 0,
+    aggressive: true,
+    aggroRadius: 0,
+    engaged: true,
   };
 }

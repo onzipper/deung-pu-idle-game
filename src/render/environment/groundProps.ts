@@ -60,6 +60,47 @@ function emberRock(g: Graphics, x: number, y: number, color: number): void {
   g.circle(x, y - 5, safeRadius(1.6)).fill({ color, alpha: 0.9 });
 }
 
+/** map4 (ice tundra) near layer: a low snow-drift mound — a few overlapping
+ * flat-alpha humps (no gradient) plus a thin brighter cap catching the cold
+ * light, same layered-alpha vocabulary as `crystalShard`. */
+function snowDrift(g: Graphics, x: number, y: number, color: number): void {
+  g.poly([x - 8, y, x - 3, y - 5, x + 4, y - 4, x + 8, y], true).fill({ color, alpha: 0.5 });
+  g.poly([x - 5, y - 2, x - 1, y - 6, x + 3, y - 5, x + 5, y - 2], true).fill({
+    color: adjustLightness(color, 0.15),
+    alpha: 0.7,
+  });
+}
+
+/** map5 (desert ruins) near layer: a broken column/brick chunk lying in the
+ * sand — an angular flat-shaded piece with a darker underside, distinct from
+ * `rockCluster`'s rounder natural-stone silhouette. */
+function rubbleChunk(g: Graphics, x: number, y: number, color: number): void {
+  g.poly([x - 6, y, x - 5, y - 8, x + 2, y - 9, x + 6, y - 3, x + 5, y], true).fill({
+    color,
+    alpha: 0.82,
+  });
+  g.poly([x - 6, y, x - 5, y - 8, x - 2, y - 6, x - 2, y], true).fill({
+    color: adjustLightness(color, -0.25),
+    alpha: 0.7,
+  });
+}
+
+/** map6 (hell city) near layer: a dark ground crack with a thin ember-glow
+ * line running along it — the crack itself is near-black, the glow is a
+ * separate thin flat-alpha stroke (never a gradient/blur). */
+function groundCrack(g: Graphics, x: number, y: number, color: number): void {
+  const dark = adjustLightness(color, -0.6);
+  g.moveTo(x - 9, y)
+    .lineTo(x - 2, y - 3)
+    .lineTo(x + 3, y - 1)
+    .lineTo(x + 9, y - 4)
+    .stroke({ width: 2.4, color: dark, alpha: 0.85 });
+  g.moveTo(x - 6, y - 1)
+    .lineTo(x - 1, y - 2.6)
+    .lineTo(x + 5, y - 2)
+    .stroke({ width: 1, color, alpha: 0.6 });
+}
+
 /** Town set dressing (M6): a lantern post (dark pole + a warm glowing head,
  * layered flat-alpha — no gradient) reading as "hearth-lit". */
 function lanternPost(g: Graphics, x: number, y: number, color: number): void {
@@ -131,6 +172,30 @@ export function buildGroundPropsChunk(opts: GroundPropsChunkOptions): Graphics {
       for (let i = 0; i < n; i++) {
         const x = Math.random() * chunkWidth;
         rockCluster(g, x, baseY + 8 + Math.random() * 4, adjustLightness(accent, -0.2));
+      }
+      break;
+    }
+    case "snow": {
+      const n = propCount(chunkWidth, 2.6);
+      for (let i = 0; i < n; i++) {
+        const x = Math.random() * chunkWidth;
+        snowDrift(g, x, baseY + 6 + Math.random() * 4, accent);
+      }
+      break;
+    }
+    case "rubble": {
+      const n = propCount(chunkWidth, 2.2);
+      for (let i = 0; i < n; i++) {
+        const x = Math.random() * chunkWidth;
+        rubbleChunk(g, x, baseY + 8 + Math.random() * 4, adjustLightness(accent, -0.15));
+      }
+      break;
+    }
+    case "cracks": {
+      const n = propCount(chunkWidth, 2.4);
+      for (let i = 0; i < n; i++) {
+        const x = Math.random() * chunkWidth;
+        groundCrack(g, x, baseY + 6 + Math.random() * 4, accent);
       }
       break;
     }

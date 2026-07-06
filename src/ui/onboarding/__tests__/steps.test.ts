@@ -20,6 +20,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
       {
         skillCd: 0,
         dead: false,
+        tier: 1,
         statsSum: 0,
         statPoints: 0,
         unlockedSlots: 1,
@@ -91,8 +92,12 @@ describe("resolveNextStepIndex", () => {
   it("slotAutoSkill (action-kind) advances the instant a skill fills an auto slot", () => {
     expect(idOf(4)).toBe("slotAutoSkill");
     const prev = snapshot({ heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 1 }] });
-    const unchanged = snapshot({ heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 1 }] });
-    const slotted = snapshot({ heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 2 }] });
+    const unchanged = snapshot({
+      heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 1 }],
+    });
+    const slotted = snapshot({
+      heroes: [{ ...snapshot().heroes[0], autoSlotsFilled: 2 }],
+    });
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, unchanged, false)).toBe(4);
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, slotted, false)).toBe(5);
   });

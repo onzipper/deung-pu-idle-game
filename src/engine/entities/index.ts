@@ -152,6 +152,13 @@ export type QuestObjectiveType = "kill" | "killBoss";
 export interface QuestObjective {
   type: QuestObjectiveType;
   count: number;
+  /**
+   * Optional MAP SCOPE (M7.9 tier-3 quest): when set, the objective only counts an
+   * event that happens while the hero is in this map (`state.location.mapId`). The
+   * tier-3 quest uses it to require kills in MAP3 + a REPEAT MAP2-boss defeat; the
+   * tier-2 class-change quest leaves it unset (counts anywhere — unchanged behaviour).
+   */
+  mapId?: string;
 }
 
 /** A static quest definition (catalog data — see systems/quests `classChangeQuestFor`). */
@@ -244,8 +251,13 @@ export interface Hero {
    * see systems/quests + systems/evolution). It grants a permanent atk/hp
    * multiplier that compounds with levels + stats. Persisted per hero. Single path
    * in M5.
+   *
+   * M7.9 "Grand Expansion": a THIRD tier (3 = จอมอัศวิน/ราชันพราน/อาร์คเมจ) is added.
+   * The tier-2 -> tier-3 change is gated by the tier-3 quest (kills in map3 + a repeat
+   * map2-boss defeat) and grants a further multiplicative atk/hp spike (the s15-wall
+   * breaker) + a 4th auto-cast slot + skill-4. `evolveHero` increments the tier.
    */
-  tier: 1 | 2;
+  tier: 1 | 2 | 3;
   /**
    * Active class-change quest instance (M5 task 5), or null. `null` while below the
    * level gate, once evolved (tier 2, quest consumed), OR when the quest is
@@ -325,6 +337,49 @@ export interface Enemy {
 }
 
 /**
+ * A boss signature-mechanic tag (M7.9 "Grand Expansion" behavior wave). Every
+ * boss carries the base `slam`+`enrage` kit; maps 4-6 LAYER one extra mechanic:
+ * `charge` (map4 s20), `summon` (map5 s25), `hazard` (map6 s30). Bosses s5/s10/s15
+ * carry only `slam`+`enrage`, so `systems/boss.updateBoss`'s classic path is
+ * byte-identical for them. Drives the config `bossVariety` table + `bossBehavior`.
+ */
+export type BossBehavior = "slam" | "enrage" | "charge" | "summon" | "hazard";
+
+/**
+ * Per-boss signature-mechanic RUNTIME state (M7.9). Fully TRANSIENT — the boss is
+ * never persisted (rebuilt each fight by `makeBoss`, nulled between fights), so
+ * these fields carry NO save-shape implication. Deterministic: no field is driven
+ * by the RNG stream (fixed timing/threshold tables in `CONFIG.bossBehavior`).
+ * OPTIONAL on `Boss` (below) so pre-M7.9 boss literals in the outer layers (e.g.
+ * the render rig test) stay valid; the engine's live boss always populates it.
+ */
+export interface BossVarietyState {
+  /** The mechanics this boss runs (snapshot of `CONFIG.bossVariety[stage]`). */
+  behaviors: BossBehavior[];
+  // ---- CHARGE (map4 s20): telegraphed dash at the hero, then a heavy hit ----
+  /** Seconds until the next charge may launch (from the idle phase). */
+  chargeCd: number;
+  chargePhase: "idle" | "windup" | "dash";
+  /** Wind-up countdown while `chargePhase === "windup"`. */
+  chargeTimer: number;
+  /** Locked dash destination x (set at telegraph time — a fair, dodgeable read). */
+  chargeTargetX: number;
+  // ---- SUMMON (map5 s25): fixed add waves at descending HP thresholds ----
+  /** How many summon waves have already fired (index into the threshold table). */
+  summonsFired: number;
+  // ---- FIELD HAZARD (map6 s30): telegraphed arena-wide danger windows ----
+  /** Seconds until the next hazard channel (from the idle phase). */
+  hazardCd: number;
+  hazardPhase: "idle" | "warn" | "strike";
+  /** Countdown for the current warn / strike window. */
+  hazardTimer: number;
+  /** Countdown to the next damage tick during the strike window. */
+  hazardTickTimer: number;
+  /** Remaining damage ticks in the current strike window. */
+  hazardTicksLeft: number;
+}
+
+/**
  * Boss entity. Populated by `makeBoss` and driven by the boss system in Phase B;
  * kept here so `GameState` and the save/render layers already know its shape.
  */
@@ -340,6 +395,12 @@ export interface Boss {
   /** Slam wind-up timer; > 0 means a telegraphed AoE is incoming. */
   telegraph: number;
   enraged: boolean;
+  /**
+   * M7.9 signature-mechanic state (charge/summon/hazard for maps 4-6). Always set
+   * by `makeBoss`; OPTIONAL on the type only so pre-M7.9 boss literals in the
+   * outer layers remain valid. Transient (the boss is never persisted).
+   */
+  variety?: BossVarietyState;
 }
 
 export interface Projectile {

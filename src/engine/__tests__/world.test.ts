@@ -216,8 +216,10 @@ describe("SAVE v7 -> v8 migration", () => {
   it("clamps a stage beyond the frontier to the last farm zone", () => {
     const m = migrate({ version: 7, stage: 99, hero: { cls: "mage", level: 40, tier: 1 } });
     expect(zoneAt(m.location).kind).toBe("farm");
-    expect(m.location.mapId).toBe("map3");
-    expect(m.stage).toBe(15); // last farm zone's stage
+    // M7.9 "Grand Expansion": the frontier moved from map3/s15 to map6/s30. The clamp
+    // still resolves an over-range stage to the LAST farm zone in the world.
+    expect(m.location.mapId).toBe("map6");
+    expect(m.stage).toBe(30); // last farm zone's stage
   });
 
   it("round-trips a v8 save through initGameState + toSaveData unchanged", () => {

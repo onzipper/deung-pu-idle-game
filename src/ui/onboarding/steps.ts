@@ -25,6 +25,10 @@ import type { MascotMood } from "@/ui/onboarding/mascotMood";
 export interface OnboardingHeroSnapshot {
   skillCd: number;
   dead: boolean;
+  /** Class-advancement tier (M7.9 "Grand Expansion" adds tier 3) — lets a
+   * contextual tip distinguish WHICH evolution's quest/slot-unlock just fired
+   * (e.g. the tier-2 -> tier-3 quest-offered tip vs the original tier-1 one). */
+  tier: 1 | 2 | 3;
   /** Sum of str+dex+int+vit — rises by exactly the allocated amount on a
    * manual (or auto) stat spend, and NEVER on a level-up alone (which only
    * grants unspent points), so an increase unambiguously means "a point was
@@ -81,6 +85,7 @@ export function toOnboardingSnapshot(s: {
   heroes: {
     skillCd: number;
     dead: boolean;
+    tier: 1 | 2 | 3;
     stats: HeroStats;
     statPoints: number;
     unlockedSlots: number;
@@ -99,6 +104,7 @@ export function toOnboardingSnapshot(s: {
     heroes: s.heroes.map((h) => ({
       skillCd: h.skillCd,
       dead: h.dead,
+      tier: h.tier,
       statsSum: h.stats.str + h.stats.dex + h.stats.int + h.stats.vit,
       statPoints: h.statPoints,
       unlockedSlots: h.unlockedSlots,
@@ -117,10 +123,7 @@ export type OnboardingAnchor =
 /** Player intents the "action" advance rule can detect via a snapshot diff.
  * Add a case here + in `didActionOccur` when a later step needs a new one. */
 export type OnboardingActionKind =
-  | "castSkill"
-  | "challengeBoss"
-  | "allocateStat"
-  | "setAutoSlot";
+  "castSkill" | "challengeBoss" | "allocateStat" | "setAutoSlot";
 
 /** Dismiss rule for a step:
  * - `next`   — explicit "Next" tap (welcome/outro/informational steps).

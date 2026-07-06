@@ -108,13 +108,15 @@
 
 > **โลก ×2 + คลาสขั้น 3 + gear t7-10 + บอสหลากหน้า** — ก้อนเดียวที่ทุบกำแพง s15 และวาง endgame ใหม่ที่ s30 · เคาะแล้ว: ธีมชุด A (**ทุนดราน้ำแข็ง s16-20 → ทะเลทรายซากอารยธรรม s21-25 → นครนรก s26-30**) · **กุญแจทุบ s15 = เควสคลาส 3** (ฟาร์ม map3 → Lv40 → เควส → power spike → ล้มบอส s15 → เข้า map4) · บอส: หน้าตาเฉพาะตัวทั้ง 6 + **ท่าใหม่ต่อบอสแมพใหม่** (พุ่งชน / เรียกลูกน้อง / คลื่นอันตรายเต็มสนาม) · **levelCap 60→90** · s30 = soft-wall ตัวใหม่
 
-- [ ] **Engine world**: map4/5/6 (แมพละ 5 ฟาร์ม + ห้องบอส, data-driven ตามสูตร M6), hunt knobs + aggro belt ต่อแมพ, levelCap 90 + xp curve ต่อ, kill/gold curve ต่อ — sim rebaseline เต็ม (เกต: จังหวะเดิม s1-15 ต้องไม่ขยับ, s30 wall ใหม่, ไม่มี stall)
-- [ ] **คลาสขั้น 3** (ร่างชื่อ: จอมอัศวิน / ราชันพราน / อาร์คเมจ — เจ้าของ rename ได้): เควสเสนอ Lv40 (ล่า map3 + บอส map2 ซ้ำ; ไม่มีเงื่อนไขตีบวก), tier 1|2|3 + SAVE v15, **สกิลที่ 4** อลังเหนือ ultimate เดิม — ดาบ: ดาบฟ้าผ่าสนาม (time-freeze beat ผ่าน timeDirector) / ธนู: พายุธนูถล่มต่อเนื่อง ~4 วิ / เวท: วันสิ้นโลก (ฟ้ามืดค้าง + อุกกาบาตชุด) — reuse กลไกเดิมทั้งหมด (ห้าม ProjectileKind ใหม่), มานา ~120 + tier 3 แถม pool เพิ่ม, **auto slot 4 ปลดด้วย tier 3 เท่านั้น**
-- [ ] **Gear t7-t10**: band t7(s16-18) t8(s19-22) t9(s23-26) t10(s27-30), drop table + ราคาขาย + refine interplay ผ่าน sim, paper-doll silhouette ใหม่ต่อ tier ต่อยอดบันไดออร่า +8-10
-- [ ] **บอสหลากหน้า**: silhouette/palette เฉพาะตัวทั้ง 6 บนริกเดิม; บอส map4 = พุ่งชน (charge), map5 = เรียกลูกน้อง (summon adds), map6 = คลื่นอันตรายเต็มสนาม (arena hazard) — deterministic, บอสเก่า 3 ตัวคงท่าเดิม (ไม่ rebalance ย้อนหลัง)
-- [ ] **Render world**: biome family ×3 (น้ำแข็ง/ทะเลทราย/นรก) + ซุ้มประตู + ประตูบอส + arena ต่อธีม, สกิล 4 spectacle (time-freeze / ม่านพายุ / ฟ้ามืดค้าง)
-- [ ] **UI**: ช่อง auto slot 4 (ปลดพร้อม tier 3), codex คลาส/แมพ/บอสใหม่, FTUE tips จังหวะเปลี่ยนคลาส 3, i18n th/en ครบ
-- [ ] **Balance close**: sim เต็ม 3 คลาส × gear × refine → docs/balance-m79.md (เกต: class2 ~s5 เดิม, s15 แตกด้วยคลาส 3 ตามดีไซน์, s30 soft-wall, mana sink ยังจริง, ไม่มี stall)
+- [x] **Engine world**: map4/5/6 (แมพละ 5 ฟาร์ม + ห้องบอส, data-driven ตามสูตร M6), hunt knobs + aggro belt ต่อแมพ, levelCap 90 + xp curve ต่อ, kill/gold curve ต่อ — sim rebaseline เต็ม (เกต: จังหวะเดิม s1-15 ต้องไม่ขยับ ✓ byte-identical, s30 wall ใหม่ ✓, ไม่มี stall ✓)
+- [x] **คลาสขั้น 3** (ร่างชื่อ: จอมอัศวิน / ราชันพราน / อาร์คเมจ — เจ้าของ rename ได้): เควสเสนอ Lv40 (ล่า map3 + บอส map2 ซ้ำ; ไม่มีเงื่อนไขตีบวก), tier 1|2|3 + SAVE v15, **สกิลที่ 4** (sword_skyfall / archer_storm ~4.0 วิจริง / mage_apocalypse ×8) — reuse กลไกเดิมทั้งหมด (ไม่มี ProjectileKind ใหม่), มานา 120 + tier3PoolBonus 90, **auto slot 4 ปลดด้วย tier 3 เท่านั้น** (tierRequired=[1,1,1,3])
+- [x] **Gear t7-t10**: band t7(s16-18) t8(s19-22) t9(s23-26) t10(s27-30) — 46 templates, drop table + ราคาขาย + refine interplay ผ่าน sim (t10+10 = เพดาน 126 atk), paper-doll silhouette + apex ornament ต่อ tier ต่อยอดบันไดออร่า +8-10
+- [x] **บอสหลากหน้า**: silhouette/palette เฉพาะตัวทั้ง 6 บนริกเดิม (bossThemes.ts); map4 = พุ่งชน / map5 = เรียกลูกน้อง / map6 = คลื่นเต็มสนาม — deterministic + telegraph fx/sfx ครบ (5 events ใหม่), บอสเก่า 3 ตัว byte-identical
+- [x] **Render world**: biome family ×3 (น้ำแข็ง/ทะเลทราย/นรก) + ซุ้มประตู + ประตูบอส + arena ต่อธีม, สกิล 4 spectacle (time-freeze 0.16s / ม่านพายุ+ฝูงธนูบังฟ้า+finale beat / ฟ้ามืดค้าง 2.6s) — pool caps audit แล้ว
+- [x] **UI**: ช่อง auto slot 4 (ปลดพร้อม tier 3), codex หมวดโลก/คลาส 3/บอสใหม่, FTUE tips (tier3QuestOffered @Lv40 + skill4Unlocked), i18n th/en ครบ (19 item keys ใหม่), patch-notes 2026-07-07c
+- [x] **Balance close**: sim เต็ม 3 คลาส × gear × refine → docs/balance-m79.md (เกตทั้ง 6 ผ่าน: class2 ~s5 เดิม, s15 แตกด้วยคลาส 3, s16-29 ไต่ไม่ stall, s30 soft-wall boss-iso ชนะ 3/3 ที่ t10+10, mana sink จริง 23/52/53 ขวด/รอบ, บอสชนะได้บน autoplay) — ธง: ธนู s26-30 friction สูง (follow-up class design)
+
+> **หมายเหตุปิด M7.9 (2026-07-07):** in-browser visual pass ยังไม่ได้ทำ — แนะนำ owner playtest: หน้าตาบอส 6 ตัว (เขากว้าง map2/map6 vs HP bar), spectacle สกิล 4 ทั้ง 3, ความรู้สึกไต่ s16-30 (โดยเฉพาะธนู)
 
 ## M8 — Party
 

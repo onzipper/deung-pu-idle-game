@@ -67,6 +67,16 @@ function anyHeroReady(s: OnboardingSnapshot): boolean {
  *  - `bossWipe`: the hero just got wiped by a boss (a phase boss -> battle
  *    transition, distinct from the game's initial "battle" phase at boot) —
  *    explains the no-penalty respawn (bossReady stays true).
+ *
+ * M7.9 "Grand Expansion" appends two more (registry order = lower priority
+ * than the tier-1 originals above, mirroring how the tier-2/-3 evolution
+ * itself comes later in a run):
+ *  - `tier3QuestOffered`: the M7.9 tier-2 -> tier-3 quest first becomes
+ *    offerable (Lv.40) — same "รับเควส" accept button, distinct id from
+ *    `questOffered` (tier-1) so BOTH fire once each across a run.
+ *  - `skill4Unlocked`: a hero's auto-cast slot count just reached the tier-3
+ *    4th slot — distinct id from `autoSlotUnlocked` (tier-1/2's Lv 15/30
+ *    slots) so both fire once each.
  */
 export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
   {
@@ -106,7 +116,8 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
     id: "statPointsPiling",
     anchor: "stat-panel",
     mood: "warning",
-    trigger: (_prev, next) => !next.autoAllocate && next.heroes.some((h) => h.statPoints > 9),
+    trigger: (_prev, next) =>
+      !next.autoAllocate && next.heroes.some((h) => h.statPoints > 9),
   },
   {
     id: "stageClear",
@@ -130,6 +141,21 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
     id: "manualPlayHint",
     mood: "excited",
     trigger: (prev, next) => prev.autoHunt && !next.autoHunt,
+  },
+  {
+    id: "tier3QuestOffered",
+    anchor: "skill-bar",
+    mood: "excited",
+    trigger: (_prev, next) => next.heroes.some((h) => h.tier === 2 && h.questOffered),
+  },
+  {
+    id: "skill4Unlocked",
+    anchor: "skill-bar",
+    mood: "excited",
+    trigger: (prev, next) =>
+      next.heroes.some(
+        (h, i) => h.unlockedSlots >= 4 && (prev.heroes[i]?.unlockedSlots ?? 0) < 4,
+      ),
   },
 ];
 

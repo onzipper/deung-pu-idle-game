@@ -24,6 +24,49 @@ import type {
 // solo play (docs/balance-m5.md); the old docs/balance-m4.md team table is
 // superseded and kept only for reference.
 
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" s16-30 FARM rebalance overlays (docs/balance-m79.md).
+// Per-stage multipliers folded into the enemyAtk / enemyHp curves below. They are
+// IDENTITY (1.0) for every stage in the frozen bands — enemyAtk ≤ s20, enemyHp ≤ s22
+// — so s1-15 AND the now-healthy s16-20 band (fixed via gear DEF + the trimmed aggro
+// belt) stay BYTE-IDENTICAL; only the deep frontier is damped. RATIONALE: the shared
+// geometric curves (enemyAtk ×1.19^n, enemyHp ×1.20^n) compound past s20 into (a)
+// per-hit burst the squishy classes can't survive even in-band gear (archer map5
+// farm death-spiral) and (b) a ~780s clear-time wall at s26-29. The overlays bend
+// BOTH down GENTLY and WITHOUT a hard cap (the climb stays monotonic / "steepening").
+// The BOSS curves (bossAtk/bossHp) are UNTOUCHED here — bosses are tuned only via
+// `bossVariety` scales — so this eases FARM pressure alone. killGoal/gold/xpPerKill
+// are also untouched, so per-zone leveling+economy stay on-curve (enemyHp damp cuts
+// clear TIME via faster TTK, not the kill count → xp/gold-per-zone is preserved).
+// Both damps are IDENTITY through s20 (the s16-20 band measured healthy on gear DEF +
+// the trimmed aggro belt alone) and engage at s21+. enemyHpDamp is the CLEAR-TIME +
+// exposure lever (faster TTK → the single-target archer / adjacent melee spend far less
+// time soaking the deep field, which was the real death driver — archer cleared s21 in
+// ~2× the mage's time); enemyAtkDamp is the per-HIT burst lever.
+//   enemyAtkDamp(n): 1 for n≤15, then 0.92^(n-15)  → s20 ≈0.66, s25 ≈0.44, s30 ≈0.29
+//   enemyHpDamp(n):  1 for n≤15, then 0.94^(n-15)  → s20 ≈0.73, s25 ≈0.54, s30 ≈0.40
+// The two damps together rescue the squishy single-target ARCHER, whose frontier death
+// -spiral was the binding constraint: its weak arrow-rain AoE can't one-shot a cluster,
+// so under survivor-retaliation (hunt.ts) every volley WAKES a swarm it then can't
+// out-DPS → it is burst through the auto-potion cooldown. Crucially the spiral ORIGINATES
+// at s18-20 (the archer died ~180× across map4 while sword/mage sailed through), so the
+// damp engages at s16 (NOT s21) to break it at the source — s1-15 stays BYTE-IDENTICAL
+// (n≤15 → 1), and the s16-20 band was never a gated invariant. enemyHpDamp turns more of
+// the woken cluster from "survivor" into "kill"; enemyAtkDamp (the stronger lever) makes
+// the swarm it does wake hit softly enough to tank + pick off single-target. The AoE
+// classes (mage meteors, sword whirl) already clear clusters, so both levers
+// disproportionately help the archer while only making the (boss-gated) frontier FARMS
+// breezier for sword/mage — the frontier's teeth are the s20/25/30 boss soft-walls
+// (boss-scaled via bossVariety, untouched by these farm overlays).
+const STAGE_ATK_DAMP_FROM = 15;
+const STAGE_ATK_DAMP_BASE = 0.92;
+const STAGE_HP_DAMP_FROM = 15;
+const STAGE_HP_DAMP_BASE = 0.94;
+const enemyAtkDamp = (n: number): number =>
+  n <= STAGE_ATK_DAMP_FROM ? 1 : Math.pow(STAGE_ATK_DAMP_BASE, n - STAGE_ATK_DAMP_FROM);
+const enemyHpDamp = (n: number): number =>
+  n <= STAGE_HP_DAMP_FROM ? 1 : Math.pow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
+
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
   /** Speed multipliers the player can toggle. */
@@ -88,6 +131,48 @@ export const CONFIG = {
       {
         id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15, fieldWidth: 900,
         hunt: { maxAlive: 21, respawnDelay: 0.55, aggroStart: 0.1, aggroEnd: 0.16, aggroRadius: 145 },
+      },
+      // ---- M7.9 "Grand Expansion" world foundation (engine-only first pass) ----
+      // Maps 4/5/6 extend the run to stage 30 following the EXACT structural formula
+      // of maps 1-3: each map = 5 farm zones (one content stage each) + 1 boss room at
+      // the last farm's stage. Per-zone combat balance is still driven by `state.stage`
+      // through the SAME parametric curves (killGoal/enemyHp/enemyAtk/goldPerKill/
+      // xpPerKill = f(n)), so s16-30 scaling falls straight out of the existing curve
+      // block — nothing per-stage is hand-authored, and s1-15 stays byte-identical
+      // (these curve functions are untouched). The geometric enemyHp (×1.2^(n-1))
+      // naturally STEEPENS toward s30, giving the intended soft-wall (s30 ≈ 15× s15 HP)
+      // without a hard cap. Hunt/aggro knobs continue the maps-1-3 ramp (density +
+      // aggressive belt climb modestly per map so danger concentrates deeper). Themes
+      // are naming/id only here (biomes/art are a render task): map4 ice tundra, map5
+      // desert ruins, map6 hell city. FULL rebalance of s16-30 is a LATER wave — these
+      // are sane monotonic first-pass numbers, not a tuned curve.
+      {
+        // map4 — ICE TUNDRA (s16-20). maxAlive 21 (holds map3's dense field),
+        // respawn a touch faster, aggro belt one notch above map3's tail.
+        // M7.9 rebalance (docs/balance-m79.md): the first-pass aggro fractions (a naive
+        // continuation of the maps-1-3 ramp) multiplied the HIGH s16-30 enemyAtk into a
+        // farm death-spiral for the squishy classes (archer s16-20 farm deaths 9→91).
+        // Because #aggressive = fraction × maxAlive AND each aggressive hit is huge at
+        // this depth, the belt was trimmed hard (danger now comes from the tough mobs +
+        // gear-gated survival, per the M6 "not a self-inflicted swarm" rule). aggroRadius
+        // eased too so fewer mobs latch onto a passing kiter. Maps 1-3 untouched.
+        id: "map4", zoneStageIds: [16, 17, 18, 19, 20], bossStageId: 20, fieldWidth: 900,
+        hunt: { maxAlive: 21, respawnDelay: 0.5, aggroStart: 0.07, aggroEnd: 0.1, aggroRadius: 140 },
+      },
+      {
+        // map5 — DESERT RUINS (s21-25). M7.9 rebalance: maxAlive eased 23 → 20 — the
+        // single-target archer couldn't out-clear a 23-mob field (it cleared s21-24 in
+        // ~2× the mage/sword time → ~2× exposure → a farm death-spiral). 20 is still a
+        // dense "alive field" but lets the archer keep pace. Modest (trimmed) aggro belt.
+        id: "map5", zoneStageIds: [21, 22, 23, 24, 25], bossStageId: 25, fieldWidth: 900,
+        hunt: { maxAlive: 18, respawnDelay: 0.5, aggroStart: 0.07, aggroEnd: 0.11, aggroRadius: 138 },
+      },
+      {
+        // map6 — HELL CITY (s26-30). The frontier: dense field (maxAlive eased 25 → 22,
+        // same archer-pace reasoning as map5), the widest (but still trimmed) aggressive
+        // belt. s30's boss room is the soft-wall gate.
+        id: "map6", zoneStageIds: [26, 27, 28, 29, 30], bossStageId: 30, fieldWidth: 900,
+        hunt: { maxAlive: 16, respawnDelay: 0.45, aggroStart: 0.09, aggroEnd: 0.13, aggroRadius: 142 },
       },
     ],
     townMapId: "map1",
@@ -428,8 +513,11 @@ export const CONFIG = {
   // only bends the LATE curve down, buying ~1 extra smooth stage and lowering the
   // wall's height without touching the early-game feel. Same base is reused for
   // bossHp, so the boss-power target (rec = bossHp / divisor) softens in lockstep.
-  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1)),
-  enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1)),
+  // M7.9: the geometric base is UNCHANGED (s1-15 byte-identical); the s16-30 overlay
+  // (enemyHpDamp / enemyAtkDamp, identity for the frozen bands) damps only the deep
+  // frontier — see the overlay block above CONFIG for the rationale + curve values.
+  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * enemyHpDamp(n)),
+  enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * enemyAtkDamp(n)),
   bossHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * 16),
   bossAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * 2.1),
   // M4 tune: gold/kill was purely linear (5 + 2n) while upgrade costs are
@@ -527,6 +615,58 @@ export const CONFIG = {
     { dx: 420, ry: 30 },
   ] as const,
 
+  // ---- archer STORM (tier-3 skill-4 "พายุธนูถล่มต่อเนื่อง ~4 วิ") drop pattern (M7.9) ----
+  // A SUSTAINED barrage: 20 drops whose LANDINGS SPREAD over ~4s of real time. Same
+  // NO-RNG contract as the tables above (length MUST equal archer_storm's `targets` =
+  // 20). Reuses the rainArrow fall — NO new ProjectileKind (footgun #6). The ~4s window
+  // is engineered PURELY through spawn-height stagger (`ry`): a taller `ry` spawns the
+  // drop higher, so it falls LONGER before landing. At the skill's projSpeed 260 the
+  // fall-time delta ≈ ry/260 s, so the ry ramp 0 -> 1045 gives a ≈4.0s first-to-last
+  // landing window (same trick barrage/arrowRain use, just a bigger table + a MUCH
+  // taller stagger). `dx` spans ~±430 so the storm blankets the whole ~900px field.
+  // Deterministic (constant table). Verified in the grand-expansion suite's window test.
+  stormOffsets: [
+    { dx: -430, ry: 0 },
+    { dx: 380, ry: 55 },
+    { dx: -300, ry: 110 },
+    { dx: 250, ry: 165 },
+    { dx: -170, ry: 220 },
+    { dx: 120, ry: 275 },
+    { dx: -40, ry: 330 },
+    { dx: 60, ry: 385 },
+    { dx: -220, ry: 440 },
+    { dx: 300, ry: 495 },
+    { dx: -360, ry: 550 },
+    { dx: 420, ry: 605 },
+    { dx: -110, ry: 660 },
+    { dx: 180, ry: 715 },
+    { dx: -260, ry: 770 },
+    { dx: 340, ry: 825 },
+    { dx: -400, ry: 880 },
+    { dx: 0, ry: 935 },
+    { dx: 230, ry: 990 },
+    { dx: -150, ry: 1045 },
+  ] as const,
+
+  // ---- mage APOCALYPSE (tier-3 skill-4 "วันสิ้นโลก") meteor-volley pattern (M7.9) ----
+  // Several METEOR-kind drops (length MUST equal mage_apocalypse's `targets` = 8) on a
+  // FIXED offset table, staggered by spawn height so the volley lands over a window (the
+  // meteor counterpart of `stormOffsets`). REUSES the existing meteor ProjectileKind —
+  // the skill stays `kind:"meteor"` and the skill code spawns MANY when `targets > 0`
+  // (NO new SkillKind, NO new ProjectileKind — footgun #6). `dx` scatters the impacts
+  // around the nearest-target centroid; `ry` spreads the landings (at projSpeed 360 the
+  // ry ramp 0 -> 980 gives a ≈2.7s volley window). Deterministic (constant table).
+  apocalypseOffsets: [
+    { dx: -240, ry: 0 },
+    { dx: 180, ry: 140 },
+    { dx: -120, ry: 280 },
+    { dx: 260, ry: 420 },
+    { dx: -300, ry: 560 },
+    { dx: 60, ry: 700 },
+    { dx: -60, ry: 840 },
+    { dx: 200, ry: 980 },
+  ] as const,
+
   // ---- skills ----
   skills: {
     meteorSpawnY: -48, // meteor projectile spawns at this absolute y (falls to impact)
@@ -560,7 +700,12 @@ export const CONFIG = {
   // Sim-rebaselined per class solo — see docs/balance-m5.md.
   leveling: {
     // Level cap; the evolution gate keys off a threshold below this.
-    levelCap: 60,
+    // M7.9 "Grand Expansion": raised 60 → 90 to head-room the s16-30 content. The
+    // xp curve (`xpToLevel`, geometric ×1.12/level) is a function of `level`, so it
+    // extends to L90 automatically and is LEFT UNCHANGED — raising the ceiling does
+    // NOT move any level-up cost for L1-59, so s1-15 leveling stays byte-identical.
+    // (A gentler late-curve retune belongs to the later s16-30 rebalance wave.)
+    levelCap: 90,
     // Per-level ADDITIVE bonuses (combine additively with the primary-stat atk
     // bonus, then the tier multiplier applies).
     //
@@ -710,6 +855,15 @@ export const CONFIG = {
     // for all three classes (str/dex classes, on the flat pool, drain in seconds).
     // The signature-cast guarantee is untouched (baseRegen alone sustains it).
     regenPerIntPoint: 0.05, // +mana/sec per INT point above base (caster identity)
+    // ---- M7.9 "Grand Expansion" tier-3 mana-pool bonus ----
+    // Tier 3 grants a FLAT pool bump (systems/stats `heroMaxMana`, tier 3 only) so the
+    // grander tier-3 skill-4 (cost ~120) is CASTABLE but still GATING — same philosophy
+    // as the tier-2 ultimates (see sword_quake / archer_barrage: cost≈pool so a cast
+    // nearly empties it). A str/dex class sits on the flat base pool (60); +90 -> 150
+    // lets it afford the 120 skill-4 with ~30 to spare, so a cast drains the pool and
+    // the next waits on regen (mana potions stay a real sink). The INT-fed mage already
+    // has the deepest pool; this lifts its ceiling in step. Applied on evolve to tier 3.
+    tier3PoolBonus: 90,
   },
 
   // ---- auto-cast slots (M5 "skill framework v2") ----
@@ -719,9 +873,17 @@ export const CONFIG = {
   // cooldown, and affordable. The player assigns skills to slots (setAutoSlot
   // intent); slot 0 defaults to the class signature so a fresh hero auto-casts it.
   autoSlots: {
-    max: 3,
-    // Level thresholds that unlock slot 0 / 1 / 2 (length MUST equal `max`).
-    unlockLevels: [1, 15, 30] as const,
+    // M7.9 "Grand Expansion": raised 3 -> 4 (a tier-3 FOURTH slot). The array LENGTH a
+    // hero actually holds is tier-scoped (`autoSlotCapacity`): tiers 1-2 keep the
+    // historical 3-slot loadout (persisted saves stay byte-identical — slot 3 exists
+    // only for a tier-3 hero), so this bump changes NOTHING for a pre-tier-3 save.
+    max: 4,
+    // Level thresholds that unlock slot 0 / 1 / 2 / 3 (length MUST equal `max`).
+    unlockLevels: [1, 15, 30, 40] as const,
+    // TIER required to unlock each slot (length MUST equal `max`). The 4th slot (index
+    // 3) is gated behind tier 3 AS WELL AS level 40 — `unlockedAutoSlotCount(level,
+    // tier)` requires BOTH. Tiers 1-2 therefore only ever see 3 usable slots (unchanged).
+    tierRequired: [1, 1, 1, 3] as const,
   },
 
   // ---- combat power ("พลังต่อสู้") — the HOF metric + boss-hint gauge ----
@@ -771,6 +933,20 @@ export const CONFIG = {
     // solo hero break the boss gate. Sim-tuned per class — see docs/balance-m5.md.
     atkMult: 1.35,
     hpMult: 1.5,
+    // ---- M7.9 "Grand Expansion" tier-3 class advancement ----
+    // The SECOND evolution: tier 2 -> tier 3 (จอมอัศวิน/ราชันพราน/อาร์คเมจ). Gated by
+    // the tier-3 quest (kills in map3 + a REPEAT map2-boss kill, no refine condition —
+    // see systems/quests). The tier-3 multipliers compound MULTIPLICATIVELY on top of
+    // the tier-2 ones (systems/stats `tierAtkMult`/`tierHpMult`): tier 3 effective atk =
+    // atkMult × tier3.atkMult, hp = hpMult × tier3.hpMult. This is the designed POWER
+    // SPIKE that breaks the s15 wall -> beat the s15 boss -> enter map4. Level gate 40
+    // (needs the L90 cap headroom from the world foundation). First-pass numbers; the
+    // s16-30 rebalance wave will sim-tune them.
+    tier3: {
+      levelRequired: 40,
+      atkMult: 1.6,
+      hpMult: 1.7,
+    },
   },
 
   // ---- class-change quest (M5 "เปลี่ยนคลาสผ่านเควส" v1, ROADMAP task 5) ----
@@ -789,6 +965,23 @@ export const CONFIG = {
       kills: 60,
       // Boss defeats required (a stage-clear milestone — proves real progress).
       bossKills: 1,
+    },
+    // ---- M7.9 "Grand Expansion" tier-3 (class-3) quest ----
+    // The tier-2 -> tier-3 evolution key (offered at level >= evolution.tier3.
+    // levelRequired while tier 2). Objectives are MAP-SCOPED (systems/quests +
+    // QuestObjective.mapId): grind kills in MAP3, then defeat the MAP2 boss AGAIN —
+    // a REPEAT boss kill (the boss room stays unlocked, so walking back re-fights it;
+    // no new mechanic needed — see systems/world). NO refine-level condition by design
+    // (owner). Completing it enables the tier-3 class change (systems/evolution), the
+    // power spike that breaks the s15 wall. Same numbers per class in this pass;
+    // per-class quest IDS (`tier3QuestId`) let a later pass diverge them.
+    tier3: {
+      // Kills to bank in map3 (the grind portion — bigger than the tier-2 grind).
+      kills: 120,
+      killMapId: "map3",
+      // Repeat map2-boss defeats required (proves the player can re-clear it).
+      bossKills: 1,
+      bossMapId: "map2",
     },
   },
 
@@ -833,6 +1026,102 @@ export const CONFIG = {
     telegraphNormal: 1.0,
     attackCdEnraged: 0.7,
     attackCdNormal: 1.1,
+  },
+
+  // ---- boss variety roster (M7.9 "Grand Expansion" behavior wave) ----
+  // A per-boss-room table keyed by the room's content stage (the map's `bossStageId`).
+  // Live stats derive from the parametric `bossHp/bossAtk` curves via `makeBoss`,
+  // then multiply by per-boss `hpScale`/`atkScale`. Maps 1-3 stay IDENTITY (1) so the
+  // OLD fights are byte-identical. The maps-4-6 bosses take a FIRST-PASS softening
+  // below 1: the raw curve past the old s15 wall is far too steep for even a max
+  // tier-3 hero (sim-verified: an L90 t3 hero in full t10+10 gear wipes on the raw
+  // s25/s30 boss), and the added signature mechanic stacks MORE pressure on top, so
+  // these scales bring the fights into "hard but breachable by a well-geared+refined
+  // tier-3 hero" — the design's soft-wall (s30 breachable, not a hard cliff). The
+  // PRECISE s16-30 curve/scale tuning is the NEXT rebalance wave; these are sane
+  // first-pass numbers (sim smoke green — see docs/balance-m7 follow-up).
+  // `behaviors` drives the mechanics in systems/boss.ts: every boss keeps the base
+  // `slam`+`enrage` kit; maps 4-6 LAYER one signature mechanic:
+  //   map4 s20 = CHARGE, map5 s25 = SUMMON, map6 s30 = FIELD HAZARD.
+  // Bosses s5/s10/s15 omit the new tags, so `updateBoss`'s classic path is unchanged
+  // for them (byte-identical). Mechanic tunables live in `bossBehavior` below.
+  // `EnemyKind` is not imported here — the summon add-kind list lives in
+  // `bossBehavior` as plain strings, cast in systems/boss.ts.
+  bossVariety: {
+    // Existing bosses (maps 1-3) — Slam + Enrage only, IDENTITY scale (UNCHANGED).
+    5: { theme: "map1", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    10: { theme: "map2", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    15: { theme: "map3", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    // New bosses (maps 4-6) — base kit + one signature mechanic. M7.9 s16-30 rebalance
+    // wave (docs/balance-m79.md): the first-pass scales were tuned for the MAGE (ranged
+    // burst + apocalypse) and walled the melee/archer — sword s20 3/5, s25 0/5; archer
+    // s20 1/5 (848 wipes) — because the signature mechanic (charge/summon) stacks lethal
+    // pressure the two non-caster classes can't kite. Softened atk (the wipe driver) more
+    // than hp, so the fights stay LONG (real DPS checks) but survivable-without-perfect-
+    // play at the intended gear band (t7/t8 @ s20, t8/t9 @ s25). s30 stays the hard
+    // soft-wall (breachable only by a t9/t10-refined tier-3 hero — verified BOSSISO=1).
+    20: { theme: "ice-tundra", hpScale: 0.7, atkScale: 0.62, behaviors: ["slam", "enrage", "charge"] },
+    25: { theme: "desert-ruins", hpScale: 0.3, atkScale: 0.4, behaviors: ["slam", "enrage", "summon"] },
+    30: { theme: "hell-city", hpScale: 0.24, atkScale: 0.4, behaviors: ["slam", "enrage", "hazard"] },
+  } as Record<number, { theme: string; hpScale: number; atkScale: number; behaviors: string[] }>,
+
+  // ---- boss signature-mechanic tunables (M7.9 behavior wave) ----
+  // DETERMINISTIC: no RNG-stream draws — fixed timing / HP-threshold / offset tables
+  // (the seeded stream stays wave-composition only). First-pass numbers; the s16-30
+  // rebalance wave tunes them. CHARGE + HAZARD are CHANNELED (the boss's Slam +
+  // normal attack pause while it winds up / acts); SUMMON is instantaneous (layers on
+  // top of the base kit). All drive systems/boss.ts.
+  bossBehavior: {
+    // CHARGE (map4 s20): telegraph a dash at the hero's current x, then rush and hit
+    // every hero within `hitRange` of the landing point for `hitMult × atk`. The
+    // target x locks at telegraph time (a fair, positional read).
+    charge: {
+      cd: 8.0, // seconds between charges (idle → windup, at engage range)
+      cdEnraged: 5.0,
+      telegraph: 0.85, // wind-up before the dash launches
+      dashSpeed: 460, // px/s during the rush (fast — the "heavy" read)
+      stopGap: 40, // the dash stops this far in front of the locked target x
+      // M7.9 rebalance: 95 → 78. The charge locks the landing on the hero's x at
+      // telegraph time; a wide hit zone caught the RANGED classes even at standoff
+      // (archer s20 3/5). A tighter zone rewards not standing on the marked x — the
+      // ranged classes can drift clear, the melee (who must be adjacent) still eats it.
+      hitRange: 78, // heroes within this of the landing point take the hit
+      // M7.9 rebalance: 2.4 → 1.6. At s20 boss atk (softened to atkScale 0.68) a 2.4×
+      // charge one-to-two-shot the melee/archer (who MUST close), turning the fight into
+      // a coin-flip (sword 3/5, archer 1/5). 1.6× keeps the charge a scary telegraphed
+      // spike (~2× a normal hit) that punishes standing in it, but a full-HP tier-3
+      // hero survives one and can react — the fight becomes a DPS check, not a lottery.
+      hitMult: 1.6, // charge damage = round(atk × this)
+    },
+    // SUMMON (map5 s25): at each descending HP fraction, spawn ONE wave of adds that
+    // flow through the normal enemy list (pooled render views key by entity id). Adds
+    // are engaged-on-spawn + hunt the hero, and JOIN the boss-phase target set so the
+    // hero can kill them. Instantaneous (does not pause the boss's base kit).
+    summon: {
+      // M7.9 rebalance: 2 waves ([0.6,0.3]) → 1 wave ([0.45]). The s25 boss's adds join
+      // the boss-phase target set AND hunt the hero, so a solo squishy took boss + add
+      // pressure at once and never out-DPS'd the second wave (sword 0/5). One mid-fight
+      // wave keeps the "clear the adds or get overwhelmed" beat without a compounding
+      // second swarm — the fight stays a hard DPS/priority check the melee can win.
+      thresholds: [0.45], // fire when boss.hp ≤ maxHp × this (1 wave)
+      // M7.9 rebalance: ["fast","normal"] (2 adds) → ["normal"] (1 add). During the
+      // ~35-40s the SINGLE-TARGET archer needs to down the s25 boss, two hunting adds
+      // stacked enough extra hits to wipe it (archer s25 boss 1/5). One add keeps the
+      // "handle the summon" beat without out-damaging the squishy classes' HP pool.
+      addKinds: ["normal"], // fixed composition per wave (cast to EnemyKind); 1 add
+      spawnSpacing: 70, // px between adds (first add sits this far behind the boss)
+    },
+    // FIELD HAZARD (map6 s30): a telegraphed arena-wide danger wave the hero must
+    // out-heal / out-DPS. A WARN window (telegraph) then a STRIKE window that ticks
+    // damage to EVERY alive hero (position-independent — the arena is the threat).
+    hazard: {
+      cd: 8.5, // seconds between hazard channels
+      cdEnraged: 5.5,
+      telegraph: 1.3, // arena-wide warning window before the strike
+      duration: 1.0, // strike-window length
+      tickInterval: 0.3, // seconds between damage ticks during the strike
+      tickMult: 0.3, // per-tick damage to every hero = round(atk × this)
+    },
   },
 } as const;
 
@@ -994,8 +1283,9 @@ export interface SkillType {
   /** Unique, class-namespaced id (the key into `SKILLS`). */
   id: string;
   cls: HeroClass;
-  /** Hero TIER required to have learned this skill (1 = base kit, 2 = evolution). */
-  tier: 1 | 2;
+  /** Hero TIER required to have learned this skill (1 = base kit, 2 = evolution,
+   * 3 = M7.9 grand-expansion tier-3 skill-4). */
+  tier: 1 | 2 | 3;
   /** Hero LEVEL required to have learned it (unlock-by-level within the tier). */
   unlockLevel: number;
   kind: SkillKind;
@@ -1072,6 +1362,17 @@ const SKILL_LIST = [
     cost: 50, cd: 10, radius: 460, mult: 6.5, targets: 0, projSpeed: 0, range: 500,
     buffMult: 1, buffDuration: 0,
   },
+  // SKYFALL BLADE (tier-3 skill-4 "ดาบฟ้าผ่าสนาม") — a FIELD-WIDE sky-strike: an instant
+  // AoE (reuses the `strike` quake/field mechanism, r500 spans the ~900px field) at a
+  // grander mult than the quake. The time-freeze/flash beat is timeDirector/render's
+  // job — the engine only emits the skillCast event + the damage. cost 120 needs the
+  // tier-3 mana bonus (str pool 60+90=150) to be castable; it nearly empties the pool,
+  // so it's a hard gate (mana potions bite). Learned at tier 3 + level 40.
+  {
+    id: "sword_skyfall", cls: "swordsman", tier: 3, unlockLevel: 40, kind: "strike",
+    cost: 120, cd: 14, radius: 500, mult: 10.0, targets: 0, projSpeed: 0, range: 540,
+    buffMult: 1, buffDuration: 0,
+  },
 
   // ---- archer (zone artillery) ----
   // Signature: ARROW RAIN — 9 drops fall over the cluster. Bigger per-drop radius +
@@ -1098,6 +1399,17 @@ const SKILL_LIST = [
     cost: 50, cd: 10, radius: 80, mult: 1.0, targets: 13, projSpeed: 950, range: 820,
     buffMult: 1, buffDuration: 0,
   },
+  // STORM (tier-3 skill-4 "พายุธนูถล่มต่อเนื่อง ~4 วิ") — a SUSTAINED storm: 20 rain drops
+  // whose LANDINGS SPREAD over ~4s of real time via spawn-height stagger (`stormOffsets`,
+  // a wide 20-row table with a TALL ry ramp). Reuses the rainArrow fall — NO new
+  // ProjectileKind. The DELIBERATELY slow projSpeed (260) is what stretches the ry
+  // stagger into the ~4s window (see stormOffsets). cost 120 gates it on the tier-3 pool.
+  // Learned at tier 3 + level 40. `targets` MUST equal stormOffsets.length.
+  {
+    id: "archer_storm", cls: "archer", tier: 3, unlockLevel: 40, kind: "rain",
+    cost: 120, cd: 15, radius: 80, mult: 1.1, targets: 20, projSpeed: 260, range: 900,
+    buffMult: 1, buffDuration: 0,
+  },
 
   // ---- mage (heavy nuker) ----
   // Signature: METEOR — a single falling AoE nuke. Bigger + cheaper + faster than M7
@@ -1120,6 +1432,17 @@ const SKILL_LIST = [
   {
     id: "mage_cataclysm", cls: "mage", tier: 2, unlockLevel: 15, kind: "meteor",
     cost: 90, cd: 11, radius: 460, mult: 13.0, targets: 0, projSpeed: 560, range: 500,
+    buffMult: 1, buffDuration: 0,
+  },
+  // APOCALYPSE (tier-3 skill-4 "วันสิ้นโลก") — a METEOR VOLLEY: 8 meteor-kind drops on the
+  // fixed `apocalypseOffsets` table, staggered by spawn height so they rain down over a
+  // window. Reuses the meteor kind — the skill stays `kind:"meteor"` and the skill code
+  // spawns MANY when `targets > 0` (NO new SkillKind / ProjectileKind — footgun #6).
+  // `targets` MUST equal apocalypseOffsets.length. cost 120 gates it (the mage's deep
+  // INT pool affords it, but continuous spam still drains). Learned at tier 3 + level 40.
+  {
+    id: "mage_apocalypse", cls: "mage", tier: 3, unlockLevel: 40, kind: "meteor",
+    cost: 120, cd: 16, radius: 150, mult: 8.0, targets: 8, projSpeed: 360, range: 520,
     buffMult: 1, buffDuration: 0,
   },
 ] as const satisfies readonly SkillType[];

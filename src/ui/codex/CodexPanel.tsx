@@ -15,7 +15,8 @@
  * registry + message keys.
  *
  * The ONE exception is the "gear" category's COLLECTION GRID (M7 Gear &
- * Drops): all 27 `ITEM_TEMPLATES` catalog entries, rendered directly off
+ * Drops, extended to 46 templates by M7.9's t7-10 tiers): all `ITEM_TEMPLATES`
+ * catalog entries, rendered directly off
  * engine config rather than `CODEX_ENTRIES` (structured slot/tier/rarity/stat
  * data, not freeform copy — see `entries.ts`'s doc on the `gear` entry).
  * Undiscovered templates render silhouetted/dimmed until first owned; the
@@ -32,6 +33,7 @@ import {
   codexEntriesByCategory,
   type CodexEntryDef,
 } from "@/ui/codex/entries";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { discoveredTemplateIds } from "@/ui/gear/inventoryOps";
 import { GEAR_SLOT_ICONS, HERO_ICONS, RARITY_COLORS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -152,54 +154,58 @@ export function CodexPanel({ onClose }: CodexPanelProps) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-70 flex items-center justify-center p-3"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("title")}
-    >
-      <button
-        type="button"
-        aria-label={t("closeButton")}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/70"
-      />
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-lg flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-          >
-            ✕ {t("closeButton")}
-          </button>
-        </div>
-
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-70 flex items-center justify-center p-3"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("title")}
+      >
         <button
           type="button"
-          onClick={replayTutorial}
-          className="min-h-11 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/10 px-3 py-2 text-left text-xs font-bold text-emerald-300 transition-transform duration-100 hover:brightness-110 active:translate-y-0.5 active:scale-[0.98]"
-        >
-          {t("replayTutorialButton")}
-        </button>
+          aria-label={t("closeButton")}
+          onClick={onClose}
+          className="absolute inset-0 bg-black/70"
+        />
+        <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-lg flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-extrabold text-ddp-gold-bright">
+              {t("title")}
+            </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
+            >
+              ✕ {t("closeButton")}
+            </button>
+          </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-          {CODEX_CATEGORIES.map((category) => (
-            <section key={category.id}>
-              <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
-                {t(`categories.${category.id}`)}
-              </h3>
-              <div className="flex flex-col gap-2">
-                {codexEntriesByCategory(category.id).map((entry) => (
-                  <CodexEntryCard key={entry.id} entry={entry} />
-                ))}
-              </div>
-              {category.id === "gear" && <GearCollectionGrid />}
-            </section>
-          ))}
+          <button
+            type="button"
+            onClick={replayTutorial}
+            className="min-h-11 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/10 px-3 py-2 text-left text-xs font-bold text-emerald-300 transition-transform duration-100 hover:brightness-110 active:translate-y-0.5 active:scale-[0.98]"
+          >
+            {t("replayTutorialButton")}
+          </button>
+
+          <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+            {CODEX_CATEGORIES.map((category) => (
+              <section key={category.id}>
+                <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+                  {t(`categories.${category.id}`)}
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {codexEntriesByCategory(category.id).map((entry) => (
+                    <CodexEntryCard key={entry.id} entry={entry} />
+                  ))}
+                </div>
+                {category.id === "gear" && <GearCollectionGrid />}
+              </section>
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }

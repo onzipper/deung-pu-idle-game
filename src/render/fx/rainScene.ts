@@ -17,10 +17,10 @@
 import { Container, Graphics } from "pixi.js";
 import { PALETTE, safeRadius } from "@/render/theme";
 
-// ---- falling-shadow markers (pooled, cap ~16 — the BARRAGE ultimate's 13
-// drops + a little slack for 3x-speed overlap between casts; NOT the big
-// rotating meteor rune) ------------------------------------------------------
-const SHADOW_CAP = 16;
+// ---- falling-shadow markers (pooled, cap ~24 — M7.9's STORM tier-3 skill-4
+// pushes 20 drops in one cast (vs BARRAGE's 13) + a little slack for 3x-speed
+// overlap between casts; NOT the big rotating meteor rune) ------------------
+const SHADOW_CAP = 24;
 const SHADOW_MAX_R = 7;
 const SHADOW_MAX_ALPHA = 0.4;
 /** Fraction of the shadow's life spent easing alpha in/out — mirrors
@@ -108,21 +108,33 @@ export class RainShadowPool {
   }
 }
 
-// ---- ground-stuck arrow decal (pooled, cap ~16, ~0.6s fade) ----------------
-// Bumped from 10 -> 16 (M7.7): the BARRAGE ultimate's 13 drops can land in a
-// tight real-time window (staggered spawn heights, not spawn TIMES), so the
-// signature rain's old headroom wasn't enough to avoid evicting an in-flight
-// decal mid-barrage.
-const GROUND_ARROW_CAP = 16;
+// ---- ground-stuck arrow decal (pooled, cap ~24, ~0.6s fade by default) -----
+// Bumped 10 -> 16 (M7.7) -> 24 (M7.9): the STORM tier-3 skill-4's 20 drops
+// each linger MUCH longer than the signature's default (per-spawn `life`,
+// see `spawn()`) so the field visibly bristles with arrows by the finale —
+// with a longer life AND more drops concurrently on-screen, the old cap-16
+// headroom (sized for BARRAGE's 13 short-lived decals) isn't enough.
+const GROUND_ARROW_CAP = 24;
 const GROUND_ARROW_LIFE = 0.6;
 const GROUND_ARROW_LEN = 14;
-/** Fraction of the decal's life spent fully visible before it eases out. */
+/** Fraction of a decal's life spent fully visible before it eases out. */
 const GROUND_ARROW_HOLD_FRAC = 0.55;
+/** M7.9 STORM finale glint pop: real seconds the brief "flash brighter"
+ * scale-up plays before easing back to rest, riding the same reset `age`. */
+const GROUND_ARROW_GLINT_DURATION = 0.15;
 
 interface GroundArrowSlot {
   g: Graphics;
   active: boolean;
   age: number;
+  /** Per-spawn lifetime (M7.9) — the signature/barrage default stays
+   * `GROUND_ARROW_LIFE`; STORM's drops pass a much longer one (see
+   * `FxController`'s `STORM_GROUND_ARROW_LIFE`). */
+  life: number;
+  /** M7.9 STORM finale: true for one brief glint pop after
+   * `finaleGlintAndFadeAll()` resets this slot — a quick scale-up easing back
+   * to 1, reading as "this arrow just glinted" rather than a flat pop-in. */
+  glinting: boolean;
 }
 
 export class GroundArrowPool {
@@ -137,23 +149,28 @@ export class GroundArrowPool {
       const g = new Graphics();
       g.visible = false;
       container.addChild(g);
-      return { g, active: false, age: 0 };
+      return { g, active: false, age: 0, life: GROUND_ARROW_LIFE, glinting: false };
     });
   }
 
   /** Spawn a small arrow sticking into the ground at `(x, groundY)`, fading
-   * over ~0.6s — "sells rain of arrows landed" per spec. Ring-buffer pool
-   * (oldest evicted first), same convention as `ParticlePool`. */
-  spawn(x: number, groundY: number, fletchColor: number): void {
+   * over `life` real seconds (default ~0.6s — "sells rain of arrows landed"
+   * per spec; M7.9 STORM passes a much longer `life` so the battlefield
+   * stays littered until its finale). Ring-buffer pool (oldest evicted
+   * first), same convention as `ParticlePool`. */
+  spawn(x: number, groundY: number, fletchColor: number, life: number = GROUND_ARROW_LIFE): void {
     const slot = this.slots[this.cursor];
     this.cursor = (this.cursor + 1) % this.slots.length;
 
     const tilt = (Math.random() - 0.5) * 0.6; // a slight jaunty angle, not always upright
     slot.active = true;
     slot.age = 0;
+    slot.life = Math.max(0.05, life);
+    slot.glinting = false;
     slot.g.visible = true;
     slot.g.alpha = 1;
     slot.g.rotation = tilt;
+    slot.g.scale.set(1);
     slot.g.position.set(x, groundY);
     slot.g.clear();
 
@@ -172,21 +189,44 @@ export class GroundArrowPool {
     slot.g.poly([0, -1, -3, -4, 0.6, -2.2], true).fill({ color: fletchColor, alpha: 0.8 });
   }
 
+  /** M7.9 STORM finale beat: every currently ground-stuck arrow flashes
+   * (a brief scale-up glint) then fades out TOGETHER over `fadeOutDuration`,
+   * instead of each on its own independent per-spawn countdown — reads as
+   * "the whole battlefield glinting at once" for the storm's closing beat.
+   * A no-op per slot if nothing is currently stuck (an empty/near-empty
+   * field just skips the beat, same as every other trySpawn-style guard in
+   * this module). */
+  finaleGlintAndFadeAll(fadeOutDuration: number): void {
+    for (const slot of this.slots) {
+      if (!slot.active) continue;
+      slot.age = 0;
+      slot.life = Math.max(0.1, fadeOutDuration);
+      slot.glinting = true;
+      slot.g.alpha = 1;
+    }
+  }
+
   /** Advance every live decal by `dt` real seconds. */
   update(dt: number): void {
     for (const slot of this.slots) {
       if (!slot.active) continue;
       slot.age += dt;
-      if (slot.age >= GROUND_ARROW_LIFE) {
+      if (slot.age >= slot.life) {
         slot.active = false;
         slot.g.visible = false;
+        slot.g.scale.set(1);
         continue;
       }
-      const frac = slot.age / GROUND_ARROW_LIFE;
+      const frac = slot.age / slot.life;
       slot.g.alpha =
         frac < GROUND_ARROW_HOLD_FRAC
           ? 1
           : Math.max(0, 1 - (frac - GROUND_ARROW_HOLD_FRAC) / (1 - GROUND_ARROW_HOLD_FRAC));
+      if (slot.glinting) {
+        const glintFrac = Math.min(1, slot.age / GROUND_ARROW_GLINT_DURATION);
+        slot.g.scale.set(1.4 - 0.4 * glintFrac);
+        if (glintFrac >= 1) slot.glinting = false;
+      }
     }
   }
 

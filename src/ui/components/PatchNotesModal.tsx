@@ -16,6 +16,7 @@
  */
 
 import { useTranslations } from "next-intl";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { latestPatchNotes } from "@/ui/patchNotes";
 import { usePatchNotes } from "@/ui/hooks/usePatchNotes";
 
@@ -28,6 +29,7 @@ export function PatchNotesModal() {
   const release = latestPatchNotes();
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -55,5 +57,6 @@ export function PatchNotesModal() {
         </button>
       </div>
     </div>
+    </ModalPortal>
   );
 }

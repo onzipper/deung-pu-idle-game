@@ -41,13 +41,19 @@ function evolvedHero(cls: HeroClass) {
 }
 
 describe("M7.7 skill table — three layers, learnable ultimate", () => {
-  it("each class learns its full 3-skill kit (signature + utility + tier-2 ultimate) at tier2/L30", () => {
+  it("each class learns its signature + utility + tier-2 ultimate at tier2/L30 (the M7.9 tier-3 skill stays gated)", () => {
     for (const cls of CLASSES) {
       const { h } = evolvedHero(cls);
       const learned = new Set(learnedSkills(h).map((d) => d.id));
-      expect(CLASS_SKILLS[cls].every((id) => learned.has(id))).toBe(true);
-      // The tier-2 skill is the LAST in each class's ordered kit.
-      const ultimate = CLASS_SKILLS[cls][CLASS_SKILLS[cls].length - 1];
+      // Every tier-1/tier-2 skill is learned at tier2/L30 (exactly the 3-skill kit).
+      const kitUpToTier2 = CLASS_SKILLS[cls].filter((id) => SKILLS[id].tier <= 2);
+      expect(kitUpToTier2.length).toBe(3);
+      expect(kitUpToTier2.every((id) => learned.has(id))).toBe(true);
+      // The M7.9 tier-3 skill-4 is NOT learned yet (needs tier 3 + L40).
+      const tier3Skill = CLASS_SKILLS[cls].find((id) => SKILLS[id].tier === 3)!;
+      expect(learned.has(tier3Skill)).toBe(false);
+      // The tier-2 ULTIMATE is the sole tier-2 entry of the kit.
+      const ultimate = CLASS_SKILLS[cls].find((id) => SKILLS[id].tier === 2)!;
       expect(SKILLS[ultimate].tier).toBe(2);
     }
   });
@@ -58,7 +64,7 @@ describe("M7.7 skill table — three layers, learnable ultimate", () => {
       const h = s.heroes[0];
       h.level = 30;
       h.tier = 1; // evolution not taken
-      const ultimate = CLASS_SKILLS[cls][CLASS_SKILLS[cls].length - 1];
+      const ultimate = CLASS_SKILLS[cls].find((id) => SKILLS[id].tier === 2)!;
       expect(isSkillLearned(h, SKILLS[ultimate])).toBe(false);
       h.tier = 2;
       expect(isSkillLearned(h, SKILLS[ultimate])).toBe(true);
@@ -137,8 +143,10 @@ describe("M7.7 survivor-retaliation — basic-attack behaviour unchanged", () =>
 });
 
 describe("M7.7 density knobs — fields read ~17/19/21", () => {
-  it("per-map maxAlive is 17 / 19 / 21", () => {
-    const alive = CONFIG.world.maps.map((m) => m.hunt.maxAlive);
+  it("per-map maxAlive is 17 / 19 / 21 (maps 1-3)", () => {
+    // M7.9 "Grand Expansion" appended maps 4-6 (21/23/25) — assert only the M7.7
+    // maps 1-3 density here; the new maps' density is covered in grand-expansion.test.
+    const alive = CONFIG.world.maps.slice(0, 3).map((m) => m.hunt.maxAlive);
     expect(alive).toEqual([17, 19, 21]);
   });
 

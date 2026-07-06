@@ -132,6 +132,34 @@ export const PALETTE = {
   refinePrestige: 0xffe9a8,
   refinePrestigeCore: 0xfffbe0,
   refinePrestigeDark: 0x8a5a00,
+
+  // ---- M7.9 "Grand Expansion" tier-3 skill-4 spectacle accents (each MUST
+  // clearly out-spectacle its own class's tier-2 ultimate above). Footgun 10
+  // everywhere here too: flat/solid on NORMAL blend + a darker underlayer,
+  // never additive over the bright biome sky. ----
+  /** Skyfall's lightning bolts — a white-hot electric blue-white, deliberately
+   * breaking from the sword's crimson/ember family so a field-wide lightning
+   * strike reads distinctly from the quake's ground shockwave (the ground
+   * cracks/scorch it also spawns still ride `swordEmber`/`swordCrackDark`). */
+  swordLightningCore: 0xf5f9ff,
+  swordLightningGlow: 0x7fd8ff,
+  /** Archer STORM's sky event: a dark green-tinted storm cast (distinct from
+   * the mage's violet/azure sky-events) + a near-black-green silhouette
+   * accent for the arrow-swarm band sweeping the top of the sky. */
+  archerStormSky: 0x0d2b12,
+  archerSwarmDark: 0x13210f,
+  /** Mage APOCALYPSE's held sky-darken tint — a touch deeper than
+   * cataclysm's `skyDarkTint`, read mainly via a bigger alpha + a much
+   * longer hold (still "the mage's sky event", not a new hue family). */
+  mageVoidTint: 0x0d001f,
+
+  // ---- M7.9 gear paper-doll ladder, tiers 7-10 (continuing `GEAR_TIER_SCALE`
+  // past t6's "huge & อลัง" ceiling — see `heroView.ts`'s `drawApexOrnament`).
+  // A shared cool white-violet "beyond max" glow, distinct from the rarity-
+  // tinted t6 flare/accent so a glance signals "past the old ceiling"
+  // regardless of the piece's rolled rarity. ----
+  gearApex: 0xd6c8ff,
+  gearApexCore: 0xffffff,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe
@@ -167,3 +195,33 @@ export const PROJECTILE_COLORS: Record<ProjectileKind, number> = {
 export function safeRadius(r: number): number {
   return Math.max(0, r);
 }
+
+/** Boss stage-map identity ids — mirrors `CONFIG.world.maps[].id` (map1..map6,
+ * see `engine/config/index.ts`). Kept as a plain string union here (render has
+ * no sanctioned import of the engine's map list itself) rather than importing
+ * an engine type, matching the existing `zoneGates.ts` convention of mirroring
+ * CONFIG-derived shape instead of reaching into engine internals. */
+export type BossMapId = "map1" | "map2" | "map3" | "map4" | "map5" | "map6";
+
+/** Boss stage-map -> flat AT-REST identity palette (M7.9 "Grand Expansion" —
+ * 6 boss stages, s5/10/15/20/25/30, each themed to its own map's biome accent
+ * — see `render/environment/biomes.ts` MAP1..6 — so a glance at the boss rig
+ * instantly signals "which world" even before the stage label resolves).
+ * Telegraph/enrage tells stay UNIVERSAL (`PALETTE.warn`/`enrageAura`, unchanged
+ * in `bossView.ts`) across every boss — only the boss's own idle identity
+ * (body/crown/eye) varies here, so "red = danger" keeps reading consistently
+ * regardless of which boss is on screen. */
+export const BOSS_COLORS: Record<BossMapId, { body: number; crown: number; eye: number }> = {
+  // s5 — cave guardian (โลกมนุษย์ ถ้ำมืด): violet-grey stone body, ember-lit horns.
+  map1: { body: 0x6a5a94, crown: 0xff8a3d, eye: 0xd9cfff },
+  // s10 — demon sovereign (แดนอสูร บัลลังก์อสูร): deep crimson-black, molten horns.
+  map2: { body: 0x7a1f22, crown: 0xff5a1e, eye: 0xffb347 },
+  // s15 — frontier warlord (พรมแดนเถื่อน ป้อมปราการเถื่อน): bronze/amber, tribal crest.
+  map3: { body: 0x9c723a, crown: 0xffb54a, eye: 0xfff0c2 },
+  // s20 — glacial sovereign (ทุนดราน้ำแข็ง): pale ice-blue body, icicle crown.
+  map4: { body: 0x6fa8cc, crown: 0xdff3ff, eye: 0x9fdfff },
+  // s25 — buried pharaoh (ทะเลทรายซากอารยธรรม): sandstone gold, nemes headdress.
+  map5: { body: 0xc79148, crown: 0xffcf7a, eye: 0x1f2a4a },
+  // s30 — infernal sovereign (นครนรก): near-black ember body, sweeping horns.
+  map6: { body: 0x330606, crown: 0xff260e, eye: 0xffab4d },
+};

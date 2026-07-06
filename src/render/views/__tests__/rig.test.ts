@@ -21,8 +21,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { Enemy, Hero } from "@/engine/entities";
+import type { Boss, Enemy, Hero } from "@/engine/entities";
 import { GROUND_Y } from "@/render/layout";
+import { createBossView, updateBossView } from "@/render/views/bossView";
 import { createEnemyView, updateEnemyView } from "@/render/views/enemyView";
 import { createHeroView, updateHeroView } from "@/render/views/heroView";
 
@@ -211,4 +212,72 @@ describe("heroView rig transform math with tier-6/epic gear equipped (regression
       view.destroy({ children: true });
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" — per-boss silhouette + palette identity, 6 boss
+// stages (s5/10/15/20/25/30, one per `CONFIG.world.maps`). Same regression
+// class as the rigs above (pivoted-container path math), extended to cover
+// every `bossThemeForMap()` variant's crown/horn/shoulder shapes so a new
+// theme's geometry can't quietly collapse the rig toward world y≈0 either.
+// ---------------------------------------------------------------------------
+function makeBoss(): Boss {
+  return {
+    id: 1,
+    x: 0,
+    y: 0,
+    hp: 1000,
+    maxHp: 1000,
+    atk: 20,
+    cd: 1,
+    skillCd: 1,
+    telegraph: 0,
+    enraged: false,
+  };
+}
+
+// Generous band: several themes grow taller crowns (icicle spike, curled ram/
+// infernal horns) than the original single default look, so this allows more
+// headroom than the hero/enemy band above while still nowhere near the
+// world-y≈0 double-subtraction collapse the bug class produces.
+const BOSS_MIN_Y = GROUND_Y - 150;
+// Wider than the hero/enemy band: the (pre-existing, unchanged by this task)
+// telegraph ring grows toward `CORE_R + 10 + 60` as `boss.telegraph` closes
+// in, well past the hexagon body's own footprint — this is intentional "the
+// slam is about to land" spectacle, not a bug, so the enraged+telegraphing
+// fixture needs the extra headroom too.
+const BOSS_MAX_Y = GROUND_Y + 120;
+
+describe("bossView rig transform math across all 6 M7.9 map themes (regression guard)", () => {
+  for (const mapId of ["map1", "map2", "map3", "map4", "map5", "map6"] as const) {
+    it(`${mapId}: rest-pose geometry lands in the GROUND_Y-relative band, not near world y=0`, () => {
+      const view = createBossView();
+      updateBossView(view, makeBoss(), { elapsedMs: 0, dt: 0, events: [], mapId });
+      const b = view.bodyRoot.getBounds();
+      expect(b.y).toBeGreaterThan(BOSS_MIN_Y);
+      expect(b.y + b.height).toBeLessThanOrEqual(BOSS_MAX_Y);
+      view.destroy({ children: true });
+    });
+
+    it(`${mapId}: enraged + mid-telegraph geometry stays bounded too`, () => {
+      const view = createBossView();
+      const boss = makeBoss();
+      boss.enraged = true;
+      boss.telegraph = 0.5;
+      updateBossView(view, boss, { elapsedMs: 100, dt: 0.016, events: [], mapId });
+      const b = view.bodyRoot.getBounds();
+      expect(b.y).toBeGreaterThan(BOSS_MIN_Y);
+      expect(b.y + b.height).toBeLessThanOrEqual(BOSS_MAX_Y);
+      view.destroy({ children: true });
+    });
+  }
+
+  it("unmapped/undefined mapId falls back to the map1 Cave Guardian theme instead of crashing", () => {
+    const view = createBossView();
+    updateBossView(view, makeBoss(), { elapsedMs: 0, dt: 0, events: [] });
+    const b = view.bodyRoot.getBounds();
+    expect(b.y).toBeGreaterThan(BOSS_MIN_Y);
+    expect(b.y + b.height).toBeLessThanOrEqual(BOSS_MAX_Y);
+    view.destroy({ children: true });
+  });
 });

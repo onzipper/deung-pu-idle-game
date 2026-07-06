@@ -12,6 +12,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import type { CharacterDTO } from "@/ui/components/characters/types";
 
 export interface DeleteCharacterDialogProps {
@@ -47,6 +48,7 @@ export function DeleteCharacterDialog({ character, onCancel, onDeleted }: Delete
   }
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -99,5 +101,6 @@ export function DeleteCharacterDialog({ character, onCancel, onDeleted }: Delete
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

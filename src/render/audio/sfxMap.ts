@@ -211,6 +211,18 @@ export const SFX_MIN_INTERVAL_MS = {
   fastTravelArrive: 300,
   fastTravelFizzle: 300,
   bossDoorUnlocked: 1000,
+  // M7.9 boss-variety mechanics (maps 4-6) — reuse the CLOSEST existing synth
+  // recipes below (no new `SFX_PARAMS` entries): charge telegraph/hit mirror
+  // the slam's own riser/boom (same "wind-up then heavy landing" shape),
+  // summon reuses the mob-aggro bark (a short "something arrived" cue), and
+  // the hazard warn/strike pair reuses the same riser/boom split too. Own
+  // throttle-key namespace so a boss's base slam kit (always present) never
+  // shares/starves budget with its ONE extra mechanic.
+  bossChargeTelegraph: 400,
+  bossChargeHit: 300,
+  bossSummon: 700,
+  bossHazardWarn: 600,
+  bossHazardStrike: 250,
 } as const;
 
 type Ev<T extends GameEvent["type"]> = Extract<GameEvent, { type: T }>;
