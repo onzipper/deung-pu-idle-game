@@ -93,7 +93,11 @@ export function classifyClaim(templateId: string, stage: number): ClaimClassific
     return { ok: true, origin: "drop", membershipKnown: false };
   }
   if (!inBoss && !inFarm) return { ok: false, reason: "not_in_table" };
-  return { ok: true, origin: inBoss ? "boss" : "drop", membershipKnown: true };
+  // Farm membership wins the origin label: every farm-table item also sits in
+  // its own band's boss pool (boss = on-curve + next tier), so checking boss
+  // first would stamp every ordinary farm drop as origin "boss". Boss-origin
+  // is therefore only the boss-pool EXCLUSIVES (the next-tier seed items).
+  return { ok: true, origin: inFarm ? "drop" : "boss", membershipKnown: true };
 }
 
 // ── Zod boundary schemas ─────────────────────────────────────────────────────

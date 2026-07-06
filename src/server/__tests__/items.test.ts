@@ -98,17 +98,30 @@ describe("classifyClaim", () => {
     const r = classifyClaim("does_not_exist", 1);
     expect(r.ok).toBe(false);
   });
-  it("accepts a known template with unverifiable membership while tables are empty", () => {
-    // Engine drop tables are placeholder-[] today → membershipKnown is false.
+  it("accepts an on-band farm template as origin drop (farm wins over boss-pool overlap)", () => {
+    // Stage 1 is tier-1 band: w_sword_t1_rusty is in the farm table AND (by the
+    // on-curve+next-tier pool rule) the boss table — farm membership must win
+    // the origin label or every ordinary drop would audit as "boss".
+    const r = classifyClaim("w_sword_t1_rusty", 1);
+    expect(r).toEqual({ ok: true, origin: "drop", membershipKnown: true });
+  });
+  it("classifies a boss-pool exclusive (next-tier seed) as origin boss", () => {
+    // Tier-2 iron sword at stage 1: not in the tier-1 farm table, only in the
+    // boss pool (on-curve + next tier).
+    const r = classifyClaim("w_sword_t2_iron", 1);
+    expect(r).toEqual({ ok: true, origin: "boss", membershipKnown: true });
+  });
+  it("rejects an off-band template (populated table, not a member)", () => {
+    // Stage 3 is tier-2 band; the tier-1 rusty sword is in neither table there.
     const r = classifyClaim("w_sword_t1_rusty", 3);
-    expect(r).toEqual({ ok: true, origin: "drop", membershipKnown: false });
+    expect(r).toEqual({ ok: false, reason: "not_in_table" });
   });
 });
 
 describe("claimBatchSchema / equipSchema", () => {
   it("accepts a well-formed batch and coerces numeric rollId to string", () => {
     const r = claimBatchSchema.safeParse({
-      items: [{ rollId: 7, templateId: "w_sword_t1_rusty", stage: 3 }],
+      items: [{ rollId: 7, templateId: "w_sword_t1_rusty", stage: 1 }],
     });
     expect(r.success).toBe(true);
     if (r.success) expect(r.data.items[0].rollId).toBe("7");
@@ -154,7 +167,7 @@ describe("claimBatch — mint / idempotency / rate cap", () => {
     mockPrisma.itemInstance.create.mockResolvedValue(instanceRow());
     const { results } = await claimBatch(
       CHAR,
-      [{ rollId: "1", templateId: "w_sword_t1_rusty", stage: 3 }],
+      [{ rollId: "1", templateId: "w_sword_t1_rusty", stage: 1 }],
       Date.now(),
     );
     expect(results[0].status).toBe("minted");
@@ -169,7 +182,7 @@ describe("claimBatch — mint / idempotency / rate cap", () => {
     mockPrisma.itemInstance.findUnique.mockResolvedValue(instanceRow({ id: "existing" }));
     const { results } = await claimBatch(
       CHAR,
-      [{ rollId: "1", templateId: "w_sword_t1_rusty", stage: 3 }],
+      [{ rollId: "1", templateId: "w_sword_t1_rusty", stage: 1 }],
       Date.now(),
     );
     expect(results[0].status).toBe("existing");
@@ -183,7 +196,7 @@ describe("claimBatch — mint / idempotency / rate cap", () => {
     mockPrisma.itemInstance.findUnique.mockResolvedValue(null); // not an idempotent retry
     const { results } = await claimBatch(
       CHAR,
-      [{ rollId: "999", templateId: "w_sword_t1_rusty", stage: 3 }],
+      [{ rollId: "999", templateId: "w_sword_t1_rusty", stage: 1 }],
       Date.now(),
     );
     expect(results[0]).toMatchObject({ status: "rejected", reason: "rate" });
