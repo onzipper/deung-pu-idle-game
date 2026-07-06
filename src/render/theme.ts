@@ -132,6 +132,34 @@ export const PALETTE = {
   refinePrestige: 0xffe9a8,
   refinePrestigeCore: 0xfffbe0,
   refinePrestigeDark: 0x8a5a00,
+
+  // ---- M7.9 "Grand Expansion" tier-3 skill-4 spectacle accents (each MUST
+  // clearly out-spectacle its own class's tier-2 ultimate above). Footgun 10
+  // everywhere here too: flat/solid on NORMAL blend + a darker underlayer,
+  // never additive over the bright biome sky. ----
+  /** Skyfall's lightning bolts — a white-hot electric blue-white, deliberately
+   * breaking from the sword's crimson/ember family so a field-wide lightning
+   * strike reads distinctly from the quake's ground shockwave (the ground
+   * cracks/scorch it also spawns still ride `swordEmber`/`swordCrackDark`). */
+  swordLightningCore: 0xf5f9ff,
+  swordLightningGlow: 0x7fd8ff,
+  /** Archer STORM's sky event: a dark green-tinted storm cast (distinct from
+   * the mage's violet/azure sky-events) + a near-black-green silhouette
+   * accent for the arrow-swarm band sweeping the top of the sky. */
+  archerStormSky: 0x0d2b12,
+  archerSwarmDark: 0x13210f,
+  /** Mage APOCALYPSE's held sky-darken tint — a touch deeper than
+   * cataclysm's `skyDarkTint`, read mainly via a bigger alpha + a much
+   * longer hold (still "the mage's sky event", not a new hue family). */
+  mageVoidTint: 0x0d001f,
+
+  // ---- M7.9 gear paper-doll ladder, tiers 7-10 (continuing `GEAR_TIER_SCALE`
+  // past t6's "huge & อลัง" ceiling — see `heroView.ts`'s `drawApexOrnament`).
+  // A shared cool white-violet "beyond max" glow, distinct from the rarity-
+  // tinted t6 flare/accent so a glance signals "past the old ceiling"
+  // regardless of the piece's rolled rarity. ----
+  gearApex: 0xd6c8ff,
+  gearApexCore: 0xffffff,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

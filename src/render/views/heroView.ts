@@ -104,8 +104,23 @@ const OFFARM_REST = 0.35;
 
 /** Per-gear-tier visual growth multiplier — "t1 modest -> t6 huge & อลัง"
  * (GDD). Applied to weapon length/radius math, never to a whole container's
- * `scale` (that would also stretch the arm segment). */
-const GEAR_TIER_SCALE: Record<number, number> = { 1: 1, 2: 1.05, 3: 1.12, 4: 1.22, 5: 1.35, 6: 1.55 };
+ * `scale` (that would also stretch the arm segment). M7.9 "Grand Expansion"
+ * continues the ladder past t6 for the new t7-10 gear band (t7-10 item
+ * templates land in a parallel engine task; this table + `drawApexOrnament`
+ * below key strictly off the numeric `tier` field, so they apply the instant
+ * those templates exist without any further render change). */
+const GEAR_TIER_SCALE: Record<number, number> = {
+  1: 1,
+  2: 1.05,
+  3: 1.12,
+  4: 1.22,
+  5: 1.35,
+  6: 1.55,
+  7: 1.72,
+  8: 1.9,
+  9: 2.08,
+  10: 2.3,
+};
 
 /** Shared shoulder-to-hand grip point per class — both the (build-once) arm
  * segment in `buildRig` and the (rebuilt-on-equip-change) weapon head in
@@ -617,6 +632,66 @@ function buildRig(view: HeroView, cls: HeroClass): void {
  * (`fx/gearAura.ts`, driven continuously from `FxController` via
  * `getWeaponAnchorPos()` below — not drawn here).
  */
+/**
+ * M7.9 "Grand Expansion": the t7-10 ornament ladder, continuing past the t6
+ * break-tier flare (`rarity`-tinted `accent`, drawn by each class branch
+ * above/below this) with an escalating halo + orbiting motes in the shared
+ * `gearApex`/`gearApexCore` glow family — so a glance signals "past the old
+ * t6 ceiling" regardless of the piece's rolled rarity. One shared helper
+ * (instead of tripling the branch logic per class) called at each class's
+ * own "business end" anchor point (blade tip / bow center / crystal head) —
+ * build-once, same convention as every other shape in this function; any
+ * continuous per-frame spin/orbit stays `fx/gearAura.ts`'s job, not this
+ * one-time path draw. No-op below tier 7 (t1-6 look unchanged). */
+function drawApexOrnament(
+  g: Graphics,
+  tier: number,
+  anchor: { x: number; y: number },
+  baseR: number,
+): void {
+  if (tier < 7) return;
+  // Deliberately CONSERVATIVE growth relative to `baseR` (already itself
+  // tier-scaled via `GEAR_TIER_SCALE`) — this is a halo accent riding the
+  // weapon's own footprint, not a second silhouette ballooning past it.
+  const step = tier - 6; // 1..4
+  const ringR = baseR * (0.45 + step * 0.12); // t7:0.57x .. t10:0.93x baseR
+  g.circle(anchor.x, anchor.y, safeRadius(ringR)).stroke({
+    width: 1.4 + step * 0.25,
+    color: PALETTE.gearApex,
+    alpha: 0.5 + (step - 1) * 0.07,
+  });
+  if (tier >= 8) {
+    // A second, tighter inner ring — reads as "layered", not just bigger.
+    g.circle(anchor.x, anchor.y, safeRadius(ringR * 0.6)).stroke({
+      width: 1,
+      color: PALETTE.gearApexCore,
+      alpha: 0.6,
+    });
+  }
+  if (tier >= 9) {
+    // Orbiting motes fixed at their build-time angle (build-once path — the
+    // CONTINUOUS orbit/spin is `fx/gearAura.ts`'s job, not this one-shot draw).
+    const moteCount = tier >= 10 ? 5 : 3;
+    for (let i = 0; i < moteCount; i++) {
+      const a = (Math.PI * 2 * i) / moteCount;
+      const mx = anchor.x + Math.cos(a) * ringR * 0.9;
+      const my = anchor.y + Math.sin(a) * ringR * 0.9 * 0.5;
+      g.circle(mx, my, safeRadius(tier >= 10 ? 2.2 : 1.7)).fill({
+        color: PALETTE.gearApexCore,
+        alpha: 0.9,
+      });
+    }
+  }
+  if (tier >= 10) {
+    // Max tier: a brighter outer halo pass — the ladder's visible peak.
+    g.circle(anchor.x, anchor.y, safeRadius(ringR * 1.1)).stroke({
+      width: 1,
+      color: PALETTE.gearApex,
+      alpha: 0.35,
+    });
+  }
+}
+
 function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | null): void {
   const colors = HERO_COLORS[cls];
   const tpl = templateId ? ITEM_TEMPLATES[templateId] : undefined;
@@ -691,6 +766,7 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
         true,
       ).fill(accent);
     }
+    drawApexOrnament(g, tier, { x: tipX, y: tipY }, bladeLen * 0.5);
   } else if (cls === "archer") {
     const hand = WEAPON_HAND.archer;
     const cx = hand.x + 3;
@@ -733,6 +809,7 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
       g.poly([p1x, p1y, p1x - 3, p1y - 5, p1x + 2, p1y - 3], true).fill(accent);
       g.poly([p2x, p2y, p2x - 3, p2y + 5, p2x + 2, p2y + 3], true).fill(accent);
     }
+    drawApexOrnament(g, tier, { x: cx, y: cy }, r * 0.9);
   } else {
     const hand = WEAPON_HAND.mage;
     const sx = hand.x;
@@ -771,6 +848,7 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
         });
       }
     }
+    drawApexOrnament(g, tier, { x: sx, y: crystalY }, crystalR * 2.2);
   }
 
   view.gearWeaponTier = tier;
@@ -833,6 +911,26 @@ function buildGearArmor(view: HeroView, cls: HeroClass, templateId: string | nul
     g.moveTo(-6, HEAD_Y - 9)
       .lineTo(6, HEAD_Y - 9)
       .stroke({ width: 1.6, color: accent, alpha: 0.9 });
+  }
+
+  // M7.9 "Grand Expansion": t7-10 apex halo, class-agnostic (every branch
+  // above centers its own accent near `SHOULDER_Y`) — a small continuation
+  // of `drawApexOrnament`'s weapon-side ladder so a heavily-geared t7-10 hero
+  // reads as "past t6" on the armor silhouette too, not just the weapon.
+  if (tier >= 8) {
+    const haloR = 5 + (tier - 8) * 1.6;
+    g.circle(0, SHOULDER_Y - 3, safeRadius(haloR)).stroke({
+      width: 1.2,
+      color: PALETTE.gearApex,
+      alpha: 0.5,
+    });
+  }
+  if (tier >= 10) {
+    g.circle(0, SHOULDER_Y - 3, safeRadius(11)).stroke({
+      width: 1,
+      color: PALETTE.gearApexCore,
+      alpha: 0.6,
+    });
   }
 
   view.gearArmorTier = tier;

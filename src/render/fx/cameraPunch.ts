@@ -30,7 +30,10 @@ export type CameraPunchKind =
   | "bossRoomEntered"
   | "swordQuake"
   | "archerBarrage"
-  | "mageCataclysm";
+  | "mageCataclysm"
+  | "swordSkyfall"
+  | "archerStorm"
+  | "mageApocalypse";
 
 /** Peak scale multiplier (1.0 = no zoom) per trigger kind — see the task
  * spec's exact values. `swordSpin` (HERO SIGNATURE PASS item 6) is a
@@ -45,7 +48,11 @@ export type CameraPunchKind =
  * Spectacle" — sword_quake/archer_barrage/mage_cataclysm) are deliberately
  * the BIGGEST punches in the palette, bigger even than `bossDefeated` — the
  * owner's "เบิ้มๆ สาดๆ ดุๆ" screen-shaking-apocalyptic mandate for a
- * field-wide ultimate landing. */
+ * field-wide ultimate landing. M7.9 "Grand Expansion"'s tier-3 skill-4s
+ * (swordSkyfall/archerStorm/mageApocalypse) are each tuned to clearly
+ * OUT-PUNCH their own class's tier-2 ultimate above (owner spec: "each MUST
+ * clearly out-spectacle its tier-2 ultimate") — the new biggest punches in
+ * the palette. */
 const PEAK_SCALE: Record<CameraPunchKind, number> = {
   skillCast: 1.02,
   swordSpin: 1.035,
@@ -56,6 +63,9 @@ const PEAK_SCALE: Record<CameraPunchKind, number> = {
   swordQuake: 1.08,
   archerBarrage: 1.07,
   mageCataclysm: 1.09,
+  swordSkyfall: 1.11,
+  archerStorm: 1.1,
+  mageApocalypse: 1.12,
 };
 
 /** Peak position nudge (world px, toward the event's side of the arena),
@@ -70,6 +80,9 @@ const PEAK_NUDGE_PX: Record<CameraPunchKind, number> = {
   swordQuake: 4.5,
   archerBarrage: 4,
   mageCataclysm: 5,
+  swordSkyfall: 5.5,
+  archerStorm: 5,
+  mageApocalypse: 6,
 };
 
 /** Total real-seconds duration of one punch (zoom-in + ease-out), per spec. */

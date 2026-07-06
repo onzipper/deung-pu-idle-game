@@ -54,6 +54,18 @@ const FREEZE_SKILL_BURST = 0.06;
 /** Minimum simultaneous `hit` events with `source: "skill"` to count as a burst. */
 const SKILL_BURST_MIN_HITS = 3;
 
+/**
+ * M7.9 "Grand Expansion" — the swordsman's tier-3 skill-4 (SKYFALL BLADE,
+ * `sword_skyfall`) gets a real TIME-FREEZE beat: the biggest hit-stop in the
+ * game, bigger than `bossDefeated`'s own freeze, selling "the whole field
+ * freezes as the sky-blade lands" (render/audio/UI keep running on real time
+ * through this, per the class doc's freeze contract — only the sim
+ * accumulator is starved). `render/fx/FxController.ts`'s own beat for this
+ * skill (shake/rings/lightning bolts) is untouched by this value; this only
+ * shapes how much sim time this frame hands to `drainAccumulator()`.
+ */
+const FREEZE_SWORD_SKYFALL = 0.16;
+
 /** Boss-defeated slow-mo: time-scale, hold duration, then ease-back duration. */
 const SLOWMO_BOSS_DEFEATED_SCALE = 0.25;
 const SLOWMO_BOSS_DEFEATED_HOLD_S = 0.6;
@@ -179,6 +191,11 @@ export class TimeDirector {
           }
           break;
         }
+        case "skillCast":
+          if (e.skillId === "sword_skyfall") {
+            freezeCandidate = Math.max(freezeCandidate, FREEZE_SWORD_SKYFALL);
+          }
+          break;
         case "hit":
           if (e.source === "skill") skillHitsThisFrame++;
           break;
