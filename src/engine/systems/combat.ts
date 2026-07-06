@@ -436,13 +436,9 @@ export function resolveDeaths(state: GameState): void {
     onBossKilled(state); // gold reward + phase -> victory
   }
 
-  if (
-    state.phase === "battle" &&
-    !state.bossReady &&
-    state.kills >= CONFIG.killGoal(state.stage)
-  ) {
-    state.bossReady = true;
-  }
+  // bossReady arming moved to world.checkZoneUnlock (2026-07-07): quota alone
+  // is NOT enough — the button must only light where the boss room is actually
+  // next door (see the note there).
 
   // Death -> respawn in TOWN (M6 "World & Town"; GDD: dead hero = respawn in town,
   // no penalty). Covers BOTH a farm-zone wipe and a boss-room wipe (replacing the

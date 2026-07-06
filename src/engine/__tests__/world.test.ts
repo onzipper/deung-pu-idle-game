@@ -269,3 +269,42 @@ describe("offline replay across a death (never stalls)", () => {
     expect(s.location.mapId === "map2" || s.location.mapId === "map3" || s.stage >= 5).toBe(true);
   });
 });
+
+/**
+ * 2026-07-07 fix: the challenge affordance (`bossReady`) must arm ONLY at the
+ * map's LAST farm zone — where `enterBossRoom` can actually walk next door.
+ * The old combat-side check armed on quota alone, so any quota-met zone (and,
+ * post-v13, any REVISITED cleared zone with persisted kills) showed a glowing
+ * dead button (owner report: stage 11, button did nothing).
+ */
+describe("bossReady arms only at the boss-gate zone", () => {
+  it("quota met at a NON-last farm zone unlocks the next zone but never arms", () => {
+    const s = initGameState(1, soloSave("swordsman", 1)); // map1 zone 1 (first farm)
+    s.kills = CONFIG.killGoal(1);
+    step(s, {});
+    expect(s.unlockedZones.map1).toBeGreaterThanOrEqual(3); // next farm unlocked
+    expect(s.bossReady).toBe(false); // the fix — no dead glowing button
+    // And the button intent is a no-op here (next door is a farm, not a boss).
+    step(s, { challengeBoss: true });
+    expect(s.traveling).toBeNull();
+  });
+
+  it("quota met AT the last farm zone arms + the button actually walks in", () => {
+    const s = initGameState(2, soloSave("swordsman", 5)); // map1 zone 5 (last farm)
+    s.unlockedZones.map1 = 6; // all farms open (boss not yet)
+    s.kills = CONFIG.killGoal(5);
+    step(s, {});
+    expect(s.bossReady).toBe(true);
+    step(s, { challengeBoss: true });
+    expect(s.traveling).not.toBeNull(); // walking into the boss room
+  });
+
+  it("revisiting a CLEARED early zone (persisted kills >= quota) stays unarmed", () => {
+    const s = initGameState(3, soloSave("archer", 2)); // map1 zone 2
+    s.unlockedZones.map1 = 7; // whole map already cleared long ago
+    s.zoneKills["map1:2"] = CONFIG.killGoal(2) + 50;
+    s.kills = s.zoneKills["map1:2"];
+    for (let i = 0; i < 10; i++) step(s, {});
+    expect(s.bossReady).toBe(false); // free-farm zone, no phantom challenge card
+  });
+});

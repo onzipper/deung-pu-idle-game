@@ -176,8 +176,9 @@ function navInput(s: GameState): Partial<FrameInput> {
   const kind = nav.current.kind;
   if (kind === "town") return walkRight();
   if (kind === "boss") return {};
-  if (s.bossReady) return walkRight();
-  return {};
+  // Move forward on the next zone's UNLOCK (bossReady arms only at the
+  // boss-gate zone since 2026-07-07); walkRight no-ops while locked.
+  return walkRight();
 }
 
 /**

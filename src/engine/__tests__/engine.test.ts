@@ -80,13 +80,13 @@ describe("hunt-field spawning (M6 สนามล่ามอน)", () => {
 });
 
 describe("boss readiness", () => {
-  it("flips bossReady once the kill goal is met (no auto boss fight in Phase A)", () => {
+  it("never arms bossReady at a non-gate zone; the sim stays in battle", () => {
+    // 2026-07-07: bossReady arms ONLY at the map's last farm zone (the boss-gate
+    // check in world.checkZoneUnlock). A fresh state farms map1 zone 1 — however
+    // many kills accrue, the challenge affordance must stay dark here.
     const s = initGameState(99);
     run(s, 20000);
-    // With enough kills the boss becomes challengeable, but the sim stays in battle.
-    if (s.kills >= 10 + s.stage * 5) {
-      expect(s.bossReady).toBe(true);
-    }
+    expect(s.bossReady).toBe(false);
     expect(s.phase).toBe("battle");
   });
 });
