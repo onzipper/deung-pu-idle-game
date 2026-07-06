@@ -21,17 +21,17 @@
 - [x] **Class change v1**: เควสอย่างง่าย (ฆ่าครบ/ไอเทม) → เปลี่ยนคลาสขั้น 2 (ต่อยอด tier ที่มี) — เควสเสนอที่ Lv15: ล่า 60 + บอส 1 แทนค่า gold, SAVE v7, จังหวะเปลี่ยนคลาส ~stage 5 ทุกคลาส
 - [x] **FTUE/onboarding + codex rework** ให้ตรงเกมใหม่ (ของเดิมสอนกดสายอัปเกรดที่ถูกตัด) — FTUE 8 step (ทักตามคลาส/แจกแต้ม/จัดช่อง auto), tips 8 ตัว (เควส/แต้มค้าง/ช่องปลด), codex หมวด character ใหม่, กวาด copy ทีม/อัปเกรดหมดทั้ง repo
 
-## M6 — World & Town
+## ✅ M6 — World & Town (เสร็จ 2026-07-06)
 
 - [x] Zone system: map → zones เดินถึงกัน (แตะขอบ/ลูกศร) + เงื่อนไขปลด zone + ย้อนฟาร์มอิสระ — engine zone/world layer (SAVE v8: location/unlockedZones/lastFarmZone), walk transit, unlock progression, town respawn + auto-return, boss-room gate; sim rebaselined per map/zone (docs/balance-m6.md); functional walk-controls UI. NPC shops = next task (zone kind "town" hook left)
 - [x] ห้องบอสพิเศษท้าย map (ฉาก/การนำเสนอพิเศษ) — arena จริง (เสาประตู/vignette ค้างทั้งไฟต์) + entrance beat (สั่น/แฟลช/วงแหวน/drone) + biome *_BOSS แยกต่อ map
 - [x] เมืองหลัก + NPC shops: ยาเลือด/ยามานา/ยันกลับเมือง (+ ของวาปปาร์ตี้ เปิดใช้ตอน M8) — ราคา scale ตามความลึก lastFarmZone, auto-use 35%HP/25%mana, gold sink แรกของเกม, SAVE v9; catalog ต่อขยายได้ (M8 warp = union append)
-- [x] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง) — AutoReturnToggle + engine honor + auto-potion thresholds; จะขยายเป็น settings panel เต็มตอน goal-ladder UI
+- [x] ตั้งค่าหลังตาย (auto กลับไปฟาร์ม / รอที่เมือง) — AutoReturnToggle + engine honor + auto-potion thresholds; ✔ ขยายเป็น settings panel เต็มแล้ว (SettingsPanel drawer, มากับ goal-ladder UI)
 - [x] ธีม map + ฉากต่อ zone (ขยายระบบ biome เดิม) — biomeForZone ต่อ map family ไล่เข้ม/ระอุเข้าหาห้องบอส, เมืองอบอุ่น (หลังคา/ตะเกียง/ควันไฟ/เงา NPC), whoosh ตอนย้าย zone
-- [x] **Combat rework "สนามล่ามอน"** (เคาะ 2026-07-05): มอนสุ่มเกิดกระจายใน zone (cap+respawn config), hero auto-hunt ไล่เป้า, มอน passive เป็นหลัก + aggressive (aggro radius) ใกล้ห้องบอส, กล้องนิ่งต่อ zone (เผื่อ config zone กว้าง), rebalance ใหม่ — aggro ไล่ระดับ 0→60% เข้าหาบอส, ความตายย้ายไป belt มอนดุ+บอสตามแผน, s15 wall อยู่, formation core เก็บไว้ให้ M8 · เหลือ cosmetic: facing flip (คิวงาน render)
-- [ ] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …)
-- [ ] Hunt follow-up (engine): archer ตัน s13 เพราะ AoE ปลุกมอน passive ทั้งฝูงในสนามแน่น + spawnBurst เต็มก้อนตอนกลับเข้า zone — ต้องการ gradual re-entry fill / กติกา AoE-aggro (flag จาก balance 2026-07-06)
-- [ ] Hunt follow-up (engine): spawn แบบ uniform random ทำมอนซ้อนกันได้ — ใส่ min-spacing placement
+- [x] **Combat rework "สนามล่ามอน"** (เคาะ 2026-07-05): มอนสุ่มเกิดกระจายใน zone (cap+respawn config), hero auto-hunt ไล่เป้า, มอน passive เป็นหลัก + aggressive (aggro radius) ใกล้ห้องบอส, กล้องนิ่งต่อ zone (เผื่อ config zone กว้าง), rebalance ใหม่ — aggro ไล่ระดับ 0→60% เข้าหาบอส, ความตายย้ายไป belt มอนดุ+บอสตามแผน, s15 wall อยู่, formation core เก็บไว้ให้ M8 · facing flip เสร็จแล้ว (b5e82d3)
+- [x] Goal-ladder UI (ตาม ladder ใหม่: เวลถัดไป → เปลี่ยนคลาส/ผ่าน map → HOF → …) — pure rung-selection (goalLadder.ts + 14 tests) + breadcrumb 4 ขั้น (HOF = locked tail รอ M9), การ์ด core-loop แทน BossPanel เดิม (แถบเทียบพลัง แทนเลขดิบ 4 ตัว), แถบปลดโซนย้ายมารวม, FTUE anchors ครบ; แถม SettingsPanel drawer (auto-allocate/auto-return/เกณฑ์ยา/เสียง/ภาษา)
+- [x] Hunt follow-up (engine): archer ตัน s13 — แก้ด้วย gradual re-entry fill (burst 0.35×maxAlive แล้ว trickle) + กติกา AoE-aggro (ปลุก ≤2 passive ใกล้จุดตกใน 0.6×radius, arrow rain ตัดสิน wake ครั้งเดียวตอน cast; deterministic ไม่ใช้ RNG) — sim: กำแพง archer ขยับ s13→s14, s15 soft-wall คงอยู่, map1+2 สะอาด, class change ยัง s5 (balance-m6.md "M6 task 5")
+- [x] Hunt follow-up (engine): มอนซ้อนกัน — min-spacing placement แบบ best-candidate 5 draws (RNG bounded/deterministic)
 
 ## 🎨 M6.5 — Art & Game-feel (ปิดการทดลอง 2026-07-06)
 
