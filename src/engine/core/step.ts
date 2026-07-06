@@ -25,6 +25,7 @@ import {
   tickConsumableCds,
 } from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
+import { applyManualCommand } from "@/engine/systems/manual";
 import { updateSpawns } from "@/engine/systems/waves";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
@@ -184,6 +185,32 @@ export interface FrameInput {
    * (`autoCast`/`autoAllocate`/…), the player's choice survives a reload.
    */
   setAutoHunt?: boolean;
+  /**
+   * Manual play (M7.8): TAP-THE-GROUND move order. The solo hero walks to `x`
+   * (clamped to the zone's walkable bounds), IGNORING huntable targets — it does
+   * NOT drop aggro (mobs already engaged keep attacking). Arrival (within
+   * `CONFIG.manual.arriveEps`) completes the command; auto-hunt (AUTO on) then
+   * resumes or the hero idles (AUTO off). Overridden by the boss phase's forced
+   * combat. Transient command state — NEVER persisted. Applied once per drained
+   * input; a later command this frame replaces it.
+   */
+  moveTo?: { x: number };
+  /**
+   * Manual play (M7.8): TAP-A-MONSTER attack order. The solo hero closes to attack
+   * range and fights the target `id` until it dies (target gone -> command
+   * complete) or the command is cancelled/replaced — overriding the auto/hunt
+   * target (engages even with AUTO off). An INVALID / dead / despawned id is
+   * ignored gracefully (clears nothing). Overridden by the boss phase's forced
+   * combat. Transient — NEVER persisted. Applied once per drained input.
+   */
+  attackTarget?: { id: number };
+  /**
+   * Manual play (M7.8): clear any active manual command (move/attack), returning
+   * the hero to AUTO (auto-hunt) / idle per the AUTO-hunt toggle. Emits
+   * `commandCancelled` only if a command was actually cleared. Applied once per
+   * drained input.
+   */
+  cancelCommand?: boolean;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -289,6 +316,11 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // Consumables (M6): a manual quick-use then threshold-gated auto-use, BEFORE
   // skills so a mana potion this step can fund a cast the same step.
   processConsumables(state, input.useConsumable);
+  // Manual play (M7.8): apply this frame's moveTo / attackTarget / cancelCommand
+  // onto the solo hero's transient command slot (never persisted). updateHeroes
+  // honours it below; the boss phase's forced combat overrides it. Runs before
+  // skills/movement so a fresh command steers THIS step's hunt.
+  applyManualCommand(state, input);
   // Fast-travel channel (M7.5): while channeling the hero stands still — skip its
   // offense (skills + auto-hunt movement/attacks) so it doesn't wander off and
   // re-engage mobs. Enemies + projectiles still resolve, so a mob CAN reach + hit

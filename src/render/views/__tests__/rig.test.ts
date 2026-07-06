@@ -50,6 +50,7 @@ function makeHero(cls: Hero["cls"]): Hero {
     autoSlots: ["sword_whirl", null, null],
     quest: null,
     equipped: { weapon: null, armor: null },
+    command: null,
   };
 }
 

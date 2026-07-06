@@ -250,6 +250,21 @@ export const CONFIG = {
     botWalkSeconds: 1.2,
   },
 
+  // ---- manual play (M7.8 "Manual Play") ----
+  // RO-style tap-to-move / tap-to-attack. The player's intents (moveTo /
+  // attackTarget / cancelCommand) set the solo hero's transient `command`
+  // (systems/manual), honoured by the hunt movement in systems/combat and
+  // OVERRIDDEN by the boss phase's forced combat. Deterministic (no RNG, no
+  // wall-clock). Sweepable knobs:
+  manual: {
+    // Arrival epsilon (engine px) for a moveTo command: once the hero is within
+    // this of the commanded x the walk COMPLETES (command cleared) and it resumes
+    // auto-hunt (AUTO on) / idles (AUTO off). Sized a touch above one hunt-step of
+    // travel (huntSpeed 175 × FIXED_DT ≈ 2.9px) so arrival latches cleanly without
+    // a jitter overshoot.
+    arriveEps: 6,
+  },
+
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.

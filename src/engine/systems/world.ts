@@ -216,6 +216,10 @@ function reviveHeroesFull(state: GameState): void {
     h.skillCds = {};
     h.atkBuffMult = 1;
     h.atkBuffTimer = 0;
+    // Manual play (M7.8): a zone arrival is a fresh footing — drop any pending
+    // move/attack command so a stale tap never carries across a transit / into a
+    // boss room (boss forced-combat owns the hero there anyway).
+    h.command = null;
   }
 }
 

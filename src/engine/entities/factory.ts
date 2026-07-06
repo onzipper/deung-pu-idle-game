@@ -91,6 +91,8 @@ export function makeHero(
       armor: equipped.armor,
       refine: { weapon: refineOf(equipped, "weapon"), armor: refineOf(equipped, "armor") },
     },
+    // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
+    command: null,
   };
 }
 
