@@ -23,7 +23,17 @@
  *    visual whoosh (`FxController.onZoneEntered`) carries this beat alone.
  *  - `zoneUnlocked`/`mapUnlocked` (M6) — visual-only sparkle in `FxController`
  *    is enough for these; kept unpaired with a sound rather than adding two
- *    more one-off stings to an already dense palette.
+ *    more one-off stings to an already dense palette. EXCEPTION (M7.5): the
+ *    sub-case of a `zoneUnlocked` that is specifically a map's BOSS ROOM
+ *    unlocking DOES get a sound (`playBossDoorUnlocked`) — see
+ *    `AudioController`'s `isBossZoneIdx` check — since that's the one-shot
+ *    "the grand door outside just unlocked" beat the M7.5 gate feel spec asks
+ *    for, distinct enough from routine zone progression to earn its own cue.
+ *  - `zoneGateEnter`/`zoneGateExit` (M7.5) — the gate-transit polish stays
+ *    visual-only too, same reasoning as `zoneEntered` (fires on every walk
+ *    hop) — "reuse/extend the whoosh feel, don't duplicate audio" per spec.
+ *  - `townArrived` (M7.5 idle-bot trips) — a background bookkeeping event
+ *    (restock/sell), not a moment the player is watching for; silent.
  */
 
 import type { GameEvent } from "@/engine";
@@ -153,6 +163,27 @@ export const SFX_PARAMS = {
       noteGain: 0.16,
     },
   },
+  /** M7.5 fast travel: a short rising arcane whir as the portal begins
+   * forming (NOT a full-channel drone — `AudioEngine` has no early-stop API,
+   * and every other cast-type cue in this palette is a short blip too), a
+   * brighter arrival chime, and a quiet descending "dud" for a mid-channel
+   * fizzle (only played when a channel was actually cancelled — see
+   * `AudioController`). */
+  fastTravelCastStart: { freqFrom: 260, freqTo: 620, duration: 0.4, gain: 0.14 },
+  fastTravelArrive: {
+    popFilterFreq: 1600,
+    popDuration: 0.05,
+    popGain: 0.16,
+    chimeFreqFrom: 700,
+    chimeFreqTo: 1300,
+    chimeDuration: 0.12,
+    chimeGain: 0.16,
+  },
+  fastTravelFizzle: { freqFrom: 420, freqTo: 180, duration: 0.18, gain: 0.12 },
+  /** Boss-door unlock (M7.5): a low drone at the door itself — lighter/
+   * shorter than `bossRoomEntered`'s own drone (which fires later, on actual
+   * entry) so the two never get confused despite sharing a register. */
+  bossDoorUnlocked: { freq: 85, freqEnd: 55, decay: 0.4, gain: 0.16 },
 } as const;
 
 /** Minimum ms between two sounds sharing a throttle key — the "same-type
@@ -176,6 +207,10 @@ export const SFX_MIN_INTERVAL_MS = {
   evolve: 400,
   upgradeBought: 40,
   itemDrop: 180,
+  fastTravelCastStart: 500,
+  fastTravelArrive: 300,
+  fastTravelFizzle: 300,
+  bossDoorUnlocked: 1000,
 } as const;
 
 type Ev<T extends GameEvent["type"]> = Extract<GameEvent, { type: T }>;
@@ -462,6 +497,54 @@ export function playItemDrop(engine: AudioEngine, rarity: ItemRarity): void {
   }
   const cfg = rarity === "rare" ? p.rare : p.common;
   engine.sweep(cfg.freq, cfg.freqEnd, { shape: "sine", duration: cfg.duration, gain: cfg.gain });
+}
+
+/** Fast travel begins channeling: a short rising arcane whir. */
+export function playFastTravelCastStart(engine: AudioEngine): void {
+  const p = SFX_PARAMS.fastTravelCastStart;
+  engine.sweep(p.freqFrom, p.freqTo, { shape: "sawtooth", duration: p.duration, gain: p.gain });
+}
+
+/** Fast travel arrives: a soft pop immediately followed by a bright chime —
+ * mirrors `playKill`'s "pop then blip" shape but pitched/timed differently so
+ * the two never get confused. */
+export function playFastTravelArrive(engine: AudioEngine): void {
+  const p = SFX_PARAMS.fastTravelArrive;
+  engine.noise({
+    duration: p.popDuration,
+    filterType: "bandpass",
+    filterFreq: p.popFilterFreq,
+    filterQ: 1.1,
+    gain: p.popGain,
+  });
+  engine.sweep(p.chimeFreqFrom, p.chimeFreqTo, {
+    shape: "triangle",
+    duration: p.chimeDuration,
+    gain: p.chimeGain,
+    delay: 0.03,
+  });
+}
+
+/** Fast travel fizzles mid-channel (damaged/dead/etc. — only played when a
+ * channel was actually in progress, see `AudioController`): a quiet
+ * descending "dud". */
+export function playFastTravelFizzle(engine: AudioEngine): void {
+  const p = SFX_PARAMS.fastTravelFizzle;
+  engine.sweep(p.freqFrom, p.freqTo, { shape: "square", duration: p.duration, gain: p.gain });
+}
+
+/** Boss-door unlock: a low drone at the door itself — see `SFX_PARAMS
+ * .bossDoorUnlocked`'s doc comment for how this stays distinct from
+ * `playBossRoomEntered`. */
+export function playBossDoorUnlocked(engine: AudioEngine): void {
+  const p = SFX_PARAMS.bossDoorUnlocked;
+  engine.tone(p.freq, {
+    shape: "sine",
+    attack: 0.015,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.freqEnd,
+  });
 }
 
 /** Upgrade bought: a tiny click followed by a rising confirmation blip. Kept

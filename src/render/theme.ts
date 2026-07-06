@@ -67,6 +67,20 @@ export const PALETTE = {
   auraFlame: 0xff7a1a,
   auraFlameCore: 0xffd23f,
   auraFlameDark: 0x7a2c00,
+
+  // ---- M7.5 world-gate accents (zone-edge archways, fast-travel portal, boss
+  // door) ----
+  /** Fast-travel portal swirl — an arcane blue-violet jewel tone, deliberately
+   * distinct from every combat/skill accent so a channel reads as "travel",
+   * not "a spell". Footgun 10: solid on NORMAL blend + a darker outline,
+   * never additive. */
+  travelPortal: 0x5a7dff,
+  /** Bright icy core at the swirl's center (grows with channel progress). */
+  travelPortalCore: 0xbfe0ff,
+  /** Dark outline/ember-equivalent for the portal swirl shapes. */
+  travelPortalDark: 0x1c2050,
+  /** Chain accent on a locked boss door. */
+  doorChain: 0x2a2a30,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

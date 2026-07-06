@@ -19,11 +19,15 @@ import { AudioEngine } from "@/render/audio/AudioEngine";
 import { SFX_MIN_INTERVAL_MS } from "@/render/audio/sfxMap";
 import {
   playBossDefeated,
+  playBossDoorUnlocked,
   playBossEnraged,
   playBossRoomEntered,
   playBossSlamLand,
   playBossSlamTelegraph,
   playEvolve,
+  playFastTravelArrive,
+  playFastTravelCastStart,
+  playFastTravelFizzle,
   playHeroDown,
   playHeroRevived,
   playHeroWalkHome,
@@ -35,9 +39,15 @@ import {
   playSkillCast,
   playStageAdvanced,
 } from "@/render/audio/sfxMap";
+import { isBossZoneIdx } from "@/render/environment/zoneGates";
 
 export class AudioController {
   private readonly engine = new AudioEngine();
+  /** Mirrors `fx/travelPortal.ts`'s own channel tracking (audio has no access
+   * to that render-only state) — lets `fastTravelBlocked` tell "a real
+   * mid-channel cancel" apart from "an intent that never started a channel"
+   * (e.g. tapping a locked zone), so the fizzle dud only plays for the former. */
+  private fastTravelChanneling = false;
 
   /** Must be called from inside a real user-gesture event handler (browsers
    * block audio autoplay until one fires). Cheap/safe to call repeatedly. */
@@ -153,13 +163,45 @@ export class AudioController {
             playItemDrop(this.engine, ITEM_TEMPLATES[ev.templateId]?.rarity ?? "common");
           }
           break;
+        case "zoneUnlocked":
+          // The general case stays silent (see sfxMap.ts's module doc
+          // comment); the boss-door-unlock EXCEPTION gets its own low drone.
+          if (
+            isBossZoneIdx(ev.mapId, ev.zoneIdx) &&
+            this.engine.allow("bossDoorUnlocked", SFX_MIN_INTERVAL_MS.bossDoorUnlocked)
+          ) {
+            playBossDoorUnlocked(this.engine);
+          }
+          break;
+        case "fastTravelCastStart":
+          this.fastTravelChanneling = true;
+          if (this.engine.allow("fastTravelCastStart", SFX_MIN_INTERVAL_MS.fastTravelCastStart)) {
+            playFastTravelCastStart(this.engine);
+          }
+          break;
+        case "fastTravelArrive":
+          this.fastTravelChanneling = false;
+          if (this.engine.allow("fastTravelArrive", SFX_MIN_INTERVAL_MS.fastTravelArrive)) {
+            playFastTravelArrive(this.engine);
+          }
+          break;
+        case "fastTravelBlocked":
+          if (
+            this.fastTravelChanneling &&
+            this.engine.allow("fastTravelFizzle", SFX_MIN_INTERVAL_MS.fastTravelFizzle)
+          ) {
+            playFastTravelFizzle(this.engine);
+          }
+          this.fastTravelChanneling = false;
+          break;
         default:
-          break; // projectileSpawn / stageCleared / zoneEntered /
-          // zoneUnlocked / mapUnlocked: silent by design — the same
-          // high-frequency-event fatigue reasoning as waveSpawn (zoneEntered
-          // fires every zone-to-zone hop), and zoneUnlocked/mapUnlocked
-          // already get their moment via FxController's visual-only sparkle
-          // (see sfxMap.ts's module doc comment for the general policy).
+          break; // projectileSpawn / stageCleared / zoneEntered / zoneGateEnter /
+          // zoneGateExit / mapUnlocked / townArrived: silent by design — the
+          // same high-frequency-event fatigue reasoning as waveSpawn
+          // (zoneEntered/zoneGateEnter fire every zone-to-zone hop), and
+          // zoneUnlocked/mapUnlocked already get their moment via
+          // FxController's visual-only sparkle (see sfxMap.ts's module doc
+          // comment for the general policy + the boss-door exception above).
       }
     }
   }

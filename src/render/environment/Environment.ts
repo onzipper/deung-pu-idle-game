@@ -18,6 +18,7 @@
  */
 
 import type { Container } from "pixi.js";
+import type { Zone } from "@/engine";
 import type { GameState } from "@/engine/state";
 import { zoneAt } from "@/engine";
 import { biomeForZone, type ResolvedBiome } from "@/render/environment/biomes";
@@ -51,22 +52,23 @@ export class Environment {
 
   /** Advance scenery by `dt` REAL seconds and react to the live `state`. */
   update(dt: number, state: GameState): void {
-    const resolved = biomeForZone(zoneAt(state.location));
+    const zone = zoneAt(state.location);
+    const resolved = biomeForZone(zone);
 
     if (!this.current) {
-      this.current = this.spawn(resolved);
+      this.current = this.spawn(resolved, zone, state);
       this.currentKey = resolved.key;
     } else if (resolved.key !== this.currentKey && !this.incoming) {
-      this.incoming = this.spawn(resolved);
+      this.incoming = this.spawn(resolved, zone, state);
       this.incomingKey = resolved.key;
       this.transitionT = 0;
     }
 
     const speedMul = speedMulFor(state);
-    this.current.update(dt, speedMul);
+    this.current.update(dt, speedMul, state);
 
     if (this.incoming) {
-      this.incoming.update(dt, speedMul);
+      this.incoming.update(dt, speedMul, state);
       this.transitionT += dt;
       const t = clamp01(this.transitionT / TRANSITION_DURATION);
       this.incoming.view.alpha = t;
@@ -89,8 +91,8 @@ export class Environment {
     this.incoming = null;
   }
 
-  private spawn(resolved: ResolvedBiome): BiomeScene {
-    const scene = new BiomeScene(resolved);
+  private spawn(resolved: ResolvedBiome, zone: Zone, state: GameState): BiomeScene {
+    const scene = new BiomeScene(resolved, zone, state);
     this.container.addChild(scene.view);
     return scene;
   }

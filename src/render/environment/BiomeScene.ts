@@ -8,6 +8,8 @@
  */
 
 import { Container } from "pixi.js";
+import type { Zone } from "@/engine";
+import type { GameState } from "@/engine/state";
 import type { ResolvedBiome } from "@/render/environment/biomes";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { AmbientField } from "@/render/environment/ambientParticles";
@@ -18,6 +20,7 @@ import { CloudField } from "@/render/environment/clouds";
 import { ParallaxLayer } from "@/render/environment/ParallaxLayer";
 import { buildSilhouetteChunk } from "@/render/environment/silhouettes";
 import { buildHorizonGlow, buildSkyBands } from "@/render/environment/sky";
+import { buildZoneGateProps, type ZoneGateProps } from "@/render/environment/zoneGateProps";
 
 const MARGIN = 60;
 const FAR_CHUNK_W = 180;
@@ -34,8 +37,9 @@ export class BiomeScene {
   private readonly near: ParallaxLayer;
   private readonly clouds: CloudField;
   private readonly ambient: AmbientField;
+  private readonly gateProps: ZoneGateProps;
 
-  constructor(readonly biome: ResolvedBiome) {
+  constructor(readonly biome: ResolvedBiome, zone: Zone, state: GameState) {
     const sky = buildSkyBands(
       biome.sky.top,
       biome.sky.bottom,
@@ -102,15 +106,23 @@ export class BiomeScene {
         this.view.addChild(g);
       }
     }
+
+    // Zone-edge gate archways / grand boss door (M7.5 "ประตูคือตัวกลาง") — fixed
+    // screen position like `bossArena.ts`'s framing above, built once here.
+    this.gateProps = buildZoneGateProps(zone, biome, GROUND_Y, this.view, state);
   }
 
   /** `speedMul` scales the far/near "world travel" scroll only — clouds and
-   * ambient particles keep their own calm, constant real-time pace. */
-  update(dt: number, speedMul: number): void {
+   * ambient particles keep their own calm, constant real-time pace. `state`
+   * drives the boss door's live locked/unlocked look (the ONLY continuous,
+   * not-build-once part of this scene — see `zoneGateProps.ts`). */
+  update(dt: number, speedMul: number, state: GameState): void {
     this.far.update(dt, this.biome.scrollSpeed.far * speedMul);
     this.near.update(dt, this.biome.scrollSpeed.near * speedMul);
     this.clouds.update(dt);
     this.ambient.update(dt);
+    this.gateProps.refreshLock(state);
+    this.gateProps.update(dt);
   }
 
   destroy(): void {
@@ -118,6 +130,7 @@ export class BiomeScene {
     this.near.destroy();
     this.clouds.destroy();
     this.ambient.destroy();
+    this.gateProps.destroy();
     this.view.destroy({ children: true });
   }
 }

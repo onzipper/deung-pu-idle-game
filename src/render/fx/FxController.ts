@@ -47,7 +47,9 @@ import { RuneGlyphPool } from "@/render/fx/runeGlyph";
 import { ScreenShake } from "@/render/fx/screenShake";
 import { SoulWispPool } from "@/render/fx/soulWisp";
 import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
+import { TravelPortalController } from "@/render/fx/travelPortal";
 import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
+import { gateX, isBossZoneIdx } from "@/render/environment/zoneGates";
 import {
   getArmorAnchorPos,
   getSwordTipPos,
@@ -262,6 +264,41 @@ const MAP_UNLOCK_PARTICLE_COUNT = 16;
 const ZONE_UNLOCK_RING_R1 = 40;
 const MAP_UNLOCK_RING_R1 = 64;
 
+// ---- M7.5 world-gate navigation beats --------------------------------------
+// Ground height the gate/door props sit at (a touch above the ground line,
+// roughly arch-post height) — mirrors `HERO_TOP_Y`'s "just above the head"
+// convention so gate glows read at the archway, not at ankle height.
+const GATE_GLOW_Y = GROUND_Y - 36;
+
+// zoneGateEnter (a walk transit's departure-edge gate): a small LOCALIZED
+// glow, distinct from `onZoneEntered()`'s full-width whoosh (which plays
+// separately, later, on arrival) — "you just stepped through the gate".
+const GATE_ENTER_RING_R1 = 30;
+const GATE_ENTER_RING_DURATION = 0.3;
+const GATE_ENTER_PARTICLE_COUNT = 6;
+
+// zoneGateExit (the arrival-edge gate): a softer arrival flash — the
+// destination zone's own crossfade + (if it's a farm/town zone) whoosh
+// already sold the "you arrived" beat; this is just the gate-side polish.
+const GATE_EXIT_RING_R1 = 22;
+const GATE_EXIT_RING_DURATION = 0.26;
+const GATE_EXIT_PARTICLE_COUNT = 4;
+
+// fastTravelArrive: a brighter, portal-tinted pop at the destination gate
+// (distinct color from the plain ivory zoneGate glows above, so a fast-travel
+// hop reads as "arcane", not "a plain walk").
+const FASTTRAVEL_ARRIVE_RING_R1 = 34;
+const FASTTRAVEL_ARRIVE_PARTICLE_COUNT = 10;
+
+// Boss-door unlock beat (extends the M6 `bossRoomEntered`/arena-entrance
+// vocabulary — the door is the OUTSIDE face of that same gate): fires once,
+// the instant a map's boss room unlocks, at the door's own world position
+// (not the hero's) so it reads as "that gate over there just opened", even
+// if the hero is standing mid-field when the kill quota ticks over.
+const BOSS_DOOR_UNLOCK_RING_R1 = 90;
+const BOSS_DOOR_UNLOCK_RING_DURATION = 0.6;
+const BOSS_DOOR_UNLOCK_PARTICLE_COUNT = 14;
+
 // ---- boss entrance (state.boss null -> object): dust + dark tint + shake --
 const BOSS_ENTRANCE_DUST_COUNT = 16;
 const BOSS_ENTRANCE_DUST_SPEED = 90;
@@ -400,6 +437,9 @@ export class FxController {
   // `updateCastAura()`.
   private readonly gearAura: GearAuraController;
   private readonly gearSparkle: GearSparklePool;
+
+  // ---- M7.5 world-gate navigation (fast-travel channel swirl) --------------
+  private readonly travelPortal: TravelPortalController;
   /** Reused every frame — `getWeaponAnchorPos()`/`getArmorAnchorPos()` write
    * into these instead of allocating a fresh point (zero steady-state
    * allocation), same convention as `tipScratch` above. */
@@ -498,6 +538,7 @@ export class FxController {
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
+    this.travelPortal = new TravelPortalController(this.heroFxLayer);
     this.rings = new RingPool(this.ringsLayer);
     this.levelUpBursts = new LevelUpBurstPool(this.ringsLayer);
     this.lightPillars = new LightPillarPool(this.ringsLayer);
@@ -661,14 +702,34 @@ export class FxController {
           this.onBossRoomEntered();
           break;
         case "zoneUnlocked":
+          this.onProgressUnlocked(ev.type, state);
+          if (isBossZoneIdx(ev.mapId, ev.zoneIdx)) this.onBossDoorUnlocked(ev.mapId);
+          break;
         case "mapUnlocked":
           this.onProgressUnlocked(ev.type, state);
           break;
         case "itemDrop":
           this.onItemDrop(ev);
           break;
+        case "zoneGateEnter":
+          this.onZoneGateEnter(ev);
+          break;
+        case "zoneGateExit":
+          this.onZoneGateExit(ev);
+          break;
+        case "fastTravelCastStart":
+          this.travelPortal.startChannel(ev.x, ev.y, CONFIG.travel.fastTravelCastSeconds);
+          break;
+        case "fastTravelArrive":
+          this.onFastTravelArrive(ev);
+          break;
+        case "fastTravelBlocked":
+          // Any reason ends an in-flight channel with a fizzle (no-op if none
+          // was running — e.g. tapping a locked zone never started one).
+          this.travelPortal.cancelChannel();
+          break;
         default:
-          break; // stageCleared / upgradeBought: no fx-layer reaction
+          break; // stageCleared / upgradeBought / townArrived: no fx-layer reaction
       }
     }
   }
@@ -709,6 +770,7 @@ export class FxController {
     this.updateBossDeathStages(dt);
     this.detectBossEntrance(state);
     this.updateGearFx(dt, state);
+    this.travelPortal.update(dt);
   }
 
   destroy(): void {
@@ -730,6 +792,7 @@ export class FxController {
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
+    this.travelPortal.destroy();
     this.impactFilters.destroy();
     this.rings.destroy();
     this.levelUpBursts.destroy();
@@ -1381,6 +1444,104 @@ export class FxController {
       width: 3,
       color: PALETTE.gold,
     });
+  }
+
+  /** `zoneGateEnter` (M7.5): a small localized glow at the departure-edge gate
+   * — distinct from `onZoneEntered()`'s full-width whoosh (which plays
+   * separately, later, once the destination zone actually arrives). Reuses
+   * the `zoneWhoosh` camera-punch id rather than adding a new one ("extend,
+   * don't duplicate" per the feel spec) and adds no new SFX (the existing
+   * zone-move whoosh stays visual-only, same as `zoneEntered`). */
+  private onZoneGateEnter(ev: Extract<GameEvent, { type: "zoneGateEnter" }>): void {
+    this.rings.spawn({
+      x: ev.x,
+      y: GATE_GLOW_Y,
+      r0: 4,
+      r1: GATE_ENTER_RING_R1,
+      duration: GATE_ENTER_RING_DURATION,
+      width: 2.5,
+      color: PALETTE.ivory,
+    });
+    burst(this.particles, ev.x, GATE_GLOW_Y, GATE_ENTER_PARTICLE_COUNT, PALETTE.ivory, {
+      speed: 70,
+      life: 0.3,
+      radius: 2,
+    });
+    this.punch.trigger("zoneWhoosh", ev.x);
+  }
+
+  /** `zoneGateExit` (M7.5): a softer arrival flash at the destination gate —
+   * the zone itself already gets `Environment`'s biome crossfade + (for a
+   * farm/town arrival) `onZoneEntered()`'s whoosh; this is just "the gate you
+   * just emerged from" polish, so it's deliberately smaller than the enter
+   * beat above. */
+  private onZoneGateExit(ev: Extract<GameEvent, { type: "zoneGateExit" }>): void {
+    this.rings.spawn({
+      x: ev.x,
+      y: GATE_GLOW_Y,
+      r0: 6,
+      r1: GATE_EXIT_RING_R1,
+      duration: GATE_EXIT_RING_DURATION,
+      width: 2,
+      color: PALETTE.ivory,
+    });
+    burst(this.particles, ev.x, GATE_GLOW_Y, GATE_EXIT_PARTICLE_COUNT, PALETTE.ivory, {
+      speed: 50,
+      life: 0.25,
+      radius: 1.8,
+    });
+  }
+
+  /** `fastTravelArrive` (M7.5): collapses the origin-side channel swirl
+   * cleanly, then pops a brighter, portal-tinted burst at the destination
+   * gate (`ev.x`/`ev.y` are the arrival point the engine already computed). */
+  private onFastTravelArrive(ev: Extract<GameEvent, { type: "fastTravelArrive" }>): void {
+    this.travelPortal.completeChannel();
+    this.rings.spawn({
+      x: ev.x,
+      y: ev.y,
+      r0: 6,
+      r1: FASTTRAVEL_ARRIVE_RING_R1,
+      duration: 0.3,
+      width: 3,
+      color: PALETTE.travelPortal,
+    });
+    burst(this.particles, ev.x, ev.y, FASTTRAVEL_ARRIVE_PARTICLE_COUNT, PALETTE.travelPortalCore, {
+      speed: 100,
+      life: 0.35,
+      radius: 2.5,
+    });
+    this.punch.trigger("zoneWhoosh", ev.x);
+  }
+
+  /** Boss-door unlock beat (M7.5 item 3): the outside face of the M6 boss-
+   * room entrance beat — fires once, the instant a map's boss room unlocks,
+   * AT THE DOOR (`gateX(mapId, "right")`), not the hero's own position, so
+   * "that gate over there just opened" reads correctly even mid-field. The
+   * door prop itself (`environment/bossDoor.ts`) reads `isZoneUnlocked` live
+   * every frame for its continuous open/glow transform — this is just the
+   * one-shot punctuation layered on top, same relationship
+   * `onBossRoomEntered()` has to `bossArena.ts`'s persistent framing. */
+  private onBossDoorUnlocked(mapId: string): void {
+    const x = gateX(mapId, "right");
+    const y = GATE_GLOW_Y;
+    this.rings.spawn({
+      x,
+      y,
+      r0: 10,
+      r1: BOSS_DOOR_UNLOCK_RING_R1,
+      duration: BOSS_DOOR_UNLOCK_RING_DURATION,
+      width: 4,
+      color: PALETTE.boss,
+    });
+    burst(this.particles, x, y, BOSS_DOOR_UNLOCK_PARTICLE_COUNT, PALETTE.bossLight, {
+      speed: 90,
+      life: 0.5,
+      radius: 3,
+      gravity: -20,
+      drag: 0.3,
+    });
+    this.flash.trigger(PALETTE.boss, 0.16);
   }
 
   /** M7 gear-wow "drop beat" (task 4): a small, rarity-tinted ground
