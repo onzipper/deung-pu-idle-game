@@ -18,6 +18,7 @@ import {
   zonesGroupedByMap,
   type UiZone,
 } from "@/ui/world/zones";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { useGameStore } from "@/ui/store/gameStore";
 
 const ZONES_BY_MAP = zonesGroupedByMap(fastTravelTargets());
@@ -76,6 +77,7 @@ export function FastTravelPicker({ onClose }: FastTravelPickerProps) {
   const t = useTranslations("world");
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -117,5 +119,6 @@ export function FastTravelPicker({ onClose }: FastTravelPickerProps) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

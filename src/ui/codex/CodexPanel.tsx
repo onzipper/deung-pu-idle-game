@@ -32,6 +32,7 @@ import {
   codexEntriesByCategory,
   type CodexEntryDef,
 } from "@/ui/codex/entries";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { discoveredTemplateIds } from "@/ui/gear/inventoryOps";
 import { GEAR_SLOT_ICONS, HERO_ICONS, RARITY_COLORS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -152,6 +153,7 @@ export function CodexPanel({ onClose }: CodexPanelProps) {
   }
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -201,5 +203,6 @@ export function CodexPanel({ onClose }: CodexPanelProps) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

@@ -39,6 +39,7 @@ import {
   type ItemTemplate,
 } from "@/engine";
 import { Coin, MaterialIcon } from "@/ui/components/icons";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { executeRefine, type RefineFlowResult } from "@/ui/gear/refineFlow";
 import { groupIntoStacks, type ItemStack } from "@/ui/gear/stacking";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -228,6 +229,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   }
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -509,5 +511,6 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

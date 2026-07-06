@@ -18,6 +18,7 @@ import { AutoAdvanceToggle, AutoReturnToggle } from "@/ui/components/AutoReturnT
 import { AutoSellRulesSection } from "@/ui/components/AutoSellRulesSection";
 import { BotSettingsSection } from "@/ui/components/BotSettingsSection";
 import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -54,6 +55,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const t = useTranslations("settings");
 
   return (
+    <ModalPortal>
     <div
       className="fixed inset-0 z-70 flex items-center justify-center p-3"
       role="dialog"
@@ -113,5 +115,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
