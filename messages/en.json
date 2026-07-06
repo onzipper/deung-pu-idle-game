@@ -6,11 +6,6 @@
     "maxLabel": "MAX",
     "fatalError": "Could not start the game: {reason}"
   },
-  "title": {
-    "tagline": "An endless adventure — grow your very own legendary hero.",
-    "ctaButton": "Begin Your Adventure",
-    "footerNote": "A farm-and-grind idle game — level up, beat bosses, keep getting stronger."
-  },
   "hud": {
     "stageLabel": "Stage",
     "waveLabel": "Wave",

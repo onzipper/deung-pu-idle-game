@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Chakra_Petch, Charm, Geist, Geist_Mono, Mitr } from "next/font/google";
+import { Chakra_Petch, Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
@@ -26,28 +26,6 @@ const chakraPetch = Chakra_Petch({
   variable: "--font-display",
   subsets: ["latin", "thai"],
   weight: ["400", "500", "600", "700"],
-});
-
-/**
- * Title/landing page font pair (M6.5b UI Skin, wave 1 — task 86d3k2skin).
- * Deliberately SEPARATE CSS vars from `--font-display`/HUD's Chakra Petch
- * above: this is a taste-gate for the title page only, wave 2 decides
- * whether/how it spreads to the HUD chrome. Charm is a decorative Thai+Latin
- * display face (warm, hand-lettered feel for the "ดึ๋งปุ๊" wordmark); Mitr is
- * a clean humanist Thai+Latin text face for taglines/buttons — both
- * self-hosted via next/font like the pair above (no runtime Google Fonts
- * CDN request).
- */
-const charm = Charm({
-  variable: "--font-title-display",
-  subsets: ["latin", "thai"],
-  weight: ["400", "700"],
-});
-
-const mitr = Mitr({
-  variable: "--font-title-body",
-  subsets: ["latin", "thai"],
-  weight: ["300", "400", "500", "600"],
 });
 
 // Locale-aware (cookie-resolved, same as the rest of the app — see
@@ -173,7 +151,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${geistSans.variable} ${geistMono.variable} ${chakraPetch.variable} ${charm.variable} ${mitr.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${chakraPetch.variable} h-full antialiased`}
     >
       <head>
         {process.env.NODE_ENV === "development" && (
