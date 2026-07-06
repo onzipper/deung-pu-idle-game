@@ -116,6 +116,60 @@ describe("enemyView rig transform math (regression guard)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M7.9 "new mob species" (owner-approved, render-only): map4/5/6 each get 4
+// NEW per-kind silhouettes (`views/enemySpecies.ts`) drawn onto the exact same
+// build-once `body`/`legs`/`limbArm`/`hpBar` rig — this extends the same
+// bounds-band regression guard above across every (mapId × kind) combo, both
+// at rest AND mid-attack-tell (the windup/lunge or aim/recoil pose, which
+// offsets `body`/`limbArm` further than idle and is exactly where a
+// species-specific geometry mistake would most likely blow the pivot
+// convention). map1/2/3's BYTE-IDENTITY to the pre-M7.9 look is proven
+// separately in `enemySpecies.test.ts` (reference-equal builder functions,
+// stronger than a bounds comparison) — this file stays focused on transform
+// math, not species content.
+// ---------------------------------------------------------------------------
+const NEW_SPECIES_MAPS = ["map4", "map5", "map6"] as const;
+
+/** Ticks the attack-tell mid-flight: first frame establishes a baseline `cd`,
+ * a second (higher-`cd`) frame triggers the melee-lunge/ranged-recoil start
+ * `updateEnemyView` derives it from (a same-tick `cd` RESET — see that
+ * module's doc comment), and a third small-`dt` frame samples it PARTWAY
+ * through so `attackOffX`/`attackArmDelta` are actually nonzero this frame. */
+function stepIntoAttackTell(
+  view: ReturnType<typeof createEnemyView>,
+  enemy: ReturnType<typeof makeEnemy>,
+  mapId: string,
+): void {
+  updateEnemyView(view, { ...enemy, cd: 0 }, { dt: 0, events: [], mapId });
+  updateEnemyView(view, { ...enemy, cd: 1 }, { dt: 0, events: [], mapId });
+  updateEnemyView(view, { ...enemy, cd: 1 }, { dt: 0.08, events: [], mapId });
+}
+
+describe("enemyView rig transform math across new mob species (M7.9, regression guard)", () => {
+  for (const mapId of NEW_SPECIES_MAPS) {
+    for (const kind of ["normal", "fast", "tank", "ranged"] as const) {
+      it(`${mapId}/${kind}: idle rest-pose lands in the GROUND_Y-relative band`, () => {
+        const view = createEnemyView();
+        updateEnemyView(view, makeEnemy(kind), { dt: 0, events: [], mapId });
+        const b = view.getBounds();
+        expect(b.y).toBeGreaterThan(MIN_Y);
+        expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+        view.destroy({ children: true });
+      });
+
+      it(`${mapId}/${kind}: mid-attack-tell pose still lands in the GROUND_Y-relative band`, () => {
+        const view = createEnemyView();
+        stepIntoAttackTell(view, makeEnemy(kind), mapId);
+        const b = view.getBounds();
+        expect(b.y).toBeGreaterThan(MIN_Y);
+        expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+        view.destroy({ children: true });
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // M7 gear paper-doll (86d3... gear-wow pass): a fully tier-6/epic-geared hero
 // grows a bigger weapon silhouette + armor accent overlay (`gearWeapon`/
 // `gearArmor`, children of `weaponArm`/`upperBody` respectively) — this

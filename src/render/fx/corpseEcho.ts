@@ -7,13 +7,12 @@
  * this is a small, capped, fixed-size pool of pre-created `Graphics` blobs
  * (same ring-buffer pattern as `particles.ts`/`rings.ts`) spawned off the
  * `kill` event: a quick flattening/fading silhouette at the death position,
- * tinted by the kind's color. Deliberately subtle — the kill-pop burst
- * already covers the "impact."
+ * tinted by the enemy's (species-resolved, M7.9) color. Deliberately subtle —
+ * the kill-pop burst already covers the "impact."
  */
 
 import { Container, Graphics } from "pixi.js";
-import type { EnemyKind } from "@/engine/entities";
-import { ENEMY_COLORS, safeRadius } from "@/render/theme";
+import { safeRadius } from "@/render/theme";
 
 interface CorpseSlot {
   g: Graphics;
@@ -47,7 +46,12 @@ export class CorpseEchoPool {
     });
   }
 
-  spawn(x: number, y: number, kind: EnemyKind, size: number): void {
+  /** `color` is the caller's already-species-resolved tint (M7.9:
+   * `enemySpecies.ts`'s `enemyColorFor(mapId, kind)`, falling back to the
+   * plain `ENEMY_COLORS[kind]` on map1/2/3) — this pool no longer looks the
+   * color up itself, so a map4/5/6 mob's corpse echo stays tinted to ITS OWN
+   * species instead of the map-agnostic base palette. */
+  spawn(x: number, y: number, color: number, size: number): void {
     const slot = this.slots[this.cursor];
     this.cursor = (this.cursor + 1) % this.slots.length;
 
@@ -58,7 +62,7 @@ export class CorpseEchoPool {
     slot.y = y;
     slot.w = 22 * s;
     slot.h = 16 * s;
-    slot.color = ENEMY_COLORS[kind];
+    slot.color = color;
     slot.g.visible = true;
   }
 
