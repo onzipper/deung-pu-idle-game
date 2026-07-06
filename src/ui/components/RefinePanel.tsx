@@ -50,7 +50,7 @@ import {
   playRefineSuccess,
   type AudioEngine,
 } from "@/render/audio";
-import { GEAR_SLOT_ICONS } from "@/ui/labels";
+import { GEAR_SLOT_ICONS, prestigeNameClass } from "@/ui/labels";
 
 const SLOT_ORDER: readonly GearSlot[] = ["weapon", "armor"];
 
@@ -376,7 +376,11 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     ))}
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span className="truncate text-sm font-bold text-ddp-ink">
+                  <span
+                    className={`truncate text-sm ${
+                      prestigeNameClass(displayStack.refineLevel) || "font-bold text-ddp-ink"
+                    }`}
+                  >
                     {tContent(`${displayStack.templateId}.name`)}
                   </span>
                   <span className="text-[11px] tabular-nums text-ddp-ink-muted">

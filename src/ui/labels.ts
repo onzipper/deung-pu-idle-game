@@ -7,7 +7,7 @@
  * `src/ui/README.md`'s "Content i18n pattern" section.
  */
 
-import type { GearSlot, HeroClass, ItemRarity } from "@/engine";
+import { REFINE, type GearSlot, type HeroClass, type ItemRarity } from "@/engine";
 
 export const HERO_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F5E1}️", // 🗡️
@@ -82,3 +82,26 @@ export const RARITY_GLOW: Record<ItemRarity, string> = {
   rare: "shadow-[0_0_10px_2px_rgba(56,189,248,0.35)]",
   epic: "shadow-[0_0_14px_3px_rgba(250,204,21,0.45)]",
 };
+
+/**
+ * M7.6+ polish — a gear NAME earns prestige-gold styling once its refine
+ * level reaches the "break" band floor (`REFINE.failBands.degradeMax + 1`,
+ * i.e. +8 — the point past which every further attempt risks destroying the
+ * item outright). Name-text only: stack count/equipped badges and tier
+ * borders are untouched (their own conventions elsewhere).
+ */
+export const PRESTIGE_REFINE_LEVEL = REFINE.failBands.degradeMax + 1; // 8
+
+/**
+ * Full replacement classes for a gear NAME span at `refineLevel` (including
+ * font-weight — callers should NOT also apply their own `font-bold`), or ""
+ * below the threshold (callers keep their existing color/weight). Reuses the
+ * existing gold token only — no new color or keyframe. +10 (max refine) gets
+ * the same treatment: there's no existing shimmer/glow class that fits
+ * inline, truncating name text without restructuring layout, so we don't
+ * force one in (see `ddp-announce-shimmer`, which needs an absolute overlay
+ * span + relative/overflow-hidden parent — a banner-only convention).
+ */
+export function prestigeNameClass(refineLevel: number): string {
+  return refineLevel >= PRESTIGE_REFINE_LEVEL ? "text-ddp-gold-bright font-black" : "";
+}
