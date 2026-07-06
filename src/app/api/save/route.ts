@@ -15,7 +15,7 @@ import { getOrCreateUserId } from "@/server/identity";
 import { resolveActiveCharacterId } from "@/server/activeCharacter";
 import { getOwnedLiveCharacterClass } from "@/server/characters";
 import { loadSave, persistSave } from "@/server/save";
-import { loadInventory, equippedLoadoutFrom } from "@/server/items";
+import { loadInventory, equippedLoadoutFrom, loadMaterials } from "@/server/items";
 
 // This route reads/writes cookies and the DB per request — never static.
 export const dynamic = "force-dynamic";
@@ -33,7 +33,8 @@ export async function GET() {
         activeCharacterId: null,
         baseClass: null,
         inventory: [],
-        equipped: { weapon: null, armor: null },
+        equipped: { weapon: null, armor: null, refine: { weapon: 0, armor: 0 } },
+        materials: 0,
       });
     }
     // M7 boot payload: additively include the character's inventory + equipped
@@ -42,10 +43,14 @@ export async function GET() {
     // client must hydrate gear from `inventory`/`equipped` here, not from the
     // save's own copy (an item is not re-derivable from the save; persistence-m7).
     const userId2 = userId; // (identity already resolved above)
-    const [{ save, offline }, inventory, character] = await Promise.all([
+    const [{ save, offline }, inventory, character, materials] = await Promise.all([
       loadSave(characterId),
       loadInventory(characterId),
       getOwnedLiveCharacterClass(userId2, characterId),
+      // M7.6 ตีบวก: the AUTHORITATIVE material balance (DB column, not the save
+      // blob) — the client seeds its `materials` mirror from this on boot, same as
+      // `equipped` is seeded from the DB ledger over the save's cache.
+      loadMaterials(characterId),
     ]);
     // `baseClass` is the AUTHORITATIVE class (immutable at creation) — the
     // client must correct/seed the save's `hero.cls` from it (the 2026-07-06
@@ -57,6 +62,7 @@ export async function GET() {
       baseClass: character?.baseClass ?? null,
       inventory,
       equipped: equippedLoadoutFrom(inventory),
+      materials,
     });
   } catch (err) {
     console.error("[api/save] GET failed:", err);

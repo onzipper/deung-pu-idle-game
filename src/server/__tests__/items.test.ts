@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
-    character: { findUnique: vi.fn() },
+    character: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     itemInstance: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -40,16 +40,22 @@ import {
   unequipItem,
   destroyItem,
   sellItems,
+  salvageItems,
+  refineItem,
+  salvageSchema,
+  refineSchema,
   CLAIM_GRACE,
   KILLS_PER_SEC_CEILING,
   MAX_CLAIM_BATCH,
   MAX_SELL_BATCH,
+  MAX_SALVAGE_BATCH,
 } from "@/server/items";
 import {
   maxSummedDropChance,
   vendorPriceForTemplate,
   INVENTORY_CAP,
 } from "@/engine/config/items";
+import { REFINE, refineCost, salvageYield } from "@/engine/config/refine";
 
 const CHAR = "char_1";
 
@@ -60,6 +66,7 @@ function instanceRow(over: Record<string, unknown> = {}) {
     equippedSlot: null,
     origin: "drop",
     acquiredAt: new Date("2026-01-01T00:00:00Z"),
+    refineLevel: 0,
     ...over,
   };
 }
@@ -425,5 +432,219 @@ describe("sellSchema", () => {
     ).toBe(false);
     expect(sellSchema.safeParse({ itemIds: [""] }).success).toBe(false);
     expect(sellSchema.safeParse({ itemIds: ["a"], hacked: true }).success).toBe(false);
+  });
+});
+
+describe("salvageItems — refine materials (M7.6)", () => {
+  beforeEach(() => {
+    mockPrisma.itemEvent.createMany.mockResolvedValue({ count: 0 });
+  });
+
+  function stockFindMany(rows: Record<string, unknown>[]): void {
+    mockPrisma.itemInstance.findMany.mockResolvedValue(
+      rows.map((r) => ({ id: "item_1", deletedAt: null, ...r })),
+    );
+  }
+
+  it("salvages an unequipped item: atomic soft-delete + salvaged event + material credit", async () => {
+    stockFindMany([{ templateId: "w_sword_t3_knight", equippedSlot: null }]);
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.character.update.mockResolvedValue({ materials: 12 });
+    const gained = salvageYield(3, "rare"); // knight = tier 3, rare
+    const now = new Date("2026-07-06T00:00:00Z");
+    const { results, totalMaterials, materials } = await salvageItems(CHAR, ["item_1"], now);
+
+    expect(results[0]).toEqual({ itemId: "item_1", status: "salvaged", yield: gained });
+    expect(totalMaterials).toBe(gained);
+    expect(materials).toBe(12);
+    // conditional check-and-set guarded by deletedAt:null + equippedSlot:null
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "item_1", deletedAt: null, equippedSlot: null }),
+        data: { deletedAt: now },
+      }),
+    );
+    // authoritative counter credited by the WON set in the same tx
+    expect(mockPrisma.character.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { materials: { increment: gained } } }),
+    );
+    expect(mockPrisma.itemEvent.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: [expect.objectContaining({ type: "salvaged" })] }),
+    );
+  });
+
+  it("rejects an equipped item (reason equipped) — never auto-unequips, no materials", async () => {
+    stockFindMany([{ equippedSlot: "weapon" }]);
+    const { results, totalMaterials } = await salvageItems(CHAR, ["item_1"]);
+    expect(results[0]).toEqual({ itemId: "item_1", status: "rejected", reason: "equipped" });
+    expect(totalMaterials).toBe(0);
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.character.update).not.toHaveBeenCalled();
+  });
+
+  it("does not double-credit an already-deleted item (status already, yield 0)", async () => {
+    stockFindMany([{ equippedSlot: null, deletedAt: new Date("2026-01-01T00:00:00Z") }]);
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 5 });
+    const { results, totalMaterials, materials } = await salvageItems(CHAR, ["item_1"]);
+    expect(results[0]).toEqual({ itemId: "item_1", status: "already", yield: 0 });
+    expect(totalMaterials).toBe(0);
+    expect(materials).toBe(5);
+    expect(mockPrisma.character.update).not.toHaveBeenCalled();
+  });
+
+  it("credits at most once when the atomic write loses the race (count 0 → already)", async () => {
+    stockFindMany([{ templateId: "w_sword_t1_rusty", equippedSlot: null }]);
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // concurrent salvager won
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 0 });
+    const { results, totalMaterials } = await salvageItems(CHAR, ["item_1"]);
+    expect(results[0]).toEqual({ itemId: "item_1", status: "already", yield: 0 });
+    expect(totalMaterials).toBe(0);
+    expect(mockPrisma.character.update).not.toHaveBeenCalled();
+  });
+
+  it("dedupes ids: a duplicated id salvages/credits exactly once", async () => {
+    stockFindMany([{ templateId: "w_sword_t1_rusty", equippedSlot: null }]);
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.character.update.mockResolvedValue({ materials: 1 });
+    const { results, totalMaterials } = await salvageItems(CHAR, ["item_1", "item_1", "item_1"]);
+    expect(results).toHaveLength(1);
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+    expect(totalMaterials).toBe(salvageYield(1, "common")); // rusty = tier 1 common
+  });
+});
+
+describe("refineItem — server-authoritative roll (M7.6)", () => {
+  beforeEach(() => {
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 1 }); // materials debit ok
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 }); // compare-and-set wins
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 99 });
+  });
+
+  function stockItem(over: Record<string, unknown> = {}): void {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue({
+      id: "item_1",
+      templateId: "w_sword_t1_rusty", // tier 1
+      refineLevel: 0,
+      equippedSlot: null,
+      ...over,
+    });
+  }
+
+  it("success (+1): debits materials, writes refined event, returns new level + deltas", async () => {
+    stockItem({ refineLevel: 0 }); // target +1 → chance 1.0
+    const cost = refineCost(1, 1);
+    const r = await refineItem(CHAR, "item_1", 1000, { roll: () => 0 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.outcome).toBe("success");
+      expect(r.refineLevel).toBe(1);
+      expect(r.materialsDelta).toBe(-cost.materials);
+      expect(r.goldDelta).toBe(-cost.gold);
+      expect(r.materials).toBe(99);
+    }
+    expect(mockPrisma.character.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ materials: { gte: cost.materials } }),
+        data: { materials: { decrement: cost.materials } },
+      }),
+    );
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ refineLevel: 0, deletedAt: null }),
+        data: { refineLevel: 1 },
+      }),
+    );
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "refined" }) }),
+    );
+  });
+
+  it("degrade (−1) on a failed +4-7 attempt", async () => {
+    stockItem({ refineLevel: 4 }); // target +5 → chance .75; roll .99 fails → degrade
+    const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0.99 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.outcome).toBe("degrade");
+      expect(r.refineLevel).toBe(3);
+    }
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { refineLevel: 3 } }),
+    );
+  });
+
+  it("break: soft-destroys AND unequips (invariant 5) on a failed +8-10 attempt", async () => {
+    stockItem({ refineLevel: 8, equippedSlot: "weapon" }); // target +9 → break on fail
+    const now = new Date("2026-07-06T00:00:00Z");
+    const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0.99, now });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.outcome).toBe("break");
+      expect(r.destroyed).toBe(true);
+      expect(r.refineLevel).toBe(0);
+    }
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ refineLevel: 8, deletedAt: null }),
+        data: { deletedAt: now, equippedSlot: null },
+      }),
+    );
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "refined" }) }),
+    );
+  });
+
+  it("rejects insufficient materials (guarded debit count 0) — nothing applied", async () => {
+    stockItem({ refineLevel: 0 });
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 0 });
+    const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0 });
+    expect(r).toEqual({ ok: false, reason: "insufficient_materials" });
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects insufficient gold before touching materials or the item", async () => {
+    stockItem({ refineLevel: 0 }); // cost.gold = refineCost(1,1).gold > 0
+    const r = await refineItem(CHAR, "item_1", 0, { roll: () => 0 });
+    expect(r).toEqual({ ok: false, reason: "insufficient_gold" });
+    expect(mockPrisma.character.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an item already at max +level", async () => {
+    stockItem({ refineLevel: REFINE.maxRefine });
+    const r = await refineItem(CHAR, "item_1", 1e9);
+    expect(r).toEqual({ ok: false, reason: "max" });
+  });
+
+  it("rejects a missing/deleted item", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(null);
+    const r = await refineItem(CHAR, "nope", 1e9);
+    expect(r).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("aborts (not_found) when the compare-and-set loses the race — no double-apply", async () => {
+    stockItem({ refineLevel: 0 });
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // level already moved
+    const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0 });
+    expect(r).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("salvageSchema / refineSchema", () => {
+  it("salvageSchema accepts a batch and rejects empty/over-cap/extra", () => {
+    expect(salvageSchema.safeParse({ itemIds: ["a", "b"] }).success).toBe(true);
+    expect(salvageSchema.safeParse({ itemIds: [] }).success).toBe(false);
+    expect(
+      salvageSchema.safeParse({
+        itemIds: Array.from({ length: MAX_SALVAGE_BATCH + 1 }, (_, i) => `i${i}`),
+      }).success,
+    ).toBe(false);
+    expect(salvageSchema.safeParse({ itemIds: ["a"], hacked: true }).success).toBe(false);
+  });
+  it("refineSchema requires one non-empty itemId and rejects extras", () => {
+    expect(refineSchema.safeParse({ itemId: "item_1" }).success).toBe(true);
+    expect(refineSchema.safeParse({ itemId: "" }).success).toBe(false);
+    expect(refineSchema.safeParse({ itemId: "a", extra: 1 }).success).toBe(false);
   });
 });
