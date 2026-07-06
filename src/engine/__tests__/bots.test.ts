@@ -391,6 +391,42 @@ describe("sell-trip bot (inventoryCount trigger)", () => {
     expect(s.traveling).not.toBeNull(); // walking home
   });
 
+  it("REGRESSION: a full bag while STANDING in town starts the sell sweep (no trip needed)", () => {
+    const s = sellBotState();
+    // Park the hero in town (manual visit — not a bot trip).
+    const town = { mapId: "map1", zoneIdx: 0 };
+    s.location = town;
+    s.heroes[0].x = 100;
+    expect(zoneAt(s.location).kind).toBe("town");
+    step(s, { inventoryCount: INVENTORY_CAP });
+    const ev = s.events.find((e) => e.type === "townArrived");
+    expect(ev && "reason" in ev && ev.reason).toBe("sell"); // sweep event fired in place
+    expect(s.botDwell).not.toBeNull();
+    // Sell lands → dwell clears but the hero STAYS in town (returnAfter=false).
+    step(s, { inventoryCount: 10 });
+    expect(s.botDwell).toBeNull();
+    expect(s.traveling).toBeNull(); // not dragged to the farm
+    expect(zoneAt(s.location).kind).toBe("town");
+  });
+
+  it("REGRESSION: a fast-travel channel started IN TOWN completes (town path ticks it)", () => {
+    const s = sellBotState();
+    s.location = { mapId: "map1", zoneIdx: 0 }; // town
+    expect(zoneAt(s.location).kind).toBe("town");
+    step(s, { fastTravel: { mapId: "map1", zoneIdx: 2 } });
+    expect(s.fastTravelCast).not.toBeNull(); // channel began
+    // The old town early-return skipped tickFastTravel → the channel froze
+    // forever. It must now count down and hop.
+    let arrived = false;
+    for (let i = 0; i < 300 && !arrived; i++) {
+      step(s, {});
+      arrived = s.events.some((e) => e.type === "fastTravelArrive");
+    }
+    expect(arrived).toBe(true);
+    expect(s.fastTravelCast).toBeNull();
+    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 2 });
+  });
+
   it("releases the latch when the count finally drops below the watermark", () => {
     const s = sellBotState();
     stepCounting(s, 6000, INVENTORY_CAP); // one trip, latched, back at the farm

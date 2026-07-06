@@ -240,9 +240,13 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   }
 
   // Town is a safe hub: no spawns, no combat. Still tick timers (mana regen /
-  // buff decay) so a stop in town isn't a dead zone for the caster resource.
+  // buff decay) so a stop in town isn't a dead zone for the caster resource —
+  // and the FAST-TRAVEL channel must tick here too (2026-07-06 bug: this early
+  // return skipped tickFastTravel, so a warp STARTED IN TOWN never completed —
+  // portal spinning forever). Town is damage-free, so it only counts down.
   if (zoneAt(state.location).kind === "town") {
     decayHeroTimers(state);
+    tickFastTravel(state);
     state.time += FIXED_DT;
     state.rngState = rng.state();
     return state;

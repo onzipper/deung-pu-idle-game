@@ -124,9 +124,12 @@ export interface GameState {
    * the timer to run out (then returns and latches `sellTripWatermark`).
    * `lastCount` tracks the fed count between ticks: any DECREASE = the sell is
    * making progress (a big pre-cap bag sells in several 100-item chunks), so
-   * the timer RESETS instead of giving up mid-sweep. Transient — NEVER persisted.
+   * the timer RESETS instead of giving up mid-sweep. `returnAfter` = walk home
+   * to the last farm zone when the dwell ends (true for a bot TRIP; false for
+   * an IN-TOWN standing sweep — a player browsing the shop must not get
+   * dragged to the farm). Transient — NEVER persisted.
    */
-  botDwell: { timer: number; lastCount: number | null } | null;
+  botDwell: { timer: number; lastCount: number | null; returnAfter: boolean } | null;
   /**
    * The fed `inventoryCount` at which the last sell trip GAVE UP (dwell timeout with
    * the bag still full), or null. Suppresses new sell trips until the count drops

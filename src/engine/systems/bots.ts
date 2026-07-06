@@ -132,19 +132,9 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
     (mpShort && spendable >= shopPriceAt("manaPotion", stage));
   const needRestock = bot.enabled && (hpShort || mpShort) && canAfford;
 
-  const kind = zoneAt(state.location).kind;
-  if (kind === "town") {
-    // Already STANDING at the shop (death respawn while waiting, manual visit):
-    // restock in place — walking to the farm just to trip straight back here
-    // would be an absurd round trip.
-    if (needRestock) botRestock(state);
-    return;
-  }
-  if (kind !== "farm") return; // trips initiate from farming
-
-  // A prior sell trip gave up with the bag still at `sellTripWatermark` items —
+  // A prior sell sweep gave up with the bag still at `sellTripWatermark` items —
   // stay latched until the count actually drops below it (a manual/late sell
-  // landed) so we never loop scroll-burning trips that sell nothing.
+  // landed) so we never loop sweeps/trips that sell nothing.
   if (
     state.sellTripWatermark !== null &&
     typeof inventoryCount === "number" &&
@@ -157,7 +147,27 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
     bot.sellTripEnabled &&
     typeof inventoryCount === "number" &&
     inventoryCount >= INVENTORY_CAP &&
-    state.sellTripWatermark === null; // latched = a prior trip sold nothing
+    state.sellTripWatermark === null; // latched = a prior sweep sold nothing
+
+  const kind = zoneAt(state.location).kind;
+  if (kind === "town") {
+    // Already STANDING at the shop (death respawn while waiting, manual visit,
+    // 2026-07-06 report: a full-bag hero parked in town never sold): restock
+    // in place, and a due sell starts the SAME dwell+event a trip arrival
+    // would — minus the walk home afterwards (`returnAfter: false`; a player
+    // browsing the shop must not get dragged to the farm).
+    if (needRestock) botRestock(state);
+    if (needSell) {
+      state.botDwell = {
+        timer: CONFIG.bot.sellDwellSeconds,
+        lastCount: null,
+        returnAfter: false,
+      };
+      state.events.push({ type: "townArrived", reason: "sell" });
+    }
+    return;
+  }
+  if (kind !== "farm") return; // trips initiate from farming
   if (!needRestock && !needSell) return;
 
   beginBotTrip(state, needRestock, needSell);
@@ -178,7 +188,7 @@ function tickSellDwell(state: GameState, inventoryCount?: number): void {
     // The client's sell landed — bag has room again. Success: no latch.
     state.botDwell = null;
     state.sellTripWatermark = null;
-    botReturnToFarm(state);
+    if (dwell.returnAfter) botReturnToFarm(state);
     return;
   }
   // PROGRESS extends the wait: a pre-cap 1,000+ bag sells in sequential
@@ -193,7 +203,7 @@ function tickSellDwell(state: GameState, inventoryCount?: number): void {
     // Gave up: bag still full and no progress. Latch so we don't re-trip.
     state.botDwell = null;
     if (count !== null) state.sellTripWatermark = count;
-    botReturnToFarm(state);
+    if (dwell.returnAfter) botReturnToFarm(state);
   }
 }
 
@@ -255,7 +265,7 @@ export function onBotTownArrival(state: GameState): void {
     // dwell in town for it instead of walking home in this same step (the
     // original walk-home-immediately behavior warp-looped: bag never shrank
     // before the next full-bag trigger back at the farm).
-    state.botDwell = { timer: CONFIG.bot.sellDwellSeconds, lastCount: null };
+    state.botDwell = { timer: CONFIG.bot.sellDwellSeconds, lastCount: null, returnAfter: true };
     return;
   }
   botReturnToFarm(state);
