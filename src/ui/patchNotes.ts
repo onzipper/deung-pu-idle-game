@@ -53,6 +53,23 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-07b.items.copySweep",
     ],
   },
+  // M7.9 Grand Expansion (world ×2 / class tier 3 / gear t7-10 / boss variety)
+  // + the same-day mobile-modal and warp-picker fixes.
+  {
+    id: "2026-07-07c",
+    date: "2026-07-07",
+    items: [
+      "releases.2026-07-07c.items.world",
+      "releases.2026-07-07c.items.tier3",
+      "releases.2026-07-07c.items.skill4",
+      "releases.2026-07-07c.items.slot4",
+      "releases.2026-07-07c.items.gear",
+      "releases.2026-07-07c.items.boss",
+      "releases.2026-07-07c.items.codex",
+      "releases.2026-07-07c.items.warpFix",
+      "releases.2026-07-07c.items.modalFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

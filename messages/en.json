@@ -809,6 +809,19 @@
           "bossGateFix": "⚔ The challenge button only lights up at the real boss door — no more dead glowing button",
           "copySweep": "📝 Goal/tutorial copy fully updated to the hunting-field + boss-door model"
         }
+      },
+      "2026-07-07c": {
+        "items": {
+          "world": "🗺 The world just DOUBLED! 3 new maps — Ice Tundra · Desert Ruins · Hell City (stages 16-30) + level cap raised to 90",
+          "tier3": "👑 Class tier 3 is here! Grand Knight / Hunt King / Archmage — quest at Lv.40, a power spike that breaks the stage-15 wall",
+          "skill4": "⚡ A spectacular 4th skill per tier-3 class — Skyfall Blade (time stops!) / Relentless Arrow Storm / Apocalypse",
+          "slot4": "✨ 4th auto-skill slot unlocks with class tier 3",
+          "gear": "🛡 Gear tiers 7-10 drop in the new stages — stronger everything, refine to a new ceiling",
+          "boss": "😈 All 6 bosses now look unique + new bosses fight dirty: charging rush / summoned minions / arena-wide shockwaves — watch the warning signs!",
+          "codex": "📖 Codex covers the new world, tier-3 classes, and every new boss",
+          "warpFix": "🌀 Picking a warp zone now closes the window — see your warp instantly",
+          "modalFix": "📱 Mobile fix: inventory/refine/settings windows no longer get covered by HUD buttons"
+        }
       }
     }
   }
