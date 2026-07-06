@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ITEM_TEMPLATES } from "@/engine/config/items";
 import { selectAutoSellSalvageIds, type SellableTemplate } from "@/ui/gear/autoSell";
 import type { InventoryItem } from "@/ui/gear/types";
 
@@ -222,6 +223,44 @@ describe("selectAutoSellSalvageIds", () => {
       keepBetterStat: false,
     });
     expect(sellIds).toEqual(["better"]);
+  });
+
+  it("REGRESSION (2026-07-07 bot warps but never sells): DEFAULT rules over a REAL full bag must dispose something", () => {
+    // Owner report: the town trip fires but nothing sells/salvages. Guards the
+    // whole selection contract end-to-end against the ACTUAL catalog (not the
+    // toy fixture above): with the shipped default rules (common/rare "sell",
+    // keep-guard ON) and a realistic drop-minted bag (equippedSlot: null on every
+    // drop — the wire always sends null, never undefined), the sweep must return
+    // a NON-EMPTY sell list. A regression here (a flipped default, an
+    // equippedSlot null-vs-undefined leak, or a keep-guard that over-keeps every
+    // slot) reproduces the perpetual re-warp.
+    const catalog = ITEM_TEMPLATES as unknown as Record<string, SellableTemplate>;
+    const weaponIds = Object.keys(ITEM_TEMPLATES).filter(
+      (k) => ITEM_TEMPLATES[k].slot === "weapon",
+    );
+    const armorIds = Object.keys(ITEM_TEMPLATES).filter(
+      (k) => ITEM_TEMPLATES[k].slot === "armor",
+    );
+    // A weapon + armor equipped, plus a bag full of duplicate & lower drops.
+    const bag: InventoryItem[] = [
+      item({ instanceId: "eqW", templateId: weaponIds[2], slot: "weapon", equippedSlot: "weapon" }),
+      item({ instanceId: "eqA", templateId: armorIds[1], slot: "armor", equippedSlot: "armor" }),
+      item({ instanceId: "w1", templateId: weaponIds[0], slot: "weapon" }),
+      item({ instanceId: "w2", templateId: weaponIds[0], slot: "weapon" }),
+      item({ instanceId: "w3", templateId: weaponIds[1], slot: "weapon", refineLevel: 5 }),
+      item({ instanceId: "a1", templateId: armorIds[0], slot: "armor" }),
+      item({ instanceId: "a2", templateId: armorIds[0], slot: "armor" }),
+    ];
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
+      bag,
+      catalog,
+      { common: "sell", rare: "sell", keepBetterStat: true },
+      ITEM_TEMPLATES[weaponIds[0]].classReq ?? undefined,
+    );
+    expect(sellIds.length + salvageIds.length).toBeGreaterThan(0);
+    // Equipped gear is never disposed.
+    expect(sellIds).not.toContain("eqW");
+    expect(sellIds).not.toContain("eqA");
   });
 
   it("skips an unknown/retired template defensively", () => {

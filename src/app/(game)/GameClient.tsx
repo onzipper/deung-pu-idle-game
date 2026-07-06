@@ -379,12 +379,23 @@ async function performAutoSell(): Promise<void> {
       count: sellResult.soldCount,
       gold: sellResult.totalGold.toLocaleString(),
     });
+  } else if (!sellResult.ok) {
+    // POST/network failure — the bag stays full, so the engine re-trips the warp
+    // and this retries next trip. Log it: a SILENT failure here is exactly what
+    // makes the "warps but sells nothing" report undiagnosable in the field.
+    console.warn("[GameClient] auto-sell POST failed; bag stays full, will retry", {
+      requested: sellIds.length,
+    });
   }
   const salvageResult = await executeSalvage(salvageIds);
   if (salvageResult.ok && salvageResult.salvagedCount > 0) {
     useGameStore.getState().pushNotice("autoSalvageDone", {
       count: salvageResult.salvagedCount,
       materials: salvageResult.totalMaterials.toLocaleString(),
+    });
+  } else if (!salvageResult.ok) {
+    console.warn("[GameClient] auto-salvage POST failed; bag stays full, will retry", {
+      requested: salvageIds.length,
     });
   }
 }
@@ -627,8 +638,17 @@ export function GameClient() {
           // dropped auto-sell just retries on the NEXT full-inventory trip).
           if (ev.reason === "sell" || ev.reason === "restockSell") {
             // Equip first so the keep-guard baseline reflects the NEW gear —
-            // the displaced pieces then vendor in this same trip.
-            void performAutoEquip().then(performAutoSell);
+            // the displaced pieces then vendor in this same trip. The dispose
+            // sweep MUST still run if auto-equip rejects (the whole point of the
+            // trip is to empty the bag): gating it on the equip promise settling
+            // cleanly means a single equip failure silently skips sell+salvage,
+            // leaving the bag full so the engine re-trips the warp forever — the
+            // "bot warps but never sells/salvages" bug. Run dispose on BOTH the
+            // fulfil and reject paths.
+            void performAutoEquip().then(performAutoSell, (err) => {
+              console.warn("[GameClient] auto-equip failed; disposing anyway", err);
+              return performAutoSell();
+            });
           }
         } else if (ev.type === "fastTravelCastStart") {
           useGameStore.getState().startFastTravelChannel(ev.mapId, ev.zoneIdx);
