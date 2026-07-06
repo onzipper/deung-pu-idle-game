@@ -73,6 +73,11 @@ export {
   emptyConsumables,
 } from "@/engine/systems/consumables";
 
+// Idle-bot settings (M7.5): the UI derives its bot-config form defaults from these
+// pure reads. The bots run ONLY through `step()` (deterministic, engine-side); the
+// mutator is the `setBotSettings` FrameInput intent, so it stays internal.
+export { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
+
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure
 // reads. Casting / slot assignment happen ONLY through `step()` intents

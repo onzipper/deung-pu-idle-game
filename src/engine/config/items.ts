@@ -202,16 +202,22 @@ export function bossDropTableForStage(stage: number): DropTableEntry[] {
 /**
  * NPC vendor sell price in gold (M7.5 contract — server's sell endpoint imports
  * this; the ledger records the price in ItemEvent meta for future re-derivation).
- * Town-only selling is enforced engine/client-side, not here. PLACEHOLDER
- * formula — the engine/balance task tunes magnitudes vs the per-stage gold
- * income tables (sell income must stay a minor share of kill gold; see
- * docs/balance-m7.md).
+ * Town-only selling is enforced engine/client-side, not here.
+ *
+ * TUNED (M7.5, docs/balance-m7.md "vendor price"): `round(tier^2 * rarityMult)`
+ * with rarityMult {common 1, rare 1.5, epic 2.5}. Sized so a full 100-slot sell of
+ * on-curve drops is a SMALL-but-felt ~3-14% of the kill gold earned over the time
+ * it takes to fill the inventory at that stage band (mid/late bands land ~10-14%;
+ * early bands are lower). Potions (stage-scaled, thousands per restock) stay the
+ * dominant gold sink. Monotonic in tier; the epic break-tier sells the highest.
+ * The ~4x cut from the placeholder (was `3 * tier^2 * {1,2,4}`) is what pulls sell
+ * income down from ~64% of kill gold to this minor share.
  */
 export function vendorPriceForTemplate(templateId: string): number {
   const t = ITEM_TEMPLATES[templateId];
   if (!t) return 0;
-  const rarityMult = t.rarity === "epic" ? 4 : t.rarity === "rare" ? 2 : 1;
-  return Math.round(3 * t.tier * t.tier * rarityMult);
+  const rarityMult = t.rarity === "epic" ? 2.5 : t.rarity === "rare" ? 1.5 : 1;
+  return Math.round(t.tier * t.tier * rarityMult);
 }
 
 /** M7.5 inventory cap (instances per character) — bot sell-trip trigger + the

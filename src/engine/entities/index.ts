@@ -109,6 +109,33 @@ export interface ConsumableCounts {
 }
 
 /**
+ * Idle-automation "bot" settings (M7.5 "Sell, Bots & Inventory UX"). Persisted
+ * (SAVE v11), engine-owned (NOT a UI-mirrored transient like `autoReturn`): the
+ * bot triggers are deterministic, engine-side, and their config round-trips
+ * through the save so the automation survives a reload. See systems/bots.ts.
+ *
+ *  - `enabled`         : the POTION-RESTOCK bot (trip to town when potions dip
+ *                        below target, buy up to targets, auto-return to farming).
+ *  - `sellTripEnabled` : the SELL-trip bot (trip to town when the client-fed
+ *                        inventory count hits `INVENTORY_CAP`; the client fires
+ *                        the sell API off the `townArrived` event).
+ *  - `hpPotionTarget` / `mpPotionTarget` : restock target stack counts.
+ *  - `scrollReserve`   : the return-scroll restock target (also the bot's warp
+ *                        fuel — any held scroll is spent to warp home, and the
+ *                        trip tops the stock back up toward this reserve).
+ *  - `goldReserve`     : a spending FLOOR — restock only ever spends gold ABOVE
+ *                        this, so the bot never drains the player dry.
+ */
+export interface BotSettings {
+  enabled: boolean;
+  sellTripEnabled: boolean;
+  hpPotionTarget: number;
+  mpPotionTarget: number;
+  scrollReserve: number;
+  goldReserve: number;
+}
+
+/**
  * Quest framework v1 (M5 "เปลี่ยนคลาสผ่านเควส", ROADMAP task 5). Deliberately
  * LEAN — exactly what the class-change quest needs — but forward-compatible with
  * the full quest system in M8.

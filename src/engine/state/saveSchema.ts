@@ -48,6 +48,20 @@ export const consumablesSchema = z
   })
   .strict();
 
+/** Idle-bot settings (M7.5, SAVE v11). Loose non-negative numbers — `migrate`
+ * (`normalizeBotSettings`) coerces booleans + clamps targets to the stack cap, so a
+ * stale/over-cap block never needlessly 400s (same resilience as the fields below). */
+export const botSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    sellTripEnabled: z.boolean(),
+    hpPotionTarget: z.number().int().min(0),
+    mpPotionTarget: z.number().int().min(0),
+    scrollReserve: z.number().int().min(0),
+    goldReserve: z.number().min(0).finite(),
+  })
+  .strict();
+
 /**
  * The accepted incoming-save contract (M5 v5 single character). Anything that
  * fails this is a 400 — a well-behaved client (see `toSaveData`) always produces
@@ -111,6 +125,10 @@ export const saveDataSchema = z
     // trimmed) payload is backfilled to zeros by `migrate()` — same resilience as
     // the world fields above.
     consumables: consumablesSchema.optional(),
+    // M7.5 idle-bot settings (SAVE v11). OPTIONAL so a pre-v11 (or trimmed) payload
+    // is backfilled to the config defaults (both bots OFF) by `migrate()` — same
+    // resilience as the fields above. Values are re-clamped on load.
+    bot: botSettingsSchema.optional(),
     // M7 gear (SAVE v10). All OPTIONAL so a pre-v10 (or trimmed) payload is
     // backfilled by `migrate()` (equipped → empty, counter → 0, salt → derived) —
     // same resilience as the fields above. `equipped` is a weapon/armor templateId

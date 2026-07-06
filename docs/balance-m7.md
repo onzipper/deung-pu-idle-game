@@ -115,3 +115,82 @@ on-curve equip — is what eventually crosses s15. In the 2400 s sim window it d
   tests untouched and mirrors the server `EquippedLoadout`.
 - The DB item ledger is authoritative; the save cache exists only for offline/pre-boot
   power. The boot payload overrides it (GameClient's merge — server zone).
+
+---
+
+# M7.5 — Sell, Bots & Fast Travel (engine)
+
+Branch `develop` · adds engine-side idle automations + fast travel + vendor pricing.
+All DETERMINISTIC (no RNG — the wave-composition stream is untouched) and all bots
+default **OFF**, so the no-gear / no-bot sim baseline is **byte-identical to M6/M7**
+(verified: class change s5, map1/map2 0 wipes, same per-stage clear times).
+
+## What landed (engine)
+
+- **Potion-restock bot** (`systems/bots.ts`, SAVE v11 `state.bot`) — while FARMING,
+  if a potion is below its target *and* at least one short potion is affordable above
+  the `goldReserve` floor, it makes a town round trip: **warp via a held return
+  scroll** (any held — the reserve is only the restock target), else a single direct
+  **walk** transit (reusing `respawnToTown`'s walk-home, reason `"bot"`). In town it
+  buys potions up to targets + scrolls up to `scrollReserve` within the gold floor,
+  emits `townArrived`, then auto-returns to `lastFarmZone`. An **affordability gate**
+  prevents a broke-hero trip livelock (it banks gold at the farm until a trip is
+  worthwhile). Reuses the death/auto-return machinery — does not fork it.
+- **Sell-trip bot** — the client feeds a transient `FrameInput.inventoryCount`; when
+  it hits `INVENTORY_CAP` (100) and `sellTripEnabled`, the same town trip fires and
+  emits `townArrived { reason }`. The engine knows **nothing** about item instances —
+  the client fires the sell API off the event. Trips **coalesce**: restock + sell
+  pending together = one trip (`reason: "restockSell"`).
+- **SAVE v11** — additive `bot` block `{ enabled, sellTripEnabled, hpPotionTarget,
+  mpPotionTarget, scrollReserve, goldReserve }`. `migrate` v10→v11 backfills the config
+  defaults (both bots OFF); v11 settings are preserved (booleans coerced, targets
+  clamped to the stack cap, gold floor ≥ 0 — idempotent). zod `botSettingsSchema` +
+  `FrameInput.setBotSettings` added.
+- **Fast travel** (`systems/world.ts`, `FrameInput.fastTravel`) — free hop to any
+  UNLOCKED non-boss zone: a `fastTravelCastSeconds` (1.75 s) channel (hero stands
+  still — offense frozen) then an instant arrival at the target's **left (entrance)
+  gate x**. Rejected (event `fastTravelBlocked { reason }`) for locked / aggro (any
+  engaged or in-radius aggressive mob) / dead / same / traveling / boss-phase /
+  invalid target; **taking damage cancels** the channel (`"damaged"`). Events
+  `fastTravelCastStart` / `fastTravelArrive` carry positions for render fx. The return
+  scroll keeps its value (instant even while swarmed; fast travel demands a standoff).
+- **Gate transit polish** — a WALK between zones now emits `zoneGateEnter { x, side }`
+  at departure (out the travel-direction edge) and `zoneGateExit { x, side }` on
+  arrival (in the opposite edge), exactly once each per hop, for render to place
+  themed archways + whoosh. Only `"walk"` transits emit them (not scroll / death /
+  bot / fast-travel). The M6 rule holds (ground still in zones; scroll only while
+  walking) — this is additive events + a small `TravelState` sub-state.
+
+## Vendor price tuning
+
+`vendorPriceForTemplate = round(tier² × rarityMult)`, rarityMult **{common 1, rare
+1.5, epic 2.5}** (was the placeholder `3 × tier² × {1,2,4}` — a ~4× cut).
+
+**Goal:** a full 100-slot sell of on-curve drops is a *small-but-felt* share of the
+kill gold earned over the time it takes to FILL the inventory at that stage band, so
+selling is a bonus and **potions stay the dominant sink**. For a band: fill kills
+`K = 100/dropΣ`, kill gold `G = K·goldPerKill(n)`, sell income `S = 100·price`, so
+`ratio = price·dropΣ/goldPerKill(n)`.
+
+| band (stage) | on-curve rarity | price/item | dropΣ/kill | goldPerKill | 100-sell | ~ratio vs kill gold |
+|---|---|---:|---:|---:|---:|---:|
+| t1 (s1–2)  | common | 1  | 0.12  | 4  | 100  | ~3% |
+| t2 (s3–5)  | common | 4  | 0.12  | 11 | 400  | ~4% |
+| t3 (s6–8)  | rare   | 14 | 0.08  | 18 | 1400 | ~6% |
+| t4 (s9–10) | rare   | 24 | 0.14  | 24 | 2400 | ~14% |
+| t5 (s11–13)| rare   | 38 | 0.08  | 35 | 3800 | ~9% |
+| t6 (s14–15, **epic**) | epic | 90 | 0.048 | 43 | 9000 | ~10% |
+
+All bands land **≤~14%** (mid/late ~9–14%, early lower); monotonic in tier; the epic
+break-tier sells highest. t4 tops the range because its class-armor splits raise
+dropΣ (0.14) — acceptable. Potions (stage-scaled, ~thousands per restock) dwarf this.
+
+## Sim / smoke verdict
+
+- **Baseline unchanged:** `pnpm sim` (bots OFF, no-gear) reproduces the M6/M7 table
+  (class change s5, map1/map2 0 wipes, s1 23s … s9 124s …). Vendor-price + gate-event
+  + bot-field additions do not perturb combat/economy/RNG.
+- **Restock-bot smoke** (`bots.test.ts`, s6, restock ON, 30k steps): the bot makes
+  town trips, the hero keeps farming (kills bank, no livelock/stall), gold stays
+  positive, potions hover near targets, and it never strands mid boss room.
+- **Determinism:** a fixed-input restock-bot run is byte-identical across two runs.

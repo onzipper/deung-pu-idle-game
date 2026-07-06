@@ -44,9 +44,12 @@ export interface Zone {
 /**
  * Reason a transit / arrival happened — town arrival auto-returns to farming after
  * a "death" (respawn) or a "scroll" (return-scroll teleport); a plain "walk" stays
- * put. Kept a small closed union so the auto-return branch reads clearly.
+ * put. "bot" is an idle-bot town trip (M7.5 — handled by systems/bots on arrival,
+ * NOT the generic auto-return branch); "fasttravel" is the instant free hop (M7.5,
+ * arrives directly via `arriveAtZone`, never through a transit). Only a "walk" emits
+ * the zone-gate archway events. Kept a small closed union so each branch reads clearly.
  */
-export type TravelReason = "walk" | "death" | "scroll";
+export type TravelReason = "walk" | "death" | "scroll" | "bot" | "fasttravel";
 
 /** In-flight walk between zones (transient; never persisted). */
 export interface TravelState {
@@ -55,6 +58,10 @@ export interface TravelState {
   /** Seconds of transit remaining (counts down at FIXED_DT). */
   timer: number;
   reason: TravelReason;
+  /** Zone-gate polish (M7.5, WALK transits only): the arrival-edge gate side + x so
+   * `updateTransit` can emit `zoneGateExit` on arrival. Unset for non-walk transits. */
+  exitSide?: "left" | "right";
+  exitGateX?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +122,18 @@ export function mapZoneCount(mapId: string): number {
 /** Whether a location addresses a real zone. */
 export function isValidLocation(loc: WorldLocation): boolean {
   return globalIndex(loc) >= 0;
+}
+
+/** A zone's walkable width in engine units (per-map `fieldWidth`, default 900). */
+function fieldWidthOf(mapId: string): number {
+  return CONFIG.world.maps.find((m) => m.id === mapId)?.fieldWidth ?? 900;
+}
+
+/** The x of a zone's left/right edge GATE (M7.5 gate transit + fast-travel arrival). */
+export function gateX(mapId: string, side: "left" | "right"): number {
+  return side === "left"
+    ? CONFIG.hunt.heroMinX
+    : fieldWidthOf(mapId) - CONFIG.hunt.fieldRightMargin;
 }
 
 /** The farm zone whose content stage is `stage`, clamped into the frontier. */
@@ -214,12 +233,24 @@ export function beginTransit(
   state.enemies = [];
   state.projectiles = [];
   state.boss = null;
-  state.traveling = {
+  const tr: TravelState = {
     targetMapId: target.mapId,
     targetZoneIdx: target.zoneIdx,
     timer: seconds,
     reason,
   };
+  // Zone-gate polish (M7.5): only a WALK transit passes through the themed archway.
+  // The hero enters the departure-edge gate now (zoneGateEnter) and will emerge from
+  // the arrival-edge gate on arrival (updateTransit -> zoneGateExit). Sides follow
+  // the travel direction (walking right = out the right gate, in the left gate).
+  if (reason === "walk") {
+    const goingRight = globalIndex(target) > globalIndex(state.location);
+    const enterSide: "left" | "right" = goingRight ? "right" : "left";
+    tr.exitSide = goingRight ? "left" : "right";
+    tr.exitGateX = gateX(target.mapId, tr.exitSide);
+    state.events.push({ type: "zoneGateEnter", x: gateX(state.location.mapId, enterSide), side: enterSide });
+  }
+  state.traveling = tr;
 }
 
 /**
@@ -270,8 +301,15 @@ export function updateTransit(state: GameState): Zone | null {
   if (tr.timer > 0) return null;
   const target: WorldLocation = { mapId: tr.targetMapId, zoneIdx: tr.targetZoneIdx };
   const reason = tr.reason;
+  const exitSide = tr.exitSide;
+  const exitGateX = tr.exitGateX;
   state.traveling = null;
-  return arriveAtZone(state, target, reason);
+  const zone = arriveAtZone(state, target, reason);
+  // Zone-gate polish (M7.5): emerge from the arrival-edge gate (WALK transits only).
+  if (reason === "walk" && exitSide !== undefined && exitGateX !== undefined) {
+    state.events.push({ type: "zoneGateExit", x: exitGateX, side: exitSide });
+  }
+  return zone;
 }
 
 /**
@@ -399,4 +437,117 @@ export function onBossRoomCleared(state: GameState): void {
     state.events.push({ type: "mapUnlocked", mapId: next.mapId });
     state.events.push({ type: "zoneUnlocked", mapId: next.mapId, zoneIdx: next.zoneIdx });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Fast travel (M7.5 "Fast travel") — a short damage-cancellable channel then an
+// instant, FREE hop to any UNLOCKED (non-boss) zone. The return scroll keeps its
+// value: it warps INSTANTLY even while swarmed, whereas fast travel demands a clear
+// standoff (no engaged/aggro mob) and can be interrupted by damage. Deterministic
+// (no RNG, no wall-clock) — the channel is a fixed-dt timer.
+// ---------------------------------------------------------------------------
+
+/** Reasons a fast-travel intent is rejected (mirrors the `fastTravelBlocked` event). */
+type FastTravelBlockedReason =
+  | "locked"
+  | "aggro"
+  | "dead"
+  | "same"
+  | "traveling"
+  | "boss"
+  | "invalid"
+  | "damaged";
+
+/** Whether any mob is currently a threat to the hero (engaged, or an aggressive mob
+ * inside its aggro radius) — the fast-travel standoff guard. */
+function heroUnderThreat(state: GameState): boolean {
+  const h = state.heroes[0];
+  if (!h) return false;
+  for (const e of state.enemies) {
+    if (e.hp <= 0) continue;
+    if (e.engaged) return true;
+    if (e.aggressive && Math.abs(e.x - h.x) <= e.aggroRadius) return true;
+  }
+  return false;
+}
+
+/**
+ * Begin a fast-travel channel to `target`. Rejected (emits `fastTravelBlocked` with
+ * a reason, returns false) if a channel is already running, the hero is dead / mid
+ * transit / in the boss phase, the target is invalid / a boss room / locked /
+ * already-current, or a mob is engaging the hero. On success emits
+ * `fastTravelCastStart` and sets the channel; completion happens in `tickFastTravel`.
+ */
+export function startFastTravel(state: GameState, target: WorldLocation): boolean {
+  if (state.fastTravelCast) return false; // already channeling — ignore the re-tap
+  const h = state.heroes[0];
+  const blocked = (reason: FastTravelBlockedReason): boolean => {
+    state.events.push({ type: "fastTravelBlocked", reason });
+    return false;
+  };
+  if (!h || h.dead) return blocked("dead");
+  if (state.traveling) return blocked("traveling");
+  if (state.phase === "boss") return blocked("boss");
+  if (!isValidLocation(target)) return blocked("invalid");
+  const zone = zoneAt(target);
+  if (zone.kind === "boss") return blocked("invalid"); // boss rooms are entered via the gate, not warped into
+  if (!isZoneUnlocked(state, target)) return blocked("locked");
+  if (target.mapId === state.location.mapId && target.zoneIdx === state.location.zoneIdx) {
+    return blocked("same");
+  }
+  if (heroUnderThreat(state)) return blocked("aggro");
+  state.fastTravelCast = {
+    targetMapId: target.mapId,
+    targetZoneIdx: target.zoneIdx,
+    timer: CONFIG.travel.fastTravelCastSeconds,
+    lastHp: h.hp,
+  };
+  state.events.push({
+    type: "fastTravelCastStart",
+    x: h.x,
+    y: h.y,
+    mapId: target.mapId,
+    zoneIdx: target.zoneIdx,
+  });
+  return true;
+}
+
+/**
+ * Tick an in-flight fast-travel channel one fixed step. Cancels (emits
+ * `fastTravelBlocked` "damaged") if the hero took damage since the last tick; on
+ * completion performs the instant hop (arrives at the target's LEFT gate x — the
+ * entrance side) and emits `fastTravelArrive`. A no-op with no channel. Called from
+ * step() after combat so this step's damage is already reflected in the hero's HP.
+ */
+export function tickFastTravel(state: GameState): void {
+  const c = state.fastTravelCast;
+  if (!c) return;
+  const h = state.heroes[0];
+  if (!h || h.dead) {
+    state.fastTravelCast = null;
+    state.events.push({ type: "fastTravelBlocked", reason: "dead" });
+    return;
+  }
+  if (h.hp < c.lastHp) {
+    state.fastTravelCast = null;
+    state.events.push({ type: "fastTravelBlocked", reason: "damaged" });
+    return;
+  }
+  c.lastHp = h.hp; // allow healing during the channel without spuriously cancelling
+  c.timer -= FIXED_DT;
+  if (c.timer > 0) return;
+
+  const target: WorldLocation = { mapId: c.targetMapId, zoneIdx: c.targetZoneIdx };
+  state.fastTravelCast = null;
+  state.traveling = null;
+  arriveAtZone(state, target, "fasttravel");
+  const arriveX = gateX(target.mapId, "left");
+  h.x = arriveX;
+  state.events.push({
+    type: "fastTravelArrive",
+    x: arriveX,
+    y: h.y,
+    mapId: target.mapId,
+    zoneIdx: target.zoneIdx,
+  });
 }

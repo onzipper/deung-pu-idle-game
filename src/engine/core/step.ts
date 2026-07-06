@@ -14,9 +14,10 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
-import type { ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
+import type { BotSettings, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
 import type { GearSlot } from "@/engine/config/items";
 import { equipItem } from "@/engine/systems/gear";
+import { onBotTownArrival, setBotSettings, updateBots } from "@/engine/systems/bots";
 import {
   applyReturnScroll,
   buyShopItem,
@@ -34,6 +35,8 @@ import {
   advanceToNextMap,
   checkZoneUnlock,
   enterBossRoom,
+  startFastTravel,
+  tickFastTravel,
   updateTransit,
   walkToZone,
   zoneAt,
@@ -133,6 +136,25 @@ export interface FrameInput {
    * across phases; applied once per drained input (a click equips exactly once).
    */
   equip?: { slot: GearSlot; templateId: string | null };
+  /**
+   * Update the idle-bot settings (M7.5) — merged over the current settings and
+   * clamped. Applied once per drained input. The engine persists `state.bot`
+   * (SAVE v11), so this is how the UI changes the automation config.
+   */
+  setBotSettings?: Partial<BotSettings>;
+  /**
+   * Current INVENTORY item count (M7.5), fed by the client every frame (the engine
+   * knows nothing about item instances). The sell-trip bot triggers when this hits
+   * `INVENTORY_CAP`. Transient — read this step only, never persisted.
+   */
+  inventoryCount?: number;
+  /**
+   * Begin a FAST-TRAVEL channel to any UNLOCKED, non-boss zone (M7.5). Valid only
+   * with no engaged/aggro mob on the hero; a short damage-cancellable channel then
+   * an instant, FREE hop to the zone's gate-side x. Rejected intents emit
+   * `fastTravelBlocked`. Applied once per drained input.
+   */
+  fastTravel?: WorldLocation;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -149,6 +171,8 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // --- discrete player actions (valid across phases) ---
   if (input.acceptQuest !== undefined) acceptQuest(state, input.acceptQuest);
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
+  // Idle-bot settings update (M7.5) — merged + clamped onto the persisted state.bot.
+  if (input.setBotSettings) setBotSettings(state, input.setBotSettings);
   // Equip / unequip gear on the solo hero (M7) — validated inside equipItem.
   if (input.equip) equipItem(state, state.heroes[0], input.equip.slot, input.equip.templateId);
   // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
@@ -167,16 +191,24 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   if (input.useReturnScroll) applyReturnScroll(state);
 
   // --- world navigation (M6 "World & Town") ---
+  // Fast travel (M7.5): begins a channel here; only completes (in tickFastTravel,
+  // after combat) if the hero isn't hit. A bot trip may also START here (updateBots,
+  // farm-zone only) and set `traveling` before the walk intents below run.
+  if (input.fastTravel) startFastTravel(state, input.fastTravel);
+  updateBots(state, input.inventoryCount);
   if (input.walkToZone) walkToZone(state, input.walkToZone);
   if (input.challengeBoss) enterBossRoom(state);
   if (input.advanceStage) advanceToNextMap(state);
 
   // While walking between zones the sim only ticks the transit (no combat/waves).
   // On arrival at a BOSS ROOM, start the boss fight (world stays free of a boss
-  // import — see systems/world.ts header).
+  // import — see systems/world.ts header). A bot trip arriving in TOWN restocks +
+  // emits townArrived + begins the auto-return (systems/bots), NOT the generic
+  // death/scroll auto-return branch.
   if (state.traveling) {
     const arrived = updateTransit(state);
     if (arrived?.kind === "boss") startBossFight(state);
+    if (arrived?.kind === "town" && state.botPending) onBotTownArrival(state);
     state.time += FIXED_DT;
     state.rngState = rng.state();
     return state;
@@ -202,15 +234,23 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // Consumables (M6): a manual quick-use then threshold-gated auto-use, BEFORE
   // skills so a mana potion this step can fund a cast the same step.
   processConsumables(state, input.useConsumable);
-  processSkills(state, input); // manual casts + guarded auto-cast
+  // Fast-travel channel (M7.5): while channeling the hero stands still — skip its
+  // offense (skills + auto-hunt movement/attacks) so it doesn't wander off and
+  // re-engage mobs. Enemies + projectiles still resolve, so a mob CAN reach + hit
+  // the hero and cancel the warp (checked in tickFastTravel below).
+  const channeling = state.fastTravelCast !== null;
+  if (!channeling) processSkills(state, input); // manual casts + guarded auto-cast
   updateAnchor(state);
   updateSpawns(state, rng); // maintain the farm zone's mob pool (M6 "สนามล่ามอน")
   updateEnemies(state); // no-op during the boss phase (field is cleared)
   if (state.phase === "boss") updateBoss(state);
-  updateHeroes(state);
+  if (!channeling) updateHeroes(state);
   updateProjectiles(state);
   resolveDeaths(state); // enemy kills / boss kill / death->town respawn / bossReady
   checkZoneUnlock(state); // farm-zone quota met -> unlock the next zone (M6)
+  // Fast-travel channel tick (M7.5): after combat so this step's damage cancels it;
+  // completion warps to the target zone's gate-side x.
+  tickFastTravel(state);
 
   state.time += FIXED_DT;
   state.rngState = rng.state();

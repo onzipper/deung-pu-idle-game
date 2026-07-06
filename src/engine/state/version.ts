@@ -19,6 +19,7 @@ import {
   unlockUpTo,
   zoneAt,
 } from "@/engine/systems/world";
+import { normalizeBotSettings } from "@/engine/systems/bots";
 import type { SaveData, CharacterSave } from "@/engine/state";
 import type {
   HeroClass,
@@ -27,6 +28,7 @@ import type {
   SkillId,
   ShopItemId,
   ConsumableCounts,
+  BotSettings,
   WorldLocation,
 } from "@/engine/entities";
 
@@ -78,7 +80,13 @@ import type {
 //   characters. A v10 save's own fields are preserved (idempotent for the
 //   server's migrate-on-every-save): a present salt is NEVER recomputed, the
 //   counter is clamped monotonic, and the loadout is normalised.
-export const SAVE_VERSION = 10;
+// v10 -> v11 (M7.5 "Sell, Bots & Inventory UX"): the save gains `bot` (idle-
+//   automation settings — the potion-restock + sell-trip bots + their targets /
+//   reserves). A pre-v11 save had none, so migration backfills the config DEFAULTS
+//   (both bots OFF, so behaviour is unchanged). A v11 save's own settings are
+//   preserved (booleans coerced, targets clamped to the stack cap, gold floor
+//   non-negative — idempotent for the server's migrate-on-every-save).
+export const SAVE_VERSION = 11;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -101,6 +109,9 @@ export interface UnknownSave {
   lastFarmZone?: UnknownLocation;
   // v9 NPC-consumable stacks (M6). Optional so a pre-v9 save backfills to zeros.
   consumables?: { hpPotion?: unknown; manaPotion?: unknown; returnScroll?: unknown };
+  // v11 idle-bot settings (M7.5). Optional so a pre-v11 save backfills to defaults
+  // (both bots OFF). Partial so a trimmed block is filled by `normalizeBotSettings`.
+  bot?: Partial<BotSettings>;
   // v10 gear (M7). Optional so a pre-v10 save backfills (equipped empty, counter 0,
   // salt derived). `equipped` fields are unknown so a malformed cache normalises.
   equipped?: { weapon?: unknown; armor?: unknown };
@@ -380,6 +391,9 @@ export function migrate(save: UnknownSave): SaveData {
     // NPC consumables (M6, v9): preserve a v9 save's clamped counts; a pre-v9 save
     // backfills to zeros.
     consumables: normalizeConsumables(save.consumables),
+    // Idle bots (M7.5, v11): preserve a v11 save's clamped settings; a pre-v11 save
+    // backfills to the config defaults (both bots OFF).
+    bot: normalizeBotSettings(save.bot),
     // M7 gear (v10): empty loadout for a pre-v10 save (DB ledger is authoritative);
     // a monotonic counter clamped non-negative; a salt PRESERVED if present (never
     // recomputed — idempotent) else derived deterministically from the save content.

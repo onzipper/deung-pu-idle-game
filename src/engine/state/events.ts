@@ -97,6 +97,29 @@ export type GameEvent =
   | { type: "shopPurchase"; item: ShopItemId; qty: number; cost: number }
   | { type: "consumableUsed"; item: ShopItemId }
   | { type: "townReturned"; mapId: string }
+  // Idle-bot town trip completed (M7.5): the potion-restock and/or sell-trip bot
+  // arrived in town. `reason` reports which triggers coalesced into this one trip —
+  // the CLIENT fires the sell API when `reason` involves selling ("sell" /
+  // "restockSell"). Restock buying is fully engine-side (done before this fires).
+  | { type: "townArrived"; reason: "restock" | "sell" | "restockSell" }
+  // Fast travel lifecycle (M7.5): a short damage-cancellable channel to any
+  // UNLOCKED zone, then an instant FREE hop arriving at the zone's gate-side x.
+  // Positions are included so render can place the warp-portal fx. `fastTravelBlocked`
+  // fires (with a reason) when the intent is rejected — locked zone / aggro / dead /
+  // already there / mid-transit / boss phase / invalid target, or a mid-cast cancel.
+  | { type: "fastTravelCastStart"; x: number; y: number; mapId: string; zoneIdx: number }
+  | { type: "fastTravelArrive"; x: number; y: number; mapId: string; zoneIdx: number }
+  | {
+      type: "fastTravelBlocked";
+      reason: "locked" | "aggro" | "dead" | "same" | "traveling" | "boss" | "invalid" | "damaged";
+    }
+  // Zone-gate transit polish (M7.5): a walk between adjacent zones passes THROUGH a
+  // themed archway — the hero enters the departure-edge gate (`zoneGateEnter`) and
+  // emerges from the arrival-edge gate (`zoneGateExit`). `side` is which edge of the
+  // zone the gate sits on; `x` is its position. Render places the archway prop +
+  // whoosh; the props/fx themselves are the render zone, not the engine's.
+  | { type: "zoneGateEnter"; x: number; side: "left" | "right" }
+  | { type: "zoneGateExit"; x: number; side: "left" | "right" }
   // M7 gear DROP (systems/gear): a kill rolled an item. `rollId` is the stable,
   // per-save monotonic loot-counter value used for this roll (the server claim
   // key is `${characterId}:${rollId}`, docs/persistence-m7.md); `templateId` is a

@@ -205,6 +205,36 @@ export const CONFIG = {
     },
   },
 
+  // ---- idle bots + fast travel (M7.5 "Sell, Bots & Inventory UX") ----
+  // Engine-side, DETERMINISTIC automations (same pattern as autoReturn/auto-potion,
+  // no RNG, no wall-clock): a potion-restock bot + a sell-trip bot make a town round
+  // trip (warp via a held ยันกลับเมือง scroll, else a direct walk transit — reusing
+  // the death respawn's walk-home mechanic), then auto-return to the last farm zone.
+  // Fast travel is a player intent: a short damage-cancellable channel then an
+  // instant, FREE hop to any UNLOCKED zone (the scroll keeps its value — it warps
+  // even while swarmed; fast travel demands a clear standoff). All sim-OFF by default
+  // so the balance baseline is byte-identical (docs/balance-m7.md).
+  bot: {
+    // Seed values for a fresh save's BotSettings (both bots OFF so a cold start /
+    // the sim run behave exactly as pre-M7.5). Targets are stack counts.
+    defaults: {
+      enabled: false,
+      sellTripEnabled: false,
+      hpPotionTarget: 15,
+      mpPotionTarget: 15,
+      scrollReserve: 3,
+      goldReserve: 0,
+    },
+  },
+  travel: {
+    // Fast-travel channel time (s). The hero stands still (no hunt/skills) and any
+    // damage taken during it CANCELS the warp (fastTravelBlocked "damaged").
+    fastTravelCastSeconds: 1.75,
+    // Bot walk-to-town time (s) when no return scroll is held — a single DIRECT
+    // transit to town (mirrors respawnToTown's walk-home), negligible vs clears.
+    botWalkSeconds: 1.2,
+  },
+
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.

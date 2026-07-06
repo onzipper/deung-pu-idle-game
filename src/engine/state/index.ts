@@ -27,9 +27,11 @@ import type {
   SkillId,
   ShopItemId,
   ConsumableCounts,
+  BotSettings,
   WorldLocation,
 } from "@/engine/entities";
 import { emptyConsumables } from "@/engine/systems/consumables";
+import { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
 import { classChangeQuestFor } from "@/engine/systems/quests";
 import { baseStats, heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import {
@@ -93,6 +95,30 @@ export interface GameState {
    * NEVER persisted — a reload resumes standing in `location`.
    */
   traveling: TravelState | null;
+  /**
+   * Idle-automation bot settings (M7.5). Engine-PERSISTED (SAVE v11) — unlike the
+   * UI-mirrored autoReturn toggle — so the automation survives a reload. Both bots
+   * OFF by default (baseline parity). See systems/bots.ts.
+   */
+  bot: BotSettings;
+  /**
+   * An in-flight idle-bot town trip's purpose (M7.5), or null. Set when a bot trip
+   * begins; consumed by `onBotTownArrival` (restock + `townArrived` + auto-return).
+   * Transient — NEVER persisted.
+   */
+  botPending: { restock: boolean; sell: boolean } | null;
+  /**
+   * An in-flight FAST-TRAVEL channel (M7.5), or null. The hero stands still while it
+   * counts down; damage cancels it, completion warps to the target's gate-side x.
+   * `lastHp` tracks the hero's HP to detect a mid-channel hit. Transient — NEVER
+   * persisted (a reload resumes standing in `location`).
+   */
+  fastTravelCast: {
+    targetMapId: string;
+    targetZoneIdx: number;
+    timer: number;
+    lastHp: number;
+  } | null;
   /**
    * Held NPC-consumable stack counts (M6 "เมืองหลัก"). Persisted (SAVE v9).
    */
@@ -217,6 +243,9 @@ export interface SaveData {
   /** Held NPC-consumable stack counts (M6 "เมืองหลัก", SAVE v9). Non-tradable,
    * fungible COUNTS (not M7 item-instances — see entities `ShopItemId`). */
   consumables: ConsumableCounts;
+  /** Idle-automation bot settings (M7.5, SAVE v11). Engine-persisted (both bots OFF
+   * by default). See entities `BotSettings` + systems/bots.ts. */
+  bot: BotSettings;
   /**
    * Equipped gear loadout (M7, SAVE v10): weapon/armor templateId or null. A SIM
    * CACHE — the DB `ItemInstance` ledger is authoritative (docs/persistence-m7.md),
@@ -305,6 +334,10 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     unlockedZones,
     lastFarmZone: { mapId: lastFarmZone.mapId, zoneIdx: lastFarmZone.zoneIdx },
     traveling: null,
+    // Idle bots (M7.5, SAVE v11): restore persisted settings, else defaults (OFF).
+    bot: save?.bot ? normalizeBotSettings(save.bot) : defaultBotSettings(),
+    botPending: null,
+    fastTravelCast: null,
     // NPC consumables (M6, SAVE v9): restore saved stacks, else empty. Use-cooldowns
     // are transient (rebuilt empty). Auto-use toggles/thresholds seed from config
     // (GameClient mirrors the store's live values onto these each frame).
@@ -442,6 +475,8 @@ export function toSaveData(state: GameState): SaveData {
     // NPC consumable stacks (M6, SAVE v9). Use-cooldowns + auto-use toggles are
     // transient/UI-owned — not persisted.
     consumables: { ...state.consumables },
+    // Idle bot settings (M7.5, SAVE v11). Engine-persisted (both bots OFF default).
+    bot: { ...state.bot },
     // Equipped gear cache (M7, SAVE v10). Authoritative copy is the DB item ledger
     // (boot payload wins on load); this persists the loadout for offline power.
     equipped: { weapon: h.equipped.weapon, armor: h.equipped.armor },
