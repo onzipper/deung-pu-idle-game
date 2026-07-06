@@ -75,6 +75,7 @@ import {
 } from "@/engine";
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
+import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
@@ -809,9 +810,18 @@ export function GameClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(serialize()),
         keepalive: true,
-      }).catch(() => {
-        /* offline / transient failure — next autosave retries */
-      });
+      })
+        .then((res) => (res.ok ? (res.json() as Promise<{ announcements?: AnnouncementWire[] }>) : null))
+        .then((json) => {
+          // M7.9: the polling piggyback — every autosave response carries any
+          // recent server-wide high-refine landing (no websockets this phase).
+          if (json?.announcements) {
+            useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
+        })
+        .catch(() => {
+          /* offline / transient failure — next autosave retries */
+        });
       // Same cadence as the save POST (see the drop-claim flush's own doc below).
       flushClaims();
     }
@@ -974,6 +984,13 @@ export function GameClient() {
              * a save whose hero.cls drifted + seeds a first boot (2026-07-06
              * "everyone is a swordsman" fix). */
             baseClass?: HeroClass | null;
+            /** M7.9: this client's own active characterId (self-exclusion key
+             * for the announcement banner — see `myCharacterId`'s doc). */
+            activeCharacterId?: string | null;
+            /** M7.9: a fresh login's recent server-wide high-refine feed
+             * (last 5 min, LIMIT 10, newest-first) — same shape the autosave
+             * POST response carries every ~30s thereafter. */
+            announcements?: AnnouncementWire[];
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -983,6 +1000,16 @@ export function GameClient() {
           // corrected + wrong-primary stat points refunded (engine helper).
           if (loaded && json.baseClass) loaded = repairHeroClass(loaded, json.baseClass);
           if (json.baseClass) bootClass = json.baseClass;
+          // M7.9: record OUR OWN characterId (self-exclusion for the
+          // announcement banner) before ingesting the boot feed, so a
+          // same-poll self-landing (unlikely at boot, but cheap to guard) is
+          // correctly filtered.
+          if ("activeCharacterId" in json) {
+            useGameStore.getState().setMyCharacterId(json.activeCharacterId ?? null);
+          }
+          if (json.announcements) {
+            useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;

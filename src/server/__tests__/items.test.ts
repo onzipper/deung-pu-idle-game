@@ -21,6 +21,7 @@ const { mockPrisma } = vi.hoisted(() => ({
       count: vi.fn(),
     },
     itemEvent: { create: vi.fn(), createMany: vi.fn() },
+    refineAnnouncement: { create: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -49,6 +50,8 @@ import {
   MAX_CLAIM_BATCH,
   MAX_SELL_BATCH,
   MAX_SALVAGE_BATCH,
+  ANNOUNCE_MIN_REFINE_LEVEL,
+  recentAnnouncements,
 } from "@/server/items";
 import {
   maxSummedDropChance,
@@ -518,7 +521,12 @@ describe("refineItem — server-authoritative roll (M7.6)", () => {
     mockPrisma.itemEvent.create.mockResolvedValue({});
     mockPrisma.character.updateMany.mockResolvedValue({ count: 1 }); // materials debit ok
     mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 }); // compare-and-set wins
-    mockPrisma.character.findUnique.mockResolvedValue({ materials: 99 });
+    // Serves BOTH lookups inside the tx: the name read for a >=+8 announcement
+    // (M7.9) and the final materials re-read — both go through the same
+    // mocked `character.findUnique`.
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 99, name: "TestHero" });
+    mockPrisma.refineAnnouncement.create.mockResolvedValue({});
+    mockPrisma.refineAnnouncement.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   function stockItem(over: Record<string, unknown> = {}): void {
@@ -628,6 +636,107 @@ describe("refineItem — server-authoritative roll (M7.6)", () => {
     mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // level already moved
     const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0 });
     expect(r).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  describe("M7.9 server-wide announcement — same-tx write on a >=+8 success", () => {
+    it("ANNOUNCE_MIN_REFINE_LEVEL is +8 (owner spec)", () => {
+      expect(ANNOUNCE_MIN_REFINE_LEVEL).toBe(8);
+    });
+
+    it("writes a RefineAnnouncement row (+ opportunistic prune) on a success landing at +8", async () => {
+      stockItem({ refineLevel: 7 }); // target +8 → chance .45; roll 0 succeeds
+      const now = new Date("2026-07-07T12:00:00Z");
+      const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0, now });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.refineLevel).toBe(8);
+      expect(mockPrisma.refineAnnouncement.create).toHaveBeenCalledWith({
+        data: {
+          characterId: CHAR,
+          charName: "TestHero",
+          templateId: "w_sword_t1_rusty",
+          refineLevel: 8,
+        },
+      });
+      // Opportunistic prune piggybacked on the SAME write path (~1h horizon).
+      expect(mockPrisma.refineAnnouncement.deleteMany).toHaveBeenCalledWith({
+        where: { createdAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } },
+      });
+    });
+
+    it("does NOT announce a success below +8 (e.g. +1)", async () => {
+      stockItem({ refineLevel: 0 }); // target +1 → chance 1.0, always succeeds
+      const r = await refineItem(CHAR, "item_1", 1000, { roll: () => 0 });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.refineLevel).toBe(1);
+      expect(mockPrisma.refineAnnouncement.create).not.toHaveBeenCalled();
+    });
+
+    it("does NOT announce a break outcome even though the TARGET level was >=8", async () => {
+      stockItem({ refineLevel: 8, equippedSlot: "weapon" }); // target +9 → break on fail
+      const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0.99 });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.outcome).toBe("break");
+      expect(mockPrisma.refineAnnouncement.create).not.toHaveBeenCalled();
+    });
+
+    it("does NOT announce a degrade outcome (fail on a +4-7 target)", async () => {
+      stockItem({ refineLevel: 4 }); // target +5 → chance .75; roll .99 fails → degrade
+      const r = await refineItem(CHAR, "item_1", 1e9, { roll: () => 0.99 });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.outcome).toBe("degrade");
+      expect(mockPrisma.refineAnnouncement.create).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("recentAnnouncements — feed query shape + in-process cache (M7.9)", () => {
+  beforeEach(() => {
+    mockPrisma.refineAnnouncement.findMany.mockResolvedValue([
+      {
+        id: "ann_1",
+        characterId: "char_2",
+        charName: "Bob",
+        templateId: "w_sword_t3_epic",
+        refineLevel: 9,
+        createdAt: new Date("2026-07-07T00:00:00Z"),
+      },
+    ]);
+  });
+
+  it("queries the last-5-minutes window newest-first capped at 10, mapped to the wire DTO shape", async () => {
+    const now = new Date("2026-07-07T00:10:00Z");
+    const result = await recentAnnouncements(now);
+    expect(mockPrisma.refineAnnouncement.findMany).toHaveBeenCalledWith({
+      where: { createdAt: { gte: new Date(now.getTime() - 5 * 60 * 1000) } },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+    expect(result).toEqual([
+      {
+        id: "ann_1",
+        characterId: "char_2",
+        charName: "Bob",
+        templateId: "w_sword_t3_epic",
+        refineLevel: 9,
+        at: "2026-07-07T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("serves a repeat call within the cache TTL from cache (no second DB hit)", async () => {
+    const now = new Date("2026-07-07T01:00:00Z");
+    await recentAnnouncements(now);
+    mockPrisma.refineAnnouncement.findMany.mockClear();
+    await recentAnnouncements(new Date(now.getTime() + 5_000)); // +5s, within the 10s TTL
+    expect(mockPrisma.refineAnnouncement.findMany).not.toHaveBeenCalled();
+  });
+
+  it("re-queries once the cache TTL has elapsed", async () => {
+    const now = new Date("2026-07-07T02:00:00Z");
+    await recentAnnouncements(now);
+    mockPrisma.refineAnnouncement.findMany.mockClear();
+    await recentAnnouncements(new Date(now.getTime() + 11_000)); // past the 10s TTL
+    expect(mockPrisma.refineAnnouncement.findMany).toHaveBeenCalledTimes(1);
   });
 });
 

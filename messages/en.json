@@ -555,6 +555,10 @@
   "dropFeed": {
     "gotItem": "Item obtained: {name}"
   },
+  "announcements": {
+    "landed": "🔥 {charName} landed a +{level} on {itemName}!",
+    "landedMax": "🔥 {charName} landed a +{level} on {itemName}! The whole server bows down!"
+  },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
     "autoSalvageDone": "Bot auto-salvaged {count} item(s) +{materials} material(s)",
@@ -620,7 +624,8 @@
           "skills": "✨ Big skills hit even harder — tier-2 ultimates now cover the whole screen! Monster fields are denser, so bring mana potions along",
           "bot": "🤖 The bot got smarter: set each rarity to sell for gold or salvage into refine materials (in Settings)",
           "autoAllocate": "📊 New auto-allocate: stat points now go where your class actually needs them, no more scattergun spending",
-          "prestige": "🔥 +8/+9/+10 gear now flaunts an escalating divine aura — hit +10 and the whole field will know it"
+          "prestige": "🔥 +8/+9/+10 gear now flaunts an escalating divine aura — hit +10 and the whole field will know it",
+          "announce": "📣 Land a +8 or higher and the WHOLE server hears about it — get ready to show off!"
         }
       }
     }

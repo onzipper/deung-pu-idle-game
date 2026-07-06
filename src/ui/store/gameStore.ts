@@ -54,6 +54,8 @@ import type {
   SalvageItemResultWire,
   SellItemResultWire,
 } from "@/ui/gear/types";
+import { ingestAnnouncements } from "@/ui/announcements/queue";
+import type { AnnouncementEntry, AnnouncementWire } from "@/ui/announcements/types";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -605,6 +607,17 @@ export interface FastTravelChannelState {
   zoneIdx: number;
 }
 
+/** M7.9 server-wide high-refine announcement feed — session-memory (in-
+ * process, NOT localStorage) dedup set. Module-level like `dropFeedSeq`
+ * above (a plain implementation detail of the ingest action, not something
+ * that itself needs to trigger a re-render), owned exclusively by
+ * `ingestAnnouncementFeed`. */
+let seenAnnouncementIds = new Set<string>();
+/** Cap on the queued-but-not-yet-shown announcements — a burst of high
+ * rolls across the server shouldn't grow this unboundedly (oldest kept,
+ * matching the feed's own LIMIT 10). */
+const MAX_ANNOUNCEMENT_QUEUE = 10;
+
 export interface HudState {
   // ---- throttled engine snapshot (~CONFIG.uiSyncHz) ----
   gold: number;
@@ -653,6 +666,19 @@ export interface HudState {
    * indicator. Set on `fastTravelCastStart`, cleared on `fastTravelArrive` /
    * `fastTravelBlocked` (see `GameClient.tsx`'s frame-event handling). */
   fastTravelChannel: FastTravelChannelState | null;
+
+  // ---- M7.9 server-wide high-refine announcement feed (no websockets — the
+  // feed is polled off the existing autosave/boot response, see
+  // `GameClient.tsx`) ----
+  /** This client's OWN active characterId (from the boot/`activeCharacterId`
+   * field), or `null` pre-boot. Used ONLY to self-exclude a landing from the
+   * banner queue (the refiner already gets the local refine-juice
+   * celebration) — never a trust boundary, purely a display filter. */
+  myCharacterId: string | null;
+  /** Queued-but-not-yet-shown announcements, oldest-first — `AnnouncementBanner.tsx`
+   * always displays `announcementQueue[0]` and shifts it off after its
+   * display timer. Capped at `MAX_ANNOUNCEMENT_QUEUE`. */
+  announcementQueue: AnnouncementEntry[];
 
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted UI preference,
   // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
@@ -850,6 +876,17 @@ export interface HudState {
   /** Clear the fast-travel channel progress UI (arrival or block/cancel). */
   clearFastTravelChannel: () => void;
 
+  // ---- M7.9 server-wide high-refine announcement feed ----
+  /** Boot-only: record this client's own characterId (see `myCharacterId`'s doc). */
+  setMyCharacterId: (characterId: string | null) => void;
+  /** Ingest one poll of the `/api/save` (GET or POST) `announcements` field —
+   * pure filtering/dedup lives in `ui/announcements/queue.ts`'s
+   * `ingestAnnouncements`; this action just applies the result. */
+  ingestAnnouncementFeed: (wire: AnnouncementWire[]) => void;
+  /** `AnnouncementBanner.tsx`-only: pop the currently-shown entry after its
+   * display timer, advancing to the next queued one (if any). */
+  shiftAnnouncementQueue: () => void;
+
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
   setAutoSellCommon: (action: AutoSellAction) => void;
   setAutoSellRare: (action: AutoSellAction) => void;
@@ -895,6 +932,9 @@ export const useGameStore = create<HudState>((set, get) => ({
   sessionKnownTemplateIds: [],
   notices: [],
   fastTravelChannel: null,
+
+  myCharacterId: null,
+  announcementQueue: [],
 
   // Safe defaults pre-hydration; a mount effect (`SettingsPanel`'s bot/auto-sell
   // section) applies the persisted values once via `hydrateAutoSellRules` —
@@ -1086,6 +1126,25 @@ export const useGameStore = create<HudState>((set, get) => ({
       fastTravelChannel: { key: (s.fastTravelChannel?.key ?? 0) + 1, mapId, zoneIdx },
     })),
   clearFastTravelChannel: () => set({ fastTravelChannel: null }),
+
+  setMyCharacterId: (characterId) => set({ myCharacterId: characterId }),
+  ingestAnnouncementFeed: (wire) =>
+    set((s) => {
+      const { toQueue, seenIds } = ingestAnnouncements(
+        wire,
+        seenAnnouncementIds,
+        s.myCharacterId,
+      );
+      seenAnnouncementIds = seenIds;
+      if (toQueue.length === 0) return {};
+      return {
+        announcementQueue: [...s.announcementQueue, ...toQueue].slice(
+          -MAX_ANNOUNCEMENT_QUEUE,
+        ),
+      };
+    }),
+  shiftAnnouncementQueue: () =>
+    set((s) => ({ announcementQueue: s.announcementQueue.slice(1) })),
 
   setAutoSellCommon: (action) =>
     set((s) => {

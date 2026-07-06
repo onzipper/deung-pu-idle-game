@@ -257,6 +257,74 @@ export async function loadMaterials(characterId: string): Promise<number> {
   return row?.materials ?? 0;
 }
 
+// ── Server-wide high-refine announcement feed (M7.9) ─────────────────────────
+//
+// NO websockets this phase (owner-approved design) — every online client polls
+// this via the existing autosave cycle (`POST /api/save`, plus the boot `GET`).
+// A row is written ONLY on a refine SUCCESS that lands the item at
+// `ANNOUNCE_MIN_REFINE_LEVEL` (+8) or higher, in the SAME tx as the refine
+// mutation (see `refineItem` below) — see the schema doc for why the table is
+// deliberately NOT a Character relation (transient feed, not an audit ledger).
+
+/** Refine +level floor that triggers a server-wide announcement row. */
+export const ANNOUNCE_MIN_REFINE_LEVEL = 8;
+/** Opportunistic prune horizon (piggybacked on the write path — no cron). */
+const ANNOUNCEMENT_PRUNE_MS = 60 * 60 * 1000; // 1h
+/** Feed window: only "recent" landings are worth announcing to a freshly-
+ *  polling client. */
+const ANNOUNCEMENT_FEED_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+/** Feed size cap (LIMIT). */
+const ANNOUNCEMENT_FEED_LIMIT = 10;
+/** Cheap in-process cache TTL: every online player's autosave lands within a
+ *  few seconds of each other, so a short shared cache noticeably cuts read
+ *  load on the shared host without staling the "within one autosave cycle"
+ *  requirement (30s cadence). Single-process cache — fine for this MVP scale
+ *  (no cross-instance invalidation needed). */
+const ANNOUNCEMENT_CACHE_MS = 10_000;
+
+export interface RefineAnnouncementDTO {
+  id: string;
+  characterId: string;
+  charName: string;
+  templateId: string;
+  refineLevel: number;
+  /** ISO timestamp. */
+  at: string;
+}
+
+let announcementsCache: { at: number; data: RefineAnnouncementDTO[] } | null = null;
+
+/**
+ * The last `ANNOUNCEMENT_FEED_WINDOW_MS` worth of high-refine landings,
+ * newest first, capped at `ANNOUNCEMENT_FEED_LIMIT` — a single indexed SELECT
+ * on `createdAt`. The caller (the save route) ships this verbatim to every
+ * polling client; the client is responsible for excluding its OWN
+ * characterId (the refiner already gets the local refine-juice celebration)
+ * and for session-deduping ids it has already displayed (see
+ * `ui/announcements/queue.ts`).
+ */
+export async function recentAnnouncements(now: Date = new Date()): Promise<RefineAnnouncementDTO[]> {
+  if (announcementsCache && now.getTime() - announcementsCache.at < ANNOUNCEMENT_CACHE_MS) {
+    return announcementsCache.data;
+  }
+  const since = new Date(now.getTime() - ANNOUNCEMENT_FEED_WINDOW_MS);
+  const rows = await prisma.refineAnnouncement.findMany({
+    where: { createdAt: { gte: since } },
+    orderBy: { createdAt: "desc" },
+    take: ANNOUNCEMENT_FEED_LIMIT,
+  });
+  const data: RefineAnnouncementDTO[] = rows.map((r) => ({
+    id: r.id,
+    characterId: r.characterId,
+    charName: r.charName,
+    templateId: r.templateId,
+    refineLevel: r.refineLevel,
+    at: r.createdAt.toISOString(),
+  }));
+  announcementsCache = { at: now.getTime(), data };
+  return data;
+}
+
 // ── Claim (mint) ─────────────────────────────────────────────────────────────
 
 function isUniqueViolation(err: unknown, target?: string): boolean {
@@ -935,6 +1003,36 @@ export async function refineItem(
           }),
         },
       });
+
+      // M7.9 server-wide announcement: ONLY a SUCCESS landing at +8/+9/+10,
+      // written in this SAME tx (schema doc: a row can never exist without the
+      // refine having actually landed). See `docs`/schema.prisma comment for
+      // why this is deliberately not a Character relation.
+      if (outcome === "success" && newLevel >= ANNOUNCE_MIN_REFINE_LEVEL) {
+        const owner = await tx.character.findUnique({
+          where: { id: characterId },
+          select: { name: true },
+        });
+        if (owner) {
+          await tx.refineAnnouncement.create({
+            data: {
+              characterId,
+              charName: owner.name,
+              templateId: item.templateId,
+              refineLevel: newLevel,
+            },
+          });
+        }
+        // Opportunistic prune (keep the table tiny; no cron) — piggybacked on
+        // this write path per the M7.9 design.
+        await tx.refineAnnouncement.deleteMany({
+          where: { createdAt: { lt: new Date(now.getTime() - ANNOUNCEMENT_PRUNE_MS) } },
+        });
+        // A fresh row just landed — drop the short in-process feed cache so
+        // the very next poll (this refiner's own next autosave, or anyone
+        // else's) sees it immediately instead of waiting out the TTL.
+        announcementsCache = null;
+      }
 
       const after = await tx.character.findUnique({
         where: { id: characterId },
