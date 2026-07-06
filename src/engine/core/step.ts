@@ -155,6 +155,14 @@ export interface FrameInput {
    * `fastTravelBlocked`. Applied once per drained input.
    */
   fastTravel?: WorldLocation;
+  /**
+   * Credit gold from a SERVER-confirmed NPC sale (M7.5): the sell endpoint's
+   * `totalGold`, applied once per drained input. Trusted the same way as the
+   * rest of the client-simmed economy — the ItemEvent ledger (price recorded at
+   * sell time) is the audit trail for later server re-derivation, so a spoofed
+   * credit is detectable after the fact. Non-finite/negative values are ignored.
+   */
+  goldCredit?: number;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -189,6 +197,14 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // intents below so a scroll+walk in the same frame resolves scroll-first.
   if (input.buyShopItem) buyShopItem(state, input.buyShopItem.item, input.buyShopItem.qty ?? 1);
   if (input.useReturnScroll) applyReturnScroll(state);
+  // Server-confirmed NPC-sale gold (M7.5) — see FrameInput.goldCredit contract.
+  if (
+    input.goldCredit !== undefined &&
+    Number.isFinite(input.goldCredit) &&
+    input.goldCredit > 0
+  ) {
+    state.gold += Math.floor(input.goldCredit);
+  }
 
   // --- world navigation (M6 "World & Town") ---
   // Fast travel (M7.5): begins a channel here; only completes (in tickFastTravel,
