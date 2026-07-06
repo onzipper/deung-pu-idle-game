@@ -19,6 +19,7 @@
  */
 
 import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
+import { zoneAt } from "@/engine";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
@@ -244,7 +245,13 @@ export class GameRenderer {
         this.bossView = createBossView();
         this.layers.entities.addChild(this.bossView);
       }
-      updateBossView(this.bossView, state.boss, { elapsedMs, dt, events: frameEvents });
+      // M7.9 "Grand Expansion": the boss entity itself is map-agnostic (see
+      // `engine/entities/index.ts`'s `Boss`), so the per-boss silhouette/
+      // palette theme is resolved here from the CURRENT zone instead — valid
+      // because `state.boss` is only ever non-null while standing in that
+      // map's boss room (see `engine/systems/world.ts`).
+      const mapId = zoneAt(state.location).mapId;
+      updateBossView(this.bossView, state.boss, { elapsedMs, dt, events: frameEvents, mapId });
       this.currentBossId = state.boss.id;
     } else if (this.bossView) {
       this.layers.entities.removeChild(this.bossView);

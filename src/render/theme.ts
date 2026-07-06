@@ -167,3 +167,33 @@ export const PROJECTILE_COLORS: Record<ProjectileKind, number> = {
 export function safeRadius(r: number): number {
   return Math.max(0, r);
 }
+
+/** Boss stage-map identity ids — mirrors `CONFIG.world.maps[].id` (map1..map6,
+ * see `engine/config/index.ts`). Kept as a plain string union here (render has
+ * no sanctioned import of the engine's map list itself) rather than importing
+ * an engine type, matching the existing `zoneGates.ts` convention of mirroring
+ * CONFIG-derived shape instead of reaching into engine internals. */
+export type BossMapId = "map1" | "map2" | "map3" | "map4" | "map5" | "map6";
+
+/** Boss stage-map -> flat AT-REST identity palette (M7.9 "Grand Expansion" —
+ * 6 boss stages, s5/10/15/20/25/30, each themed to its own map's biome accent
+ * — see `render/environment/biomes.ts` MAP1..6 — so a glance at the boss rig
+ * instantly signals "which world" even before the stage label resolves).
+ * Telegraph/enrage tells stay UNIVERSAL (`PALETTE.warn`/`enrageAura`, unchanged
+ * in `bossView.ts`) across every boss — only the boss's own idle identity
+ * (body/crown/eye) varies here, so "red = danger" keeps reading consistently
+ * regardless of which boss is on screen. */
+export const BOSS_COLORS: Record<BossMapId, { body: number; crown: number; eye: number }> = {
+  // s5 — cave guardian (โลกมนุษย์ ถ้ำมืด): violet-grey stone body, ember-lit horns.
+  map1: { body: 0x6a5a94, crown: 0xff8a3d, eye: 0xd9cfff },
+  // s10 — demon sovereign (แดนอสูร บัลลังก์อสูร): deep crimson-black, molten horns.
+  map2: { body: 0x7a1f22, crown: 0xff5a1e, eye: 0xffb347 },
+  // s15 — frontier warlord (พรมแดนเถื่อน ป้อมปราการเถื่อน): bronze/amber, tribal crest.
+  map3: { body: 0x9c723a, crown: 0xffb54a, eye: 0xfff0c2 },
+  // s20 — glacial sovereign (ทุนดราน้ำแข็ง): pale ice-blue body, icicle crown.
+  map4: { body: 0x6fa8cc, crown: 0xdff3ff, eye: 0x9fdfff },
+  // s25 — buried pharaoh (ทะเลทรายซากอารยธรรม): sandstone gold, nemes headdress.
+  map5: { body: 0xc79148, crown: 0xffcf7a, eye: 0x1f2a4a },
+  // s30 — infernal sovereign (นครนรก): near-black ember body, sweeping horns.
+  map6: { body: 0x330606, crown: 0xff260e, eye: 0xffab4d },
+};
