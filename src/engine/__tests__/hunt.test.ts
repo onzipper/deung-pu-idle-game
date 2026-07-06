@@ -11,7 +11,8 @@ import {
 } from "@/engine";
 
 const HERO_MELEE_RANGE = HERO_TYPES.swordsman.range;
-import { updateEnemies } from "@/engine/systems/combat";
+import { makeHero } from "@/engine";
+import { updateEnemies, updateHeroes } from "@/engine/systems/combat";
 import { zoneSpawnParams } from "@/engine/systems/waves";
 import { applyDamage, applyAoeDamage } from "@/engine/systems/damage";
 import { makeStubEnemy, soloSave, worldAutopilot } from "./helpers";
@@ -333,4 +334,62 @@ describe("anti-stall (M6)", () => {
     expect(s.stage).toBeGreaterThan(1); // genuinely advanced out of zone 1
     expect(zoneAt(s.location).kind).not.toBe("boss"); // not wedged mid boss room
   });
+});
+
+/**
+ * Kite smoothness (game-feel regression, 2026-07): a ranged hero fleeing a mob that
+ * has stabilised at the kite distance used to STUTTER — the old `h.x - dir*kiteStep`
+ * lunge over-shot the `kiteDist` threshold ~2.9px, then held for ~2 frames while the
+ * mob closed the gap, then lunged again (a 20Hz stop-start = owner-reported "ตัวเด้ง ๆ").
+ * The fix servos the kite goal to a fixed target-relative distance (`tgt.x - dir*kiteDist`),
+ * so the per-step move-clamp glides continuously. These pin that headlessly.
+ */
+describe("kite smoothness (ranged flee, no jitter)", () => {
+  function chaserMob(id: number, x: number, speed: number): Enemy {
+    return { ...makeStubEnemy(id, x, 1_000_000), engaged: true, aggressive: false, atk: 5, cd: 999, speed };
+  }
+
+  for (const cls of ["archer", "mage"] as const) {
+    it(`${cls} kiting a chasing mob retreats smoothly — no per-step oscillation or stutter`, () => {
+      const s = initGameState(1);
+      s.heroes = [makeHero(1, cls)];
+      s.nextId = 100;
+      s.autoHunt = true;
+      const h = s.heroes[0];
+      h.x = 400;
+      // A single mob to the RIGHT, walking left at well under huntSpeed so the hero
+      // CAN hold the kite band (this is the case the mob pins the hero at `kiteDist`).
+      s.enemies = [chaserMob(200, 700, 55)];
+
+      // Warm up until the mob has driven the hero into the kite band (dist ≈ kiteDist).
+      for (let i = 0; i < 220; i++) {
+        updateEnemies(s);
+        updateHeroes(s);
+      }
+      expect(Math.abs(s.enemies[0].x - h.x)).toBeLessThan(CONFIG.kiteDist + 5);
+
+      // Now measure 120 kite-band steps.
+      let prevX = h.x;
+      let prevDir = 0;
+      let flips = 0;
+      let holdFramesWhileCrowded = 0;
+      for (let i = 0; i < 120; i++) {
+        updateEnemies(s);
+        updateHeroes(s);
+        const dx = h.x - prevX;
+        const dir = dx > 1e-6 ? 1 : dx < -1e-6 ? -1 : 0;
+        if (dir !== 0 && prevDir !== 0 && dir !== prevDir) flips++;
+        if (dir !== 0) prevDir = dir;
+        // A "hold frame" (|dx|≈0) WHILE a mob sits inside the kite band is the stutter
+        // signature — a smooth servo moves a little every frame instead.
+        const crowded = Math.abs(s.enemies[0].x - h.x) <= CONFIG.kiteDist + 1e-3;
+        if (crowded && dir === 0) holdFramesWhileCrowded++;
+        prevX = h.x;
+      }
+      // The fleeing hero never reverses direction (no bounce)...
+      expect(flips).toBe(0);
+      // ...and never stop-starts inside the kite band (no lunge/hold stutter).
+      expect(holdFramesWhileCrowded).toBe(0);
+    });
+  }
 });
