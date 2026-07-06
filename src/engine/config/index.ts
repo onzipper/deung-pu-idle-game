@@ -89,6 +89,37 @@ export const CONFIG = {
         id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15, fieldWidth: 900,
         hunt: { maxAlive: 21, respawnDelay: 0.55, aggroStart: 0.1, aggroEnd: 0.16, aggroRadius: 145 },
       },
+      // ---- M7.9 "Grand Expansion" world foundation (engine-only first pass) ----
+      // Maps 4/5/6 extend the run to stage 30 following the EXACT structural formula
+      // of maps 1-3: each map = 5 farm zones (one content stage each) + 1 boss room at
+      // the last farm's stage. Per-zone combat balance is still driven by `state.stage`
+      // through the SAME parametric curves (killGoal/enemyHp/enemyAtk/goldPerKill/
+      // xpPerKill = f(n)), so s16-30 scaling falls straight out of the existing curve
+      // block — nothing per-stage is hand-authored, and s1-15 stays byte-identical
+      // (these curve functions are untouched). The geometric enemyHp (×1.2^(n-1))
+      // naturally STEEPENS toward s30, giving the intended soft-wall (s30 ≈ 15× s15 HP)
+      // without a hard cap. Hunt/aggro knobs continue the maps-1-3 ramp (density +
+      // aggressive belt climb modestly per map so danger concentrates deeper). Themes
+      // are naming/id only here (biomes/art are a render task): map4 ice tundra, map5
+      // desert ruins, map6 hell city. FULL rebalance of s16-30 is a LATER wave — these
+      // are sane monotonic first-pass numbers, not a tuned curve.
+      {
+        // map4 — ICE TUNDRA (s16-20). maxAlive 21 (holds map3's dense field),
+        // respawn a touch faster, aggro belt one notch above map3's tail.
+        id: "map4", zoneStageIds: [16, 17, 18, 19, 20], bossStageId: 20, fieldWidth: 900,
+        hunt: { maxAlive: 21, respawnDelay: 0.5, aggroStart: 0.14, aggroEnd: 0.2, aggroRadius: 150 },
+      },
+      {
+        // map5 — DESERT RUINS (s21-25). Denser + a wider aggressive belt.
+        id: "map5", zoneStageIds: [21, 22, 23, 24, 25], bossStageId: 25, fieldWidth: 900,
+        hunt: { maxAlive: 23, respawnDelay: 0.5, aggroStart: 0.18, aggroEnd: 0.24, aggroRadius: 155 },
+      },
+      {
+        // map6 — HELL CITY (s26-30). The current frontier: the densest field + the
+        // most aggressive belt. s30's boss room is the new soft-wall gate.
+        id: "map6", zoneStageIds: [26, 27, 28, 29, 30], bossStageId: 30, fieldWidth: 900,
+        hunt: { maxAlive: 25, respawnDelay: 0.45, aggroStart: 0.22, aggroEnd: 0.3, aggroRadius: 160 },
+      },
     ],
     townMapId: "map1",
     // Deterministic walk transit per hop (seconds). Negligible vs clear times;
@@ -560,7 +591,12 @@ export const CONFIG = {
   // Sim-rebaselined per class solo — see docs/balance-m5.md.
   leveling: {
     // Level cap; the evolution gate keys off a threshold below this.
-    levelCap: 60,
+    // M7.9 "Grand Expansion": raised 60 → 90 to head-room the s16-30 content. The
+    // xp curve (`xpToLevel`, geometric ×1.12/level) is a function of `level`, so it
+    // extends to L90 automatically and is LEFT UNCHANGED — raising the ceiling does
+    // NOT move any level-up cost for L1-59, so s1-15 leveling stays byte-identical.
+    // (A gentler late-curve retune belongs to the later s16-30 rebalance wave.)
+    levelCap: 90,
     // Per-level ADDITIVE bonuses (combine additively with the primary-stat atk
     // bonus, then the tier multiplier applies).
     //
@@ -834,6 +870,33 @@ export const CONFIG = {
     attackCdEnraged: 0.7,
     attackCdNormal: 1.1,
   },
+
+  // ---- boss variety roster (M7.9 "Grand Expansion" — STAT/SCALE PLACEHOLDERS) ----
+  // A per-boss-room descriptive table, keyed by the room's content stage (the map's
+  // `bossStageId`). Every boss's live stats still derive purely from the parametric
+  // `bossHp(stage)` / `bossAtk(stage)` curves via `makeBoss`; `hpScale`/`atkScale`
+  // are IDENTITY (1) placeholders here and are NOT read by combat yet, so this table
+  // changes NOTHING about current balance (existing boss fights are byte-identical).
+  // It exists so the LATER "boss behavior variety" wave has a config home to (a) dial
+  // per-boss stat scales and (b) attach the new mechanics. The three new bosses ship
+  // as stat-level placeholders on the curve; their special behaviors are deferred.
+  //
+  // TODO(M7.9 behavior wave): implement per-boss mechanics below — do NOT add
+  // charge/summon/hazard logic now. When wired, `hpScale`/`atkScale` multiply the
+  // curve in `makeBoss`, and `behaviors` drives systems/boss.ts.
+  bossVariety: {
+    // Existing bosses (maps 1-3) — documented for completeness; Slam + Enrage only.
+    5: { theme: "map1", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    10: { theme: "map2", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    15: { theme: "map3", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    // New bosses (maps 4-6) — stat placeholders on the curve; behaviors are TODO.
+    // TODO(behavior wave): map4 ice boss — a freezing/slow HAZARD field.
+    20: { theme: "ice-tundra", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    // TODO(behavior wave): map5 desert boss — SUMMONS adds / a burrow charge.
+    25: { theme: "desert-ruins", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    // TODO(behavior wave): map6 hell boss — a multi-phase CHARGE + fire hazard.
+    30: { theme: "hell-city", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+  } as Record<number, { theme: string; hpScale: number; atkScale: number; behaviors: string[] }>,
 } as const;
 
 export type SpeedMultiplier = (typeof CONFIG.speeds)[number];

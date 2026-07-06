@@ -137,8 +137,10 @@ describe("M7.7 survivor-retaliation — basic-attack behaviour unchanged", () =>
 });
 
 describe("M7.7 density knobs — fields read ~17/19/21", () => {
-  it("per-map maxAlive is 17 / 19 / 21", () => {
-    const alive = CONFIG.world.maps.map((m) => m.hunt.maxAlive);
+  it("per-map maxAlive is 17 / 19 / 21 (maps 1-3)", () => {
+    // M7.9 "Grand Expansion" appended maps 4-6 (21/23/25) — assert only the M7.7
+    // maps 1-3 density here; the new maps' density is covered in grand-expansion.test.
+    const alive = CONFIG.world.maps.slice(0, 3).map((m) => m.hunt.maxAlive);
     expect(alive).toEqual([17, 19, 21]);
   });
 
