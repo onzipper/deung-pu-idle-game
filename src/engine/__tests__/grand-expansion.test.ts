@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CONFIG, zoneAt } from "@/engine";
+import { CONFIG } from "@/engine";
 import { WORLD_ZONES } from "@/engine/systems/world";
 import { zoneSpawnParams } from "@/engine/systems/waves";
 import { makeBoss } from "@/engine/entities";
@@ -142,30 +142,52 @@ describe("M7.9 hunt / aggro belt continues the ramp across new maps", () => {
   });
 });
 
-describe("M7.9 boss variety placeholder table", () => {
+describe("M7.9 boss variety roster", () => {
   it("has a row for every boss room stage (maps 1-6)", () => {
     for (const stage of [5, 10, 15, 20, 25, 30]) {
       expect(CONFIG.bossVariety[stage], `bossVariety[${stage}]`).toBeDefined();
     }
   });
 
-  it("new-boss rows are IDENTITY stat placeholders (no balance change yet)", () => {
-    for (const stage of [20, 25, 30]) {
+  it("keeps maps 1-3 bosses on Slam + Enrage only (old fights unchanged)", () => {
+    for (const stage of [5, 10, 15]) {
       const row = CONFIG.bossVariety[stage];
       expect(row.hpScale).toBe(1);
       expect(row.atkScale).toBe(1);
-      // Behavior variety is deferred — only Slam + Enrage for now.
       expect(row.behaviors).toEqual(["slam", "enrage"]);
     }
   });
 
-  it("new bosses derive stats straight from the curve via makeBoss", () => {
+  it("gives each new boss the base kit + one signature mechanic", () => {
+    // Task spec: map4 s20 = CHARGE, map5 s25 = SUMMON, map6 s30 = FIELD HAZARD.
+    const expected: Record<number, string> = { 20: "charge", 25: "summon", 30: "hazard" };
     for (const stage of [20, 25, 30]) {
+      const row = CONFIG.bossVariety[stage];
+      // First-pass SOFTENING (breachable by a max tier-3 hero; the raw curve past
+      // the s15 wall is unwinnable + the mechanic adds pressure). Scale in (0, 1].
+      expect(row.hpScale).toBeGreaterThan(0);
+      expect(row.hpScale).toBeLessThanOrEqual(1);
+      expect(row.atkScale).toBeGreaterThan(0);
+      expect(row.atkScale).toBeLessThanOrEqual(1);
+      expect(row.behaviors).toContain("slam");
+      expect(row.behaviors).toContain("enrage");
+      expect(row.behaviors).toContain(expected[stage]);
+    }
+  });
+
+  it("new bosses derive stats from the curve × per-boss scale via makeBoss", () => {
+    for (const stage of [20, 25, 30]) {
+      const row = CONFIG.bossVariety[stage];
       const boss = makeBoss(1, stage);
-      expect(boss.hp).toBe(CONFIG.bossHp(stage));
-      expect(boss.maxHp).toBe(CONFIG.bossHp(stage));
-      expect(boss.atk).toBe(CONFIG.bossAtk(stage));
+      expect(boss.hp).toBe(Math.round(CONFIG.bossHp(stage) * row.hpScale));
+      expect(boss.maxHp).toBe(boss.hp);
+      expect(boss.atk).toBe(Math.round(CONFIG.bossAtk(stage) * row.atkScale));
       expect(boss.hp).toBeGreaterThan(0);
+      // The variety runtime state is stamped + starts idle.
+      expect(boss.variety?.behaviors).toEqual(row.behaviors);
+      expect(boss.variety?.chargePhase).toBe("idle");
+      expect(boss.variety?.hazardPhase).toBe("idle");
+      expect(boss.variety?.summonsFired).toBe(0);
     }
   });
 });

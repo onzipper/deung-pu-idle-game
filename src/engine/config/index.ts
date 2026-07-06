@@ -971,32 +971,76 @@ export const CONFIG = {
     attackCdNormal: 1.1,
   },
 
-  // ---- boss variety roster (M7.9 "Grand Expansion" — STAT/SCALE PLACEHOLDERS) ----
-  // A per-boss-room descriptive table, keyed by the room's content stage (the map's
-  // `bossStageId`). Every boss's live stats still derive purely from the parametric
-  // `bossHp(stage)` / `bossAtk(stage)` curves via `makeBoss`; `hpScale`/`atkScale`
-  // are IDENTITY (1) placeholders here and are NOT read by combat yet, so this table
-  // changes NOTHING about current balance (existing boss fights are byte-identical).
-  // It exists so the LATER "boss behavior variety" wave has a config home to (a) dial
-  // per-boss stat scales and (b) attach the new mechanics. The three new bosses ship
-  // as stat-level placeholders on the curve; their special behaviors are deferred.
-  //
-  // TODO(M7.9 behavior wave): implement per-boss mechanics below — do NOT add
-  // charge/summon/hazard logic now. When wired, `hpScale`/`atkScale` multiply the
-  // curve in `makeBoss`, and `behaviors` drives systems/boss.ts.
+  // ---- boss variety roster (M7.9 "Grand Expansion" behavior wave) ----
+  // A per-boss-room table keyed by the room's content stage (the map's `bossStageId`).
+  // Live stats derive from the parametric `bossHp/bossAtk` curves via `makeBoss`,
+  // then multiply by per-boss `hpScale`/`atkScale`. Maps 1-3 stay IDENTITY (1) so the
+  // OLD fights are byte-identical. The maps-4-6 bosses take a FIRST-PASS softening
+  // below 1: the raw curve past the old s15 wall is far too steep for even a max
+  // tier-3 hero (sim-verified: an L90 t3 hero in full t10+10 gear wipes on the raw
+  // s25/s30 boss), and the added signature mechanic stacks MORE pressure on top, so
+  // these scales bring the fights into "hard but breachable by a well-geared+refined
+  // tier-3 hero" — the design's soft-wall (s30 breachable, not a hard cliff). The
+  // PRECISE s16-30 curve/scale tuning is the NEXT rebalance wave; these are sane
+  // first-pass numbers (sim smoke green — see docs/balance-m7 follow-up).
+  // `behaviors` drives the mechanics in systems/boss.ts: every boss keeps the base
+  // `slam`+`enrage` kit; maps 4-6 LAYER one signature mechanic:
+  //   map4 s20 = CHARGE, map5 s25 = SUMMON, map6 s30 = FIELD HAZARD.
+  // Bosses s5/s10/s15 omit the new tags, so `updateBoss`'s classic path is unchanged
+  // for them (byte-identical). Mechanic tunables live in `bossBehavior` below.
+  // `EnemyKind` is not imported here — the summon add-kind list lives in
+  // `bossBehavior` as plain strings, cast in systems/boss.ts.
   bossVariety: {
-    // Existing bosses (maps 1-3) — documented for completeness; Slam + Enrage only.
+    // Existing bosses (maps 1-3) — Slam + Enrage only, IDENTITY scale (UNCHANGED).
     5: { theme: "map1", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
     10: { theme: "map2", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
     15: { theme: "map3", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
-    // New bosses (maps 4-6) — stat placeholders on the curve; behaviors are TODO.
-    // TODO(behavior wave): map4 ice boss — a freezing/slow HAZARD field.
-    20: { theme: "ice-tundra", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
-    // TODO(behavior wave): map5 desert boss — SUMMONS adds / a burrow charge.
-    25: { theme: "desert-ruins", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
-    // TODO(behavior wave): map6 hell boss — a multi-phase CHARGE + fire hazard.
-    30: { theme: "hell-city", hpScale: 1, atkScale: 1, behaviors: ["slam", "enrage"] },
+    // New bosses (maps 4-6) — base kit + one signature mechanic + first-pass softening.
+    20: { theme: "ice-tundra", hpScale: 0.85, atkScale: 0.9, behaviors: ["slam", "enrage", "charge"] },
+    25: { theme: "desert-ruins", hpScale: 0.42, atkScale: 0.68, behaviors: ["slam", "enrage", "summon"] },
+    30: { theme: "hell-city", hpScale: 0.25, atkScale: 0.44, behaviors: ["slam", "enrage", "hazard"] },
   } as Record<number, { theme: string; hpScale: number; atkScale: number; behaviors: string[] }>,
+
+  // ---- boss signature-mechanic tunables (M7.9 behavior wave) ----
+  // DETERMINISTIC: no RNG-stream draws — fixed timing / HP-threshold / offset tables
+  // (the seeded stream stays wave-composition only). First-pass numbers; the s16-30
+  // rebalance wave tunes them. CHARGE + HAZARD are CHANNELED (the boss's Slam +
+  // normal attack pause while it winds up / acts); SUMMON is instantaneous (layers on
+  // top of the base kit). All drive systems/boss.ts.
+  bossBehavior: {
+    // CHARGE (map4 s20): telegraph a dash at the hero's current x, then rush and hit
+    // every hero within `hitRange` of the landing point for `hitMult × atk`. The
+    // target x locks at telegraph time (a fair, positional read).
+    charge: {
+      cd: 7.0, // seconds between charges (idle → windup, at engage range)
+      cdEnraged: 4.5,
+      telegraph: 0.85, // wind-up before the dash launches
+      dashSpeed: 460, // px/s during the rush (fast — the "heavy" read)
+      stopGap: 40, // the dash stops this far in front of the locked target x
+      hitRange: 95, // heroes within this of the landing point take the hit
+      hitMult: 2.4, // charge damage = round(atk × this)
+    },
+    // SUMMON (map5 s25): at each descending HP fraction, spawn ONE wave of adds that
+    // flow through the normal enemy list (pooled render views key by entity id). Adds
+    // are engaged-on-spawn + hunt the hero, and JOIN the boss-phase target set so the
+    // hero can kill them. Instantaneous (does not pause the boss's base kit).
+    summon: {
+      thresholds: [0.6, 0.3], // fire when boss.hp ≤ maxHp × each, in order (2 waves)
+      addKinds: ["fast", "normal"], // fixed composition per wave (cast to EnemyKind); 2×2 = 4 adds
+      spawnSpacing: 70, // px between adds (first add sits this far behind the boss)
+    },
+    // FIELD HAZARD (map6 s30): a telegraphed arena-wide danger wave the hero must
+    // out-heal / out-DPS. A WARN window (telegraph) then a STRIKE window that ticks
+    // damage to EVERY alive hero (position-independent — the arena is the threat).
+    hazard: {
+      cd: 8.5, // seconds between hazard channels
+      cdEnraged: 5.5,
+      telegraph: 1.3, // arena-wide warning window before the strike
+      duration: 1.0, // strike-window length
+      tickInterval: 0.3, // seconds between damage ticks during the strike
+      tickMult: 0.3, // per-tick damage to every hero = round(atk × this)
+    },
+  },
 } as const;
 
 export type SpeedMultiplier = (typeof CONFIG.speeds)[number];

@@ -104,10 +104,18 @@ export function frontHeroX(state: GameState): number {
 }
 
 /**
- * The current set of things heroes fight: the boss during a boss fight, else the
- * live enemy list. (Phase A never enters the boss phase, so this is the enemies.)
+ * The current set of things heroes fight: during a boss fight, the boss PLUS any
+ * boss-SUMMONED adds (M7.9 map5 — normal Enemy entities the boss spawned into
+ * `state.enemies`), else the live enemy list. For classic bosses (s5/s10/s15) the
+ * enemy list is empty during the fight, so this returns exactly `[boss]` — the
+ * pre-M7.9 behaviour (byte-identical).
  */
 export function getTargets(state: GameState): CombatTarget[] {
-  if (state.phase === "boss") return state.boss ? [state.boss] : [];
+  if (state.phase === "boss") {
+    if (state.enemies.length === 0) return state.boss ? [state.boss] : [];
+    const list: CombatTarget[] = state.boss ? [state.boss] : [];
+    for (const e of state.enemies) list.push(e);
+    return list;
+  }
   return state.enemies;
 }
