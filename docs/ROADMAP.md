@@ -78,6 +78,7 @@
 - [x] Salvage: ย่อยของเป็นวัสดุตาม tier/rarity (server tx: destroy + mint material — โมเดลวัสดุเป็น counter ต่อ character ไม่ใช่ instance) — `POST /api/items/salvage` batch tx เดียว กัน double-credit, yield = tier × {common 1, rare 2, epic 4}, UI ย่อยรายชิ้น + bulk พร้อม preview
 - [x] Refine core: server-authoritative roll (crypto ฝั่ง server, engine ไม่ทอย), ItemEvent `refined`/`salvaged` ทุกครั้ง, engine รับ refineLevel เข้า stat/power — `refinedStat = base×(1+N×8%)`, SAVE v14, สำเร็จ +1-3 การันตี / +4-7 = .85-.55 / +8-10 = .45-.25, compare-and-set กันกดซ้อน, แตก = destroy+unequip
 - [x] UI ตู้ตีบวกในเมือง + จังหวะลุ้น/แตก (juice เต็ม) + โชว์ +N บน paper-doll/ชื่อของ — ตอกค้อน ~1s → สำเร็จ "+N!" เด้ง/ลดขั้นทึบ/แตกกระจาย+แฟลชขอบจอ (CSS+synth SFX), ตัวนับวัสดุใน HUD, stack แยกตาม +N, ออร่า step-up ที่ +7, desktop+mobile
+- [x] (เพิ่มตามคำขอเจ้าของ 2026-07-07) บอท auto-ย่อยของ: กฎ auto-sell เดิมยกเป็น v2 ต่อ rarity 3 ทาง **ปิด/ขาย/ย่อย** (common/rare; epic ห้ามแตะเหมือนเดิม), sweep เดียวได้ทั้งสองลิสต์ (keepBetterStat guard คุ้มครองทั้งขายและย่อยเท่ากัน), บอททริปเมือง ขาย→ย่อย ตามลำดับ + toast "ย่อยแล้ว N ชิ้น +M วัสดุ", migrate ค่าที่ตั้งไว้เดิมอัตโนมัติ
 - [x] Sim ผลต่อ curve: **เลขร่างผ่านทุกเกตโดยไม่แก้** — s15 wall อยู่ 0/15 แม้ refine-stress, เปลี่ยนคลาส s5, วัสดุ sink จริง (ของใส่วน +1~4 ไม่นั่ง +10), ตี +10 ~359 ครั้ง, แตก ~1% ของดรอป; knobs REFINE=1/sweep/STRESS ใน balance-sim (ตาราง: balance-m7.md "M7.6 — Refine")
 
 ## ✅ M7.8 — Manual Play (เสร็จ 2026-07-07)

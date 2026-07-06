@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectAutoSellItemIds, type SellableTemplate } from "@/ui/gear/autoSell";
+import { selectAutoSellSalvageIds, type SellableTemplate } from "@/ui/gear/autoSell";
 import type { InventoryItem } from "@/ui/gear/types";
 
 const TEMPLATES: Record<string, SellableTemplate> = {
@@ -20,62 +20,83 @@ function item(over: Partial<InventoryItem>): InventoryItem {
   };
 }
 
-describe("selectAutoSellItemIds", () => {
-  it("sells commons when sellCommon is on", () => {
-    const ids = selectAutoSellItemIds(
+describe("selectAutoSellSalvageIds", () => {
+  it("sells commons when common is set to sell", () => {
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
       [item({ instanceId: "a", templateId: "common_sword" })],
       TEMPLATES,
-      { sellCommon: true, sellRare: false, keepBetterStat: false },
+      { common: "sell", rare: "off", keepBetterStat: false },
     );
-    expect(ids).toEqual(["a"]);
+    expect(sellIds).toEqual(["a"]);
+    expect(salvageIds).toEqual([]);
   });
 
-  it("does not sell commons when sellCommon is off", () => {
-    const ids = selectAutoSellItemIds(
+  it("salvages commons when common is set to salvage", () => {
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
       [item({ instanceId: "a", templateId: "common_sword" })],
       TEMPLATES,
-      { sellCommon: false, sellRare: false, keepBetterStat: false },
+      { common: "salvage", rare: "off", keepBetterStat: false },
     );
-    expect(ids).toEqual([]);
+    expect(salvageIds).toEqual(["a"]);
+    expect(sellIds).toEqual([]);
   });
 
-  it("sells rares only when sellRare is on", () => {
+  it("does not touch commons when common is off", () => {
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
+      [item({ instanceId: "a", templateId: "common_sword" })],
+      TEMPLATES,
+      { common: "off", rare: "off", keepBetterStat: false },
+    );
+    expect(sellIds).toEqual([]);
+    expect(salvageIds).toEqual([]);
+  });
+
+  it("rares only dispose when rare's action is not off, matching the chosen action", () => {
     const items = [item({ instanceId: "a", templateId: "rare_sword" })];
     expect(
-      selectAutoSellItemIds(items, TEMPLATES, {
-        sellCommon: true,
-        sellRare: false,
+      selectAutoSellSalvageIds(items, TEMPLATES, {
+        common: "sell",
+        rare: "off",
         keepBetterStat: false,
       }),
-    ).toEqual([]);
+    ).toEqual({ sellIds: [], salvageIds: [] });
     expect(
-      selectAutoSellItemIds(items, TEMPLATES, {
-        sellCommon: true,
-        sellRare: true,
+      selectAutoSellSalvageIds(items, TEMPLATES, {
+        common: "sell",
+        rare: "sell",
         keepBetterStat: false,
       }),
-    ).toEqual(["a"]);
+    ).toEqual({ sellIds: ["a"], salvageIds: [] });
+    expect(
+      selectAutoSellSalvageIds(items, TEMPLATES, {
+        common: "sell",
+        rare: "salvage",
+        keepBetterStat: false,
+      }),
+    ).toEqual({ sellIds: [], salvageIds: ["a"] });
   });
 
-  it("NEVER sells epic, even with every rule maximally permissive", () => {
-    const ids = selectAutoSellItemIds(
+  it("NEVER disposes of epic, even with every rule maximally permissive", () => {
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
       [item({ instanceId: "a", templateId: "epic_sword" })],
       TEMPLATES,
-      { sellCommon: true, sellRare: true, keepBetterStat: false },
+      { common: "salvage", rare: "salvage", keepBetterStat: false },
     );
-    expect(ids).toEqual([]);
+    expect(sellIds).toEqual([]);
+    expect(salvageIds).toEqual([]);
   });
 
-  it("NEVER sells an equipped item regardless of rules", () => {
-    const ids = selectAutoSellItemIds(
+  it("NEVER disposes of an equipped item regardless of rules", () => {
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
       [item({ instanceId: "a", templateId: "common_sword", equippedSlot: "weapon" })],
       TEMPLATES,
-      { sellCommon: true, sellRare: true, keepBetterStat: false },
+      { common: "sell", rare: "sell", keepBetterStat: false },
     );
-    expect(ids).toEqual([]);
+    expect(sellIds).toEqual([]);
+    expect(salvageIds).toEqual([]);
   });
 
-  it("keep-guard: keeps a candidate that beats the equipped item's stat total", () => {
+  it("keep-guard: keeps a candidate that beats the equipped item's stat total (sell action)", () => {
     const items = [
       item({
         instanceId: "equipped",
@@ -84,18 +105,37 @@ describe("selectAutoSellItemIds", () => {
       }),
       item({ instanceId: "better", templateId: "rare_sword" }), // atk 8 > equipped atk 3
     ];
-    const ids = selectAutoSellItemIds(items, TEMPLATES, {
-      sellCommon: true,
-      sellRare: true,
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "sell",
       keepBetterStat: true,
     });
-    expect(ids).toEqual([]); // "better" is kept, "equipped" is never touched
+    expect(sellIds).toEqual([]); // "better" is kept, "equipped" is never touched
+    expect(salvageIds).toEqual([]);
   });
 
-  it("REGRESSION keep-guard: an EMPTY slot keeps ONLY the best backup, sells the rest", () => {
+  it("keep-guard parity: also keeps a stat-upgrade candidate when rare's action is salvage", () => {
+    const items = [
+      item({
+        instanceId: "equipped",
+        templateId: "common_sword",
+        equippedSlot: "weapon",
+      }),
+      item({ instanceId: "better", templateId: "rare_sword" }), // atk 8 > equipped atk 3
+    ];
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "salvage",
+      keepBetterStat: true,
+    });
+    expect(sellIds).toEqual([]);
+    expect(salvageIds).toEqual([]);
+  });
+
+  it("REGRESSION keep-guard: an EMPTY slot keeps ONLY the best backup, disposes the rest", () => {
     // 2026-07-06 bug: an empty slot baselined to 0, so EVERY item "beat" it and
     // was kept — auto-sell matched nothing and the sell-trip bot warp-looped.
-    // v1.1: keep the single best candidate per empty slot, sell the copies.
+    // v1.1: keep the single best candidate per empty slot, dispose of the copies.
     const items = [
       item({ instanceId: "w1", templateId: "common_sword" }),
       item({ instanceId: "w2", templateId: "common_sword" }),
@@ -103,15 +143,34 @@ describe("selectAutoSellItemIds", () => {
       item({ instanceId: "a1", templateId: "common_armor" }),
       item({ instanceId: "a2", templateId: "common_armor" }), // a1 wins the id tie-break
     ]; // NOTHING equipped in either slot
-    const ids = selectAutoSellItemIds(items, TEMPLATES, {
-      sellCommon: true,
-      sellRare: true,
+    const { sellIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "sell",
       keepBetterStat: true,
     });
-    expect(ids.sort()).toEqual(["a2", "w1", "w2"]); // w3 + a1 kept as backups
+    expect(sellIds.sort()).toEqual(["a2", "w1", "w2"]); // w3 + a1 kept as backups
   });
 
-  it("empty-slot backup is scoped to the hero's class (foreign-class gear sells)", () => {
+  it("REGRESSION keep-guard parity: the empty-slot best-backup pick is action-agnostic", () => {
+    // Same scenario as above but common is routed to salvage instead of sell —
+    // the single-sweep guard must still keep exactly one backup per slot.
+    const items = [
+      item({ instanceId: "w1", templateId: "common_sword" }),
+      item({ instanceId: "w2", templateId: "common_sword" }),
+      item({ instanceId: "w3", templateId: "rare_sword" }), // best weapon backup
+      item({ instanceId: "a1", templateId: "common_armor" }),
+      item({ instanceId: "a2", templateId: "common_armor" }), // a1 wins the id tie-break
+    ];
+    const { salvageIds, sellIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "salvage",
+      rare: "sell",
+      keepBetterStat: true,
+    });
+    expect(salvageIds.sort()).toEqual(["a2", "w1", "w2"]);
+    expect(sellIds).toEqual([]);
+  });
+
+  it("empty-slot backup is scoped to the hero's class (foreign-class gear disposes)", () => {
     const templates = {
       ...TEMPLATES,
       archer_bow: {
@@ -125,30 +184,30 @@ describe("selectAutoSellItemIds", () => {
       item({ instanceId: "bow", templateId: "archer_bow" }), // unwearable by a swordsman
       item({ instanceId: "sword", templateId: "common_sword" }),
     ];
-    const ids = selectAutoSellItemIds(
+    const { sellIds } = selectAutoSellSalvageIds(
       items,
       templates,
-      { sellCommon: true, sellRare: true, keepBetterStat: true },
+      { common: "sell", rare: "sell", keepBetterStat: true },
       "swordsman",
     );
     // The bow can't be this hero's backup → sold; the wearable sword is kept.
-    expect(ids).toEqual(["bow"]);
+    expect(sellIds).toEqual(["bow"]);
   });
 
-  it("keep-guard: still sells a candidate that does NOT beat the equipped item", () => {
+  it("keep-guard: still disposes of a candidate that does NOT beat the equipped item", () => {
     const items = [
       item({ instanceId: "equipped", templateId: "rare_sword", equippedSlot: "weapon" }),
       item({ instanceId: "worse", templateId: "common_sword" }), // atk 3 < equipped atk 8
     ];
-    const ids = selectAutoSellItemIds(items, TEMPLATES, {
-      sellCommon: true,
-      sellRare: true,
+    const { sellIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "sell",
       keepBetterStat: true,
     });
-    expect(ids).toEqual(["worse"]);
+    expect(sellIds).toEqual(["worse"]);
   });
 
-  it("keep-guard off: sells a stat-upgrade candidate anyway", () => {
+  it("keep-guard off: disposes of a stat-upgrade candidate anyway", () => {
     const items = [
       item({
         instanceId: "equipped",
@@ -157,20 +216,21 @@ describe("selectAutoSellItemIds", () => {
       }),
       item({ instanceId: "better", templateId: "rare_sword" }),
     ];
-    const ids = selectAutoSellItemIds(items, TEMPLATES, {
-      sellCommon: true,
-      sellRare: true,
+    const { sellIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "sell",
       keepBetterStat: false,
     });
-    expect(ids).toEqual(["better"]);
+    expect(sellIds).toEqual(["better"]);
   });
 
   it("skips an unknown/retired template defensively", () => {
-    const ids = selectAutoSellItemIds(
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
       [item({ instanceId: "a", templateId: "does_not_exist" })],
       TEMPLATES,
-      { sellCommon: true, sellRare: true, keepBetterStat: false },
+      { common: "sell", rare: "sell", keepBetterStat: false },
     );
-    expect(ids).toEqual([]);
+    expect(sellIds).toEqual([]);
+    expect(salvageIds).toEqual([]);
   });
 });

@@ -77,10 +77,11 @@ import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import { GameHud } from "@/ui/components/GameHud";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
-import { selectAutoSellItemIds } from "@/ui/gear/autoSell";
+import { selectAutoSellSalvageIds } from "@/ui/gear/autoSell";
 import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
 import { postClaimBatch, postEquip } from "@/ui/gear/api";
 import { applyEquipChange } from "@/ui/gear/inventoryOps";
+import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { toInventoryItem } from "@/ui/gear/types";
 import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
@@ -308,12 +309,16 @@ function buildSnapshot(state: GameState): EngineSnapshot {
 }
 
 /**
- * M7.5 auto-sell executor — runs off a `townArrived` event (reason "sell" /
- * "restockSell"): computes the sell list from the CURRENT inventory slice +
- * persisted rules, then reuses the same POST-first sell flow the manual
- * `InventoryPanel` sell buttons use (`executeSell`). Fire-and-forget: a
- * dropped/failed auto-sell simply leaves the inventory full, so the NEXT trip
- * (or a manual sell) retries it — never a stuck state.
+ * M7.5→M7.7 auto-dispose executor — runs off a `townArrived` event (reason
+ * "sell" / "restockSell"): computes the sell AND salvage lists from the
+ * CURRENT inventory slice + persisted rules in ONE sweep
+ * (`selectAutoSellSalvageIds`), then reuses the same POST-first flows the
+ * manual `InventoryPanel` sell/salvage buttons use (`executeSell` /
+ * `executeSalvage`) — sell first, then salvage (order doesn't matter
+ * functionally; sequential keeps the shared 100-slot inventory bookkeeping
+ * simple). Fire-and-forget: a dropped/failed run simply leaves the inventory
+ * full, so the NEXT trip (or a manual dispose) retries it — never a stuck
+ * state.
  */
 /**
  * M7.5 auto-equip executor (owner request 2026-07-06) — keeps the hero in its
@@ -351,28 +356,35 @@ async function performAutoEquip(): Promise<void> {
 
 async function performAutoSell(): Promise<void> {
   const store = useGameStore.getState();
-  const ids = selectAutoSellItemIds(
+  const { sellIds, salvageIds } = selectAutoSellSalvageIds(
     store.inventory,
     ITEM_TEMPLATES,
     {
-      sellCommon: store.autoSellCommon,
-      sellRare: store.autoSellRare,
+      common: store.autoSellCommon,
+      rare: store.autoSellRare,
       keepBetterStat: store.autoSellKeepBetterStat,
     },
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
   );
-  if (ids.length === 0) {
+  if (sellIds.length === 0 && salvageIds.length === 0) {
     // Bag full but the rules matched nothing — the engine latches its sell-trip
     // watermark and stops tripping; tell the player WHY the bot gave up (fix =
-    // loosen the rules in Settings or sell manually).
+    // loosen the rules in Settings or sell/salvage manually).
     store.pushNotice("autoSellNothing");
     return;
   }
-  const result = await executeSell(ids);
-  if (result.ok && result.soldCount > 0) {
+  const sellResult = await executeSell(sellIds);
+  if (sellResult.ok && sellResult.soldCount > 0) {
     useGameStore.getState().pushNotice("autoSellDone", {
-      count: result.soldCount,
-      gold: result.totalGold.toLocaleString(),
+      count: sellResult.soldCount,
+      gold: sellResult.totalGold.toLocaleString(),
+    });
+  }
+  const salvageResult = await executeSalvage(salvageIds);
+  if (salvageResult.ok && salvageResult.salvagedCount > 0) {
+    useGameStore.getState().pushNotice("autoSalvageDone", {
+      count: salvageResult.salvagedCount,
+      materials: salvageResult.totalMaterials.toLocaleString(),
     });
   }
 }

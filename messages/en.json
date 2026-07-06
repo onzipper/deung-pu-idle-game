@@ -132,10 +132,13 @@
       "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)"
     },
     "autoSell": {
-      "title": "Auto-sell rules",
-      "sellCommon": "Sell common",
-      "sellRare": "Sell rare",
-      "sellEpic": "Sell epic (locked off)",
+      "title": "Auto-dispose drops",
+      "commonLabel": "Common",
+      "rareLabel": "Rare",
+      "epicHint": "Epic: always kept (locked off)",
+      "actionOff": "Off",
+      "actionSell": "Sell",
+      "actionSalvage": "Salvage",
       "keepBetterStat": "Protect good gear (upgrades over equipped + best piece for an empty slot)"
     }
   },
@@ -554,6 +557,7 @@
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
+    "autoSalvageDone": "Bot auto-salvaged {count} item(s) +{materials} material(s)",
     "botTripStart": "🧭 Bot is walking to town...",
     "botSelling": "💰 Bot is selling at the shop...",
     "botRestocked": "🧪 Bot restocked (HP +{hp} / MP +{mp} / scroll +{scroll})",

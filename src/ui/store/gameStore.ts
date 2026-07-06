@@ -420,25 +420,45 @@ export function writeSeenTip(id: string, seen: readonly string[]): string[] {
   return next;
 }
 
-/** localStorage-persisted auto-sell rules (M7.5) — same client-preference tier
- * as `soundMuted`/`ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't
- * game progress; the bot's ENGINE-side config, `BotSettings`, is the thing
- * that's actually save-persisted). Owner-locked defaults (ROADMAP.md M7.5):
- * sell common ON, rare OFF, epic never (no field — see `ui/gear/autoSell.ts`),
- * keep-guard ON (don't auto-sell a stat upgrade over what's equipped). */
-const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2"; // v2 (2026-07-06): sellRare default flipped ON (tier-3+ drops are ALL rare; common-only sold nothing mid-game) — key versioned so existing players re-default
+/** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
+ * salvage-by-rarity) — same client-preference tier as `soundMuted`/
+ * `ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't game progress;
+ * the bot's ENGINE-side config, `BotSettings`, is the thing that's actually
+ * save-persisted). Owner-locked defaults: common "sell", rare "sell", epic
+ * never (no field — see `ui/gear/autoSell.ts`), keep-guard ON (don't dispose
+ * of a stat upgrade over what's equipped). SAME storage key as the old v1.1
+ * boolean shape — deliberately NOT bumped, so `readStoredAutoSellRules`
+ * migrates old `{sellCommon, sellRare}` booleans → `"sell"/"off"` in place
+ * rather than resetting every existing player's preference. */
+const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2";
+
+/** Per-rarity disposal action (M7.7 — replaces the old two booleans). */
+export type AutoSellAction = "off" | "sell" | "salvage";
 
 export interface StoredAutoSellRules {
-  sellCommon: boolean;
-  sellRare: boolean;
+  common: AutoSellAction;
+  rare: AutoSellAction;
   keepBetterStat: boolean;
 }
 
 const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
-  sellCommon: true,
-  sellRare: true, // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
+  common: "sell",
+  rare: "sell", // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
   keepBetterStat: true,
 };
+
+function isAutoSellAction(v: unknown): v is AutoSellAction {
+  return v === "off" || v === "sell" || v === "salvage";
+}
+
+/** Migrates one rarity field from either shape: v2 action string (preferred),
+ * v1.1 boolean (`true` → "sell", `false` → "off"), or missing/corrupt → the
+ * default. */
+function migrateAction(actionField: unknown, boolField: unknown, fallback: AutoSellAction): AutoSellAction {
+  if (isAutoSellAction(actionField)) return actionField;
+  if (typeof boolField === "boolean") return boolField ? "sell" : "off";
+  return fallback;
+}
 
 export function readStoredAutoSellRules(): StoredAutoSellRules {
   if (typeof window === "undefined") return DEFAULT_AUTO_SELL_RULES;
@@ -447,14 +467,18 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
     if (!raw) return DEFAULT_AUTO_SELL_RULES;
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return DEFAULT_AUTO_SELL_RULES;
-    const p = parsed as Partial<StoredAutoSellRules>;
+    // Loosely typed so both the v1.1 boolean shape and the v2 action shape
+    // read from the same key without a cast-away-safety hack.
+    const p = parsed as {
+      common?: unknown;
+      rare?: unknown;
+      sellCommon?: unknown;
+      sellRare?: unknown;
+      keepBetterStat?: unknown;
+    };
     return {
-      sellCommon:
-        typeof p.sellCommon === "boolean"
-          ? p.sellCommon
-          : DEFAULT_AUTO_SELL_RULES.sellCommon,
-      sellRare:
-        typeof p.sellRare === "boolean" ? p.sellRare : DEFAULT_AUTO_SELL_RULES.sellRare,
+      common: migrateAction(p.common, p.sellCommon, DEFAULT_AUTO_SELL_RULES.common),
+      rare: migrateAction(p.rare, p.sellRare, DEFAULT_AUTO_SELL_RULES.rare),
       keepBetterStat:
         typeof p.keepBetterStat === "boolean"
           ? p.keepBetterStat
@@ -604,10 +628,10 @@ export interface HudState {
    * `fastTravelBlocked` (see `GameClient.tsx`'s frame-event handling). */
   fastTravelChannel: FastTravelChannelState | null;
 
-  // ---- M7.5 auto-sell rules (localStorage-persisted UI preference, same tier
-  // as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
-  autoSellCommon: boolean;
-  autoSellRare: boolean;
+  // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted UI preference,
+  // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
+  autoSellCommon: AutoSellAction;
+  autoSellRare: AutoSellAction;
   autoSellKeepBetterStat: boolean;
   /** M7.5 auto-equip executor toggle (localStorage-persisted, default ON). */
   autoEquip: boolean;
@@ -785,9 +809,9 @@ export interface HudState {
   /** Clear the fast-travel channel progress UI (arrival or block/cancel). */
   clearFastTravelChannel: () => void;
 
-  // ---- M7.5 auto-sell rules (localStorage-persisted) ----
-  toggleAutoSellCommon: () => void;
-  toggleAutoSellRare: () => void;
+  // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
+  setAutoSellCommon: (action: AutoSellAction) => void;
+  setAutoSellRare: (action: AutoSellAction) => void;
   toggleAutoSellKeepBetterStat: () => void;
   /** Mount-effect-only: apply the persisted rules once, post-hydration (same
    * "don't re-persist on mount" rule as `setSoundMuted`). */
@@ -834,8 +858,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   // Safe defaults pre-hydration; a mount effect (`SettingsPanel`'s bot/auto-sell
   // section) applies the persisted values once via `hydrateAutoSellRules` —
   // same two-step pattern as `soundMuted`/`setSoundMuted`.
-  autoSellCommon: DEFAULT_AUTO_SELL_RULES.sellCommon,
-  autoSellRare: DEFAULT_AUTO_SELL_RULES.sellRare,
+  autoSellCommon: DEFAULT_AUTO_SELL_RULES.common,
+  autoSellRare: DEFAULT_AUTO_SELL_RULES.rare,
   autoSellKeepBetterStat: DEFAULT_AUTO_SELL_RULES.keepBetterStat,
   autoEquip: true,
 
@@ -1018,40 +1042,38 @@ export const useGameStore = create<HudState>((set, get) => ({
     })),
   clearFastTravelChannel: () => set({ fastTravelChannel: null }),
 
-  toggleAutoSellCommon: () =>
+  setAutoSellCommon: (action) =>
     set((s) => {
-      const autoSellCommon = !s.autoSellCommon;
       writeAutoSellRules({
-        sellCommon: autoSellCommon,
-        sellRare: s.autoSellRare,
+        common: action,
+        rare: s.autoSellRare,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
-      return { autoSellCommon };
+      return { autoSellCommon: action };
     }),
-  toggleAutoSellRare: () =>
+  setAutoSellRare: (action) =>
     set((s) => {
-      const autoSellRare = !s.autoSellRare;
       writeAutoSellRules({
-        sellCommon: s.autoSellCommon,
-        sellRare: autoSellRare,
+        common: s.autoSellCommon,
+        rare: action,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
-      return { autoSellRare };
+      return { autoSellRare: action };
     }),
   toggleAutoSellKeepBetterStat: () =>
     set((s) => {
       const autoSellKeepBetterStat = !s.autoSellKeepBetterStat;
       writeAutoSellRules({
-        sellCommon: s.autoSellCommon,
-        sellRare: s.autoSellRare,
+        common: s.autoSellCommon,
+        rare: s.autoSellRare,
         keepBetterStat: autoSellKeepBetterStat,
       });
       return { autoSellKeepBetterStat };
     }),
   hydrateAutoSellRules: (rules) =>
     set({
-      autoSellCommon: rules.sellCommon,
-      autoSellRare: rules.sellRare,
+      autoSellCommon: rules.common,
+      autoSellRare: rules.rare,
       autoSellKeepBetterStat: rules.keepBetterStat,
     }),
   toggleAutoEquip: () =>
