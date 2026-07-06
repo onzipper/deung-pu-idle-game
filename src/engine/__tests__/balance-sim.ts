@@ -30,6 +30,7 @@ import {
   zoneAt,
   SIGNATURE_SKILL,
   ITEM_TEMPLATES,
+  SAVE_VERSION,
   FIXED_DT,
   type FrameInput,
   type Hero,
@@ -94,7 +95,7 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
   // A cold-start save at stage 1 (first farm zone). Built directly; the world
   // fields are what initGameState fills for a fresh start, mirrored here.
   return {
-    version: 13,
+    version: SAVE_VERSION,
     stage: 1,
     gold: 0,
     zoneKills: {},
@@ -117,6 +118,8 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
     equipped: { weapon: null, armor: null },
     lootSalt: (seed * 2654435761) >>> 0,
     lootCounter: 0,
+    // M7.6 ตีบวก: cold start holds no refine materials.
+    materials: 0,
     hero: {
       cls,
       level: 1,

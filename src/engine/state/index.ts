@@ -12,7 +12,8 @@
  */
 
 import { CONFIG } from "@/engine/config";
-import { emptyEquipped, type EquippedGear } from "@/engine/config/items";
+import { emptyEquipped, refineOf, type EquippedGear } from "@/engine/config/items";
+import { clampRefine } from "@/engine/config/refine";
 import { clamp } from "@/engine/core/math";
 import { splitmix32 } from "@/engine/core/hash";
 import { makeHero, defaultAutoSlots } from "@/engine/entities";
@@ -223,6 +224,13 @@ export interface GameState {
    */
   lootCounter: number;
   /**
+   * M7.6 ตีบวก material counter: a plain per-character resource (like `gold`) spent
+   * with gold to refine gear + granted by salvaging duplicates. Transactions are
+   * SERVER-authoritative (this only carries the count for display/save; the engine
+   * mutates it solely via the trusted `materialsDelta` intent). Persisted (SAVE v14).
+   */
+  materials: number;
+  /**
    * Per-step event buffer for render/audio juice. Cleared at the START of each
    * `step()`, filled during the step, drained by the outside layers after it.
    * Deterministic, one-way (engine never reads it), and NEVER persisted.
@@ -299,6 +307,10 @@ export interface SaveData {
   lootSalt: number;
   /** M7 monotonic drop-roll counter (SAVE v10) — anti-dupe rollId source. */
   lootCounter: number;
+  /** M7.6 ตีบวก material counter (SAVE v14): a per-character resource (like gold),
+   * spent + gold to refine gear, granted by salvage. Server-authoritative
+   * transactions; engine carries the count for display/save. */
+  materials: number;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -327,9 +339,18 @@ export function initHeroes(state: GameState): void {
       // Quest progress MUST survive a stage reset — the boss-defeat objective
       // completes as the stage clears, then nextStage rebuilds the hero.
       prev ? cloneQuest(prev.quest) : null,
-      // Equipped gear (M7) survives a battlefield reset (stage advance) — makeHero
-      // folds its armor HP into the rebuilt hero's max HP.
-      prev ? { weapon: prev.equipped.weapon, armor: prev.equipped.armor } : emptyEquipped(),
+      // Equipped gear (M7) + its refine (M7.6) survive a battlefield reset (stage
+      // advance) — makeHero folds refined armor HP into the rebuilt hero's max HP.
+      prev
+        ? {
+            weapon: prev.equipped.weapon,
+            armor: prev.equipped.armor,
+            refine: {
+              weapon: refineOf(prev.equipped, "weapon"),
+              armor: refineOf(prev.equipped, "armor"),
+            },
+          }
+        : emptyEquipped(),
     ),
   ];
 }
@@ -457,6 +478,9 @@ export function initGameState(
         ? save.lootSalt >>> 0
         : splitmix32(seed >>> 0),
     lootCounter: Math.max(0, Math.floor(save?.lootCounter ?? 0)),
+    // M7.6 ตีบวก material counter (SAVE v14): restore the saved count (server-
+    // authoritative), else 0 for a fresh/pre-v14 start.
+    materials: Math.max(0, Math.floor(save?.materials ?? 0)),
     events: [],
   };
   initHeroes(state);
@@ -484,6 +508,12 @@ export function initGameState(
     h.equipped = {
       weapon: typeof save.equipped?.weapon === "string" ? save.equipped.weapon : null,
       armor: typeof save.equipped?.armor === "string" ? save.equipped.armor : null,
+      // Refine levels (M7.6, SAVE v14): migrate() backfills these (0 for a pre-v14
+      // save); clamp defensively for a raw save literal handed straight in.
+      refine: {
+        weapon: clampRefine(save.equipped?.refine?.weapon),
+        armor: clampRefine(save.equipped?.refine?.armor),
+      },
     };
     h.maxHp = heroMaxHpOf(h);
     h.hp = h.maxHp;
@@ -572,9 +602,14 @@ export function toSaveData(state: GameState): SaveData {
     bot: { ...state.bot },
     // Auto-hunt toggle (M6.6, SAVE v12). Engine-persisted (default true).
     autoHunt: state.autoHunt,
-    // Equipped gear cache (M7, SAVE v10). Authoritative copy is the DB item ledger
-    // (boot payload wins on load); this persists the loadout for offline power.
-    equipped: { weapon: h.equipped.weapon, armor: h.equipped.armor },
+    // Equipped gear cache (M7, SAVE v10) + per-slot refine (M7.6, SAVE v14).
+    // Authoritative copy is the DB item ledger (boot payload wins on load); this
+    // persists the loadout + refine so offline power is correct.
+    equipped: {
+      weapon: h.equipped.weapon,
+      armor: h.equipped.armor,
+      refine: { weapon: refineOf(h.equipped, "weapon"), armor: refineOf(h.equipped, "armor") },
+    },
     hero: {
       cls: h.cls,
       level: h.level,
@@ -593,6 +628,8 @@ export function toSaveData(state: GameState): SaveData {
     // M7 drop-roll bookkeeping (SAVE v10): monotonic counter + per-save salt.
     lootCounter: state.lootCounter,
     lootSalt: state.lootSalt,
+    // M7.6 ตีบวก material counter (SAVE v14).
+    materials: state.materials,
     lastSeen: 0,
   };
 }

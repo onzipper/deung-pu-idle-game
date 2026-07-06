@@ -262,6 +262,7 @@ describe("events are transient (never persisted)", () => {
       "hero",
       "lootCounter",
       "lootSalt",
+      "materials",
       "lastSeen",
     ]);
   });

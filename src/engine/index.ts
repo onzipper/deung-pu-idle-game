@@ -15,6 +15,11 @@ export * from "@/engine/config";
 // it's a pinned contract module). render/ui read templates + the EquippedGear type
 // through here; the server imports it directly (@/engine/config/items).
 export * from "@/engine/config/items";
+// M7.6 ตีบวก (Refine) tunables + pure derivations (config/refine is NOT re-exported
+// by config/index — like config/items it's a standalone contract module). The UI
+// reads REFINE + cost/salvage/success helpers to draw the refine cabinet; the
+// server imports it directly to gate/roll refines. The engine never ROLLS a refine.
+export * from "@/engine/config/refine";
 export * from "@/engine/entities";
 export * from "@/engine/state";
 export * from "@/engine/state/version";

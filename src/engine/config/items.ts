@@ -49,11 +49,26 @@ export interface ItemTemplate {
 export interface EquippedGear {
   weapon: string | null;
   armor: string | null;
+  /**
+   * Per-slot RO refine level (+0..+REFINE.maxRefine), M7.6 "ตีบวก" (SAVE v14).
+   * OPTIONAL on the TYPE so pre-v14 constructions in the outer layers
+   * (render/ui/server literals) still satisfy it without edits; the ENGINE's live
+   * + persisted loadouts ALWAYS populate it, and every reader treats a missing
+   * entry as +0 (no bonus) via `refineOf`. Server-authoritative — the engine
+   * never ROLLS a refine (config/refine.ts); it only consumes the level into
+   * stats/power (systems/stats `equip*Of`).
+   */
+  refine?: { weapon: number; armor: number };
 }
 
 /** An empty (nothing-equipped) loadout. */
 export function emptyEquipped(): EquippedGear {
-  return { weapon: null, armor: null };
+  return { weapon: null, armor: null, refine: { weapon: 0, armor: 0 } };
+}
+
+/** The refine level of a loadout slot (missing/undefined → +0). */
+export function refineOf(equipped: EquippedGear, slot: GearSlot): number {
+  return equipped.refine?.[slot] ?? 0;
 }
 
 // ---------------------------------------------------------------------------

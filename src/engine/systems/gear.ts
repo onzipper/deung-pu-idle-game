@@ -18,8 +18,10 @@ import {
   ITEM_TEMPLATES,
   bossDropTableForStage,
   dropTableForStage,
+  refineOf,
   type GearSlot,
 } from "@/engine/config/items";
+import { clampRefine } from "@/engine/config/refine";
 import { lootFloat } from "@/engine/core/hash";
 import { clamp } from "@/engine/core/math";
 import { heroMaxHpOf } from "@/engine/systems/stats";
@@ -43,29 +45,47 @@ function reconcileMaxHp(hero: Hero): void {
   else hero.hp = Math.min(hero.hp, newMax);
 }
 
+/** A loadout's refine map (defaulted so `equipItem` can spread it safely). */
+function refineMap(hero: Hero): { weapon: number; armor: number } {
+  return {
+    weapon: refineOf(hero.equipped, "weapon"),
+    armor: refineOf(hero.equipped, "armor"),
+  };
+}
+
 /**
  * Equip (or, with `templateId === null`, UNEQUIP) the hero's `slot`. Validated:
  * the template must exist, sit in `slot`, and satisfy classReq (null = any
  * class). Any failing check is a silent no-op. Honoured across phases.
+ *
+ * `refineLevel` (M7.6 ตีบวก) is the SERVER-authoritative refine of the equipped
+ * instance (the engine never rolls it — config/refine.ts); it is clamped and
+ * stored per slot so the equipped item's stats scale by +N. Unequip resets the
+ * slot's refine to +0.
  */
 export function equipItem(
   state: GameState,
   hero: Hero,
   slot: GearSlot,
   templateId: string | null,
+  refineLevel = 0,
 ): void {
   if (!hero) return;
   if (templateId === null) {
     if (hero.equipped[slot] === null) return; // already empty
-    hero.equipped = { ...hero.equipped, [slot]: null };
+    hero.equipped = { ...hero.equipped, [slot]: null, refine: { ...refineMap(hero), [slot]: 0 } };
     reconcileMaxHp(hero);
     return;
   }
   const t = ITEM_TEMPLATES[templateId];
   if (!t || t.slot !== slot) return; // unknown template / wrong slot
   if (t.classReq && t.classReq !== hero.cls) return; // class mismatch — reject
-  if (hero.equipped[slot] === templateId) return; // no change
-  hero.equipped = { ...hero.equipped, [slot]: templateId };
+  const refine = clampRefine(refineLevel);
+  // No change only if BOTH the template AND its refine level are unchanged (a
+  // re-equip of the same item at a NEW +N — e.g. after a server-side refine —
+  // must re-derive stats/HP).
+  if (hero.equipped[slot] === templateId && refineOf(hero.equipped, slot) === refine) return;
+  hero.equipped = { ...hero.equipped, [slot]: templateId, refine: { ...refineMap(hero), [slot]: refine } };
   reconcileMaxHp(hero);
 }
 

@@ -20,8 +20,9 @@
  */
 
 import { CONFIG, HERO_TYPES, PRIMARY_STAT, SKILL_TYPES } from "@/engine/config";
-import { ITEM_TEMPLATES } from "@/engine/config/items";
+import { ITEM_TEMPLATES, refineOf } from "@/engine/config/items";
 import type { EquippedGear } from "@/engine/config/items";
+import { refinedStat } from "@/engine/config/refine";
 import type { Hero, HeroClass, HeroStats, StatKey } from "@/engine/entities";
 
 const ST = CONFIG.stats;
@@ -129,8 +130,10 @@ function equipStatSum(equipped: EquippedGear, key: "atk" | "def" | "hp"): number
   let sum = 0;
   const w = equipped.weapon ? ITEM_TEMPLATES[equipped.weapon] : undefined;
   const a = equipped.armor ? ITEM_TEMPLATES[equipped.armor] : undefined;
-  if (w) sum += w.stats[key] ?? 0;
-  if (a) sum += a.stats[key] ?? 0;
+  // M7.6 ตีบวก: each item's flat stat is scaled by its per-slot refine level
+  // (+0 → ×1, so an unrefined loadout is byte-identical to pre-M7.6).
+  if (w) sum += refinedStat(w.stats[key] ?? 0, refineOf(equipped, "weapon"));
+  if (a) sum += refinedStat(a.stats[key] ?? 0, refineOf(equipped, "armor"));
   return sum;
 }
 

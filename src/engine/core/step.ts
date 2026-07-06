@@ -134,8 +134,19 @@ export interface FrameInput {
    * (M7). Validated for template existence + slot + classReq (a mismatch is a
    * no-op); OWNERSHIP is server-enforced (the engine trusts the id). Honoured
    * across phases; applied once per drained input (a click equips exactly once).
+   * `refineLevel` (M7.6 ตีบวก, default 0) is the SERVER-decided refine of the
+   * equipped instance — clamped + consumed into stats/power (the engine never
+   * rolls it). Re-equipping the same template at a NEW +N re-derives its stats.
    */
-  equip?: { slot: GearSlot; templateId: string | null };
+  equip?: { slot: GearSlot; templateId: string | null; refineLevel?: number };
+  /**
+   * Apply a SIGNED delta to the material counter (M7.6 ตีบวก), floored at 0.
+   * Materials transactions (salvage grants +, refine spends −) are decided
+   * SERVER-side (like `goldCredit`); this reflects a server-confirmed change into
+   * the client sim so display/save stay in step. Persisted (SAVE v14). Non-finite
+   * values are ignored. Applied once per drained input.
+   */
+  materialsDelta?: number;
   /**
    * Update the idle-bot settings (M7.5) — merged over the current settings and
    * clamped. Applied once per drained input. The engine persists `state.bot`
@@ -191,7 +202,20 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // Auto-hunt toggle (M6.6) — engine-persisted (SAVE v12); see FrameInput.setAutoHunt.
   if (input.setAutoHunt !== undefined) state.autoHunt = input.setAutoHunt;
   // Equip / unequip gear on the solo hero (M7) — validated inside equipItem.
-  if (input.equip) equipItem(state, state.heroes[0], input.equip.slot, input.equip.templateId);
+  // `refineLevel` (M7.6) is the server-decided +N (default 0).
+  if (input.equip) {
+    equipItem(
+      state,
+      state.heroes[0],
+      input.equip.slot,
+      input.equip.templateId,
+      input.equip.refineLevel,
+    );
+  }
+  // Material counter delta (M7.6 ตีบวก) — server-confirmed salvage(+)/refine(−).
+  if (input.materialsDelta !== undefined && Number.isFinite(input.materialsDelta)) {
+    state.materials = Math.max(0, Math.floor(state.materials + input.materialsDelta));
+  }
   // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
   if (input.setAutoSlots) {
     for (const a of input.setAutoSlots) setAutoSlot(state, state.heroes[0], a.slot, a.skillId);
