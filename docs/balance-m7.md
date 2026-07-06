@@ -370,3 +370,94 @@ so no single build is trivialised.
 - **Mage safety scales with INT, not VIT** — more INT deepens the mana pool that sustains
   the skill uptime the caster survives on, so the *less*-VIT 3:1 both out-survived and
   out-cleared the heavier 2:1 (0 boss wipes vs 26).
+
+---
+
+# M7.6 — Refine ("ตีบวก") balance sweep
+
+Branch `develop` · tunables in `src/engine/config/refine.ts` (commit 52d704d draft).
+RO-style +0..+10 refine: `refinedStat = round(base × (1 + N × statBonusPerRefine))`
+folds through the EXISTING flat-additive equip pipeline (a +0 item is byte-identical to
+pre-M7.6). The engine NEVER rolls a refine (server-authoritative); the harness plays the
+server for this sweep.
+
+## Method
+
+The balance harness (`src/engine/__tests__/balance-sim.ts`) gained a `REFINE=1` /
+`REFINE=sweep` emulation (requires `GEAR=1`). It models a player who **salvages every
+non-worn drop on town trips → materials** (RO NPCs are town-only; feedstock capped at the
+100-slot inventory), then **greedily refines the equipped gear** when materials + surplus
+gold cover the next +1, feeding the resulting +N into COMBAT via the equip intent's
+`refineLevel`. The refine roll uses a harness splitmix32 stream — **NEVER** the engine
+wave-composition RNG. **Potions buy first**: the engine deducts potion gold from `s.gold`;
+refine draws only the post-potion surplus (`wallet = s.gold − refineGoldSpent`), so refine
+can never starve the M7.7 mana/hp sink (verified: sword 25 mana/run, archer 101, mage 17 —
+in the M7.7 ballpark). Town-trip cadence = the sim's existing death→town→auto-return loop
+(bots off). `REFINE_STRESS_SEC=45` adds a fixed-cadence trip (a bot-running player) to
+stress the wall against aggressive refining. Sweep: `SIM_SECONDS=2400`, 5 seeds, 3 classes.
+
+## Sweep — one-factor-at-a-time around the draft (aggregated over 15 runs/combo)
+
+| combo | class-chg | s15 boss | s15 farm | +N@s10 (w/a) | +N@s15 (w/a) | mat earn/spend | refine gold % | breaks/drops | attempts→+10 |
+|---|---|---|---|---|---|---|---|---|---|
+| **draft** (.08 / .45·.35·.25 / gold×1) | s5.0 | **0/15** | 15/15 | 0.3/0.3 | 1.4/2.6 | 1181/792 | 59% | 1/163 | **359** |
+| bonus .06 | s5.0 | 0/15 | 15/15 | 0.3/0.3 | 1.4/2.4 | 1179/784 | 58% | 1/163 | 359 |
+| bonus .10 | s5.0 | 0/15 | 15/15 | 0.3/0.3 | 1.3/2.6 | 1177/793 | 59% | 1/163 | 359 |
+| harsh band (.35·.25·.15) | s5.0 | 0/15 | 15/15 | 0.3/0.3 | 0.9/2.3 | 1176/791 | 59% | 2/163 | **1058** |
+| gold ×2 | s5.0 | 0/15 | 15/15 | 0.6/0.3 | 2.6/1.2 | 1115/**391** | 56% | 0/163 | 359 |
+
+## Chosen values = the DRAFT (every excursion rejected)
+
+- **`statBonusPerRefine` = 0.08** (draft kept) — the bonus axis is **outcome-insensitive
+  on-curve** (.06/.08/.10 all hold s15 boss 0/15; +N@s15 ≈ identical), because refine only
+  reaches +1..~4 at the frontier where the flat gear block is a minority of hero power. 0.08
+  is the felt-but-not-runaway middle; .10 adds theoretical late-game risk at a +10 the sim
+  can't reach, for no measured gain.
+- **`successChance` +8-10 = .45 / .35 / .25** (draft kept) — the harsh band barely moves the
+  on-curve outcome but pushes **attempts-to-+10 from ~359 → ~1058** (pointless-slog
+  territory). 359 keeps +10 a reachable pinnacle for a dedicated grinder → "lottery but not
+  pointless".
+- **`cost` gold (`goldPerTier2Level` = 5) + materials (`materialsPerTierLevel` = 1)** (draft
+  kept) — gold ×2 flips the binding constraint to GOLD and leaves **materials piling up
+  unspent** (392/1115 = 35% consumed) + starves armor (weapon-only refine). The draft keeps
+  **materials the real sink** (tanky classes consume 83–89% of feedstock) — the intended
+  "salvage ↔ cost ↔ break-loss" balance. `salvageYield` {common 1, rare 2, epic 4} and the
+  break/degrade/safe bands are unchanged (they produce the ~1%-of-drops break-loss above).
+
+## Gates — all held on the chosen (draft) set
+
+| gate | result |
+|---|---|
+| s15 soft-wall INTACT for a geared+refining player | ✅ **0/15 boss** every combo; **0/15 even under `REFINE_STRESS_SEC=45`** (aggressive refining to +N@s15 w4.1/a3.2) — refine softens the frontier farm like gear did, never cracks the boss |
+| class change ~s5 unchanged | ✅ **s5.0** every class/seed/combo (refine is barely available that early — realistic runs make ~0–1 town trips before s5) |
+| material economy a real sink (constrained, not +10-everything) | ✅ equipped hovers **+1..~4** at the frontier; tanky classes spend 83–89% of feedstock, archer is gold-bound (potions) so materials pile — either way the player is constrained, never at +10 |
+| break-loss lottery-like but not pointless | ✅ **attempts-to-+10 ≈ 359**; break-induced item loss ≈ **1–2 items/run vs ~163 drops (~1%)** — well under drop income |
+| no-refine byte-identical to the geared baseline | ✅ `GEAR=1` (no `REFINE`) reproduces the geared baseline exactly (s15 boss 0/15, class change s5, levels 44); 541 engine tests green; +0 = ×1 = no effect |
+
+## Expected +N ladder (equipped gear, time-averaged in-band)
+
+| class (cadence) | +N@s10 (w/a) | +N@s15 (w/a) | town trips/run | mat earn/spend | refine gold % |
+|---|---|---|---|---|---|
+| swordsman (death-only) | 0.0/0.0 | 2.4/3.2 | 2 | 1089/912 | 71% |
+| archer (death-only) | 0.6/0.5 | 0.7/0.4 | 70 | 1333/537 | 33% (potion-bound) |
+| mage (death-only) | 0.4/0.4 | 1.0/4.3 | 2 | 1121/927 | 72% |
+| sword / mage (`STRESS=45`, bot cadence) | ~3.5–4.2/~2.0 | ~4.1/~2.1–3.2 | 27–30 | ~1335/~1150 | 72–79% |
+
+Refine is the **long-missing gold sink** for low-death classes (pre-refine gold accrued
+unused): tanky heroes dump ~72% of earned gold into +N. The squishy **archer never benefits**
+— its gold is eaten by frontier potions (33% to refine), so materials inflate and +N stays
+~+0.5; consistent with the M7.7 finding that archer frontier squishiness is a content
+matter, not fixable by allocation/refine.
+
+## Compromises / notes
+
+- **Town-gated cadence under-samples tanky classes** (2 death-trips/run) — realistic runs
+  show refine landing late+small, so it barely moves farm times (s1–s10 byte-identical, mild
+  s11–14 frontier help). A player running the M7.5 restock/sell bots refines far more
+  (the `STRESS` row) — and even that leaves s15 boss 0/15.
+- **A fully-ground +10/+10 endgame set is INTENDED to be part of the eventual wall-break**
+  (M7's "gear + XP grind crosses s15" path); the gate is that on-curve, in-window refining
+  does not DELETE the wall — which holds at every combo and under stress.
+- The refine emulation lives entirely harness-side (gold/materials virtual, roll on a
+  separate splitmix stream); it mutates only the hero's server-authoritative `equipped.refine`
+  (which the engine consumes deterministically), so the reserved wave RNG is untouched.

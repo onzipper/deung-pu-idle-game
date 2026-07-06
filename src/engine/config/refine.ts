@@ -8,8 +8,12 @@
  *    server-decided `refineLevel` into item stats (`refinedStat`) — a pure,
  *    deterministic function of `(baseStat, level)`, NO RNG (the seeded stream is
  *    wave-composition-only).
- *  - All numbers here are sim-swept balance levers (a later refine-sim wave tunes
- *    them). Draft rates below are placeholders that satisfy the RO-style shape.
+ *  - All numbers here are sim-VALIDATED balance levers (M7.6 refine sweep,
+ *    docs/balance-m7.md "Refine (M7.6)"): a `REFINE=sweep GEAR=1` run of the
+ *    balance harness over bonus {.06,.08,.10}, the +8-10 success band (draft vs a
+ *    harsher .35/.25/.15), and the gold cost scalar (draft vs ×2) — all excursions
+ *    were REJECTED, the draft holds every gate (s15 boss 0/15 even under aggressive
+ *    refining, class change s5, materials a real sink, break-loss ~1% of drops).
  *
  * STAT-BONUS SHAPE (chosen): a refine multiplies the item's FLAT stat block by
  * `(1 + level * statBonusPerRefine)`. This folds through the EXISTING flat-

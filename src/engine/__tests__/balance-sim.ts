@@ -30,6 +30,11 @@ import {
   zoneAt,
   SIGNATURE_SKILL,
   ITEM_TEMPLATES,
+  REFINE,
+  refineCost,
+  successChanceForLevel,
+  failModeForLevel,
+  salvageYield,
   SAVE_VERSION,
   FIXED_DT,
   type FrameInput,
@@ -38,6 +43,7 @@ import {
   type HeroClass,
   type SaveData,
   type ItemTemplate,
+  type GearSlot,
 } from "@/engine";
 
 const SIM_SECONDS = Number(process.env.SIM_SECONDS ?? 1800);
@@ -54,6 +60,108 @@ const CLASSES: HeroClass[] = (process.env.CLASSES ?? "swordsman,archer,mage")
 // equilibrium run). Default (unset) → drops are ignored (NO-GEAR run: must match
 // the balance-m6 tables, since unarmored combat is byte-identical to pre-M7).
 const GEAR = process.env.GEAR === "1";
+// REFINE=1 → the autopilot also plays the SERVER's refine role (M7.6 ตีบวก): it
+// salvages non-upgrade drops on town trips (materials), then GREEDILY refines the
+// equipped gear when materials + surplus gold cover the next +1, and feeds the
+// resulting +N into combat via the equip intent's `refineLevel`. Requires GEAR
+// (nothing to refine bare). All gold/material bookkeeping is HARNESS-SIDE and the
+// refine roll uses a harness splitmix stream (NEVER the engine wave RNG). With
+// REFINE unset the code path is inert → byte-identical to the GEAR baseline.
+const REFINE_ON = process.env.REFINE === "1" && GEAR;
+// REFINE_SWEEP=1 → run the one-factor-at-a-time param grid (below) and print a
+// compact comparison table instead of the per-class report.
+const REFINE_SWEEP = process.env.REFINE === "sweep" && GEAR;
+// The per-seed refine emulation runs for BOTH a single REFINE=1 run and each combo
+// of a REFINE=sweep run.
+const REFINE_ACTIVE = REFINE_ON || REFINE_SWEEP;
+// REFINE_STRESS_SEC (default 0 = off): also grant a refine opportunity every N sec
+// of in-farm time, ON TOP of death-town trips — models a player running the M7.5
+// restock/sell bots (regular town cadence). Maximises refine progress to STRESS the
+// s15 wall against an aggressively-refining player (the sim's death-only cadence
+// under-samples refine for tanky classes). Salvage feedstock is still town-gated.
+const REFINE_STRESS_SEC = Number(process.env.REFINE_STRESS_SEC ?? 0);
+
+// ---------------------------------------------------------------------------
+// Refine sweep — the tunables under test (M7.6). Each combo mutates the live
+// REFINE config so BOTH the harness (roll/cost/salvage) AND the engine
+// (refinedStat in combat) read the same values, then the class×seed matrix runs.
+// ---------------------------------------------------------------------------
+
+interface RefineCombo {
+  label: string;
+  /** statBonusPerRefine (combat-facing +N stat multiplier increment). */
+  bonus: number;
+  /** +8/+9/+10 success band. */
+  band: { 8: number; 9: number; 10: number };
+  /** gold cost scalar (× the base goldPerTier2Level 5). */
+  goldX: number;
+}
+
+// Draft center + one-factor-at-a-time excursions (bonus {.06,.08,.10}; the +8-10
+// band draft vs harsher; gold cost draft vs ×2).
+const DRAFT_BAND = { 8: 0.45, 9: 0.35, 10: 0.25 };
+const HARSH_BAND = { 8: 0.35, 9: 0.25, 10: 0.15 };
+const REFINE_GRID: RefineCombo[] = [
+  { label: "draft(.08/soft/g5)", bonus: 0.08, band: DRAFT_BAND, goldX: 1 },
+  { label: "bonus.06", bonus: 0.06, band: DRAFT_BAND, goldX: 1 },
+  { label: "bonus.10", bonus: 0.1, band: DRAFT_BAND, goldX: 1 },
+  { label: "harshBand", bonus: 0.08, band: HARSH_BAND, goldX: 1 },
+  { label: "gold×2", bonus: 0.08, band: DRAFT_BAND, goldX: 2 },
+];
+
+/** Mutate the live REFINE config to a combo (sim-only; a dev harness lever). */
+function applyRefineCombo(c: RefineCombo): void {
+  const R = REFINE as unknown as {
+    statBonusPerRefine: number;
+    successChance: Record<number, number>;
+    cost: { goldPerTier2Level: number };
+  };
+  R.statBonusPerRefine = c.bonus;
+  R.successChance[8] = c.band[8];
+  R.successChance[9] = c.band[9];
+  R.successChance[10] = c.band[10];
+  R.cost.goldPerTier2Level = 5 * c.goldX;
+}
+
+/** A tiny splitmix32 — the HARNESS refine-roll stream (never the engine RNG). */
+function splitmix32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x9e3779b9) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 16), 0x21f0aaad);
+    t = Math.imul(t ^ (t >>> 15), 0x735a2d97);
+    return ((t ^ (t >>> 15)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Monte-Carlo the expected number of refine ATTEMPTS to first reach +10 from a
+ * fresh (+0) item under the CURRENT REFINE success table, with unlimited
+ * mats/gold — the "lottery-ness" metric. Break (+8-10 fail) destroys the item →
+ * re-climb from +0; degrade (+4-7 fail) drops one level; safe (+1-3) never fails.
+ */
+function expectedAttemptsTo10(trials = 40000): number {
+  const rng = splitmix32(0xa5a5a5a5);
+  let total = 0;
+  for (let t = 0; t < trials; t++) {
+    let cur = 0;
+    let attempts = 0;
+    while (cur < REFINE.maxRefine) {
+      const target = cur + 1;
+      attempts++;
+      if (rng() < successChanceForLevel(target)) {
+        cur = target;
+      } else {
+        const mode = failModeForLevel(target);
+        if (mode === "degrade") cur = Math.max(0, cur - 1);
+        else if (mode === "break") cur = 0;
+      }
+    }
+    total += attempts;
+  }
+  return total / trials;
+}
 
 // ---------------------------------------------------------------------------
 // Per-run metrics — keyed by the zone's STAGE (each farm zone / boss room owns one).
@@ -89,6 +197,37 @@ interface SeedResult {
   /** M7.7: potions actually consumed (auto-use) over the run — the mana-sink check. */
   hpPotionsUsed: number;
   manaPotionsUsed: number;
+  /** M7.6 ตีบวก refine emulation (REFINE_ON): the material-sink + wall metrics. */
+  refine: RefineMetrics;
+}
+
+interface RefineMetrics {
+  matEarned: number;
+  matSpent: number;
+  refineGold: number;
+  goldEarned: number;
+  attempts: number;
+  breaks: number;
+  drops: number;
+  townTrips: number;
+  /** Time-averaged equipped +N (weapon,armor) sampled while in the s10 / s15 band. */
+  s10: { w: number; a: number; n: number };
+  s15: { w: number; a: number; n: number };
+}
+
+function freshRefineMetrics(): RefineMetrics {
+  return {
+    matEarned: 0,
+    matSpent: 0,
+    refineGold: 0,
+    goldEarned: 0,
+    attempts: 0,
+    breaks: 0,
+    drops: 0,
+    townTrips: 0,
+    s10: { w: 0, a: 0, n: 0 },
+    s15: { w: 0, a: 0, n: 0 },
+  };
 }
 
 function makeSave(cls: HeroClass, seed: number): SaveData {
@@ -272,6 +411,72 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let hpPotionsUsed = 0;
   let manaPotionsUsed = 0;
 
+  // ---- M7.6 refine emulation run-state (harness plays the server) ----
+  const rm = freshRefineMetrics();
+  // Harness refine RNG — decorrelated per (class, seed); NEVER the engine stream.
+  const rrng = splitmix32(((seed * 0x9e3779b1) ^ (cls.length * 2654435761)) >>> 0);
+  const curRefine: Record<GearSlot, number> = { weapon: 0, armor: 0 };
+  // Salvage feedstock waiting for the next town trip (RO NPCs are town-only), capped
+  // at the inventory cap — a hero who rarely visits town overflows + loses drops.
+  let matBank = 0;
+  let pendingMat = 0;
+  let pendingCount = 0;
+  let prevGold = s.gold;
+  let prevTown = zoneAt(s.location).kind === "town";
+
+  let lastStressTrip = 0;
+  const salvageOf = (templateId: string): number => {
+    const t = ITEM_TEMPLATES[templateId];
+    return t ? salvageYield(t.tier, t.rarity) : 0;
+  };
+  // One refine "town visit": flush feedstock → materials, then GREEDILY refine the
+  // equipped gear from the SURPLUS gold left after the engine's potion buys.
+  const doRefineTrip = (): void => {
+    rm.townTrips++;
+    matBank += pendingMat;
+    rm.matEarned += pendingMat;
+    pendingMat = 0;
+    pendingCount = 0;
+    const eq = s.heroes[0].equipped;
+    for (const slot of ["weapon", "armor"] as GearSlot[]) {
+      const tid = eq[slot];
+      if (!tid) continue;
+      const tier = ITEM_TEMPLATES[tid].tier;
+      let cur = curRefine[slot];
+      let guard = 0;
+      while (cur < REFINE.maxRefine && guard++ < 400) {
+        const target = cur + 1;
+        const cost = refineCost(tier, target);
+        const wallet = s.gold - rm.refineGold; // surplus after potions
+        if (matBank < cost.materials || wallet < cost.gold) break;
+        matBank -= cost.materials;
+        rm.matSpent += cost.materials;
+        rm.refineGold += cost.gold;
+        rm.attempts++;
+        if (rrng() < successChanceForLevel(target)) {
+          cur = target; // success (parks at +10 until a tier upgrade resets it)
+        } else {
+          const mode = failModeForLevel(target);
+          if (mode === "degrade") cur = Math.max(0, cur - 1);
+          else if (mode === "break") {
+            rm.breaks++; // item destroyed → re-acquired from the drop stream at +0
+            cur = 0;
+            break; // stop pushing this slot this trip ("ugh, broke — later")
+          }
+          // safe: no change
+        }
+      }
+      curRefine[slot] = cur;
+    }
+  };
+  // A drop the player will NOT wear becomes feedstock (the replaced old item too);
+  // capped at INVENTORY_CAP pending — overflow is lost until a town trip clears it.
+  const feedstock = (templateId: string): void => {
+    if (pendingCount >= 100) return;
+    pendingCount++;
+    pendingMat += salvageOf(templateId);
+  };
+
   for (let i = 0; i < STEPS; i++) {
     const input: FrameInput = { ...navInput(s), ...shopInput(s) };
     if (isClassChangeQuestOffered(s.heroes[0])) input.acceptQuest = 0;
@@ -279,12 +484,25 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     const slots = fillAutoSlots(s.heroes[0]);
     if (slots.length) input.setAutoSlots = slots;
     // Equip toward the best owned item (one slot/step). Weapon first, then armor.
+    // A template SWAP (upgrade) equips at +0 (a fresh item, refine reset); when the
+    // template already matches, sync the harness-decided +N into the engine so the
+    // refine bonus feeds combat (M7.6). One equip intent per step.
     if (GEAR && !input.walkToZone) {
       const eq = s.heroes[0].equipped;
       if (bestOwned.weapon && eq.weapon !== bestOwned.weapon) {
-        input.equip = { slot: "weapon", templateId: bestOwned.weapon };
+        input.equip = { slot: "weapon", templateId: bestOwned.weapon, refineLevel: 0 };
+        curRefine.weapon = 0;
       } else if (bestOwned.armor && eq.armor !== bestOwned.armor) {
-        input.equip = { slot: "armor", templateId: bestOwned.armor };
+        input.equip = { slot: "armor", templateId: bestOwned.armor, refineLevel: 0 };
+        curRefine.armor = 0;
+      } else if (REFINE_ACTIVE) {
+        const wR = eq.weapon ? (eq.refine?.weapon ?? 0) : 0;
+        const aR = eq.armor ? (eq.refine?.armor ?? 0) : 0;
+        if (eq.weapon && wR !== curRefine.weapon) {
+          input.equip = { slot: "weapon", templateId: eq.weapon, refineLevel: curRefine.weapon };
+        } else if (eq.armor && aR !== curRefine.armor) {
+          input.equip = { slot: "armor", templateId: eq.armor, refineLevel: curRefine.armor };
+        }
       }
     }
 
@@ -294,6 +512,23 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     for (const e of s.events) {
       if (e.type === "itemDrop") {
         drops++;
+        if (REFINE_ACTIVE) {
+          rm.drops++;
+          // Is this drop a strict upgrade the hero will WEAR? Then the OLD item it
+          // replaces becomes feedstock; otherwise the drop itself does.
+          const t = ITEM_TEMPLATES[e.templateId];
+          if (t && gearCompatible(t, cls)) {
+            const cur = bestOwned[t.slot];
+            const upgrade = !cur || gearScore(t) > gearScore(ITEM_TEMPLATES[cur]);
+            if (upgrade) {
+              if (cur) feedstock(cur); // the displaced item is salvaged
+            } else {
+              feedstock(e.templateId);
+            }
+          } else {
+            feedstock(e.templateId); // class-incompatible drop → pure feedstock
+          }
+        }
         if (GEAR) considerDrop(bestOwned, e.templateId, cls);
       }
       if (e.type === "consumableUsed") {
@@ -336,6 +571,41 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     }
     if (prevTier < s.heroes[0].tier) evolveStage = s.stage;
 
+    // ---- M7.6 refine emulation (post-step, harness-side) ----
+    if (REFINE_ACTIVE) {
+      // Gold income (positive deltas only; potion buys are the engine's, refine
+      // spends are virtual so they never touch s.gold — potions ALWAYS buy first).
+      const dg = s.gold - prevGold;
+      if (dg > 0) rm.goldEarned += dg;
+      prevGold = s.gold;
+
+      // Town trip (auto-return death loop passes through town): salvage + greedy
+      // refine. REFINE_STRESS_SEC additionally grants a trip on a fixed in-farm
+      // cadence (a bot-running player) to stress the wall against heavy refining.
+      const nowTown = zoneAt(s.location).kind === "town";
+      if (nowTown && !prevTown) doRefineTrip();
+      else if (
+        REFINE_STRESS_SEC > 0 &&
+        !nowTown &&
+        s.time - lastStressTrip >= REFINE_STRESS_SEC
+      ) {
+        lastStressTrip = s.time;
+        doRefineTrip();
+      }
+      prevTown = nowTown;
+
+      // Time-average the equipped +N in the s10 / s15 stage bands.
+      if (s.stage === 9 || s.stage === 10) {
+        rm.s10.w += curRefine.weapon;
+        rm.s10.a += curRefine.armor;
+        rm.s10.n++;
+      } else if (s.stage === 14 || s.stage === 15) {
+        rm.s15.w += curRefine.weapon;
+        rm.s15.a += curRefine.armor;
+        rm.s15.n++;
+      }
+    }
+
     prevPhase = s.phase;
     prevDead = nowDead;
     prevTier = s.heroes[0].tier;
@@ -356,6 +626,7 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     finalArmor: s.heroes[0].equipped.armor,
     hpPotionsUsed,
     manaPotionsUsed,
+    refine: rm,
   };
 }
 
@@ -419,6 +690,33 @@ function aggregate(results: SeedResult[]): ZoneAgg[] {
   return out;
 }
 
+/** Aggregate refine metrics across seeds (per-run means, band-weighted +N means). */
+function aggRefine(results: SeedResult[]): {
+  s10w: number; s10a: number; s15w: number; s15a: number;
+  matEarned: number; matSpent: number; refineGold: number; goldEarned: number;
+  attempts: number; breaks: number; drops: number; townTrips: number;
+} {
+  const n = Math.max(1, results.length);
+  const bandMean = (sel: (m: RefineMetrics) => { w: number; a: number; n: number }) => {
+    let w = 0, a = 0, cnt = 0;
+    for (const r of results) {
+      const b = sel(r.refine);
+      w += b.w; a += b.a; cnt += b.n;
+    }
+    return { w: w / Math.max(1, cnt), a: a / Math.max(1, cnt) };
+  };
+  const s10 = bandMean((m) => m.s10);
+  const s15 = bandMean((m) => m.s15);
+  const sum = (sel: (m: RefineMetrics) => number) => results.reduce((x, r) => x + sel(r.refine), 0) / n;
+  return {
+    s10w: s10.w, s10a: s10.a, s15w: s15.w, s15a: s15.a,
+    matEarned: sum((m) => m.matEarned), matSpent: sum((m) => m.matSpent),
+    refineGold: sum((m) => m.refineGold), goldEarned: sum((m) => m.goldEarned),
+    attempts: sum((m) => m.attempts), breaks: sum((m) => m.breaks),
+    drops: sum((m) => m.drops), townTrips: sum((m) => m.townTrips),
+  };
+}
+
 function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void {
   const n = results.length;
   console.log(`\n=== ${cls.toUpperCase()} (solo, world) — ${n} seeds ===`);
@@ -466,14 +764,89 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
         `final gear: ${results.map((r) => `${r.finalWeapon ?? "-"}/${r.finalArmor ?? "-"}`).join(" ")}`,
     );
   }
+  if (REFINE_ON) {
+    const agg = aggRefine(results);
+    console.log(
+      `  - refine: +N@s10 w${agg.s10w.toFixed(1)}/a${agg.s10a.toFixed(1)} · ` +
+        `+N@s15 w${agg.s15w.toFixed(1)}/a${agg.s15a.toFixed(1)} | ` +
+        `mat earned ${agg.matEarned.toFixed(0)} spent ${agg.matSpent.toFixed(0)} | ` +
+        `refineGold ${agg.refineGold.toFixed(0)} of ${agg.goldEarned.toFixed(0)} earned ` +
+        `(${((100 * agg.refineGold) / Math.max(1, agg.goldEarned)).toFixed(0)}%) | ` +
+        `attempts ${agg.attempts.toFixed(0)} breaks ${agg.breaks.toFixed(0)}/${agg.drops.toFixed(0)} drops | ` +
+        `town trips ${agg.townTrips.toFixed(0)}`,
+    );
+  }
   // Frontier flag: which zones did NOT clear on every seed (a wall/soft-wall).
   const walls = agg.filter((a) => a.clears < n).map((a) => `${a.mapId}/s${a.stage}(${a.kind})`);
   if (walls.length) console.log(`  - not cleared on every seed (frontier): ${walls.join(", ")}`);
 }
 
-function main(): void {
+/**
+ * Refine parameter sweep (REFINE=sweep GEAR=1): run the class×seed matrix for each
+ * combo in REFINE_GRID and print a compact comparison — the wall gates (s15 boss
+ * clears must stay 0, class change ~s5), the material sink (+N@s10/s15, mat/gold
+ * earned vs spent), and the lottery (attempts-to-+10, breaks vs drops).
+ */
+function runSweep(): void {
   console.log(
-    `[balance-sim ${GEAR ? "M7 GEAR" : "M6 world / M7 no-gear"}] ${SIM_SECONDS}s ` +
+    `[refine-sweep] ${SIM_SECONDS}s × ${SEEDS.length} seeds × ${CLASSES.length} classes ` +
+      `per combo, ${REFINE_GRID.length} combos\n`,
+  );
+  const head =
+    "  " + pad("combo", 20) + pad("chg", 5) + pad("s15boss", 9) + pad("s15farm", 9) +
+    pad("+N@s10", 12) + pad("+N@s15", 12) + pad("mat e/s", 14) + pad("gold%", 7) +
+    pad("brk/drop", 11) + pad("→+10", 7);
+  console.log(head);
+  for (const combo of REFINE_GRID) {
+    applyRefineCombo(combo);
+    const att10 = expectedAttemptsTo10();
+    // Aggregate over ALL classes×seeds for the combo.
+    let s15boss = 0, s15bossTot = 0, s15farm = 0, s15farmTot = 0;
+    const chgStages: number[] = [];
+    const all: SeedResult[] = [];
+    for (const cls of CLASSES) {
+      for (const seed of SEEDS) {
+        const r = runSeed(cls, seed);
+        all.push(r);
+        if (r.evolveStage !== null) chgStages.push(r.evolveStage);
+        const bossZone = r.zones.find((z) => z.kind === "boss" && z.stage === 15);
+        if (bossZone) {
+          s15bossTot++;
+          if (bossZone.clearTime !== null) s15boss++;
+        }
+        const farmZone = r.zones.find((z) => z.kind === "farm" && z.stage === 15);
+        if (farmZone) {
+          s15farmTot++;
+          if (farmZone.clearTime !== null) s15farm++;
+        }
+      }
+    }
+    const g = aggRefine(all);
+    const chg = chgStages.length ? (chgStages.reduce((a, b) => a + b, 0) / chgStages.length).toFixed(1) : "-";
+    const goldPct = ((100 * g.refineGold) / Math.max(1, g.goldEarned)).toFixed(0) + "%";
+    console.log(
+      "  " +
+        pad(combo.label, 20) +
+        pad(chg, 5) +
+        pad(`${s15boss}/${s15bossTot}`, 9) +
+        pad(`${s15farm}/${s15farmTot}`, 9) +
+        pad(`w${g.s10w.toFixed(1)}/a${g.s10a.toFixed(1)}`, 12) +
+        pad(`w${g.s15w.toFixed(1)}/a${g.s15a.toFixed(1)}`, 12) +
+        pad(`${g.matEarned.toFixed(0)}/${g.matSpent.toFixed(0)}`, 14) +
+        pad(goldPct, 7) +
+        pad(`${g.breaks.toFixed(0)}/${g.drops.toFixed(0)}`, 11) +
+        pad(att10.toFixed(0), 7),
+    );
+  }
+}
+
+function main(): void {
+  if (REFINE_SWEEP) {
+    runSweep();
+    return;
+  }
+  console.log(
+    `[balance-sim ${GEAR ? "M7 GEAR" : "M6 world / M7 no-gear"}${REFINE_ON ? " +REFINE" : ""}] ${SIM_SECONDS}s ` +
       `(${STEPS} steps) per seed, ${SEEDS.length} seeds, classes: ${CLASSES.join("/")}`,
   );
   const byClass = new Map<HeroClass, ZoneAgg[]>();
