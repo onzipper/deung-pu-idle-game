@@ -32,8 +32,24 @@ describe("selectCurrentRung", () => {
     ).toBe("classQuest");
   });
 
-  it("a tier-2 (evolved) hero farming normally is on zoneBoss", () => {
+  it("a tier-2 (evolved) hero farming normally (no tier-3 quest yet) is on zoneBoss", () => {
     expect(selectCurrentRung(input({ hero: { tier: 2, quest: null } }))).toBe("zoneBoss");
+  });
+
+  it("a tier-2 hero with an offered-but-incomplete tier-3 quest is on classQuest (M7.9)", () => {
+    expect(
+      selectCurrentRung(input({ hero: { tier: 2, quest: { complete: false } } })),
+    ).toBe("classQuest");
+  });
+
+  it("a tier-2 hero with a COMPLETE tier-3 quest stays on classQuest (ready to evolve, M7.9)", () => {
+    expect(
+      selectCurrentRung(input({ hero: { tier: 2, quest: { complete: true } } })),
+    ).toBe("classQuest");
+  });
+
+  it("a tier-3 (fully evolved) hero is on zoneBoss regardless of quest", () => {
+    expect(selectCurrentRung(input({ hero: { tier: 3, quest: null } }))).toBe("zoneBoss");
   });
 
   it("bossReady ALWAYS forces zoneBoss, even for a fresh tier-1 hero below the quest gate", () => {

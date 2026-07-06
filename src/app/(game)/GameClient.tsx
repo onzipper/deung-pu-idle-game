@@ -49,12 +49,12 @@ import {
   bossHint,
   canEvolveHero,
   canUseConsumable,
-  classChangeQuestFor,
   combatPower,
   createAccumulator,
   drainAccumulator,
+  evolutionQuestFor,
   initGameState,
-  isClassChangeQuestOffered,
+  isEvolutionQuestOffered,
   learnedSkills,
   migrate,
   repairHeroClass,
@@ -197,16 +197,20 @@ function buildSkillSummaries(h: Hero): SkillSummary[] {
 }
 
 /**
- * Precompute the class-change quest affordance state (M5 task 5). Returns null
- * when there's nothing quest-related to show (tier 2, or below the level gate with
- * no active quest — the bar shows the evolved badge / locked hint from tier/level).
+ * Precompute the evolution-quest affordance state — covers BOTH the tier-1 ->
+ * tier-2 class-change quest and the M7.9 tier-2 -> tier-3 quest (same shape,
+ * `evolutionQuestFor(cls, tier)` resolves the right def). Returns null when
+ * there's nothing quest-related to show: tier 3 (fully evolved — no further
+ * quest, the bar shows the final-form badge instead), or below the level gate
+ * with no active quest (the bar shows the locked hint from tier/level).
  */
 function buildQuestSummary(h: Hero): HeroQuestSummary | null {
-  if (h.tier === 2) return null;
-  const offered = isClassChangeQuestOffered(h);
+  if (h.tier === 3) return null;
+  const offered = isEvolutionQuestOffered(h);
   const q = h.quest;
   if (!offered && !q) return null; // below the level gate — no affordance yet
-  const def = classChangeQuestFor(h.cls);
+  const def = evolutionQuestFor(h.cls, h.tier);
+  if (!def) return null;
   const killIdx = def.objectives.findIndex((o) => o.type === "kill");
   const bossIdx = def.objectives.findIndex((o) => o.type === "killBoss");
   const kills = killIdx >= 0 ? (q?.progress[killIdx] ?? 0) : 0;
@@ -239,7 +243,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       maxMana: h.maxMana,
       skills: buildSkillSummaries(h),
       autoSlots: [...h.autoSlots],
-      unlockedSlots: unlockedAutoSlotCount(h.level),
+      unlockedSlots: unlockedAutoSlotCount(h.level, h.tier),
       dead: h.dead,
       level: h.level,
       xpProgress,
@@ -824,7 +828,9 @@ export function GameClient() {
         body: JSON.stringify(serialize()),
         keepalive: true,
       })
-        .then((res) => (res.ok ? (res.json() as Promise<{ announcements?: AnnouncementWire[] }>) : null))
+        .then((res) =>
+          res.ok ? (res.json() as Promise<{ announcements?: AnnouncementWire[] }>) : null,
+        )
         .then((json) => {
           // M7.9: the polling piggyback — every autosave response carries any
           // recent server-wide high-refine landing (no websockets this phase).
@@ -945,7 +951,11 @@ export function GameClient() {
     function onArenaClick(e: MouseEvent): void {
       if (!arenaEl) return;
       const rect = arenaEl.getBoundingClientRect();
-      const hit = renderer.hitTestPointer(e.clientX - rect.left, e.clientY - rect.top, state);
+      const hit = renderer.hitTestPointer(
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+        state,
+      );
       if (!hit) return;
       if (hit.kind === "monster") useGameStore.getState().queueAttackTarget(hit.id);
       else useGameStore.getState().queueMoveTo(hit.x);
@@ -960,7 +970,11 @@ export function GameClient() {
     function onArenaPointerMove(e: PointerEvent): void {
       if (!arenaEl || e.pointerType !== "mouse") return;
       const rect = arenaEl.getBoundingClientRect();
-      const hit = renderer.hitTestPointer(e.clientX - rect.left, e.clientY - rect.top, state);
+      const hit = renderer.hitTestPointer(
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+        state,
+      );
       arenaEl.style.cursor = hit?.kind === "monster" ? "crosshair" : "";
     }
     arenaEl.addEventListener("pointermove", onArenaPointerMove);

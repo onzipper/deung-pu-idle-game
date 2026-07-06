@@ -69,15 +69,22 @@ export interface GoalLadderInput {
  * biggest moment and must surface regardless of narrative milestone (a fresh
  * Lv.3 hero clearing stage-1's boss is just as much "current rung: zoneBoss"
  * as a fully-evolved hero grinding stage 40). Otherwise: a tier-1 hero with
- * no quest yet offered is still grinding toward the Lv.15 gate (`levelUp`);
- * once a quest exists (offered, accepted, or complete-but-not-yet-evolved)
- * that becomes the current rung; a tier-2 (evolved) hero has nothing
- * narrative left but the endless zone/boss loop.
+ * no quest yet offered is still grinding toward the Lv.15 gate (`levelUp`,
+ * the ONLY tier that reaches this rung — `MilestoneCard` hardcodes the tier-1
+ * level gate for its progress bar, see `GoalLadder.tsx`); once EITHER
+ * evolution quest exists (tier-1's class-change OR the M7.9 tier-2 -> tier-3
+ * quest — offered, accepted, or complete-but-not-yet-evolved) that becomes
+ * the current rung regardless of which tier it belongs to (same `classQuest`
+ * rung id/copy serves both, `evolutionQuestFor` already resolves the right
+ * def per tier); a tier-2 hero with NO active quest yet (still grinding
+ * toward the Lv.40 gate) and a fully-evolved tier-3 hero both fall through to
+ * the endless zone/boss loop.
  */
 export function selectCurrentRung(input: GoalLadderInput): GoalRungId {
   if (input.phase === "victory" || input.bossReady) return "zoneBoss";
-  if (input.hero && input.hero.tier === 1) {
-    return input.hero.quest ? "classQuest" : "levelUp";
+  if (input.hero && input.hero.tier < 3) {
+    if (input.hero.quest) return "classQuest";
+    if (input.hero.tier === 1) return "levelUp";
   }
   return "zoneBoss";
 }

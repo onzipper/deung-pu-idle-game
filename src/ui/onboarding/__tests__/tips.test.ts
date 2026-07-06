@@ -26,6 +26,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
       {
         skillCd: 1,
         dead: false,
+        tier: 1,
         statsSum: 0,
         statPoints: 0,
         unlockedSlots: 1,
@@ -184,6 +185,24 @@ describe("individual tip triggers", () => {
     const offNext = snapshot({ autoHunt: false });
     expect(tip.trigger(bootPrev, bootNext)).toBe(false);
     expect(tip.trigger(onPrev, offNext)).toBe(true);
+  });
+
+  it("tier3QuestOffered fires only for a tier-2 hero's quest, not a tier-1 one (M7.9)", () => {
+    const tip = idOf("tier3QuestOffered");
+    const prev = snapshot();
+    const tier1Offered = snapshot({ heroes: [hero({ tier: 1, questOffered: true })] });
+    const tier2Offered = snapshot({ heroes: [hero({ tier: 2, questOffered: true })] });
+    expect(tip.trigger(prev, tier1Offered)).toBe(false);
+    expect(tip.trigger(prev, tier2Offered)).toBe(true);
+  });
+
+  it("skill4Unlocked fires only on the 3 -> 4 unlocked-slot edge (M7.9 tier 3)", () => {
+    const tip = idOf("skill4Unlocked");
+    const prev = snapshot({ heroes: [hero({ unlockedSlots: 3 })] });
+    const stillThree = snapshot({ heroes: [hero({ unlockedSlots: 3 })] });
+    const fourUnlocked = snapshot({ heroes: [hero({ unlockedSlots: 4 })] });
+    expect(tip.trigger(prev, stillThree)).toBe(false);
+    expect(tip.trigger(prev, fourUnlocked)).toBe(true);
   });
 });
 

@@ -20,7 +20,14 @@
 import type { HeroClass } from "@/engine";
 
 export type CodexCategoryId =
-  "coreLoop" | "character" | "heroes" | "boss" | "controls" | "offlineIdle" | "gear";
+  | "coreLoop"
+  | "world"
+  | "character"
+  | "heroes"
+  | "boss"
+  | "controls"
+  | "offlineIdle"
+  | "gear";
 
 export interface CodexCategoryDef {
   id: CodexCategoryId;
@@ -43,6 +50,7 @@ export interface CodexEntryDef {
 
 export const CODEX_CATEGORIES: readonly CodexCategoryDef[] = [
   { id: "coreLoop" },
+  { id: "world" },
   { id: "character" },
   { id: "heroes" },
   { id: "boss" },
@@ -54,6 +62,9 @@ export const CODEX_CATEGORIES: readonly CodexCategoryDef[] = [
 export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   { id: "coreLoop", category: "coreLoop" },
 
+  // "world" (M7.9 "Grand Expansion"): the 6-map/30-stage world overview.
+  { id: "worldMaps", category: "world" },
+
   // "character" (M5 Character Pivot): the single-hero systems that replaced
   // the old team + upgrade lines — creation slots, base stats, mana/skills +
   // auto slots, and the class-change quest.
@@ -61,6 +72,9 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   { id: "baseStats", category: "character" },
   { id: "manaSkills", category: "character" },
   { id: "classQuest", category: "character" },
+  // M7.9: the SECOND evolution (tier 2 -> tier 3) at Lv.40 — new quest, 4th
+  // skill, 4th auto-cast slot.
+  { id: "classTier3", category: "character" },
 
   {
     id: "hero-swordsman",
@@ -75,14 +89,21 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   { id: "hero-mage", category: "heroes", contentRef: { kind: "heroClass", id: "mage" } },
 
   { id: "boss", category: "boss" },
+  // M7.9 "Grand Expansion" boss variety — one behavior-hint entry per new map
+  // boss (s20/25/30), matching `render/views/bossThemes.ts`'s silhouette
+  // naming + `CONFIG.world.bossBehavior`'s CHARGE/SUMMON/FIELD-HAZARD mechanics.
+  { id: "boss-map4", category: "boss" },
+  { id: "boss-map5", category: "boss" },
+  { id: "boss-map6", category: "boss" },
 
   { id: "autoCast", category: "controls" },
   { id: "autoAllocate", category: "controls" },
 
   { id: "offlineIdle", category: "offlineIdle" },
 
-  // "gear" (M7 Gear & Drops): the intro/explainer text entry. The category's
-  // COLLECTION GRID (all 27 catalog templates, undiscovered ones silhouetted)
+  // "gear" (M7 Gear & Drops, extended to 46 templates by M7.9's t7-10 tiers):
+  // the intro/explainer text entry. The category's
+  // COLLECTION GRID (all catalog templates, undiscovered ones silhouetted)
   // is rendered specially by `CodexPanel.tsx` reading `@/engine`'s
   // `ITEM_TEMPLATES` directly — it's structured game data (slot/tier/rarity),
   // not freeform codex copy, so it deliberately isn't a `CODEX_ENTRIES` list.

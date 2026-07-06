@@ -80,13 +80,15 @@ export interface SkillSummary {
 }
 
 /**
- * Class-change quest state (M5 task 5) for the SkillBar quest flow. `null` when
- * not applicable (tier 2, or the hero is below the level gate with no active
- * quest — the bar shows the evolved badge / locked hint from `tier`/`level`
- * instead). Precomputed by the snapshot builder (engine reads only).
+ * Evolution-quest state (M5 task 5, generalized M7.9 to also cover the tier-2
+ * -> tier-3 quest) for the SkillBar quest flow. `null` when not applicable
+ * (tier 3 — fully evolved, no quest left — or the hero is below its next
+ * evolution's level gate with no active quest — the bar shows the final-form
+ * badge / locked hint from `tier`/`level` instead). Precomputed by the
+ * snapshot builder (engine reads only).
  */
 export interface HeroQuestSummary {
-  /** The quest is available to accept now (tier 1, level gate met, not yet taken). */
+  /** The quest is available to accept now (tier < 3, level gate met, not yet taken). */
   offered: boolean;
   /** The quest has been accepted and is tracking objectives. */
   accepted: boolean;
@@ -133,12 +135,13 @@ export interface HeroSummary {
   atLevelCap: boolean;
   /** Class-advancement tier. 1 = base, 2 = evolved, 3 = M7.9 grand-expansion tier 3. */
   tier: 1 | 2 | 3;
-  /** Precomputed `canEvolveHero(state, hero)` read (tier 1, class-change quest
-   * complete) — the store never runs engine logic itself, just carries this
-   * one-way display flag (same pattern as `atLevelCap`). */
+  /** Precomputed `canEvolveHero(state, hero)` read (tier < 3, active evolution
+   * quest complete) — the store never runs engine logic itself, just carries
+   * this one-way display flag (same pattern as `atLevelCap`). */
   canEvolve: boolean;
-  /** Class-change quest state (M5 task 5) driving the quest affordance, or null
-   * (tier 2 / below the level gate — see `HeroQuestSummary`). */
+  /** Evolution quest state (M5 task 5; M7.9 also covers tier 2 -> 3) driving
+   * the quest affordance, or null (tier 3 / below the level gate — see
+   * `HeroQuestSummary`). */
   quest: HeroQuestSummary | null;
   /** Unspent base-stat points (M5 "Base stats") — drives the stat-panel badge. */
   statPoints: number;
