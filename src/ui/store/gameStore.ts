@@ -705,6 +705,9 @@ export interface HudState {
    * `state.autoReturn` every frame; not part of `FrameInput`, never persisted.
    * Defaults ON (design). */
   autoReturn: boolean;
+  /** Auto next-zone toggle (2026-07-07, mirrors autoReturn): quota met ->
+   * auto-walk into the next unlocked FARM zone (never a boss room). */
+  autoAdvance: boolean;
   /** Auto-use hp/mana potions below a threshold (M6). UI-owned like `autoCast`:
    * the loop copies these onto `state.autoHpPotion`/`state.autoManaPotion` +
    * thresholds every frame; not part of `FrameInput`, never persisted. Default ON
@@ -765,6 +768,7 @@ export interface HudState {
   toggleAutoAllocate: () => void;
   /** Toggle death auto-return (M6 "auto กลับไปฟาร์ม" / "รอที่เมือง"). */
   toggleAutoReturn: () => void;
+  toggleAutoAdvance: () => void;
   /** Toggle auto hp/mana potion use (M6). */
   toggleAutoHpPotion: () => void;
   toggleAutoManaPotion: () => void;
@@ -968,6 +972,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoCast: false,
   autoAllocate: false,
   autoReturn: true,
+  autoAdvance: true,
   autoHpPotion: CONFIG.shop.autoDefaults.hpPotion,
   autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
   autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
@@ -991,6 +996,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   toggleAutoCast: () => set((s) => ({ autoCast: !s.autoCast })),
   toggleAutoAllocate: () => set((s) => ({ autoAllocate: !s.autoAllocate })),
   toggleAutoReturn: () => set((s) => ({ autoReturn: !s.autoReturn })),
+  toggleAutoAdvance: () => set((s) => ({ autoAdvance: !s.autoAdvance })),
   toggleAutoHpPotion: () => set((s) => ({ autoHpPotion: !s.autoHpPotion })),
   toggleAutoManaPotion: () => set((s) => ({ autoManaPotion: !s.autoManaPotion })),
   setAutoHpThreshold: (frac) =>

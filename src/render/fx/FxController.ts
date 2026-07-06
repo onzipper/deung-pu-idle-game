@@ -1024,12 +1024,22 @@ export class FxController {
         !!view &&
         (weaponRarity === "epic" || weaponRefine >= REFINE_AURA_THRESHOLD) &&
         getWeaponAnchorPos(view, this.weaponAnchorScratch);
+      // Class-flavored aura (owner request 2026-07-07): the same flame rig
+      // reads great on the big blade but drowned on the bow/staff silhouettes
+      // in the sword's warm palette — each class now burns in its own family
+      // (sword = flame, archer = emerald/wind, mage = azure/arcane).
+      const auraColor =
+        h.cls === "archer"
+          ? PALETTE.archerEmerald
+          : h.cls === "mage"
+            ? PALETTE.mageAzure
+            : PALETTE.auraFlame;
       this.gearAura.setSlot(
         slot,
         auraOn,
         this.weaponAnchorScratch.x,
         this.weaponAnchorScratch.y,
-        PALETTE.auraFlame,
+        auraColor,
         weaponRefine >= REFINE_PRESTIGE_BOOST_THRESHOLD,
       );
       // +9/+10 steps ride the SAME anchor/active-gate as the aura above — a

@@ -14,7 +14,7 @@
 
 import { useTranslations } from "next-intl";
 import { AutoPotionToggles } from "@/ui/components/AutoPotionToggles";
-import { AutoReturnToggle } from "@/ui/components/AutoReturnToggle";
+import { AutoAdvanceToggle, AutoReturnToggle } from "@/ui/components/AutoReturnToggle";
 import { AutoSellRulesSection } from "@/ui/components/AutoSellRulesSection";
 import { BotSettingsSection } from "@/ui/components/BotSettingsSection";
 import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
@@ -89,6 +89,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {t("deathBehaviorLabel")}
               </span>
               <AutoReturnToggle />
+          <AutoAdvanceToggle />
             </div>
             <AutoPotionToggles />
           </section>

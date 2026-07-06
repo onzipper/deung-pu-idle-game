@@ -308,3 +308,33 @@ describe("bossReady arms only at the boss-gate zone", () => {
     expect(s.bossReady).toBe(false); // free-farm zone, no phantom challenge card
   });
 });
+
+/** Auto next-zone toggle (2026-07-07): quota met -> walk into the next
+ * unlocked FARM zone; never into a boss room; engine default OFF. */
+describe("maybeAutoAdvance", () => {
+  it("walks into the next farm zone once quota is met (toggle on)", () => {
+    const s = initGameState(4, soloSave("swordsman", 1));
+    s.autoAdvance = true;
+    s.kills = CONFIG.killGoal(1);
+    step(s, {}); // unlocks zone 2 (checkZoneUnlock) then auto-advances
+    expect(s.traveling).not.toBeNull();
+    expect(s.traveling?.targetZoneIdx).toBe(s.location.zoneIdx + 1);
+  });
+
+  it("does nothing with the toggle off (engine default)", () => {
+    const s = initGameState(4, soloSave("swordsman", 1));
+    s.kills = CONFIG.killGoal(1);
+    for (let i = 0; i < 5; i++) step(s, {});
+    expect(s.traveling).toBeNull();
+  });
+
+  it("never auto-enters a boss room (stops at the gate zone)", () => {
+    const s = initGameState(5, soloSave("swordsman", 5)); // map1 last farm
+    s.autoAdvance = true;
+    s.unlockedZones.map1 = 7; // boss room unlocked
+    s.kills = CONFIG.killGoal(5);
+    for (let i = 0; i < 5; i++) step(s, {});
+    expect(s.traveling).toBeNull(); // challenging stays a player beat
+    expect(s.bossReady).toBe(true);
+  });
+});

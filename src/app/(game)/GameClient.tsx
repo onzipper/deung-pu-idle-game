@@ -644,6 +644,7 @@ export function GameClient() {
       state.autoCast = store.autoCast;
       state.autoAllocate = store.autoAllocate;
       state.autoReturn = store.autoReturn;
+      state.autoAdvance = store.autoAdvance;
       // Auto-use potion toggles + thresholds (M6), same UI-owned pattern.
       state.autoHpPotion = store.autoHpPotion;
       state.autoManaPotion = store.autoManaPotion;

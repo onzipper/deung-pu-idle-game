@@ -435,6 +435,28 @@ export function checkZoneUnlock(state: GameState): void {
 }
 
 /**
+ * Auto next-zone (owner request 2026-07-07, UI toggle `state.autoAdvance`):
+ * once the CURRENT farm zone's quota is met and the next FARM zone in the same
+ * map is unlocked, walk forward automatically. Never auto-enters a boss room
+ * (the challenge is a player beat) and never crosses maps (that requires the
+ * boss anyway). No-op mid-travel/cast/boss/death or in town.
+ */
+export function maybeAutoAdvance(state: GameState): void {
+  if (!state.autoAdvance) return;
+  if (state.traveling || state.fastTravelCast || state.phase !== "battle") return;
+  const cur = zoneAt(state.location);
+  if (cur.kind !== "farm") return;
+  const hero = state.heroes[0];
+  if (!hero || hero.dead) return;
+  if (state.kills < CONFIG.killGoal(cur.stage)) return;
+  const gi = globalIndex(state.location);
+  const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
+  if (!next || next.kind !== "farm" || next.mapId !== cur.mapId) return;
+  if (next.zoneIdx >= (state.unlockedZones[next.mapId] ?? 0)) return; // locked
+  walkToZone(state, { mapId: next.mapId, zoneIdx: next.zoneIdx });
+}
+
+/**
  * Boss room cleared -> unlock the next MAP's first zone (progression across the
  * map boundary). Called from boss.onBossKilled (which already flips to victory).
  */

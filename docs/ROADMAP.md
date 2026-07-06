@@ -104,6 +104,18 @@
 - [x] UAT patch-notes modal: "มีอะไรใหม่!" เด้งครั้งเดียวต่อ release id ภาษาผู้เล่น th/en, ผู้เล่นใหม่ไม่โดนซ้อน FTUE, เพิ่มรอบหน้าแค่ append entry เดียว
 - [x] Tab-return catch-up: สลับ tab/พับจอกลับมา >5s → replay เวลาที่หายผ่านท่อ offline เดิม (cap 8 ชม., budget 250ms, กัน fx/toast ทะลัก) — มือถือล็อกจอ = ได้ progress ย้อนหลังแบบเดียวกับ offline idle
 
+## M7.9 — Grand Expansion ⭐ (ดีไซน์เคาะกับเจ้าของ 2026-07-07)
+
+> **โลก ×2 + คลาสขั้น 3 + gear t7-10 + บอสหลากหน้า** — ก้อนเดียวที่ทุบกำแพง s15 และวาง endgame ใหม่ที่ s30 · เคาะแล้ว: ธีมชุด A (**ทุนดราน้ำแข็ง s16-20 → ทะเลทรายซากอารยธรรม s21-25 → นครนรก s26-30**) · **กุญแจทุบ s15 = เควสคลาส 3** (ฟาร์ม map3 → Lv40 → เควส → power spike → ล้มบอส s15 → เข้า map4) · บอส: หน้าตาเฉพาะตัวทั้ง 6 + **ท่าใหม่ต่อบอสแมพใหม่** (พุ่งชน / เรียกลูกน้อง / คลื่นอันตรายเต็มสนาม) · **levelCap 60→90** · s30 = soft-wall ตัวใหม่
+
+- [ ] **Engine world**: map4/5/6 (แมพละ 5 ฟาร์ม + ห้องบอส, data-driven ตามสูตร M6), hunt knobs + aggro belt ต่อแมพ, levelCap 90 + xp curve ต่อ, kill/gold curve ต่อ — sim rebaseline เต็ม (เกต: จังหวะเดิม s1-15 ต้องไม่ขยับ, s30 wall ใหม่, ไม่มี stall)
+- [ ] **คลาสขั้น 3** (ร่างชื่อ: จอมอัศวิน / ราชันพราน / อาร์คเมจ — เจ้าของ rename ได้): เควสเสนอ Lv40 (ล่า map3 + บอส map2 ซ้ำ; ไม่มีเงื่อนไขตีบวก), tier 1|2|3 + SAVE v15, **สกิลที่ 4** อลังเหนือ ultimate เดิม — ดาบ: ดาบฟ้าผ่าสนาม (time-freeze beat ผ่าน timeDirector) / ธนู: พายุธนูถล่มต่อเนื่อง ~4 วิ / เวท: วันสิ้นโลก (ฟ้ามืดค้าง + อุกกาบาตชุด) — reuse กลไกเดิมทั้งหมด (ห้าม ProjectileKind ใหม่), มานา ~120 + tier 3 แถม pool เพิ่ม, **auto slot 4 ปลดด้วย tier 3 เท่านั้น**
+- [ ] **Gear t7-t10**: band t7(s16-18) t8(s19-22) t9(s23-26) t10(s27-30), drop table + ราคาขาย + refine interplay ผ่าน sim, paper-doll silhouette ใหม่ต่อ tier ต่อยอดบันไดออร่า +8-10
+- [ ] **บอสหลากหน้า**: silhouette/palette เฉพาะตัวทั้ง 6 บนริกเดิม; บอส map4 = พุ่งชน (charge), map5 = เรียกลูกน้อง (summon adds), map6 = คลื่นอันตรายเต็มสนาม (arena hazard) — deterministic, บอสเก่า 3 ตัวคงท่าเดิม (ไม่ rebalance ย้อนหลัง)
+- [ ] **Render world**: biome family ×3 (น้ำแข็ง/ทะเลทราย/นรก) + ซุ้มประตู + ประตูบอส + arena ต่อธีม, สกิล 4 spectacle (time-freeze / ม่านพายุ / ฟ้ามืดค้าง)
+- [ ] **UI**: ช่อง auto slot 4 (ปลดพร้อม tier 3), codex คลาส/แมพ/บอสใหม่, FTUE tips จังหวะเปลี่ยนคลาส 3, i18n th/en ครบ
+- [ ] **Balance close**: sim เต็ม 3 คลาส × gear × refine → docs/balance-m79.md (เกต: class2 ~s5 เดิม, s15 แตกด้วยคลาส 3 ตามดีไซน์, s30 soft-wall, mana sink ยังจริง, ไม่มี stall)
+
 ## M8 — Party
 
 - [ ] Websocket infra spike: ประเมิน VPS/Node server + ห้องปาร์ตี้ (ตัดสินใจ infra ก่อนเริ่ม)

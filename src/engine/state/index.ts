@@ -81,6 +81,15 @@ export interface GameState {
    */
   autoReturn: boolean;
   /**
+   * UI-owned toggle (2026-07-07, mirrors `autoReturn`): when true, a farm zone
+   * whose quota is met auto-walks into the NEXT unlocked FARM zone (never into
+   * a boss room — challenging stays a player beat). Read off the store onto
+   * state each frame; never part of `FrameInput`, never persisted. Engine-side
+   * default OFF (fresh states in tests/sim keep legacy behaviour); the real
+   * client mirrors the store's own default-ON toggle every frame.
+   */
+  autoAdvance: boolean;
+  /**
    * Current world position (M6 "World & Town"): which map + zone the hero is in.
    * The zone's KIND + content stage are derived from CONFIG.world
    * (systems/world.ts `zoneAt`). `state.stage` mirrors the current zone's stage.
@@ -431,6 +440,7 @@ export function initGameState(
     // Defaults ON (design: "auto กลับไปฟาร์ม" on by default); GameClient mirrors
     // the store toggle onto this each frame, and the offline replay forces it on.
     autoReturn: true,
+    autoAdvance: false,
     location: { mapId: location.mapId, zoneIdx: location.zoneIdx },
     unlockedZones,
     lastFarmZone: { mapId: lastFarmZone.mapId, zoneIdx: lastFarmZone.zoneIdx },
