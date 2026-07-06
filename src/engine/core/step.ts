@@ -163,6 +163,13 @@ export interface FrameInput {
    * credit is detectable after the fact. Non-finite/negative values are ignored.
    */
   goldCredit?: number;
+  /**
+   * Set the auto-hunt toggle (M6.6): whether the hero auto-acquires NEW hunt
+   * targets outside the boss phase (see `GameState.autoHunt`). Applied once per
+   * drained input. Engine-persisted (SAVE v12) — unlike the UI-mirrored toggles
+   * (`autoCast`/`autoAllocate`/…), the player's choice survives a reload.
+   */
+  setAutoHunt?: boolean;
 }
 
 export function step(state: GameState, input: FrameInput = {}): GameState {
@@ -181,6 +188,8 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
   // Idle-bot settings update (M7.5) — merged + clamped onto the persisted state.bot.
   if (input.setBotSettings) setBotSettings(state, input.setBotSettings);
+  // Auto-hunt toggle (M6.6) — engine-persisted (SAVE v12); see FrameInput.setAutoHunt.
+  if (input.setAutoHunt !== undefined) state.autoHunt = input.setAutoHunt;
   // Equip / unequip gear on the solo hero (M7) — validated inside equipItem.
   if (input.equip) equipItem(state, state.heroes[0], input.equip.slot, input.equip.templateId);
   // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).

@@ -86,7 +86,12 @@ import type {
 //   (both bots OFF, so behaviour is unchanged). A v11 save's own settings are
 //   preserved (booleans coerced, targets clamped to the stack cap, gold floor
 //   non-negative — idempotent for the server's migrate-on-every-save).
-export const SAVE_VERSION = 11;
+// v11 -> v12 (M6.6 "autoHunt toggle"): the save gains `autoHunt` (whether the
+//   hero auto-acquires NEW hunt targets outside the boss phase). A pre-v12 save
+//   had none, so migration backfills `true` (behaviour unchanged — auto-hunt was
+//   always on before this toggle existed). A v12 save's own flag is preserved
+//   (coerced to a boolean — idempotent for the server's migrate-on-every-save).
+export const SAVE_VERSION = 12;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -112,6 +117,9 @@ export interface UnknownSave {
   // v11 idle-bot settings (M7.5). Optional so a pre-v11 save backfills to defaults
   // (both bots OFF). Partial so a trimmed block is filled by `normalizeBotSettings`.
   bot?: Partial<BotSettings>;
+  // v12 autoHunt toggle (M6.6). Optional/unknown so a pre-v12 (or malformed) save
+  // backfills to `true`.
+  autoHunt?: unknown;
   // v10 gear (M7). Optional so a pre-v10 save backfills (equipped empty, counter 0,
   // salt derived). `equipped` fields are unknown so a malformed cache normalises.
   equipped?: { weapon?: unknown; armor?: unknown };
@@ -394,6 +402,9 @@ export function migrate(save: UnknownSave): SaveData {
     // Idle bots (M7.5, v11): preserve a v11 save's clamped settings; a pre-v11 save
     // backfills to the config defaults (both bots OFF).
     bot: normalizeBotSettings(save.bot),
+    // autoHunt toggle (M6.6, v12): preserve a v12 save's flag (coerced to a
+    // boolean); a pre-v12 save (no flag) backfills to `true` (unchanged behaviour).
+    autoHunt: typeof save.autoHunt === "boolean" ? save.autoHunt : true,
     // M7 gear (v10): empty loadout for a pre-v10 save (DB ledger is authoritative);
     // a monotonic counter clamped non-negative; a salt PRESERVED if present (never
     // recomputed — idempotent) else derived deterministically from the save content.

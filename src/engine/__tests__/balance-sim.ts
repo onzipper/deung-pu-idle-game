@@ -91,7 +91,7 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
   // A cold-start save at stage 1 (first farm zone). Built directly; the world
   // fields are what initGameState fills for a fresh start, mirrored here.
   return {
-    version: 11,
+    version: 12,
     stage: 1,
     gold: 0,
     location: { mapId: "map1", zoneIdx: 1 },
@@ -107,6 +107,8 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
       scrollReserve: 3,
       goldReserve: 0,
     },
+    // M6.6: auto-hunt ON by default (baseline parity — the sim never toggles it).
+    autoHunt: true,
     // M7: cold start owns no gear; deterministic salt + zero counter.
     equipped: { weapon: null, armor: null },
     lootSalt: (seed * 2654435761) >>> 0,

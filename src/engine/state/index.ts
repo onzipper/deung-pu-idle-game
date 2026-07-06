@@ -102,6 +102,16 @@ export interface GameState {
    */
   bot: BotSettings;
   /**
+   * Auto-hunt toggle (M6.6): when true (default), the hero AUTO-ACQUIRES new
+   * hunt targets (chases + initiates attacks on idle/passive mobs) exactly like
+   * before this toggle existed. When false, OUTSIDE the boss phase, the hero may
+   * not chase/initiate — but an enemy already ENGAGED on the hero (fighting it)
+   * remains a valid retaliation target, so toggling off mid-swarm finishes off
+   * current attackers then idles. The boss phase always ignores this flag.
+   * Engine-persisted (SAVE v12; unlike the UI-mirrored `autoCast`/`autoAllocate`).
+   */
+  autoHunt: boolean;
+  /**
    * An in-flight idle-bot town trip's purpose (M7.5), or null. Set when a bot trip
    * begins; consumed by `onBotTownArrival` (restock + `townArrived` + auto-return).
    * Transient — NEVER persisted.
@@ -246,6 +256,9 @@ export interface SaveData {
   /** Idle-automation bot settings (M7.5, SAVE v11). Engine-persisted (both bots OFF
    * by default). See entities `BotSettings` + systems/bots.ts. */
   bot: BotSettings;
+  /** Auto-hunt toggle (M6.6, SAVE v12). Engine-persisted (default true). See
+   * `GameState.autoHunt` for the behaviour contract. */
+  autoHunt: boolean;
   /**
    * Equipped gear loadout (M7, SAVE v10): weapon/armor templateId or null. A SIM
    * CACHE — the DB `ItemInstance` ledger is authoritative (docs/persistence-m7.md),
@@ -336,6 +349,9 @@ export function initGameState(seed: number, save?: SaveData): GameState {
     traveling: null,
     // Idle bots (M7.5, SAVE v11): restore persisted settings, else defaults (OFF).
     bot: save?.bot ? normalizeBotSettings(save.bot) : defaultBotSettings(),
+    // Auto-hunt toggle (M6.6, SAVE v12): restore the persisted flag, else default ON
+    // (unchanged behaviour for a fresh/pre-v12 start).
+    autoHunt: typeof save?.autoHunt === "boolean" ? save.autoHunt : true,
     botPending: null,
     fastTravelCast: null,
     // NPC consumables (M6, SAVE v9): restore saved stacks, else empty. Use-cooldowns
@@ -477,6 +493,8 @@ export function toSaveData(state: GameState): SaveData {
     consumables: { ...state.consumables },
     // Idle bot settings (M7.5, SAVE v11). Engine-persisted (both bots OFF default).
     bot: { ...state.bot },
+    // Auto-hunt toggle (M6.6, SAVE v12). Engine-persisted (default true).
+    autoHunt: state.autoHunt,
     // Equipped gear cache (M7, SAVE v10). Authoritative copy is the DB item ledger
     // (boot payload wins on load); this persists the loadout for offline power.
     equipped: { weapon: h.equipped.weapon, armor: h.equipped.armor },

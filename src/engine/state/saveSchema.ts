@@ -129,6 +129,9 @@ export const saveDataSchema = z
     // is backfilled to the config defaults (both bots OFF) by `migrate()` — same
     // resilience as the fields above. Values are re-clamped on load.
     bot: botSettingsSchema.optional(),
+    // autoHunt toggle (M6.6, SAVE v12). Optional so a pre-v12 (or trimmed) payload
+    // is backfilled to `true` by `migrate()` -- same resilience as the fields above.
+    autoHunt: z.boolean().optional(),
     // M7 gear (SAVE v10). All OPTIONAL so a pre-v10 (or trimmed) payload is
     // backfilled by `migrate()` (equipped → empty, counter → 0, salt → derived) —
     // same resilience as the fields above. `equipped` is a weapon/armor templateId

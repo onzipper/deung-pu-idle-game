@@ -188,9 +188,24 @@ export function updateEnemies(state: GameState): void {
 // Heroes: move THEN attack
 // ---------------------------------------------------------------------------
 
+/**
+ * Targets the hero MAY hunt/attack this step (M6.6 "autoHunt toggle"). With the
+ * toggle ON (default) or during the boss phase, every current target is fair
+ * game (unchanged behaviour). With it OFF outside the boss phase, the hero must
+ * not acquire NEW targets — no chasing, no initiating on idle/passive mobs — but
+ * an enemy already `engaged` (aggro-triggered or retaliating after a hit) stays a
+ * valid target, so the hero fights off its current attackers then stands idle.
+ * `getTargets` returns plain `state.enemies` whenever phase !== "boss", so this
+ * filter only ever touches `Enemy`s (never the boss).
+ */
+function huntableTargets(state: GameState): CombatTarget[] {
+  if (state.autoHunt || state.phase === "boss") return getTargets(state);
+  return state.enemies.filter((e) => e.engaged);
+}
+
 export function updateHeroes(state: GameState): void {
   const hunt = CONFIG.hunt;
-  const targets = getTargets(state);
+  const targets = huntableTargets(state);
   const minX = hunt.heroMinX;
   const maxX = fieldMaxX(state) - hunt.fieldRightMargin;
   for (const h of state.heroes) {
