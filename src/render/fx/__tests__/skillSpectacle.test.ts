@@ -19,6 +19,7 @@ import { ArrowSwarmPool } from "@/render/fx/arrowSwarm";
 import { CurtainSweepPool } from "@/render/fx/curtainSweep";
 import { GroundArrowPool } from "@/render/fx/rainScene";
 import { GroundCrackPool } from "@/render/fx/groundCrack";
+import { HazardBandOverlay } from "@/render/fx/hazardBand";
 import { RingPool } from "@/render/fx/rings";
 import { SkyDarkenOverlay } from "@/render/fx/skyDarken";
 
@@ -163,6 +164,64 @@ describe("M7.9 tier-3 skill-4 fx pools", () => {
     // stuck-alpha bug.
     expect(overlay.view.alpha).toBeCloseTo(0, 5);
 
+    expect(() => overlay.destroy()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M7.9 boss-variety mechanic render follow-up (charge/summon/hazard, maps
+// 4-6, commit 993c315's events): `HazardBandOverlay` is the one NEW pooled
+// primitive this task adds (charge/summon reuse existing rings/flashLines/
+// particles/runeGlyphs pools — no new class needed for those).
+// ---------------------------------------------------------------------------
+describe("M7.9 boss-variety mechanic fx: HazardBandOverlay", () => {
+  it("pulses visibly during the warn hold, then fully fades back to invisible", () => {
+    const overlay = new HazardBandOverlay(900, 300);
+    overlay.trigger(0xff260e, 0.4, 1.3); // map6 infernal accent + the engine's own telegraph window
+
+    expect(overlay.view.visible).toBe(true);
+
+    // Sample alpha across the hold — it should visibly PULSE (vary), not sit
+    // at one flat value, and never exceed the peak or go negative.
+    const samples: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      overlay.update(0.1);
+      samples.push(overlay.view.alpha);
+    }
+    for (const a of samples) {
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThanOrEqual(0.4);
+    }
+    expect(new Set(samples.map((a) => a.toFixed(4))).size).toBeGreaterThan(1);
+
+    // Well past the total duration — must resolve cleanly, no stuck alpha.
+    for (let i = 0; i < 10; i++) overlay.update(0.2);
+    expect(overlay.view.visible).toBe(false);
+    expect(overlay.view.alpha).toBeCloseTo(0, 5);
+
+    expect(() => overlay.destroy()).not.toThrow();
+  });
+
+  it("a retrigger while already active takes the brighter peak / longer window (never shrinks)", () => {
+    const overlay = new HazardBandOverlay(900, 300);
+    overlay.trigger(0xff260e, 0.2, 0.5);
+    overlay.update(0.05);
+    overlay.trigger(0xff260e, 0.5, 1.3);
+
+    // A few steps in, well past the first (shorter) trigger's own total —
+    // still visible thanks to the retrigger's longer window.
+    for (let i = 0; i < 6; i++) overlay.update(0.1);
+    expect(overlay.view.visible).toBe(true);
+
+    expect(() => overlay.destroy()).not.toThrow();
+  });
+
+  it("never throws across zero/negative-leaning update steps (safeRadius clamping)", () => {
+    const overlay = new HazardBandOverlay(900, 300);
+    expect(() => overlay.update(0.1)).not.toThrow(); // idle, never triggered
+    overlay.trigger(0xffffff, 0.3, 0.05); // a near-zero duration window
+    expect(() => overlay.update(1)).not.toThrow();
+    expect(overlay.view.visible).toBe(false);
     expect(() => overlay.destroy()).not.toThrow();
   });
 });

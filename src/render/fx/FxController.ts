@@ -16,12 +16,20 @@
 
 import { Container as PixiContainer } from "pixi.js";
 import type { Container } from "pixi.js";
+import { zoneAt } from "@/engine";
 import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
 import { ITEM_TEMPLATES, refineOf, type ItemRarity } from "@/engine/config/items";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
-import { ENEMY_COLORS, HERO_COLORS, PALETTE, PROJECTILE_COLORS } from "@/render/theme";
+import {
+  BOSS_COLORS,
+  ENEMY_COLORS,
+  HERO_COLORS,
+  PALETTE,
+  PROJECTILE_COLORS,
+  type BossMapId,
+} from "@/render/theme";
 import { ArenaFlash } from "@/render/fx/arenaFlash";
 import { ArmorShardPool } from "@/render/fx/armorShard";
 import { ArrowSwarmPool } from "@/render/fx/arrowSwarm";
@@ -38,6 +46,7 @@ import { GearAuraController } from "@/render/fx/gearAura";
 import { GearSparklePool } from "@/render/fx/gearSparkle";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { GroundCrackPool } from "@/render/fx/groundCrack";
+import { HazardBandOverlay } from "@/render/fx/hazardBand";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
 import { LevelUpBurstPool } from "@/render/fx/levelUp";
@@ -527,6 +536,63 @@ const APOCALYPSE_IMPACT_SHAKE = 9; // per-meteor; retriggered per landing (max p
 const APOCALYPSE_RING_R1 = 130;
 const APOCALYPSE_RUNE_RADIUS = METEOR_RUNE_RADIUS * 1.3;
 
+// ---------------------------------------------------------------------------
+// M7.9 "Grand Expansion" boss-variety MECHANIC telegraphs (charge/summon/
+// hazard, maps 4-6) — render follow-up for the events introduced in 993c315
+// (see `engine/state/events.ts`'s own doc comment; the engine side already
+// shipped, this file was the "unhandled kind -> default no-op" gap). Telegraph
+// colors stay the UNIVERSAL `PALETTE.warn` (the same "red = danger" language
+// as `bossSlamTelegraph`/`bossView.ts`'s telegraph ring) with a per-map BOSS
+// TINT ACCENT (`BOSS_COLORS[mapId].crown`, resolved via `zoneAt(state.location)`
+// — same plumbing convention as `bossView.ts`'s own `ctx.mapId`) layered on
+// top, so each mechanic still reads as "that boss's own attack". Every beat
+// reuses an EXISTING pool (rings/flashLines/particles/runeGlyphs) — the one
+// new primitive is `hazardBand.ts`'s field-wide warn overlay, which has no
+// existing single-shape effect to repurpose (same reasoning as
+// `skyDarken.ts`/`arenaFlash.ts` each earning their own reusable shape).
+// ---------------------------------------------------------------------------
+
+// ---- CHARGE (map4 s20, ice-tundra) -----------------------------------------
+/** Low, ground-hugging streak from the boss toward the locked dash target —
+ * a "look out, it's coming from there" read distinct from the boss's own
+ * body (which stays readable, unobscured). */
+const CHARGE_STREAK_Y = GROUND_Y - 14;
+const CHARGE_STREAK_WIDTH = 3;
+const CHARGE_STREAK_ALPHA = 0.55;
+/** Boss-side windup flash — a small tightening ring at the boss's own
+ * position, echoing `bossSlamTelegraph`'s ring but tighter/faster (a dash
+ * windup is quicker than a slam). */
+const CHARGE_WINDUP_RING_R0 = 8;
+const CHARGE_WINDUP_RING_R1 = 34;
+const CHARGE_HIT_SHAKE_CONNECTED = 9;
+const CHARGE_HIT_SHAKE_WHIFF = 4;
+const CHARGE_HIT_RING_R1_CONNECTED = 80;
+const CHARGE_HIT_RING_R1_WHIFF = 42;
+const CHARGE_HIT_PARTICLE_COUNT_CONNECTED = 16;
+const CHARGE_HIT_PARTICLE_COUNT_WHIFF = 7;
+
+// ---- SUMMON (map5 s25, desert-ruins) ---------------------------------------
+/** A brief arcane glyph pulse at the boss (reuses the mage meteor's rune-
+ * glyph shape/pool — a "calling forth" read fits the same vocabulary) + a
+ * small spawn puff at each add's own arrival point (computed from the SAME
+ * `CONFIG.bossBehavior.summon.spawnSpacing` the engine used to place them —
+ * no new event field needed). */
+const SUMMON_GLYPH_RADIUS = 42;
+const SUMMON_GLYPH_LIFE = 0.55;
+const SUMMON_PUFF_PARTICLE_COUNT = 6;
+
+// ---- FIELD HAZARD (map6 s30, hell-city) ------------------------------------
+/** Warn window uses `hazardBand.ts`'s pulsing ground band/edge glow, held for
+ * the engine's own telegraph duration (`CONFIG.bossBehavior.hazard.telegraph`)
+ * so the read resolves right as the first strike tick lands. Each strike tick
+ * (fires ~3-4x across the 1s strike window) gets its own modest re-punch
+ * (shake + a quick arena flash + a small burst at the boss) — NOT the big
+ * one-shot beats above, since this one repeats. */
+const HAZARD_WARN_PEAK_ALPHA = 0.4;
+const HAZARD_STRIKE_SHAKE = 6;
+const HAZARD_STRIKE_FLASH_ALPHA = 0.2;
+const HAZARD_STRIKE_PARTICLE_COUNT = 10;
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -657,6 +723,9 @@ export class FxController {
   /** Full-bleed sky-darken overlay for the CATACLYSM/APOCALYPSE ultimates —
    * same "one shared shape, topmost" convention as `meteorSky`/`flash` below. */
   private readonly skyDarken: SkyDarkenOverlay;
+  /** M7.9 boss-variety FIELD HAZARD warn overlay (map6) — see the knobs block
+   * above and `fx/hazardBand.ts`'s own doc comment. */
+  private readonly hazardBand: HazardBandOverlay;
 
   // ---- M7.9 "Grand Expansion" tier-3 skill-4 additions ---------------------
   /** STORM's arrow-swarm silhouette band — lives alongside `skyDarken` as the
@@ -815,8 +884,15 @@ export class FxController {
     this.flash = new ArenaFlash(WORLD_WIDTH, WORLD_HEIGHT);
     this.meteorSky = new MeteorSkyFlash(WORLD_WIDTH);
     this.skyDarken = new SkyDarkenOverlay(WORLD_WIDTH, WORLD_HEIGHT);
+    this.hazardBand = new HazardBandOverlay(WORLD_WIDTH, WORLD_HEIGHT);
     this.impactFilters = new ImpactFilterController(world);
-    fxContainer.addChild(this.bossEcho.view, this.meteorSky.view, this.skyDarken.view, this.flash.view);
+    fxContainer.addChild(
+      this.bossEcho.view,
+      this.meteorSky.view,
+      this.skyDarken.view,
+      this.hazardBand.view,
+      this.flash.view,
+    );
   }
 
   get shakeOffset(): { x: number; y: number } {
@@ -914,6 +990,21 @@ export class FxController {
           break;
         case "bossEnraged":
           this.flash.trigger(PALETTE.enrageAura, 0.28);
+          break;
+        case "bossChargeTelegraph":
+          this.onBossChargeTelegraph(ev, state);
+          break;
+        case "bossChargeHit":
+          this.onBossChargeHit(ev);
+          break;
+        case "bossSummon":
+          this.onBossSummon(ev, state);
+          break;
+        case "bossHazardWarn":
+          this.onBossHazardWarn(ev, state);
+          break;
+        case "bossHazardStrike":
+          this.onBossHazardStrike(ev);
           break;
         case "bossDefeated":
           this.onBossDefeated(ev);
@@ -1025,6 +1116,7 @@ export class FxController {
     this.groundCracks.update(dt);
     this.curtainStreaks.update(dt);
     this.skyDarken.update(dt);
+    this.hazardBand.update(dt);
     this.bossEcho.update(dt);
     this.rings.update(dt);
     this.levelUpBursts.update(dt);
@@ -1076,6 +1168,7 @@ export class FxController {
     this.runeGlyphs.destroy();
     this.meteorSky.destroy();
     this.skyDarken.destroy();
+    this.hazardBand.destroy();
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
@@ -2830,6 +2923,144 @@ export class FxController {
     // enrage/defeat/stage-advanced, just tinted dark instead of bright.
     this.flash.trigger(BOSS_ENTRANCE_DARK_TINT, BOSS_ENTRANCE_DARK_ALPHA);
     this.shake.trigger(BOSS_ENTRANCE_SHAKE);
+  }
+
+  /** Resolves the CURRENT boss's map-themed accent tint (`BOSS_COLORS[mapId]
+   * .crown`, same field `bossThemes.ts` uses for the idle crown/eye look) via
+   * `zoneAt(state.location)` — mirrors `bossView.ts`'s own `ctx.mapId`
+   * plumbing (render has no engine `Boss.mapId` field to read directly).
+   * Falls back to the universal `PALETTE.warn` if the map id is ever outside
+   * the configured roster (shouldn't happen — these events only fire while
+   * standing in that map's boss room — but keeps this render-only, never a
+   * crash). */
+  private resolveBossTint(state: GameState): number {
+    const mapId = zoneAt(state.location).mapId as BossMapId;
+    return BOSS_COLORS[mapId]?.crown ?? PALETTE.warn;
+  }
+
+  // ---- CHARGE (map4 s20): telegraphed dash + heavy landing hit -------------
+  /** A low ground streak (universal `PALETTE.warn`, the dominant "danger"
+   * read) from the boss toward the locked dash target, held for the whole
+   * windup, plus a tighter map-tinted windup ring right at the boss so the
+   * tell still reads as "this boss's own attack". */
+  private onBossChargeTelegraph(
+    ev: Extract<GameEvent, { type: "bossChargeTelegraph" }>,
+    state: GameState,
+  ): void {
+    const windup = CONFIG.bossBehavior.charge.telegraph;
+    this.flashLines.spawn({
+      x1: ev.x,
+      y1: CHARGE_STREAK_Y,
+      x2: ev.targetX,
+      y2: CHARGE_STREAK_Y,
+      color: PALETTE.warn,
+      width: CHARGE_STREAK_WIDTH,
+      life: windup,
+      alpha: CHARGE_STREAK_ALPHA,
+    });
+    this.rings.spawn({
+      x: ev.x,
+      y: BOSS_CY,
+      r0: CHARGE_WINDUP_RING_R0,
+      r1: CHARGE_WINDUP_RING_R1,
+      duration: windup,
+      width: 3,
+      color: this.resolveBossTint(state),
+    });
+  }
+
+  /** Impact burst + shake at the dash's landing point — bigger when it
+   * actually `connected` (a whiff still gets a smaller beat so the dash's
+   * resolution always reads, even when dodged). */
+  private onBossChargeHit(ev: Extract<GameEvent, { type: "bossChargeHit" }>): void {
+    this.shake.trigger(ev.connected ? CHARGE_HIT_SHAKE_CONNECTED : CHARGE_HIT_SHAKE_WHIFF);
+    this.punch.trigger("bossSlamLand", ev.x);
+    this.impactFilters.triggerShockwave(ev.x, GROUND_Y);
+    this.rings.spawn({
+      x: ev.x,
+      y: GROUND_Y,
+      r0: 14,
+      r1: ev.connected ? CHARGE_HIT_RING_R1_CONNECTED : CHARGE_HIT_RING_R1_WHIFF,
+      duration: 0.35,
+      width: 4,
+      color: PALETTE.warn,
+    });
+    burst(
+      this.particles,
+      ev.x,
+      GROUND_Y - 8,
+      ev.connected ? CHARGE_HIT_PARTICLE_COUNT_CONNECTED : CHARGE_HIT_PARTICLE_COUNT_WHIFF,
+      PALETTE.warn,
+      { speed: 140, life: 0.3, radius: 3 },
+    );
+  }
+
+  // ---- SUMMON (map5 s25): add-wave arrival beat -----------------------------
+  /** A brief map-tinted arcane glyph pulse at the boss (reuses the mage
+   * meteor's rune-glyph shape — "calling forth" fits the same vocabulary) +
+   * a small dust puff at each add's own arrival point. The engine's
+   * `bossSummon` event carries only `count`, not each add's x — this
+   * recomputes the SAME positions `systems/boss.ts` placed them at via the
+   * shared `CONFIG.bossBehavior.summon.spawnSpacing` constant (no new event
+   * field needed; the adds themselves are normal pooled `enemyView`s that
+   * pop in automatically). */
+  private onBossSummon(
+    ev: Extract<GameEvent, { type: "bossSummon" }>,
+    state: GameState,
+  ): void {
+    this.runeGlyphs.spawn({
+      x: ev.x,
+      y: BOSS_CY,
+      radius: SUMMON_GLYPH_RADIUS,
+      color: this.resolveBossTint(state),
+      life: SUMMON_GLYPH_LIFE,
+      fadeInFrac: 0.15,
+    });
+    const spacing = CONFIG.bossBehavior.summon.spawnSpacing;
+    for (let i = 0; i < ev.count; i++) {
+      const x = ev.x - (i + 1) * spacing;
+      burst(this.particles, x, GROUND_Y - 4, SUMMON_PUFF_PARTICLE_COUNT, PALETTE.muted, {
+        speed: 60,
+        life: 0.35,
+        radius: 3,
+      });
+    }
+  }
+
+  // ---- FIELD HAZARD (map6 s30): arena-wide warn -> repeated strike ticks ----
+  /** `hazardBand.ts`'s pulsing ground band/edge glow, held for the engine's
+   * own `hazard.telegraph` window so the read resolves right as the first
+   * strike tick lands — plus a small map-tinted echo ring at the boss, same
+   * "universal warn + boss-tint accent" split as the charge telegraph above. */
+  private onBossHazardWarn(
+    ev: Extract<GameEvent, { type: "bossHazardWarn" }>,
+    state: GameState,
+  ): void {
+    const telegraph = CONFIG.bossBehavior.hazard.telegraph;
+    this.hazardBand.trigger(PALETTE.warn, HAZARD_WARN_PEAK_ALPHA, telegraph);
+    this.rings.spawn({
+      x: ev.x,
+      y: BOSS_CY,
+      r0: 20,
+      r1: 90,
+      duration: telegraph,
+      width: 3,
+      color: this.resolveBossTint(state),
+    });
+  }
+
+  /** One arena-wide damage tick fired (repeats ~3-4x across the strike
+   * window) — a modest re-punch each time (shake + a quick flash + a small
+   * burst at the boss), deliberately smaller than the one-shot charge-hit/
+   * slam-land beats since this one repeats in quick succession. */
+  private onBossHazardStrike(ev: Extract<GameEvent, { type: "bossHazardStrike" }>): void {
+    this.shake.trigger(HAZARD_STRIKE_SHAKE);
+    this.flash.trigger(PALETTE.warn, HAZARD_STRIKE_FLASH_ALPHA);
+    burst(this.particles, ev.x, GROUND_Y - 10, HAZARD_STRIKE_PARTICLE_COUNT, PALETTE.warn, {
+      speed: 130,
+      life: 0.3,
+      radius: 3,
+    });
   }
 
   /** Best-effort "above the head" y for a hit's damage number (entities are

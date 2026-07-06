@@ -124,6 +124,36 @@ export class AudioController {
             playBossEnraged(this.engine);
           }
           break;
+        // M7.9 boss-variety mechanics (maps 4-6, render/audio follow-up for
+        // 993c315): reuse the closest existing recipe rather than composing
+        // new ones — own throttle-key namespace (see sfxMap.ts's doc comment).
+        case "bossChargeTelegraph":
+          if (
+            this.engine.allow("bossChargeTelegraph", SFX_MIN_INTERVAL_MS.bossChargeTelegraph)
+          ) {
+            playBossSlamTelegraph(this.engine);
+          }
+          break;
+        case "bossChargeHit":
+          if (this.engine.allow("bossChargeHit", SFX_MIN_INTERVAL_MS.bossChargeHit)) {
+            playBossSlamLand(this.engine);
+          }
+          break;
+        case "bossSummon":
+          if (this.engine.allow("bossSummon", SFX_MIN_INTERVAL_MS.bossSummon)) {
+            playMobAggroed(this.engine);
+          }
+          break;
+        case "bossHazardWarn":
+          if (this.engine.allow("bossHazardWarn", SFX_MIN_INTERVAL_MS.bossHazardWarn)) {
+            playBossSlamTelegraph(this.engine);
+          }
+          break;
+        case "bossHazardStrike":
+          if (this.engine.allow("bossHazardStrike", SFX_MIN_INTERVAL_MS.bossHazardStrike)) {
+            playBossSlamLand(this.engine);
+          }
+          break;
         case "bossDefeated":
           if (this.engine.allow("bossDefeated", SFX_MIN_INTERVAL_MS.bossDefeated)) {
             playBossDefeated(this.engine);
