@@ -85,6 +85,9 @@ interface SeedResult {
   drops: number;
   finalWeapon: string | null;
   finalArmor: string | null;
+  /** M7.7: potions actually consumed (auto-use) over the run — the mana-sink check. */
+  hpPotionsUsed: number;
+  manaPotionsUsed: number;
 }
 
 function makeSave(cls: HeroClass, seed: number): SaveData {
@@ -214,9 +217,25 @@ function shopInput(s: GameState): Partial<FrameInput> {
   if (zoneAt(s.location).kind !== "town") return {};
   const hp = s.consumables.hpPotion;
   const mana = s.consumables.manaPotion;
-  if (hp < RESTOCK_TARGET) return { buyShopItem: { item: "hpPotion", qty: RESTOCK_TARGET - hp } };
-  if (mana < RESTOCK_TARGET) {
-    return { buyShopItem: { item: "manaPotion", qty: RESTOCK_TARGET - mana } };
+  // Restock the LOWER-stock potion first (one intent/step, short town dwell). Over
+  // repeated town passes both converge to the target — so BOTH sinks are exercised for
+  // every class (the old hp-first rule starved mana restock on high-death classes).
+  const buyHp = (): Partial<FrameInput> => ({
+    buyShopItem: { item: "hpPotion", qty: RESTOCK_TARGET - hp },
+  });
+  const buyMana = (): Partial<FrameInput> => ({
+    buyShopItem: { item: "manaPotion", qty: RESTOCK_TARGET - mana },
+  });
+  // Keep a minimum mana reserve so the mana-sink mechanic is always exercised (a
+  // high-death class otherwise spends every town step on hp and never holds a mana
+  // potion to auto-use). A real player sets both targets / runs the M7.5 restock bot.
+  if (mana < 4) return buyMana();
+  if (hp <= mana) {
+    if (hp < RESTOCK_TARGET) return buyHp();
+    if (mana < RESTOCK_TARGET) return buyMana();
+  } else {
+    if (mana < RESTOCK_TARGET) return buyMana();
+    if (hp < RESTOCK_TARGET) return buyHp();
   }
   return {};
 }
@@ -245,6 +264,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let totalWipes = 0;
   const bestOwned: OwnedBest = { weapon: null, armor: null };
   let drops = 0;
+  let hpPotionsUsed = 0;
+  let manaPotionsUsed = 0;
 
   for (let i = 0; i < STEPS; i++) {
     const input: FrameInput = { ...navInput(s), ...shopInput(s) };
@@ -269,6 +290,10 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
       if (e.type === "itemDrop") {
         drops++;
         if (GEAR) considerDrop(bestOwned, e.templateId, cls);
+      }
+      if (e.type === "consumableUsed") {
+        if (e.item === "hpPotion") hpPotionsUsed++;
+        else if (e.item === "manaPotion") manaPotionsUsed++;
       }
       if (e.type === "zoneUnlocked" && cur.kind === "farm" && cur.clearTime === null) {
         cur.clearTime = s.time;
@@ -324,6 +349,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     drops,
     finalWeapon: s.heroes[0].equipped.weapon,
     finalArmor: s.heroes[0].equipped.armor,
+    hpPotionsUsed,
+    manaPotionsUsed,
   };
 }
 
@@ -420,6 +447,13 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
       `class-change stage: ${results.map((r) => r.evolveStage ?? "-").join(",")} | ` +
       `deaths: ${results.reduce((a, r) => a + r.totalDeaths, 0)} | ` +
       `boss wipes: ${results.reduce((a, r) => a + r.totalWipes, 0)}`,
+  );
+  // M7.7 mana-sink check: total + per-seed potions consumed (auto-use).
+  const hpTot = results.reduce((a, r) => a + r.hpPotionsUsed, 0);
+  const mpTot = results.reduce((a, r) => a + r.manaPotionsUsed, 0);
+  console.log(
+    `  - potions used (${n} seeds): hp ${hpTot} (${(hpTot / n).toFixed(0)}/run) | ` +
+      `mana ${mpTot} (${(mpTot / n).toFixed(0)}/run) [per-seed mana: ${results.map((r) => r.manaPotionsUsed).join(",")}]`,
   );
   if (GEAR) {
     console.log(

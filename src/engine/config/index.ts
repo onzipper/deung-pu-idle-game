@@ -70,17 +70,24 @@ export const CONFIG = {
   // docs/balance-m6.md task 4 for the sim table + the archer frontier caveat.
   world: {
     maps: [
+      // M7.7 density retune: maxAlive raised 15/17/18 → 17/19/21 so live fields read
+      // ~17/19/21 (owner: "15-20+ ตัว"); respawnDelay cut so the denser field stays
+      // full. Because the nuked-up skills + SURVIVOR-RETALIATION (any passive that
+      // survives a hero SKILL fights back) add heat, map3's aggro FRACTIONS were
+      // trimmed (0.15-0.25 → 0.12-0.20) to keep the belt — not a self-inflicted swarm
+      // — the danger source (owner's rule). killGoal ×~1.7 restores clear TIME; xp/gold
+      // ÷ the same so per-zone leveling/economy hold (see the curve block).
       {
         id: "map1", zoneStageIds: [1, 2, 3, 4, 5], bossStageId: 5, fieldWidth: 900,
-        hunt: { maxAlive: 15, respawnDelay: 0.75, aggroStart: 0.0, aggroEnd: 0.1, aggroRadius: 125 },
+        hunt: { maxAlive: 17, respawnDelay: 0.7, aggroStart: 0.0, aggroEnd: 0.05, aggroRadius: 125 },
       },
       {
         id: "map2", zoneStageIds: [6, 7, 8, 9, 10], bossStageId: 10, fieldWidth: 900,
-        hunt: { maxAlive: 17, respawnDelay: 0.65, aggroStart: 0.09, aggroEnd: 0.18, aggroRadius: 145 },
+        hunt: { maxAlive: 19, respawnDelay: 0.6, aggroStart: 0.04, aggroEnd: 0.08, aggroRadius: 145 },
       },
       {
         id: "map3", zoneStageIds: [11, 12, 13, 14, 15], bossStageId: 15, fieldWidth: 900,
-        hunt: { maxAlive: 18, respawnDelay: 0.6, aggroStart: 0.15, aggroEnd: 0.25, aggroRadius: 145 },
+        hunt: { maxAlive: 21, respawnDelay: 0.55, aggroStart: 0.1, aggroEnd: 0.16, aggroRadius: 145 },
       },
     ],
     townMapId: "map1",
@@ -148,17 +155,16 @@ export const CONFIG = {
     // deterministic — spawn placement legitimately uses the seeded stream) and keeps
     // the one FARTHEST from the nearest existing mob, so a dense field reads spread
     // out instead of stacking mobs on a point. 1 = plain uniform random (old behaviour).
-    spawnCandidates: 5,
-    // (3) AoE-AGGRO rule. A single AoE (arrow rain / meteor / whirl / frost) DAMAGES
-    // every mob in its blast (unchanged), but must NOT wake the whole passive cluster
-    // — the archer's rain used to aggro every passive it clipped, swarming its kite in
-    // a dense field. Retaliation is limited to the mobs NEAREST the impact, within
-    // `aoeWakeRadiusFrac × blastRadius`, capped at `aoeWakeCap` per impact
-    // (deterministic nearest-first + id tie-break; NO RNG — combat never draws from the
-    // stream). Edge-of-blast passives take damage but stay passive, so an AoE farmer
-    // keeps retreat room. The directly-targeted mob (at the impact centre) always wakes.
-    aoeWakeRadiusFrac: 0.6,
-    aoeWakeCap: 2,
+    spawnCandidates: 7,
+    // (3) SURVIVOR-RETALIATION rule (M7.7, replaces the old aoeWakeCap/aoeWakeRadiusFrac
+    // AoE-aggro cap). ANY passive mob DAMAGED by a hero SKILL (or any hit) that SURVIVES
+    // the hit becomes ENGAGED and fights back; a mob KILLED by the hit does not (it's
+    // gone). This is enforced uniformly in `damage.applyDamage` (mob + hp > 0 after the
+    // hit → engaged), so it needs NO knob — the M7.7 "เบิ้ม" skills kill most of a
+    // cluster outright (killed → silent), and only the TOUGH survivors at the frontier
+    // retaliate, which is exactly where the heat should be. Deterministic (no RNG). The
+    // old cap knobs are REMOVED; danger is governed by the aggressive belt + how much a
+    // skill leaves alive, not a wake cap.
   },
 
   // ---- NPC shop / consumables (M6 "เมืองหลัก + NPC shops", ROADMAP task) ----
@@ -391,7 +397,15 @@ export const CONFIG = {
   // reward, xpPerKill + goldPerKill are divided by the SAME 1.6 below so the
   // leveling trajectory, the map3 power wall, class-change-at-stage-5, and the
   // potion-sink %s all stay on the M6 curve — only the field density changed.
-  killGoal: (n: number): number => 16 + n * 8,
+  // M7.7 pacing lever (owner-locked): the "เบิ้ม" skills + denser fields (17/19/21)
+  // raised raw kill THROUGHPUT ~1.5×, so killGoal is scaled ~1.5× (16+8n → 24+12n) to
+  // hold per-zone CLEAR TIME in the M6/M7 ballpark — difficulty comes from the
+  // aggressive belt + survivor-retaliation, NOT the quota. xpPerKill + goldPerKill are
+  // divided by the SAME 1.5 below, so per-zone XP/gold (leveling trajectory,
+  // class-change-at-s5, potion-sink %s, the map3 wall) are PRESERVED EXACTLY (24+12n =
+  // 1.5×(16+8n), so the product killGoal×perKill is byte-identical to the M6 baseline)
+  // — same methodology as the M6 task-4 density retune (sim-verified, balance-m7 "M7.7").
+  killGoal: (n: number): number => 24 + n * 12,
   // M4 tune: HP scaling exponent 1.23 -> 1.20. `heroAtk` is ADDITIVE
   // (base*(1+per*level)) while enemy/boss HP is GEOMETRIC, so the atk level (and
   // its geometric cost) needed to keep pace grows super-linearly with stage — a
@@ -411,7 +425,8 @@ export const CONFIG = {
   // M6 hunt-density retune: base coeffs are the old (5 + 2n) divided by the 1.6×
   // killGoal factor (≈ 3.125 + 1.25n) so gold-per-ZONE = killGoal × goldPerKill is
   // preserved — income trajectory and the depth-scaled potion-sink %s are unchanged.
-  goldPerKill: (n: number): number => Math.round((3.125 + n * 1.25) * Math.pow(1.05, n - 1)),
+  goldPerKill: (n: number): number =>
+    Math.round(((3.125 + n * 1.25) / 1.5) * Math.pow(1.05, n - 1)),
   goldPerBoss: (n: number): number => 50 + n * 20,
 
   // ---- spatial layout ----
@@ -475,6 +490,28 @@ export const CONFIG = {
     { dx: 96, ry: 26 },
   ] as const,
 
+  // ---- archer BARRAGE (tier-2 ultimate) drop pattern (M7.7) ----
+  // The FIELD-WIDE counterpart of `arrowRainOffsets` (length MUST equal the barrage
+  // skill's `targets` = 13). Same NO-RNG contract: `dx` spans ~±420 around the cluster
+  // centroid so the 13 drops BLANKET the whole ~900px field (a screen-wide barrage),
+  // and `ry` staggers spawn height so drops land across several frames. Deterministic
+  // because the table is constant. Reuses the rainArrow fall — no new ProjectileKind.
+  barrageOffsets: [
+    { dx: -420, ry: 0 },
+    { dx: -350, ry: 40 },
+    { dx: -280, ry: 14 },
+    { dx: -210, ry: 52 },
+    { dx: -140, ry: 24 },
+    { dx: -70, ry: 60 },
+    { dx: 0, ry: 8 },
+    { dx: 70, ry: 48 },
+    { dx: 140, ry: 20 },
+    { dx: 210, ry: 56 },
+    { dx: 280, ry: 12 },
+    { dx: 350, ry: 44 },
+    { dx: 420, ry: 30 },
+  ] as const,
+
   // ---- skills ----
   skills: {
     meteorSpawnY: -48, // meteor projectile spawns at this absolute y (falls to impact)
@@ -529,11 +566,12 @@ export const CONFIG = {
     hpPerLevel: 0.09,
     // XP granted to the solo hero per NORMAL enemy kill; scales with stage so
     // deeper (tougher) kills are worth more and leveling keeps pace with HP.
-    // M6 hunt-density retune: ≈ old (10 + 3n) divided by the 1.6× killGoal factor
-    // so xp-per-ZONE = killGoal × xpPerKill is preserved — the leveling trajectory
+    // M7.7: divided by the same 1.5× killGoal factor as the M6 ÷1.6 before it, so
+    // xp-per-ZONE = killGoal × xpPerKill is preserved EXACTLY ((6+2n)/1.5 = 4 + 4n/3;
+    // 24+12n = 1.5×(16+8n), so the product is byte-identical) — the leveling trajectory
     // (level-at-stage, class-change beat, map3 power wall) is unchanged despite the
-    // ~2.5× denser field (which only made the same kills arrive faster).
-    xpPerKill: (n: number): number => 6 + n * 2,
+    // harder-hitting skills + denser field.
+    xpPerKill: (n: number): number => 4 + (n * 4) / 3,
     // XP granted per BOSS kill — a chunky milestone reward (a level or more).
     xpPerBossKill: (n: number): number => 80 + n * 25,
     // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
@@ -605,7 +643,14 @@ export const CONFIG = {
     // cut mana is meant to impose). The mage's INT-fed regen lifts it clear of the
     // gate, so it sustains its full kit — the caster identity.
     baseRegen: 7, // mana/sec every class regenerates (sustains the signature cast)
-    regenPerIntPoint: 0.15, // +mana/sec per INT point above base (caster identity)
+    // M7.7: cut 0.15 → 0.06 so MANA governs pacing (owner-locked). The mage's INT
+    // pool keeps its sustain IDENTITY — it still sustains signature + frost-nova
+    // indefinitely (~10 mana/s < its ~12-14 regen at the frontier) — but the full
+    // heavy kit (adding the ~8-9 mana/s CATACLYSM) now EXCEEDS regen, so continuous
+    // spam drains even the mage's deep pool → mana potions become a real gold sink
+    // for all three classes (str/dex classes, on the flat pool, drain in seconds).
+    // The signature-cast guarantee is untouched (baseRegen alone sustains it).
+    regenPerIntPoint: 0.05, // +mana/sec per INT point above base (caster identity)
   },
 
   // ---- auto-cast slots (M5 "skill framework v2") ----
@@ -926,70 +971,96 @@ export interface SkillType {
  * classes run mostly their signature (base regen sustains it) and dip into their
  * extra skills opportunistically.
  */
+// M7.7 "Skill Spectacle & World Heat" (owner-locked 2026-07-06): skills เบิ้ม —
+// bigger radius + damage, cooldowns stay short, and MANA is the pacing governor
+// ("ยิงรัวได้แต่ถังแห้งเร็ว"). Three clear layers per class:
+//   (a) SIGNATURE spam — bigger radius/mult than M7, cheap-ish mana, short cd; base
+//       regen still sustains it at ~its cadence (the M5 no-hard-stall rule: cost/cd
+//       ≤ baseRegen 7/s for every signature, so a mana-broke hero still casts it).
+//   (b) UTILITY (warcry / powershot / frostnova) — kept distinct in role, NOT
+//       nuke-ified: a steroid, a single-target boss nuke, a cheap sustained clear.
+//   (c) TIER-2 ULTIMATE — effectively FIELD-WIDE (radius/coverage spanning the ~900px
+//       field): quake shockwave (strike r460), barrage blanket (rain, 13 wide drops),
+//       cataclysm sky-fall (meteor r460). Big mana cost so the POOL gates them; cd
+//       moderate (owner: not long). No new SkillKind / ProjectileKind (footgun #6) —
+//       barrage reuses the rainArrow fall (a WIDE offset table, `barrageOffsets`).
+// The full kit's summed cost/cd EXCEEDS each class's regen post-evolution, so
+// continuous spam drains the pool (mana potions become a real sink) — sim-tuned,
+// see docs/balance-m7.md "M7.7". All deterministic (fixed offset tables, no RNG).
 const SKILL_LIST = [
-  // ---- swordsman ----
-  // Signature: WHIRL SLASH — instant AoE spin around the swordsman (unchanged).
+  // ---- swordsman (in-the-swarm brawler) ----
+  // Signature: WHIRL SLASH — instant AoE spin around the swordsman. Bigger + cheaper
+  // + faster than M7 (r95→150, mult 2.2→3.2, cost 24→18, cd 8→5): the melee brawler
+  // spins through the swarm. cost/cd = 3.6/s ≤ baseRegen (sustained on the flat pool).
   {
     id: "sword_whirl", cls: "swordsman", tier: 1, unlockLevel: 1, kind: "nova",
-    cost: 24, cd: 8, radius: 95, mult: 2.2, targets: 0, projSpeed: 0, range: 95,
+    cost: 18, cd: 5, radius: 115, mult: 3.2, targets: 0, projSpeed: 0, range: 115,
     buffMult: 1, buffDuration: 0,
   },
-  // WAR CRY — self ATK buff (steroid). No damage; guarded on a nearby foe so it
-  // isn't wasted while idle. Cheap enough that the swordsman's spare mana sustains
-  // occasional uptime on top of the whirl.
+  // WAR CRY — self ATK buff (steroid; utility, NOT a nuke). Guarded on a nearby foe.
   {
     id: "sword_warcry", cls: "swordsman", tier: 1, unlockLevel: 8, kind: "buff",
     cost: 20, cd: 16, radius: 0, mult: 0, targets: 0, projSpeed: 0, range: 260,
-    buffMult: 1.4, buffDuration: 6,
+    buffMult: 1.5, buffDuration: 6,
   },
-  // EARTHQUAKE (tier-2) — a heavy ground-slam AoE a short reach ahead (evolution
-  // burst). Bigger radius/mult than the whirl; costs more mana.
+  // EARTHQUAKE (tier-2 ULTIMATE) — a FIELD-WIDE ground shockwave (r460 spans the ~900px
+  // field). Heavy mult, moderate cd. cost 50 nearly EMPTIES the flat 60 pool (a str
+  // class allocates str, never int, so its pool stays at base 60 — the ultimate MUST be
+  // affordable from 60, so it's a big gate but castable): after a quake the whirl skips
+  // until regen refills, and continuous full-kit spam drains the pool → mana potions.
   {
     id: "sword_quake", cls: "swordsman", tier: 2, unlockLevel: 15, kind: "strike",
-    cost: 44, cd: 12, radius: 120, mult: 3.2, targets: 0, projSpeed: 0, range: 200,
+    cost: 50, cd: 10, radius: 460, mult: 6.5, targets: 0, projSpeed: 0, range: 500,
     buffMult: 1, buffDuration: 0,
   },
 
-  // ---- archer ----
-  // Signature: ARROW RAIN — many drops fall over the cluster (unchanged).
+  // ---- archer (zone artillery) ----
+  // Signature: ARROW RAIN — 9 drops fall over the cluster. Bigger per-drop radius +
+  // damage than M7 (r44→70, mult 0.5→0.85), cheaper + faster (cost 24→20, cd 7→5):
+  // the artillery barrage-lite. cost/cd = 4.0/s ≤ baseRegen (sustained on the flat pool).
   {
     id: "archer_rain", cls: "archer", tier: 1, unlockLevel: 1, kind: "rain",
-    cost: 24, cd: 7, radius: 44, mult: 0.5, targets: 9, projSpeed: 900, range: 760,
+    cost: 20, cd: 6, radius: 46, mult: 0.9, targets: 9, projSpeed: 900, range: 760,
     buffMult: 1, buffDuration: 0,
   },
-  // POWER SHOT — a single high-damage homing arrow (single-target nuke; the
+  // POWER SHOT — a single high-damage homing arrow (utility single-target nuke; the
   // archer's answer to a lone boss, where its rain AoE barely lands).
   {
     id: "archer_powershot", cls: "archer", tier: 1, unlockLevel: 8, kind: "bolt",
-    cost: 28, cd: 9, radius: 0, mult: 5.5, targets: 0, projSpeed: 1100, range: 700,
+    cost: 26, cd: 8, radius: 0, mult: 7.0, targets: 0, projSpeed: 1100, range: 700,
     buffMult: 1, buffDuration: 0,
   },
-  // EXPLOSIVE SHOT (tier-2) — an instant AoE burst at the nearest target
-  // (evolution wave-buster complementing the single-target power shot).
+  // BARRAGE (tier-2 ULTIMATE) — a FIELD-WIDE blanket: 13 drops on the WIDE
+  // `barrageOffsets` table (~±420 spread ≈ the whole field), each a small AoE.
+  // Reuses the rainArrow fall (no new kind). cost 50 nearly empties the flat 60 pool
+  // (dex class = base pool), so it's a hard gate but castable — see sword_quake.
   {
-    id: "archer_barrage", cls: "archer", tier: 2, unlockLevel: 15, kind: "strike",
-    cost: 46, cd: 11, radius: 90, mult: 2.4, targets: 0, projSpeed: 0, range: 700,
+    id: "archer_barrage", cls: "archer", tier: 2, unlockLevel: 15, kind: "rain",
+    cost: 50, cd: 10, radius: 80, mult: 1.0, targets: 13, projSpeed: 950, range: 820,
     buffMult: 1, buffDuration: 0,
   },
 
-  // ---- mage ----
-  // Signature: METEOR — a single falling AoE nuke (unchanged; the mage's burst).
+  // ---- mage (heavy nuker) ----
+  // Signature: METEOR — a single falling AoE nuke. Bigger + cheaper + faster than M7
+  // (r90→130, mult 5.5→7.0, cost 40→36, cd 10→6): the nuker's bread-and-butter.
+  // cost/cd = 6.0/s ≤ baseRegen (sustained on the flat pool — no hard stall).
   {
     id: "mage_meteor", cls: "mage", tier: 1, unlockLevel: 1, kind: "meteor",
-    cost: 40, cd: 10, radius: 90, mult: 5.5, targets: 0, projSpeed: 560, range: 330,
+    cost: 36, cd: 6, radius: 130, mult: 7.0, targets: 0, projSpeed: 560, range: 330,
     buffMult: 1, buffDuration: 0,
   },
-  // FROST NOVA — a cheap, fast, short-cooldown AoE burst at the nearest cluster
-  // (sustained wave clear between meteors; the mage's INT-fed regen keeps it up).
+  // FROST NOVA — a cheap, fast, short-cd AoE burst (utility sustained clear between
+  // meteors; the mage's INT-fed regen keeps signature+frost up — its sustain identity).
   {
     id: "mage_frostnova", cls: "mage", tier: 1, unlockLevel: 8, kind: "strike",
-    cost: 20, cd: 6, radius: 85, mult: 1.5, targets: 0, projSpeed: 0, range: 330,
+    cost: 22, cd: 5, radius: 110, mult: 2.2, targets: 0, projSpeed: 0, range: 340,
     buffMult: 1, buffDuration: 0,
   },
-  // CATACLYSM (tier-2) — a bigger, costlier meteor (evolution ultimate).
+  // CATACLYSM (tier-2 ULTIMATE) — a FIELD-WIDE sky-fall (r460 darkens the sky over the
+  // ~900px field). The heaviest nuke in the game; big mana gate, moderate cd.
   {
     id: "mage_cataclysm", cls: "mage", tier: 2, unlockLevel: 15, kind: "meteor",
-    cost: 58, cd: 15, radius: 110, mult: 8.0, targets: 0, projSpeed: 560, range: 330,
+    cost: 90, cd: 11, radius: 460, mult: 13.0, targets: 0, projSpeed: 560, range: 500,
     buffMult: 1, buffDuration: 0,
   },
 ] as const satisfies readonly SkillType[];

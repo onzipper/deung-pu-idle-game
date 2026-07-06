@@ -27,7 +27,7 @@ import {
   CLASS_SKILLS,
   type SkillType,
 } from "@/engine/config";
-import { applyAoeDamage, wakeNearestPassives } from "@/engine/systems/damage";
+import { applyAoeDamage } from "@/engine/systems/damage";
 import { heroAtkOf } from "@/engine/systems/stats";
 import {
   aliveHeroes,
@@ -40,6 +40,16 @@ import type { GameState } from "@/engine/state";
 import type { FrameInput } from "@/engine/core/step";
 
 const L = CONFIG.layout;
+
+/**
+ * The fixed drop-offset table a `rain` skill uses (M7.7). The signature arrow rain
+ * uses the tight 9-drop `arrowRainOffsets`; the tier-2 BARRAGE ultimate uses the
+ * WIDE 13-drop `barrageOffsets` to blanket the whole field. Length MUST equal the
+ * skill's `targets`. NO RNG — both tables are constant, so casts stay deterministic.
+ */
+function rainOffsetsFor(def: SkillType): readonly { dx: number; ry: number }[] {
+  return def.id === "archer_barrage" ? CONFIG.barrageOffsets : CONFIG.arrowRainOffsets;
+}
 
 /** Remaining cooldown on a specific skill (0 = ready). */
 export function skillCdOf(hero: Hero, skillId: string): number {
@@ -164,22 +174,20 @@ function applySkillEffect(
       return;
     }
     case "rain": {
-      // ARROW RAIN: `targets` small arrows fall onto a zone centred on the
-      // centroid of the foes within range (the guard guarantees ≥1). Landing
-      // spread + spawn-height stagger come from the FIXED `arrowRainOffsets`
-      // table — NO RNG. Each drop is a point-target AoE (meteor-style fall).
+      // ARROW RAIN / BARRAGE: `targets` small arrows fall onto a zone centred on the
+      // centroid of the foes within range (the guard guarantees ≥1). Landing spread +
+      // spawn-height stagger come from a FIXED offset table (`arrowRainOffsets` for the
+      // signature, the wider `barrageOffsets` for the tier-2 ultimate) — NO RNG. Each
+      // drop is a point-target AoE (meteor-style fall). M7.7: survivor-retaliation is
+      // applied per-drop by the AoE damage path (combat.stepProjectile) — no separate
+      // wake pass, so every tough mob a drop leaves alive fights back.
       const inRange = targets.filter((e) => Math.abs(e.x - hero.x) < def.range);
       const cx = inRange.reduce((sum, e) => sum + e.x, 0) / inRange.length;
       const dmg = Math.round(heroAtkOf(hero) * def.mult);
       const ty = L.groundY - L.heroProjImpactYOffset;
-      // AoE-aggro rule (M6 hunt follow-up): decide the capped wake ONCE for the whole
-      // volley — wake the ≤`aoeWakeCap` mobs NEAREST the cluster centroid (cast range
-      // as the search radius; the cap, not the radius, is what limits it). The drops
-      // (below) then deal NO-WAKE damage, so a single rain can't aggro the entire dense
-      // field and swarm the kiting archer.
-      wakeNearestPassives(targets, cx, def.range);
+      const offsets = rainOffsetsFor(def);
       for (let i = 0; i < def.targets; i++) {
-        const off = CONFIG.arrowRainOffsets[i];
+        const off = offsets[i];
         const tx = cx + off.dx;
         const spawnY = CONFIG.skills.arrowRainSpawnY - off.ry;
         state.projectiles.push({

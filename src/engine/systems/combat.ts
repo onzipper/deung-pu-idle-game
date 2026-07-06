@@ -373,10 +373,9 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
     const d = Math.hypot(dx, dy);
     if (d <= arrive) {
       const src = projHitSource(p.kind);
-      // AoE-aggro rule (M6 hunt follow-up). Arrow-rain decided its capped wake ONCE
-      // at cast (skills.ts), so its 9 drops deal NO-WAKE damage — otherwise each drop
-      // would re-aggro the field. Single-impact AoEs (mage basic orb, meteor) wake the
-      // capped nearest set per impact.
+      // M7.7 survivor-retaliation: every falling AoE (rain drop, meteor, cataclysm,
+      // mage basic orb) wakes the TOUGH mobs it damages-but-doesn't-kill, via the one
+      // shared AoE path (damageInRadius/applyAoeDamage are the same now — no cap pass).
       if (p.kind === "rainArrow") damageInRadius(state, list, p.tx, p.aoe, p.damage, src);
       else applyAoeDamage(state, list, p.tx, p.aoe, p.damage, src);
       return true;

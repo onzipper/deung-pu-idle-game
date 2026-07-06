@@ -55,12 +55,27 @@ describe("hunt-field spawning (M6 สนามล่ามอน)", () => {
 
   it("keeps the pool respawning as mobs are hunted down", () => {
     const s = initGameState(42);
-    run(s, 3000);
-    const killsMid = s.kills;
+    s.autoCast = true; // real play auto-casts the signature (M7.7: needed to survive
+    // the denser field's survivor-retaliation as a low-level hero — a bare basic-only
+    // hero can get swarmed and respawn, which resets s.kills mid-run).
+    // s.kills resets on a death→town→auto-return trip, so tally kill EVENTS across the
+    // run (as the hunt anti-stall tests do) — the real "pool keeps feeding" signal.
+    let total = 0;
+    const tally = (): void => {
+      for (const e of s.events) if (e.type === "kill") total++;
+    };
+    for (let i = 0; i < 3000; i++) {
+      step(s, {});
+      tally();
+    }
+    const killsMid = total;
     expect(killsMid).toBeGreaterThan(0);
-    run(s, 3000);
+    for (let i = 0; i < 3000; i++) {
+      step(s, {});
+      tally();
+    }
     // The pool keeps feeding the hunt (respawn refills what the hero clears).
-    expect(s.kills).toBeGreaterThan(killsMid);
+    expect(total).toBeGreaterThan(killsMid);
   });
 });
 

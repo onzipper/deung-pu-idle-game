@@ -194,3 +194,139 @@ dropΣ (0.14) — acceptable. Potions (stage-scaled, ~thousands per restock) dwa
   town trips, the hero keeps farming (kills bank, no livelock/stall), gold stays
   positive, potions hover near targets, and it never strands mid boss room.
 - **Determinism:** a fixed-input restock-bot run is byte-identical across two runs.
+
+---
+
+# M7.7 — Skill Spectacle & World Heat (engine)
+
+Branch `develop` · owner-locked spec (ROADMAP "M7.7", 2026-07-06): **skills เบิ้ม —
+bigger radius + damage, cooldowns short, MANA = the pacing governor** ("ยิงรัวได้แต่ถังแห้ง
+เร็ว" → mana potions become a primary sink alongside hp potions); the world compensates
+with **denser fields** (17/19/21) + a raised **killGoal for PACING** (difficulty comes
+from the aggressive belt + retaliation, NOT the quota). **Boss stats UNTOUCHED** (owner
+deferred boss buffs). Identity: sword = in-the-swarm brawler, archer = zone artillery,
+mage = heavy nuker; **tier-2 skills = field-wide ultimates**. SkillKind set unchanged, **no
+new ProjectileKind** (barrage reuses the rainArrow fall). **SAVE unchanged (v12)** — skill
+ids/kit shape are the same; only tuning + a transient rule changed. Files:
+`engine/config`, `engine/systems/{damage,skills,combat}.ts`, `__tests__/skills-m77.test.ts`.
+
+## 1. Skill table (SKILL_LIST) — three layers per class
+
+(a) a **signature spam** layer (bigger + cheaper + shorter-cd than M7, sustained by base
+regen), (b) a **utility** layer (kept distinct in role, NOT nuke-ified), (c) a **tier-2
+ULTIMATE** that is effectively **field-wide** (coverage spanning the ~900px field).
+Ultimates cost <= 50 so they are AFFORDABLE from the flat 60 pool a str/dex class carries
+(it allocates str/dex, never int) — a hard gate that nearly empties the pool, but castable
+(a 72–90 cost made quake/barrage uncastable → the ultimate never fired for 2 of 3 classes,
+a bug caught in the sim: sword drained 0 mana potions until the fix).
+
+| skill | kind | tier | radius | mult | cost / cd | note (M7 -> M7.7) |
+|---|---|---|---:|---:|---|---|
+| sword_whirl | nova | 1 | 115 | 3.2 | 18 / 5 | signature (r95->115, mult 2.2->3.2, cheaper+faster) |
+| sword_warcry | buff | 1 | — | x1.5 | 20 / 16 | utility steroid (kept) |
+| **sword_quake** | strike | **2** | **460** | 6.5 | 50 / 10 | **field-wide** shockwave (r120->460) |
+| archer_rain | rain | 1 | 46 | 0.9 | 20 / 6 | signature, 9 drops (mult 0.5->0.9; radius held tight — §3) |
+| archer_powershot | bolt | 1 | — | 7.0 | 26 / 8 | utility single-target boss nuke |
+| **archer_barrage** | rain | **2** | 80 | 1.0 | 50 / 10 | **field-wide** 13-drop blanket (`barrageOffsets`, ~±420 span) |
+| mage_meteor | meteor | 1 | 130 | 7.0 | 36 / 6 | signature (r90->130, mult 5.5->7.0, cheaper+faster) |
+| mage_frostnova | strike | 1 | 110 | 2.2 | 22 / 5 | utility sustained clear (kept) |
+| **mage_cataclysm** | meteor | **2** | **460** | 13.0 | 90 / 11 | **field-wide** sky-fall (r110->460, mult 8->13) |
+
+Signature cost/cd (whirl 3.6, rain 3.3, meteor 6.0 mana/s) all <= `baseRegen` 7/s, so the
+**M5 no-hard-stall rule holds** — base regen alone sustains each signature.
+
+## 2. Mana economy — the pacing governor
+
+`regenPerIntPoint` cut **0.15 -> 0.05** (pool `base 60`, `perIntPoint 3.5` unchanged). The
+mage keeps its **sustain identity** (signature + frost-nova ~10 mana/s < its ~11–15 regen
+-> sustained) but the full heavy kit (adding the ~8 mana/s cataclysm) EXCEEDS regen, so
+continuous spam drains even the deep INT pool. Str/dex classes run the flat 60 pool: an
+ultimate nearly empties it, so the whole kit is mana-gated in seconds.
+
+**Mana potions are a real sink for all three classes** (`pnpm sim`, 2400 s × 5 seeds,
+auto-potion ON at 25%; the autopilot restocks the lower-stock potion on town passes):
+
+| class | mana potions / run | hp potions / run |
+|---|---:|---:|
+| swordsman | **124** | 115 |
+| archer | **181** | 125 |
+| mage | **17** (M6 was ~4) | 77 |
+
+## 3. Survivor-retaliation (replaces aoeWakeCap / aoeWakeRadiusFrac)
+
+**ANY passive mob DAMAGED by a hit that SURVIVES (`hp > 0` after) becomes engaged; one
+KILLED does not.** Enforced uniformly in `damage.applyDamage` (mob + survives -> engaged),
+so it needs **no knob** — the old AoE-aggro cap (`wakeNearestPassives`, `aoeWakeCap`,
+`aoeWakeRadiusFrac`) is **removed** and `applyAoeDamage`/`damageInRadius` share one path.
+Deterministic (no RNG). The "เบิ้ม" skills one-shot most of a cluster (killed -> silent),
+so heat concentrates on the **tough survivors at the frontier**. Basic-attack behaviour is
+unchanged (a surviving target retaliates; a killed one is removed).
+
+This is strictly MORE aggressive than the old cap-2 rule, so it bites the squishy
+**archer** hardest (its rain self-wakes what it cannot kill). Mitigations kept map2 clean
+and the archer walling at its M6 frontier region (s13): the rain radius was held tight
+(**46** — a first-pass 70 swarmed map2 to s10 481 s), and the belt fractions trimmed (map1
+0.00–0.05, map2 0.04–0.08, map3 0.10–0.16) so the **belt**, not a self-swarm, is the danger.
+
+## 4. Density + pacing knobs
+
+| knob | map1 | map2 | map3 |
+|---|---|---|---|
+| `maxAlive` | 15 -> **17** | 17 -> **19** | 18 -> **21** |
+| `respawnDelay` | 0.75 -> **0.7** | 0.65 -> **0.6** | 0.6 -> **0.55** |
+| `aggroStart→End` | 0.00–0.10 -> **0.00–0.05** | 0.09–0.18 -> **0.04–0.08** | 0.15–0.25 -> **0.10–0.16** |
+
+`spawnCandidates` 5 -> **7**. Kill throughput rose ~1.5×, so:
+
+| curve | M6/M7 | M7.7 | per-zone effect |
+|---|---|---|---|
+| `killGoal` | 16+8n | **24+12n** (×1.5) | clear-TIME held (the pacing lever) |
+| `xpPerKill` | 6+2n | **4 + 4n/3** (÷1.5) | XP/zone **byte-identical** (product exact) |
+| `goldPerKill` | (3.125+1.25n)·1.05ⁿ⁻¹ | **/1.5** | gold/zone **byte-identical** -> sink %s hold |
+
+`24+12n = 1.5×(16+8n)`, so killGoal×perKill is exactly preserved -> leveling trajectory,
+class-change-at-s5, and the map3 wall are unchanged.
+
+## 5. Sim gates — met (2400 s × 5 seeds × 3 classes; no-gear AND GEAR=1)
+
+- **Class change at stage 5 (5/5, every class, both configs).** OK
+- **map1 + map2: every farm zone + both boss rooms 5/5, 0 boss wipes.** OK
+- **s15 soft-wall INTACT (boss untouched).** s15 boss **0/5 for every class that reaches
+  it** — no-gear (sword 0/5, mage 0/5, archer walls s13 farm) AND **GEAR=1** (sword 0/5,
+  mage 0/5, archer reaches s14/s15 farm, never the boss). Gear softens frontier farm times
+  but does **not** crack the boss — field-wide ultimates alone do not crack s15, so no
+  ultimate-mult trim was needed. OK
+- **Autopilot never stalls** — all seeds×classes reach the frontier, bank XP (final levels
+  46–51); 494 tests green incl. long-run + pure-farm anti-stall suites. OK
+
+### Farm-zone clear time (mean s) — M7.7 no-gear vs the M6/M7 baseline
+
+| stage | sword / base | archer / base | mage / base |
+|---:|---|---|---|
+| 1  | 27 / 24 | 30 / 28 | 45 / 40 |
+| 5  | 74 / 54 | 62 / 51 | 70 / 109 |
+| 8  | 72 / 70 | 70 / 66 | 76 / 113 |
+| 10 | 86 / 83 | 154 / 116 | 105 / 139 |
+| 11 | 90 / 90 | 240 / 300 | 101 / 173 |
+| 12 | 109 / 170 | 683 / 317 | 96 / 297 |
+| 13 | 148 / 275 | wall / 422 | 135 / 309 |
+| 14 | 176 / 294 | wall / — | 215 / 260 |
+| 15 | 371 / — | wall | 521 / — |
+
+Early/mid (s1–s10) hold the M6 ballpark. Frontier farms clear **faster** for sword/mage
+(field-wide ultimates), but the **s15 boss is the wall** and it holds (0/5). The archer is
+the survivor-retaliation-sensitive class: clears map2 clean, walls at s13 (its M6 region),
+slower at s12 (683 s) — the accepted cost of removing the wake cap (GEAR=1 already reaches
+s14/s15 farm).
+
+## Compromises / notes
+
+- **Ultimates cost-capped at 50** for str/dex castability (60 pool). A bigger gate would
+  need a deeper pool (rejected — a deeper pool dries slower, against "ถังแห้งเร็ว").
+- **Barrage kind changed strike -> rain** (13 wide drops) for the artillery read; emits
+  `rainArrow` (render map already covers it — no new ProjectileKind).
+- **Sword/mage frontier FARMS clear faster than M6** (strong ultimates) but the s15 BOSS
+  is untouched and unbeaten — the soft-wall is the boss.
+- **Archer s12 is heavy (683 s).** Survivor-retaliation on a spammy AoE kiter is inherently
+  punishing (the exact interaction the M6 cap addressed); further trimming would blunt the
+  "เบิ้ม" intent. Held; gear/refine (M7/M7.6) are the relief.

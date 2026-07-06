@@ -149,42 +149,42 @@ describe("temperament (M6)", () => {
   });
 });
 
-describe("AoE-aggro rule (M6 hunt follow-up)", () => {
+describe("survivor-retaliation rule (M7.7)", () => {
   const HP0 = 1_000_000;
 
-  it("one AoE damages the whole passive cluster but wakes at most aoeWakeCap of them", () => {
+  it("every passive that SURVIVES a skill AoE engages; a cluster it one-shots stays silent", () => {
     const s = initGameState(1);
     s.spawnPaused = true;
-    // A tight passive cluster straddling the impact centre (all inside the wake radius).
-    const mobs = [0, 1, 2, 3, 4, 5].map((i) => passiveMob(i + 1, 400 + i * 6));
-    s.enemies = mobs;
+    // A tight passive cluster fully inside the blast — all take the hit and SURVIVE.
+    const survivors = [0, 1, 2, 3, 4, 5].map((i) => passiveMob(i + 1, 400 + i * 6));
+    s.enemies = survivors;
+    applyAoeDamage(s, s.enemies, 415, 90, 5, "skill"); // 5 dmg vs 1e6 hp: all live
+    expect(survivors.every((m) => m.hp === HP0 - 5)).toBe(true); // all damaged
+    expect(survivors.every((m) => m.engaged)).toBe(true); // ...all retaliate (no cap)
 
-    applyAoeDamage(s, s.enemies, 415, 90, 5, "skill"); // radius 90 covers all 6
-
-    // Damage is unaffected — every mob in the blast took the hit.
-    expect(mobs.every((m) => m.hp === HP0 - 5)).toBe(true);
-    // ...but retaliation is capped: only aoeWakeCap of them turned hostile.
-    expect(mobs.filter((m) => m.engaged).length).toBe(CONFIG.hunt.aoeWakeCap);
+    // A cluster the blast KILLS outright never engages (it's removed this step).
+    const s2 = initGameState(1);
+    s2.spawnPaused = true;
+    const doomed = [0, 1, 2].map((i) => ({ ...passiveMob(i + 10, 400 + i * 6), hp: 4, maxHp: 4 }));
+    s2.enemies = doomed;
+    applyAoeDamage(s2, s2.enemies, 406, 90, 5, "skill"); // 5 dmg kills all (hp 4)
+    expect(doomed.every((m) => m.hp <= 0)).toBe(true); // killed
+    expect(doomed.every((m) => !m.engaged)).toBe(true); // killed -> no retaliation
   });
 
-  it("passives outside the inner wake radius take damage but stay passive", () => {
+  it("a mob that survives one drop but dies to another: killed = not engaged", () => {
     const s = initGameState(1);
     s.spawnPaused = true;
-    // radius 100 -> wake radius 60. The near mob (d0) wakes; the edge mob (d85, still
-    // inside the 100 blast) takes damage but stays passive — it keeps its retreat room.
-    const near = passiveMob(1, 400);
-    const edge = passiveMob(2, 485);
-    s.enemies = [near, edge];
-
-    applyAoeDamage(s, s.enemies, 400, 100, 7, "skill");
-
-    expect(near.hp).toBe(HP0 - 7);
-    expect(edge.hp).toBe(HP0 - 7); // damaged
-    expect(near.engaged).toBe(true); // at the impact -> woke
-    expect(edge.engaged).toBe(false); // edge of blast -> stayed passive
+    const tough = passiveMob(1, 400); // 1e6 hp -> survives, engages
+    const frail = { ...passiveMob(2, 406), hp: 3, maxHp: 3 }; // dies -> stays silent
+    s.enemies = [tough, frail];
+    applyAoeDamage(s, s.enemies, 403, 90, 5, "skill");
+    expect(tough.engaged).toBe(true);
+    expect(frail.hp).toBeLessThanOrEqual(0);
+    expect(frail.engaged).toBe(false);
   });
 
-  it("does not draw from the RNG — an AoE wake is byte-identical on replay", () => {
+  it("does not draw from the RNG — survivor-retaliation is byte-identical on replay", () => {
     const run = (): string => {
       const s = initGameState(55);
       s.spawnPaused = true;
@@ -199,14 +199,16 @@ describe("AoE-aggro rule (M6 hunt follow-up)", () => {
 describe("min-spacing spawn placement (M6 hunt follow-up)", () => {
   it("a filled field is spread out — no two mobs stacked on a point", () => {
     // best-candidate placement keeps each spawn away from the nearest existing mob,
-    // so even a dense (15-18) field never stacks mobs. Check a few seeds.
+    // so even a dense (17-21) M7.7 field never STACKS mobs on a point. The packed
+    // field legitimately runs tighter than the M6 15-mob one, so the "no exact stack"
+    // floor is a couple px (sprites are wider — this only guards against coincident x).
     for (const seed of [1, 2, 3, 42]) {
       const s = initGameState(seed);
       for (let i = 0; i < 60 * 20; i++) step(s, {});
       const xs = [...s.enemies.map((e) => e.x)].sort((a, b) => a - b);
       let minGap = Infinity;
       for (let i = 1; i < xs.length; i++) minGap = Math.min(minGap, xs[i] - xs[i - 1]);
-      expect(minGap).toBeGreaterThan(4); // no visual stack
+      expect(minGap).toBeGreaterThan(2); // no coincident spawn (not a hard-spacing guarantee)
     }
   });
 
@@ -234,10 +236,11 @@ describe("aggro belt density ramps toward the boss room (M6)", () => {
     // Later maps are more dangerous (no town offset: last farm = zoneIdx 4).
     expect(frac("map2", 4)).toBeGreaterThan(frac("map1", 5)); // map2 last farm > map1 last farm
     expect(frac("map3", 4)).toBeGreaterThan(frac("map2", 4));
-    // M6 hunt-density retune: aggro FRACTIONS were cut when maxAlive rose ~2.5×
-    // (0.15-0.25 on map3), so the ABSOLUTE aggressive-mob count per zone still rose
-    // vs the old 6-8-cap field without turning the belt into a meat grinder.
-    expect(frac("map3", 4)).toBeGreaterThanOrEqual(0.25); // ~25% at the last frontier farm
+    // M7.7: aggro FRACTIONS were trimmed again (map3 0.15-0.25 → 0.10-0.16) because
+    // survivor-retaliation + the denser 17/19/21-mob fields add their own heat — the
+    // belt stays the danger source without becoming a meat grinder (esp. for the
+    // self-swarming archer; map2 kept low to keep it 0-death-safe).
+    expect(frac("map3", 4)).toBeGreaterThanOrEqual(0.15); // ~16% at the frontier tail
 
   });
 });
