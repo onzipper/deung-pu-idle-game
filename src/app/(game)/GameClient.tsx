@@ -374,7 +374,7 @@ async function performAutoEquip(): Promise<void> {
   }
 }
 
-async function performAutoSell(): Promise<void> {
+async function performAutoSell(suppressNothingNotice = false): Promise<void> {
   const store = useGameStore.getState();
   const { sellIds, salvageIds } = selectAutoSellSalvageIds(
     store.inventory,
@@ -387,10 +387,12 @@ async function performAutoSell(): Promise<void> {
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
   );
   if (sellIds.length === 0 && salvageIds.length === 0) {
-    // Bag full but the rules matched nothing — the engine latches its sell-trip
-    // watermark and stops tripping; tell the player WHY the bot gave up (fix =
-    // loosen the rules in Settings or sell/salvage manually).
-    store.pushNotice("autoSellNothing");
+    // Rules matched nothing. On a GENUINE full-bag sell trip the engine latches its
+    // sell-trip watermark and stops tripping, so tell the player WHY the bot gave up
+    // (fix = loosen the rules in Settings or sell/salvage manually). On an
+    // OPPORTUNISTIC sweep (a potions trip that also tidies the bag) a nothing-to-do
+    // result is normal, not a stuck bot — stay silent (`suppressNothingNotice`).
+    if (!suppressNothingNotice) store.pushNotice("autoSellNothing");
     return;
   }
   const sellResult = await executeSell(sellIds);
@@ -765,6 +767,10 @@ export function GameClient() {
           // is where the auto-sell rules actually run (fire-and-forget — a
           // dropped auto-sell just retries on the NEXT full-inventory trip).
           if (ev.reason === "sell" || ev.reason === "restockSell") {
+            // Suppress the "nothing to dispose" notice on an OPPORTUNISTIC sweep
+            // (a potions trip that also tidies the bag — `sellTriggered` false):
+            // a tidy bag with nothing to sell is normal there, not a stuck bot.
+            const suppressNothing = !ev.sellTriggered;
             // Equip first so the keep-guard baseline reflects the NEW gear —
             // the displaced pieces then vendor in this same trip. The dispose
             // sweep MUST still run if auto-equip rejects (the whole point of the
@@ -773,10 +779,13 @@ export function GameClient() {
             // leaving the bag full so the engine re-trips the warp forever — the
             // "bot warps but never sells/salvages" bug. Run dispose on BOTH the
             // fulfil and reject paths.
-            void performAutoEquip().then(performAutoSell, (err) => {
-              console.warn("[GameClient] auto-equip failed; disposing anyway", err);
-              return performAutoSell();
-            });
+            void performAutoEquip().then(
+              () => performAutoSell(suppressNothing),
+              (err) => {
+                console.warn("[GameClient] auto-equip failed; disposing anyway", err);
+                return performAutoSell(suppressNothing);
+              },
+            );
           }
         } else if (ev.type === "fastTravelCastStart") {
           useGameStore.getState().startFastTravelChannel(ev.mapId, ev.zoneIdx);

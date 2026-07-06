@@ -630,7 +630,8 @@
           "catchUp": "⏰ Switch tabs or fold your phone as long as you like — the game now catches up all your progress when you return",
           "botFix": "🛠 Fixed the bot reaching town but refusing to sell/salvage — every trip now completes its chores",
           "kiteFix": "🏹 Archer/Mage now glide smoothly while kiting — no more jittery bouncing",
-          "statTapFix": "👆 Stat + buttons now register every tap with instant feedback — mash away"
+          "statTapFix": "👆 Stat + buttons now register every tap with instant feedback — mash away",
+          "botTrip": "🏃 The bot works harder: one town trip now clears every chore you enabled — potions, selling, and salvaging in a single visit"
         }
       }
     }

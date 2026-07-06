@@ -452,6 +452,99 @@ describe("sell-trip bot (inventoryCount trigger)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Opportunistic sell sweep on EVERY trip (owner call 2026-07-07)
+// ---------------------------------------------------------------------------
+
+describe("opportunistic sell sweep (all enabled chores per trip)", () => {
+  /** Restock bot ON with EMPTY potions (a restock trip is due). */
+  function restockDue(sellBot: boolean): GameState {
+    const s = initGameState(1, soloSave("swordsman", 4));
+    unlockAll(s);
+    s.gold = 100_000;
+    s.bot = {
+      ...defaultBotSettings(),
+      enabled: true,
+      sellTripEnabled: sellBot,
+      hpPotionTarget: 15,
+      mpPotionTarget: 15,
+      scrollReserve: 3,
+    };
+    return s;
+  }
+
+  it("a potions-only trip with the sell bot ON sweeps too: sell-capable event + dwell", () => {
+    const s = restockDue(true);
+    // Bag BELOW cap → no sell trigger; the trip is restock-only, yet the sweep
+    // must still run because the sell bot is enabled.
+    const below = INVENTORY_CAP - 1;
+    const arrived = runUntilInput(
+      s,
+      { inventoryCount: below },
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      3000,
+    );
+    expect(arrived).toBe(true);
+    const ev = s.events.find((e) => e.type === "townArrived");
+    // Sell-capable reason (client runs the dispose sweep) but NOT a genuine
+    // full-bag trigger → sellTriggered false (client suppresses the give-up notice).
+    expect(ev && "reason" in ev && ev.reason).toBe("restockSell");
+    expect(ev && "sellTriggered" in ev && ev.sellTriggered).toBe(false);
+    expect(s.botDwell).not.toBeNull(); // dwells for the client's async sweep
+    expect(s.consumables.hpPotion).toBe(15); // restocked in the same trip
+    // A below-cap bag ends the dwell on the very next tick → walks straight home.
+    step(s, { inventoryCount: below });
+    expect(s.botDwell).toBeNull();
+    expect(s.sellTripWatermark).toBeNull(); // opportunistic exit never latches
+    const home = runUntilInput(
+      s,
+      { inventoryCount: below },
+      (st) => st.traveling === null && zoneAt(st.location).kind === "farm",
+      3000,
+    );
+    expect(home).toBe(true);
+  });
+
+  it("with the sell bot OFF a potions-only trip keeps the old behavior (no dwell)", () => {
+    const s = restockDue(false);
+    const arrived = runUntilInput(
+      s,
+      { inventoryCount: INVENTORY_CAP - 1 },
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      3000,
+    );
+    expect(arrived).toBe(true);
+    const ev = s.events.find((e) => e.type === "townArrived");
+    expect(ev && "reason" in ev && ev.reason).toBe("restock");
+    expect(ev && "sellTriggered" in ev && ev.sellTriggered).toBe(false);
+    expect(s.botDwell).toBeNull(); // buys and walks home, bag untouched
+  });
+
+  it("a genuine full-bag + restock trip is unchanged (restockSell, sellTriggered)", () => {
+    const s = restockDue(true);
+    const arrived = runUntilInput(
+      s,
+      { inventoryCount: INVENTORY_CAP }, // full bag = genuine sell trigger
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      3000,
+    );
+    expect(arrived).toBe(true);
+    const ev = s.events.find((e) => e.type === "townArrived");
+    expect(ev && "reason" in ev && ev.reason).toBe("restockSell");
+    expect(ev && "sellTriggered" in ev && ev.sellTriggered).toBe(true);
+    expect(s.botDwell).not.toBeNull();
+  });
+
+  it("is deterministic: byte-identical opportunistic-sweep runs", () => {
+    function run(): string {
+      const s = restockDue(true); // fixed seed 1 via initGameState
+      for (let i = 0; i < 4000; i++) step(s, { inventoryCount: INVENTORY_CAP - 1 });
+      return JSON.stringify(s);
+    }
+    expect(run()).toBe(run());
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fast travel
 // ---------------------------------------------------------------------------
 
