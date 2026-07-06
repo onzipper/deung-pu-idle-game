@@ -56,7 +56,11 @@ export interface GameState {
   stage: number;
   phase: Phase;
   wave: number;
+  /** Kills toward THIS zone's unlock quota (live counter; see `zoneKills`). */
   kills: number;
+  /** Persisted per-zone unlock progress (SAVE v13) backing `kills` across zone
+   * moves — see `arriveAtZone` (stash old zone / restore new zone). */
+  zoneKills: Record<string, number>;
   gold: number;
   /** The player's chosen base class (M5). Drives which hero is spawned. */
   heroClass: HeroClass;
@@ -280,6 +284,10 @@ export interface SaveData {
   /** Auto-hunt toggle (M6.6, SAVE v12). Engine-persisted (default true). See
    * `GameState.autoHunt` for the behaviour contract. */
   autoHunt: boolean;
+  /** Per-farm-zone unlock-quota kill progress keyed "mapId:zoneIdx" (M7.7
+   * follow-up, SAVE v13) — the zone-unlock gauge no longer wipes on a town
+   * trip/warp/death; `arriveAtZone` stashes + restores through this. */
+  zoneKills: Record<string, number>;
   /**
    * Equipped gear loadout (M7, SAVE v10): weapon/armor templateId or null. A SIM
    * CACHE — the DB `ItemInstance` ledger is authoritative (docs/persistence-m7.md),
@@ -391,7 +399,10 @@ export function initGameState(
     stage,
     phase: "battle",
     wave: 0,
-    kills: 0,
+    // Restore this zone's persisted unlock progress (v13) — a reload mid-zone
+    // resumes the gauge instead of restarting it.
+    kills: save?.zoneKills?.[`${location.mapId}:${location.zoneIdx}`] ?? 0,
+    zoneKills: { ...(save?.zoneKills ?? {}) },
     gold: save?.gold ?? 0,
     heroClass,
     autoCast: false,
@@ -545,6 +556,14 @@ export function toSaveData(state: GameState): SaveData {
     // standing in `location` (mid-walk is not persisted).
     location: { mapId: state.location.mapId, zoneIdx: state.location.zoneIdx },
     unlockedZones: { ...state.unlockedZones },
+    // v13: persist per-zone unlock progress, INCLUDING the live counter for the
+    // zone the hero is standing in right now.
+    zoneKills: {
+      ...state.zoneKills,
+      ...(zoneAt(state.location).kind === "farm"
+        ? { [`${state.location.mapId}:${state.location.zoneIdx}`]: state.kills }
+        : {}),
+    },
     lastFarmZone: { mapId: state.lastFarmZone.mapId, zoneIdx: state.lastFarmZone.zoneIdx },
     // NPC consumable stacks (M6, SAVE v9). Use-cooldowns + auto-use toggles are
     // transient/UI-owned — not persisted.

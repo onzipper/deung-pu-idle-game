@@ -94,9 +94,10 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
   // A cold-start save at stage 1 (first farm zone). Built directly; the world
   // fields are what initGameState fills for a fresh start, mirrored here.
   return {
-    version: 12,
+    version: 13,
     stage: 1,
     gold: 0,
+    zoneKills: {},
     location: { mapId: "map1", zoneIdx: 1 },
     unlockedZones: { map1: 2 },
     lastFarmZone: { mapId: "map1", zoneIdx: 1 },

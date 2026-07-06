@@ -91,7 +91,11 @@ import type {
 //   had none, so migration backfills `true` (behaviour unchanged — auto-hunt was
 //   always on before this toggle existed). A v12 save's own flag is preserved
 //   (coerced to a boolean — idempotent for the server's migrate-on-every-save).
-export const SAVE_VERSION = 12;
+// v12 -> v13 (M7.7 follow-up "เกจรี" fix): the save gains `zoneKills` — per-farm-
+//   zone unlock-quota progress keyed "mapId:zoneIdx", so a town trip (bot restock,
+//   warp, death respawn) no longer wipes the zone-unlock gauge. Pre-v13 saves
+//   backfill to {} (progress starts fresh once — the old behavior, one last time).
+export const SAVE_VERSION = 13;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -101,6 +105,18 @@ type UnknownStats = { str?: number; dex?: number; int?: number; vit?: number };
 
 /** A world location from an unknown/older save (fields optional). */
 type UnknownLocation = { mapId?: unknown; zoneIdx?: unknown };
+
+/** v13 zoneKills: keep only "map:idx" keys with non-negative integer counts. */
+function normalizeZoneKills(raw: Record<string, unknown> | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === "number" && Number.isInteger(v) && v >= 0 && k.includes(":")) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 
 /** A save of unknown/older version, before migration. */
 export interface UnknownSave {
@@ -120,6 +136,9 @@ export interface UnknownSave {
   // v12 autoHunt toggle (M6.6). Optional/unknown so a pre-v12 (or malformed) save
   // backfills to `true`.
   autoHunt?: unknown;
+  // v13 per-zone unlock-progress kills (M7.7 follow-up). Optional; malformed
+  // entries are dropped (non-negative integers only).
+  zoneKills?: Record<string, unknown>;
   // v10 gear (M7). Optional so a pre-v10 save backfills (equipped empty, counter 0,
   // salt derived). `equipped` fields are unknown so a malformed cache normalises.
   equipped?: { weapon?: unknown; armor?: unknown };
@@ -405,6 +424,8 @@ export function migrate(save: UnknownSave): SaveData {
     // autoHunt toggle (M6.6, v12): preserve a v12 save's flag (coerced to a
     // boolean); a pre-v12 save (no flag) backfills to `true` (unchanged behaviour).
     autoHunt: typeof save.autoHunt === "boolean" ? save.autoHunt : true,
+    // Per-zone unlock progress (v13): keep sane entries, drop garbage.
+    zoneKills: normalizeZoneKills(save.zoneKills),
     // M7 gear (v10): empty loadout for a pre-v10 save (DB ledger is authoritative);
     // a monotonic counter clamped non-negative; a salt PRESERVED if present (never
     // recomputed — idempotent) else derived deterministically from the save content.

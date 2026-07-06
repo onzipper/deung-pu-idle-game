@@ -324,12 +324,21 @@ export function arriveAtZone(
   reason: TravelReason,
 ): Zone {
   const zone = zoneAt(target);
+  // Per-zone unlock progress (SAVE v13, the "เกจรี" fix): stash the OLD farm
+  // zone's live counter, then restore the NEW zone's stashed progress — a town
+  // round trip (bot restock/sell, warp, death respawn) keeps the gauge; only
+  // genuinely-new zones start at 0.
+  const from = state.location;
+  if (zoneAt(from).kind === "farm") {
+    state.zoneKills[`${from.mapId}:${from.zoneIdx}`] = state.kills;
+  }
   state.location = { mapId: target.mapId, zoneIdx: target.zoneIdx };
   state.stage = zone.stage;
   state.enemies = [];
   state.projectiles = [];
   state.wave = 0;
-  state.kills = 0;
+  state.kills =
+    zone.kind === "farm" ? (state.zoneKills[`${target.mapId}:${target.zoneIdx}`] ?? 0) : 0;
   state.bossReady = false;
   state.anchorX = CONFIG.baseAnchor;
   state.waveGap = CONFIG.firstWaveGap;

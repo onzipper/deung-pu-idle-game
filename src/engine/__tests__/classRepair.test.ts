@@ -54,3 +54,37 @@ describe("repairHeroClass", () => {
     expect(initGameState(1).heroClass).toBe("swordsman");
   });
 });
+
+/**
+ * M7.7 follow-up "เกจรี" fix (SAVE v13): the zone-unlock kill gauge must
+ * survive town round trips / warps / reloads — per-zone progress lives in
+ * `zoneKills` and `arriveAtZone` stashes/restores it.
+ */
+describe("zoneKills — unlock-gauge persistence (SAVE v13)", () => {
+  it("a town round trip keeps the current zone's kill progress", async () => {
+    const { step, zoneAt } = await import("@/engine");
+    const s = initGameState(1, soloSave("swordsman", 3));
+    expect(zoneAt(s.location).kind).toBe("farm");
+    const here = { ...s.location };
+    s.kills = 41; // mid-quota progress
+
+    // Scroll-warp to town, then walk back to the same farm zone.
+    s.consumables.returnScroll = 1;
+    step(s, { useReturnScroll: true });
+    expect(zoneAt(s.location).kind).toBe("town");
+    expect(s.kills).toBe(0); // town shows no farm quota
+    step(s, { walkToZone: here });
+    for (let i = 0; i < 600 && s.traveling; i++) step(s, {});
+    expect(s.location).toEqual(here);
+    expect(s.kills).toBe(41); // gauge intact — the fix
+  });
+
+  it("each farm zone keeps ITS OWN progress; save round-trips it", () => {
+    const s = initGameState(2, soloSave("archer", 4));
+    s.kills = 17;
+    const data = toSaveData(s);
+    expect(data.zoneKills[`${s.location.mapId}:${s.location.zoneIdx}`]).toBe(17);
+    const s2 = initGameState(9, data);
+    expect(s2.kills).toBe(17); // reload resumes the gauge
+  });
+});
