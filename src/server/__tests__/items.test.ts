@@ -17,6 +17,7 @@ const { mockPrisma } = vi.hoisted(() => ({
       findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       count: vi.fn(),
     },
     itemEvent: { create: vi.fn() },
@@ -33,15 +34,22 @@ import {
   classifyClaim,
   claimBatchSchema,
   equipSchema,
+  sellSchema,
   claimBatch,
   equipItem,
   unequipItem,
   destroyItem,
+  sellItems,
   CLAIM_GRACE,
   KILLS_PER_SEC_CEILING,
   MAX_CLAIM_BATCH,
+  MAX_SELL_BATCH,
 } from "@/server/items";
-import { maxSummedDropChance } from "@/engine/config/items";
+import {
+  maxSummedDropChance,
+  vendorPriceForTemplate,
+  INVENTORY_CAP,
+} from "@/engine/config/items";
 
 const CHAR = "char_1";
 
@@ -283,5 +291,140 @@ describe("unequipItem / destroyItem", () => {
     expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ type: "destroyed" }) }),
     );
+  });
+});
+
+describe("claimBatch — inventory cap backstop (M7.5)", () => {
+  beforeEach(() => {
+    mockPrisma.character.findUnique.mockResolvedValue({ createdAt: new Date() });
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+    // Two distinct count() calls: origin-scoped (rate budget) vs deletedAt:null
+    // (inventory usage). Only the latter is at the cap here.
+    mockPrisma.itemInstance.count.mockImplementation(
+      async ({ where }: { where?: { deletedAt?: unknown } }) =>
+        where?.deletedAt === null ? INVENTORY_CAP : 0,
+    );
+  });
+
+  it("rejects a new mint at the cap (inventory_full), never minting", async () => {
+    mockPrisma.itemInstance.findUnique.mockResolvedValue(null); // not an idempotent retry
+    const { results } = await claimBatch(
+      CHAR,
+      [{ rollId: "1", templateId: "w_sword_t1_rusty", stage: 1 }],
+      Date.now(),
+    );
+    expect(results[0]).toMatchObject({ status: "rejected", reason: "inventory_full" });
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("still returns existing for an idempotent retry at the cap (cap must not break idempotency)", async () => {
+    mockPrisma.itemInstance.findUnique.mockResolvedValue(instanceRow({ id: "existing" }));
+    const { results } = await claimBatch(
+      CHAR,
+      [{ rollId: "1", templateId: "w_sword_t1_rusty", stage: 1 }],
+      Date.now(),
+    );
+    expect(results[0].status).toBe("existing");
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("sellItems — NPC vendor (M7.5)", () => {
+  beforeEach(() => {
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+  });
+
+  it("sells an unequipped item: atomic soft-delete + destroyed event, price from vendorPriceForTemplate", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(
+      instanceRow({ templateId: "w_sword_t3_knight", equippedSlot: null, deletedAt: null }),
+    );
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
+    const now = new Date("2026-07-06T00:00:00Z");
+    const { results, totalGold } = await sellItems(CHAR, ["item_1"], now);
+
+    const expectedPrice = vendorPriceForTemplate("w_sword_t3_knight");
+    expect(results[0]).toEqual({ itemId: "item_1", status: "sold", price: expectedPrice });
+    expect(totalGold).toBe(expectedPrice);
+    // conditional check-and-set guarded by deletedAt:null + equippedSlot:null
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "item_1", deletedAt: null, equippedSlot: null }),
+        data: { deletedAt: now },
+      }),
+    );
+    // ledger records the sell-time price
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "destroyed",
+          meta: JSON.stringify({ sold: true, price: expectedPrice, currency: "gold" }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects an equipped item (reason equipped) — never auto-unequips, no gold", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(
+      instanceRow({ equippedSlot: "weapon", deletedAt: null }),
+    );
+    const { results, totalGold } = await sellItems(CHAR, ["item_1"]);
+    expect(results[0]).toEqual({ itemId: "item_1", status: "rejected", reason: "equipped" });
+    expect(totalGold).toBe(0);
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("does not double-credit an already-deleted item (status already, price 0)", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(
+      instanceRow({ deletedAt: new Date("2026-01-01T00:00:00Z") }),
+    );
+    const { results, totalGold } = await sellItems(CHAR, ["item_1"]);
+    expect(results[0]).toEqual({ itemId: "item_1", status: "already", price: 0 });
+    expect(totalGold).toBe(0);
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("credits at most once when the atomic write loses the race (count 0 → already)", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(
+      instanceRow({ equippedSlot: null, deletedAt: null }),
+    );
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // concurrent seller won
+    const { results, totalGold } = await sellItems(CHAR, ["item_1"]);
+    expect(results[0]).toEqual({ itemId: "item_1", status: "already", price: 0 });
+    expect(totalGold).toBe(0);
+    expect(mockPrisma.itemEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a not-found item", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(null);
+    const { results } = await sellItems(CHAR, ["ghost"]);
+    expect(results[0]).toEqual({ itemId: "ghost", status: "rejected", reason: "not_found" });
+  });
+
+  it("dedupes ids: a duplicated id sells/credits exactly once", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(
+      instanceRow({ templateId: "w_sword_t1_rusty", equippedSlot: null, deletedAt: null }),
+    );
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
+    const { results, totalGold } = await sellItems(CHAR, ["item_1", "item_1", "item_1"]);
+    expect(results).toHaveLength(1);
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+    expect(totalGold).toBe(vendorPriceForTemplate("w_sword_t1_rusty"));
+  });
+});
+
+describe("sellSchema", () => {
+  it("accepts a well-formed batch", () => {
+    expect(sellSchema.safeParse({ itemIds: ["a", "b"] }).success).toBe(true);
+  });
+  it("rejects empty, over-cap, empty-string id, and extra keys", () => {
+    expect(sellSchema.safeParse({ itemIds: [] }).success).toBe(false);
+    expect(
+      sellSchema.safeParse({
+        itemIds: Array.from({ length: MAX_SELL_BATCH + 1 }, (_, i) => `i${i}`),
+      }).success,
+    ).toBe(false);
+    expect(sellSchema.safeParse({ itemIds: [""] }).success).toBe(false);
+    expect(sellSchema.safeParse({ itemIds: ["a"], hacked: true }).success).toBe(false);
   });
 });

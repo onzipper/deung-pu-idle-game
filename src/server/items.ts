@@ -25,6 +25,8 @@ import {
   dropTableForStage,
   bossDropTableForStage,
   maxSummedDropChance,
+  vendorPriceForTemplate,
+  INVENTORY_CAP,
   type GearSlot,
 } from "@/engine/config/items";
 import type { HeroClass } from "@/engine";
@@ -33,6 +35,9 @@ import { prisma } from "@/lib/db";
 // ── Tunables (plausibility cap) ──────────────────────────────────────────────
 /** Hard cap on items per POST /api/items/claim batch (DoS / abuse bound). */
 export const MAX_CLAIM_BATCH = 64;
+/** Hard cap on itemIds per POST /api/items/sell batch (DoS / abuse bound). Sized
+ *  to the full inventory so a "sell everything" trip is one request. */
+export const MAX_SELL_BATCH = 100;
 /**
  * GENEROUS kills/sec ceiling for the rate-plausibility guard — real auto-hunting
  * clears well under ~1 mob/sec; 5 leaves huge headroom for legit bursts/AoE while
@@ -124,6 +129,14 @@ export type ClaimEntry = z.infer<typeof claimEntrySchema>;
 export const equipSchema = z.object({ itemId: z.string().min(1).max(64) }).strict();
 export const unequipSchema = equipSchema;
 
+/** NPC-sell batch. Ids are deduped downstream in `sellItems` (one result/tx per
+ *  unique id); a duplicated id can never sell/credit the same instance twice. */
+export const sellSchema = z
+  .object({
+    itemIds: z.array(z.string().min(1).max(64)).min(1).max(MAX_SELL_BATCH),
+  })
+  .strict();
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface ItemInstanceDTO {
@@ -211,7 +224,11 @@ function isUniqueViolation(err: unknown, target?: string): boolean {
 
 export type ClaimItemResult =
   | { status: "minted" | "existing"; item: ItemInstanceDTO }
-  | { status: "rejected"; reason: "unknown_template" | "not_in_table" | "rate"; rollId: string };
+  | {
+      status: "rejected";
+      reason: "unknown_template" | "not_in_table" | "rate" | "inventory_full";
+      rollId: string;
+    };
 
 /**
  * Mint one item in a single tx (instance + `minted` event) — invariants 1, 7, 9.
@@ -286,6 +303,16 @@ export async function claimBatch(
   });
   let remaining = Math.max(0, ceiling - existingMinted);
 
+  // M7.5 inventory-cap backstop: the engine/client triggers a sell-trip at the
+  // cap, but a hostile client could keep claiming — the server refuses to mint
+  // past INVENTORY_CAP non-deleted instances. An idempotent retry of an
+  // ALREADY-minted claim still returns "existing" (the cap must not break
+  // idempotency — it mints nothing, so it never grows the inventory).
+  const inventoryCount = await prisma.itemInstance.count({
+    where: { ownerId: characterId, deletedAt: null },
+  });
+  let mintedThisBatch = 0;
+
   const results: ClaimItemResult[] = [];
   let unverifiedMembership = 0;
 
@@ -298,9 +325,11 @@ export async function claimBatch(
     }
     if (!cls.membershipKnown) unverifiedMembership++;
 
-    if (remaining <= 0) {
-      // Budget exhausted — still honour an idempotent retry of an already-minted
-      // claim (it doesn't add an item), otherwise reject as rate abuse.
+    const atCap = inventoryCount + mintedThisBatch >= INVENTORY_CAP;
+    const atRate = remaining <= 0;
+    if (atCap || atRate) {
+      // Gate hit — still honour an idempotent retry of an already-minted claim
+      // (it adds no item, so neither cap nor rate is violated), otherwise reject.
       const existing = await prisma.itemInstance.findUnique({
         where: { claimKey },
         select: INSTANCE_SELECT,
@@ -310,12 +339,20 @@ export async function claimBatch(
         if (dto) results.push({ status: "existing", item: dto });
         continue;
       }
-      results.push({ status: "rejected", reason: "rate", rollId: entry.rollId });
+      // Cap takes precedence over rate: it is the actionable normal-play limit.
+      results.push({
+        status: "rejected",
+        reason: atCap ? "inventory_full" : "rate",
+        rollId: entry.rollId,
+      });
       continue;
     }
 
     const minted = await mintOne(characterId, entry, cls.origin, claimKey);
-    if (minted.status === "minted") remaining--;
+    if (minted.status === "minted") {
+      remaining--;
+      mintedThisBatch++;
+    }
     const dto = toItemDTO(minted.row);
     if (dto) results.push({ status: minted.status, item: dto });
   }
@@ -472,6 +509,92 @@ export async function destroyItem(
     return true;
   });
   return { ok: res };
+}
+
+// ── Sell (NPC vendor) ────────────────────────────────────────────────────────
+
+export type SellItemResult =
+  | { itemId: string; status: "sold"; price: number }
+  | { itemId: string; status: "already"; price: 0 }
+  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+
+/**
+ * Sell owned items to the NPC vendor. Each item is ONE $transaction: verify
+ * ownership + non-deleted + UNEQUIPPED, then soft-delete (destroy) it and append a
+ * `destroyed` ItemEvent recording the sell-time price. Returns a per-item status +
+ * `totalGold` (sum of "sold" prices only).
+ *
+ * TRUST BOUNDARY / gold: the player's gold balance lives in the ENGINE save blob,
+ * not a DB column — the client applies `totalGold` via an engine intent and persists
+ * it on the next save. This ItemEvent(destroyed, meta.price) row is the AUTHORITATIVE
+ * audit for a future server-side gold re-derivation (M-later anti-cheat): re-derivation
+ * reads the recorded historical price from the ledger, it NEVER recomputes the price
+ * from today's `vendorPriceForTemplate` (magnitudes drift with balance).
+ *
+ * KNOWN GAP (v1): "town-only" selling is enforced engine/client-side; the server does
+ * not yet check the character's map/position, it only records the sale. Tighten when
+ * server-authoritative position lands.
+ *
+ * NO DOUBLE CREDIT: the soft-delete is a conditional `updateMany` guarded by
+ * `deletedAt: null` (+ `equippedSlot: null`) — an atomic check-and-set, NOT a
+ * read-then-write. Two concurrent sell calls for the same id race on that write:
+ * exactly one matches (count 1 → "sold", credited once); the loser matches nothing
+ * (count 0 → "already", price 0), so a retried/duplicated call can never add gold
+ * twice. Equipped items REJECT with reason "equipped" — sell NEVER auto-unequips
+ * (owner-locked M7.5 design).
+ */
+export async function sellItems(
+  characterId: string,
+  itemIds: string[],
+  now: Date = new Date(),
+): Promise<{ results: SellItemResult[]; totalGold: number }> {
+  const uniqueIds = [...new Set(itemIds)];
+  const results: SellItemResult[] = [];
+  let totalGold = 0;
+
+  for (const itemId of uniqueIds) {
+    const result = await prisma.$transaction(async (tx): Promise<SellItemResult> => {
+      const item = await tx.itemInstance.findFirst({
+        where: { id: itemId, ownerId: characterId },
+        select: { templateId: true, deletedAt: true, equippedSlot: true },
+      });
+      if (!item) return { itemId, status: "rejected", reason: "not_found" };
+      if (item.deletedAt !== null) return { itemId, status: "already", price: 0 };
+      // Equipped → reject; never auto-unequip on sell (owner-locked design).
+      if (item.equippedSlot !== null) return { itemId, status: "rejected", reason: "equipped" };
+
+      // Price is captured at SELL TIME and recorded in the ledger (below).
+      const price = vendorPriceForTemplate(item.templateId);
+
+      // Atomic check-and-set (the deletedAt:null guard is the lock). equippedSlot
+      // is already NULL here, and the guard re-asserts it, so invariant 5
+      // (deletedAt set ⇒ equippedSlot NULL) holds without a separate write.
+      const res = await tx.itemInstance.updateMany({
+        where: { id: itemId, ownerId: characterId, deletedAt: null, equippedSlot: null },
+        data: { deletedAt: now },
+      });
+      if (res.count === 0) {
+        // Lost the race (concurrently sold/deleted between the read and the write)
+        // — do NOT credit. Retried/duplicated sell yields exactly one "sold".
+        return { itemId, status: "already", price: 0 };
+      }
+
+      await tx.itemEvent.create({
+        data: {
+          itemId,
+          type: "destroyed",
+          fromCharacterId: characterId,
+          meta: JSON.stringify({ sold: true, price, currency: "gold" }),
+        },
+      });
+      return { itemId, status: "sold", price };
+    });
+
+    if (result.status === "sold") totalGold += result.price;
+    results.push(result);
+  }
+
+  return { results, totalGold };
 }
 
 /** Internal control-flow error so a tx callback can abort with a typed reason. */
