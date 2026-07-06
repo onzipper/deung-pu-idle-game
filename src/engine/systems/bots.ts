@@ -163,7 +163,7 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
         lastCount: null,
         returnAfter: false,
       };
-      state.events.push({ type: "townArrived", reason: "sell" });
+      state.events.push({ type: "townArrived", reason: "sell", sellTriggered: true });
     }
     return;
   }
@@ -243,9 +243,12 @@ function beginBotTrip(state: GameState, restock: boolean, sell: boolean): void {
 
 /**
  * Town arrival for a bot trip (called from step when a "bot" transit reaches town).
- * Restocks potions + scrolls within the gold floor, emits `townArrived` (the client
- * fires the sell API off it when selling is involved), then begins the auto-return
- * walk to the last farm zone. Always returns to farming — the whole point of the bot.
+ * EVERY trip performs ALL enabled chores (owner call 2026-07-07): it restocks AND
+ * runs the sell/salvage sweep opportunistically, so a potions-only trip clears the
+ * bag too instead of buying and walking home with it still full — mirroring the
+ * long-standing opportunistic restock. Emits `townArrived` (the client fires the
+ * sell API off it when selling is involved), then dwells for the async sell (or
+ * walks straight home to the last farm zone). Always returns to farming.
  */
 export function onBotTownArrival(state: GameState): void {
   const pending = state.botPending ?? { restock: false, sell: false };
@@ -256,15 +259,24 @@ export function onBotTownArrival(state: GameState): void {
   // clearly doesn't want gold auto-spent on potions).
   if (pending.restock || state.bot.enabled) botRestock(state);
 
-  const reason: "restock" | "sell" | "restockSell" =
-    pending.restock && pending.sell ? "restockSell" : pending.sell ? "sell" : "restock";
-  state.events.push({ type: "townArrived", reason });
+  // Opportunistic dispose (mirrors the restock precedent): ANY bot trip runs the
+  // sell/salvage sweep when the sell-trip bot is ON, so a potions-only trip empties
+  // the bag too. `pending.sell` alone means a GENUINE full-bag trigger; the extra
+  // `sellTriggered` flag carries that distinction to the client (it only surfaces
+  // the "nothing to dispose" notice for real sell trips, not tidy-bag potions runs).
+  const doSell = pending.sell || state.bot.sellTripEnabled;
 
-  if (pending.sell) {
+  const reason: "restock" | "sell" | "restockSell" =
+    pending.restock && doSell ? "restockSell" : doSell ? "sell" : "restock";
+  state.events.push({ type: "townArrived", reason, sellTriggered: pending.sell });
+
+  if (doSell) {
     // The sell is a CLIENT-side async API call fired off the townArrived event —
     // dwell in town for it instead of walking home in this same step (the
     // original walk-home-immediately behavior warp-looped: bag never shrank
-    // before the next full-bag trigger back at the farm).
+    // before the next full-bag trigger back at the farm). An opportunistic sweep
+    // that finds a below-cap bag ends the dwell on the very next tick (see
+    // tickSellDwell), so a tidy potions trip still walks home promptly.
     state.botDwell = { timer: CONFIG.bot.sellDwellSeconds, lastCount: null, returnAfter: true };
     return;
   }

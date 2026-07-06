@@ -98,10 +98,14 @@ export type GameEvent =
   | { type: "consumableUsed"; item: ShopItemId }
   | { type: "townReturned"; mapId: string }
   // Idle-bot town trip completed (M7.5): the potion-restock and/or sell-trip bot
-  // arrived in town. `reason` reports which triggers coalesced into this one trip —
-  // the CLIENT fires the sell API when `reason` involves selling ("sell" /
+  // arrived in town. `reason` reports which chores this visit performs — the CLIENT
+  // fires the sell/salvage sweep when `reason` involves selling ("sell" /
   // "restockSell"). Restock buying is fully engine-side (done before this fires).
-  | { type: "townArrived"; reason: "restock" | "sell" | "restockSell" }
+  // `sellTriggered` distinguishes a GENUINE full-bag sell trigger (true) from an
+  // OPPORTUNISTIC sweep tacked onto another trip (false, e.g. a potions-only trip
+  // that clears the bag too) — the client only shows the "nothing to dispose" notice
+  // when true, since a tidy-bag potions run giving up is normal, not a stuck bot.
+  | { type: "townArrived"; reason: "restock" | "sell" | "restockSell"; sellTriggered: boolean }
   // Fast travel lifecycle (M7.5): a short damage-cancellable channel to any
   // UNLOCKED zone, then an instant FREE hop arriving at the zone's gate-side x.
   // Positions are included so render can place the warp-portal fx. `fastTravelBlocked`
