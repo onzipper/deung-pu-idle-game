@@ -133,6 +133,14 @@ export async function persistSave(
     level: data.hero.level,
     power,
   };
+  // M8 presence cache: stamp the character's CURRENT zone (mapId:zoneIdx composite,
+  // ≤32 chars) alongside the level/power caches so a friends-list poll can show
+  // "where is my friend" without parsing this save blob. Derived from the validated
+  // payload's `location` (re-derivable, denormalized). Absent location (pre-v8 /
+  // trimmed) → leave the prior value untouched.
+  if (data.location) {
+    characterData.lastZone = `${data.location.mapId}:${data.location.zoneIdx}`.slice(0, 32);
+  }
   if (uiConfig !== undefined) {
     const uic = parseUiConfig(uiConfig);
     if (uic.ok) characterData.uiConfig = uiConfigWriteValue(uic.data);
