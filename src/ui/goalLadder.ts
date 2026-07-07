@@ -53,8 +53,12 @@ export interface GoalLadderHero {
   tier: 1 | 2 | 3;
   /** `null` below the quest's level gate (mirrors `HeroQuestSummary | null`);
    * otherwise present regardless of offered/accepted/complete — ANY non-null
-   * quest means "the class-change milestone is now the active one". */
-  quest: { complete: boolean } | null;
+   * quest means "the class-change milestone is now the active one" for the
+   * BREADCRUMB's rung (`buildGoalLadder`). `accepted` additionally gates
+   * `selectCurrentRung`'s priority-#1 behavior (2026-07-07 owner report,
+   * see its doc) — an OFFERED-but-not-yet-accepted quest deliberately does
+   * NOT outrank the zoneBoss "ready" state, only an accepted one does. */
+  quest: { accepted: boolean; complete: boolean } | null;
 }
 
 export interface GoalLadderInput {
@@ -64,24 +68,42 @@ export interface GoalLadderInput {
 }
 
 /**
- * The single current-rung decision. `bossReady`/`victory` ALWAYS wins over
- * the hero's level/quest tier — the challenge/next-stage beat is the loop's
- * biggest moment and must surface regardless of narrative milestone (a fresh
- * Lv.3 hero clearing stage-1's boss is just as much "current rung: zoneBoss"
- * as a fully-evolved hero grinding stage 40). Otherwise: a tier-1 hero with
- * no quest yet offered is still grinding toward the Lv.15 gate (`levelUp`,
- * the ONLY tier that reaches this rung — `MilestoneCard` hardcodes the tier-1
- * level gate for its progress bar, see `GoalLadder.tsx`); once EITHER
- * evolution quest exists (tier-1's class-change OR the M7.9 tier-2 -> tier-3
- * quest — offered, accepted, or complete-but-not-yet-evolved) that becomes
- * the current rung regardless of which tier it belongs to (same `classQuest`
- * rung id/copy serves both, `evolutionQuestFor` already resolves the right
- * def per tier); a tier-2 hero with NO active quest yet (still grinding
- * toward the Lv.40 gate) and a fully-evolved tier-3 hero both fall through to
- * the endless zone/boss loop.
+ * The single current-rung decision.
+ *
+ * Precedence (2026-07-07 owner report fix — an ACCEPTED evolution quest used
+ * to get buried behind an unrelated zone boss becoming challengeable):
+ *  1. `phase === "victory"` or `"boss"` (actually fighting) ALWAYS wins over
+ *     everything else — the biggest in-the-moment beat, and the hero mid-
+ *     fight needs fight feedback regardless of any quest state.
+ *  2. An ACCEPTED evolution quest (in progress OR complete-but-not-yet-
+ *     consumed change-class) is priority #1 over the zoneBoss "ready" state
+ *     — quest guidance must not be hidden just because some OTHER zone's
+ *     boss door happens to be open. An OFFERED-but-not-yet-accepted quest
+ *     deliberately does NOT get this priority: players who haven't engaged
+ *     the offer yet keep the pre-existing behavior (boss guidance still
+ *     wins) rather than being forced to notice a quest they ignored.
+ *  3. Otherwise: `bossReady` wins (the original "challenge/next-stage beat
+ *     surfaces regardless of narrative milestone" rule — a fresh Lv.3 hero
+ *     clearing stage-1's boss is just as much "current rung: zoneBoss" as a
+ *     fully-evolved hero grinding stage 40).
+ *  4. A tier-1 hero with no quest yet offered is still grinding toward the
+ *     Lv.15 gate (`levelUp`, the ONLY tier that reaches this rung —
+ *     `MilestoneCard` hardcodes the tier-1 level gate for its progress bar,
+ *     see `GoalLadder.tsx`); once EITHER evolution quest exists (tier-1's
+ *     class-change OR the M7.9 tier-2 -> tier-3 quest — offered, accepted,
+ *     or complete-but-not-yet-evolved) that becomes the current rung
+ *     regardless of which tier it belongs to (same `classQuest` rung
+ *     id/copy serves both, `evolutionQuestFor` already resolves the right
+ *     def per tier); a tier-2 hero with NO active quest yet (still grinding
+ *     toward the Lv.40 gate) and a fully-evolved tier-3 hero both fall
+ *     through to the endless zone/boss loop.
  */
 export function selectCurrentRung(input: GoalLadderInput): GoalRungId {
-  if (input.phase === "victory" || input.bossReady) return "zoneBoss";
+  if (input.phase === "victory" || input.phase === "boss") return "zoneBoss";
+  if (input.hero && input.hero.tier < 3 && input.hero.quest?.accepted) {
+    return "classQuest";
+  }
+  if (input.bossReady) return "zoneBoss";
   if (input.hero && input.hero.tier < 3) {
     if (input.hero.quest) return "classQuest";
     if (input.hero.tier === 1) return "levelUp";

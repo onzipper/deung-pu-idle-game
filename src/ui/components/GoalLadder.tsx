@@ -626,7 +626,12 @@ export function GoalLadder() {
 
   const { current, rungs } = buildGoalLadder({
     hero: hero
-      ? { tier: hero.tier, quest: hero.quest ? { complete: hero.quest.complete } : null }
+      ? {
+          tier: hero.tier,
+          quest: hero.quest
+            ? { accepted: hero.quest.accepted, complete: hero.quest.complete }
+            : null,
+        }
       : null,
     phase,
     bossReady,
