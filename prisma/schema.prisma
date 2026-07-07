@@ -37,6 +37,12 @@ model User {
   pingsReceived          EmojiPing[]     @relation("EmojiPingTo")
   partyInvitesSent       PartyInvite[]   @relation("PartyInviteFrom")
   partyInvitesReceived   PartyInvite[]   @relation("PartyInviteTo")
+  // M8 Phase 1 party (social container). A user is in AT MOST one party — the
+  // 0..1 side of PartyMember.userId @unique; `partiesLed` is the parties this
+  // user is the leader of (cascade dissolves a party if the leader's ACCOUNT is
+  // hard-deleted — a rare GDPR event, distinct from the app-level leave/promote).
+  partyMembership PartyMember? @relation("PartyMembership")
+  partiesLed      Party[]      @relation("PartyLeader")
 }
 
 // A player character (GDD v2: account -> up to 3 characters, each its own
@@ -453,6 +459,49 @@ model EmojiPing {
 
   @@index([toUserId, seenAt]) // "unseen pings for user X" (seenAt IS NULL filter) + purge sweep
   @@index([fromUserId]) // cascade-side reads
+}
+
+// M8 Phase 1 "Party" — a social CONTAINER (max 3), no gameplay coupling yet (the
+// lockstep cohort sim is a later wave; see docs/party-design-m8.md). Membership is
+// modeled as PartyMember ROWS rather than an array-on-User because it gives us both
+// invariants cleanly at the DB layer:
+//   - "which party am I in / my party" = a single indexed lookup by PartyMember.userId
+//     (@unique → a user is in AT MOST one party, DB-ENFORCED, no app race window for
+//     double-join: a second accept collides on the unique index → P2002).
+//   - the <=3 cap = COUNT(PartyMember WHERE partyId) — checked inside the accept tx
+//     AFTER an exclusive row-lock on the Party (tx.party.update bumps `updatedAt`),
+//     which serializes concurrent accepts into the SAME party so the re-checked count
+//     is authoritative (MySQL/InnoDB REPEATABLE-READ snapshot counts alone would let
+//     two accepts both read 2 and both insert → the lock closes that race).
+//
+// `leaderUserId` is a REAL relation (onDelete: Cascade) so hard-deleting the leader's
+// account dissolves the whole party (members' rows then cascade via PartyMember.partyId).
+// The everyday "leader leaves" path is APP-level: leaveParty promotes the oldest
+// remaining member (min joinedAt) before deleting the leader's row; the last member
+// leaving deletes the Party. The leader ALSO holds a PartyMember row (they are a member).
+model Party {
+  id           String        @id @default(cuid())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt // bumped to acquire the accept-race row lock
+  leaderUserId String
+  leader       User          @relation("PartyLeader", fields: [leaderUserId], references: [id], onDelete: Cascade)
+  members      PartyMember[]
+
+  @@index([leaderUserId]) // "parties I lead" + cascade-side reads
+}
+
+// One row per (user, party) membership. `userId @unique` is the hard guarantee that a
+// user belongs to at most ONE party. Cascades from BOTH sides: deleting the Party (last
+// leave / leader account purge) removes members; hard-deleting a User removes their row.
+model PartyMember {
+  id       String   @id @default(cuid())
+  partyId  String
+  party    Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  userId   String   @unique // a user is in AT MOST one party (DB-enforced)
+  user     User     @relation("PartyMembership", fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now()) // promotion order: oldest remaining member becomes leader
+
+  @@index([partyId]) // enumerate a party's members + the <=3 COUNT
 }
 
 // Party invite — future-proofed NOW so M8 needs only ONE `prisma db push`. Minimal:

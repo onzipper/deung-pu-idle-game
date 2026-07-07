@@ -32,6 +32,10 @@ const { mockPrisma } = vi.hoisted(() => ({
       count: vi.fn(),
       create: vi.fn(),
     },
+    // M8 party — getFriendsPanel folds party state in via loadPartyState().
+    partyMember: { findUnique: vi.fn() },
+    party: { findUnique: vi.fn() },
+    partyInvite: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -64,6 +68,10 @@ beforeEach(() => {
   mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) =>
     fn(mockPrisma),
   );
+  // Default M8 party state = "not in a party, no invites" so the existing
+  // getFriendsPanel assertions are unaffected by the party fold-in.
+  mockPrisma.partyMember.findUnique.mockResolvedValue(null);
+  mockPrisma.partyInvite.findMany.mockResolvedValue([]);
 });
 
 describe("sortPair", () => {

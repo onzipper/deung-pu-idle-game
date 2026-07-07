@@ -23,6 +23,7 @@
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { loadPartyState } from "@/server/party";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -166,16 +167,43 @@ export interface EmojiPingView {
   sentAt: string;
 }
 
+/** A single party member's presence row (same shape as a friend row, minus the
+ *  friendCode/lastSeen the party UI doesn't render). Includes ME. */
+export interface PartyMemberView {
+  userId: string;
+  displayName: string | null;
+  online: boolean;
+  currentCharacter: CurrentCharacter | null;
+  lastZone: string | null;
+}
+
+export interface PartyView {
+  partyId: string;
+  leaderUserId: string;
+  members: PartyMemberView[];
+}
+
+export interface IncomingPartyInviteView {
+  inviteId: string;
+  fromDisplayName: string | null;
+  createdAt: string;
+}
+
 export interface FriendsPanel {
   friends: FriendView[];
   incomingRequests: IncomingRequestView[];
   emojiPings: EmojiPingView[];
+  /** M8 party (social container): my party or null, plus pending invites TO me.
+   *  Folded into this ONE poll so the panel needs no second timer. */
+  party: PartyView | null;
+  incomingPartyInvites: IncomingPartyInviteView[];
 }
 
 // ── Registration guard ───────────────────────────────────────────────────────
 
-/** True iff `userId` names a REGISTERED account (guest → false). */
-async function isRegistered(userId: string): Promise<boolean> {
+/** True iff `userId` names a REGISTERED account (guest → false).
+ *  Exported so the party domain (`src/server/party.ts`) reuses the ONE guest gate. */
+export async function isRegistered(userId: string): Promise<boolean> {
   const u = await prisma.user.findUnique({
     where: { id: userId },
     select: { registeredAt: true },
@@ -183,8 +211,9 @@ async function isRegistered(userId: string): Promise<boolean> {
   return Boolean(u?.registeredAt);
 }
 
-/** True iff the (canonical) pair are friends. */
-async function areFriends(a: string, b: string): Promise<boolean> {
+/** True iff the (canonical) pair are friends. Exported for the party domain
+ *  (a party invite requires an existing friendship). */
+export async function areFriends(a: string, b: string): Promise<boolean> {
   const [userAId, userBId] = sortPair(a, b);
   const row = await prisma.friendship.findUnique({
     where: { userAId_userBId: { userAId, userBId } },
@@ -432,9 +461,21 @@ export async function getFriendsPanel(
   });
   const requesterIds = requests.map((r) => r.fromUserId);
 
+  // M8 party state (my party incl. me + pending invites TO me) — folded into this
+  // same poll. Its member/inviter ids join the batched presence fetch below.
+  const { party: partyRaw, incomingInvites } = await loadPartyState(userId);
+
   // One batched fetch of every "other" user + their characters (friends, requesters,
-  // ping senders) — no N+1.
-  const otherIds = [...new Set([...friendIds, ...requesterIds, ...pings.map((p) => p.fromUserId)])];
+  // ping senders, party members incl. ME, party inviters) — no N+1.
+  const otherIds = [
+    ...new Set([
+      ...friendIds,
+      ...requesterIds,
+      ...pings.map((p) => p.fromUserId),
+      ...(partyRaw?.memberUserIds ?? []),
+      ...incomingInvites.map((i) => i.fromUserId),
+    ]),
+  ];
 
   const [users, chars] = await Promise.all([
     otherIds.length
@@ -509,7 +550,39 @@ export async function getFriendsPanel(
     sentAt: p.sentAt.toISOString(),
   }));
 
-  return { ok: true, panel: { friends, incomingRequests, emojiPings } };
+  // Party member presence reuses the exact same helpers as a friend row.
+  const memberView = (uid: string): PartyMemberView => {
+    const mr = mostRecent(charsByUser.get(uid) ?? []);
+    const lastSeenMs = mr?.lastSeenMs ?? 0;
+    return {
+      userId: uid,
+      displayName: displayNameFor(uid),
+      online: lastSeenMs > 0 && nowMs - lastSeenMs < ONLINE_WINDOW_MS,
+      currentCharacter: mr
+        ? { name: mr.char.name, class: mr.char.baseClass, level: mr.char.level }
+        : null,
+      lastZone: mr?.char.lastZone ?? null,
+    };
+  };
+
+  const party: PartyView | null = partyRaw
+    ? {
+        partyId: partyRaw.partyId,
+        leaderUserId: partyRaw.leaderUserId,
+        members: partyRaw.memberUserIds.map(memberView),
+      }
+    : null;
+
+  const incomingPartyInvites: IncomingPartyInviteView[] = incomingInvites.map((i) => ({
+    inviteId: i.inviteId,
+    fromDisplayName: displayNameFor(i.fromUserId),
+    createdAt: i.createdAt.toISOString(),
+  }));
+
+  return {
+    ok: true,
+    panel: { friends, incomingRequests, emojiPings, party, incomingPartyInvites },
+  };
 }
 
 // ── 5. Send an emoji ping ────────────────────────────────────────────────────

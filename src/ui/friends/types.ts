@@ -36,10 +36,33 @@ export interface EmojiPingWire {
   sentAt: string;
 }
 
+export interface PartyMemberWire {
+  userId: string;
+  displayName: string | null;
+  online: boolean;
+  currentCharacter: CurrentCharacterWire | null;
+  lastZone: string | null;
+}
+
+export interface PartyWire {
+  partyId: string;
+  leaderUserId: string;
+  members: PartyMemberWire[];
+}
+
+export interface IncomingPartyInviteWire {
+  inviteId: string;
+  fromDisplayName: string | null;
+  createdAt: string;
+}
+
 export interface FriendsPanelWire {
   friends: FriendWire[];
   incomingRequests: IncomingRequestWire[];
   emojiPings: EmojiPingWire[];
+  /** M8 party (social container): my party or null + pending invites TO me. */
+  party: PartyWire | null;
+  incomingPartyInvites: IncomingPartyInviteWire[];
 }
 
 /** Server allowlist (footgun #4: pre-2020 glyphs only, Windows 10 safe) —

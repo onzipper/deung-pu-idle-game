@@ -1107,6 +1107,20 @@
     "errorBadEmoji": "อิโมจินี้ใช้ไม่ได้",
     "errorNotFriends": "ต้องเป็นเพื่อนกันก่อนถึงจะส่งอิโมจิได้",
     "errorRateLimited": "ส่งถี่ไปหน่อย เว้นจังหวะก่อนส่งใหม่นะ",
-    "errorGeneric": "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง"
+    "errorGeneric": "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง",
+    "partyGroupTitle": "ปาร์ตี้ ({count}/{max})",
+    "partyPhaseNote": "ปาร์ตี้เฟสแรก: เห็นสถานะกันก่อน — เล่นด้วยกันจริงมาเร็ว ๆ นี้",
+    "partyLeaderBadge": "หัวหน้าปาร์ตี้",
+    "partyInviteButton": "ชวนเข้าปาร์ตี้",
+    "partyInviteSent": "ส่งคำเชิญแล้ว",
+    "partyInvitesGroupTitle": "คำเชิญเข้าปาร์ตี้",
+    "partyLeaveButton": "ออกจากปาร์ตี้",
+    "partyLeaveConfirmPrompt": "ออกจากปาร์ตี้เลยนะ?",
+    "partyLeaveConfirmButton": "ยืนยันออก",
+    "partyLeaveCancelButton": "ยกเลิก",
+    "errorPartyFull": "ปาร์ตี้เต็มแล้ว (สูงสุด 3 คน)",
+    "errorAlreadyMember": "อยู่ปาร์ตี้เดียวกันอยู่แล้ว",
+    "errorAlreadyInvited": "ส่งคำเชิญไปแล้ว รอผลก่อนนะ",
+    "errorAlreadyInParty": "ออกจากปาร์ตี้เดิมก่อนถึงจะเข้าปาร์ตี้ใหม่ได้"
   }
 }

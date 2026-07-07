@@ -20,8 +20,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchFriendsPanel,
   postFriendRequest,
+  postLeaveParty,
+  postPartyInvite,
   postRemoveFriend,
   postRespondFriendRequest,
+  postRespondPartyInvite,
   postSendEmoji,
 } from "@/ui/friends/api";
 import type { FriendsPanelWire, SendFriendRequestResult } from "@/ui/friends/types";
@@ -51,6 +54,11 @@ export interface UseFriendsPoll {
   respond: (requestId: string, accept: boolean) => Promise<boolean>;
   remove: (userId: string) => Promise<boolean>;
   sendEmoji: (toUserId: string, emoji: string) => Promise<{ ok: true } | { ok: false; code: string }>;
+  invitePartyMember: (
+    toUserId: string,
+  ) => Promise<{ ok: true } | { ok: false; code: string }>;
+  respondPartyInvite: (inviteId: string, accept: boolean) => Promise<boolean>;
+  leaveParty: () => Promise<boolean>;
 }
 
 export function useFriendsPoll(open: boolean): UseFriendsPoll {
@@ -168,10 +176,35 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
 
   const sendEmoji = useCallback((toUserId: string, emoji: string) => postSendEmoji(toUserId, emoji), []);
 
+  const invitePartyMember = useCallback(
+    async (toUserId: string) => {
+      const res = await postPartyInvite(toUserId);
+      void poll();
+      return res;
+    },
+    [poll],
+  );
+
+  const respondPartyInvite = useCallback(
+    async (inviteId: string, accept: boolean) => {
+      const res = await postRespondPartyInvite(inviteId, accept);
+      void poll();
+      return res.ok;
+    },
+    [poll],
+  );
+
+  const leaveParty = useCallback(async () => {
+    const res = await postLeaveParty();
+    void poll();
+    return res.ok;
+  }, [poll]);
+
   return {
     status,
     panel,
-    pendingCount: panel?.incomingRequests.length ?? 0,
+    // Badge reflects everything actionable: friend requests + party invites.
+    pendingCount: (panel?.incomingRequests.length ?? 0) + (panel?.incomingPartyInvites.length ?? 0),
     toasts,
     dismissToast,
     refresh,
@@ -179,5 +212,8 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
     respond,
     remove,
     sendEmoji,
+    invitePartyMember,
+    respondPartyInvite,
+    leaveParty,
   };
 }

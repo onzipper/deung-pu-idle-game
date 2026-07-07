@@ -1107,6 +1107,20 @@
     "errorBadEmoji": "That emoji isn't allowed",
     "errorNotFriends": "You need to be friends to send an emoji",
     "errorRateLimited": "Sending too fast — slow down a bit",
-    "errorGeneric": "That didn't work — try again"
+    "errorGeneric": "That didn't work — try again",
+    "partyGroupTitle": "Party ({count}/{max})",
+    "partyPhaseNote": "Party phase one: see each other status first — playing together for real is coming soon",
+    "partyLeaderBadge": "Party leader",
+    "partyInviteButton": "Invite to party",
+    "partyInviteSent": "Invite sent",
+    "partyInvitesGroupTitle": "Party Invites",
+    "partyLeaveButton": "Leave party",
+    "partyLeaveConfirmPrompt": "Leave this party?",
+    "partyLeaveConfirmButton": "Confirm leave",
+    "partyLeaveCancelButton": "Cancel",
+    "errorPartyFull": "Party is full (max 3)",
+    "errorAlreadyMember": "Already in the same party",
+    "errorAlreadyInvited": "Invite already sent — wait for a response",
+    "errorAlreadyInParty": "Leave your current party first to join a new one"
   }
 }

@@ -15,12 +15,24 @@ import type { HeroClass } from "@/engine";
 import { HERO_ICONS } from "@/ui/labels";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { FRIEND_EMOJI_ALLOWLIST } from "@/ui/friends/types";
-import type { FriendCandidateWire, FriendWire } from "@/ui/friends/types";
+import type {
+  FriendCandidateWire,
+  FriendWire,
+  IncomingPartyInviteWire,
+  PartyMemberWire,
+  PartyWire,
+} from "@/ui/friends/types";
 import { parseFriendZone, relativeTimeFrom } from "@/ui/friends/format";
 import type { UseFriendsPoll } from "@/ui/friends/useFriendsPoll";
 import { requestOpenAccountSettings } from "@/ui/openSettingsSignal";
 
 type Translator = ReturnType<typeof useTranslations>;
+
+/** Mirror of the server's MAX_PARTY_SIZE — the "have room" gate for the invite CTA. */
+const MAX_PARTY_SIZE = 3;
+
+/** Windows-10-safe leader marker (footgun #4: pre-2020 glyphs only). */
+const LEADER_GLYPH = "★"; // ★
 
 const ERROR_KEY_BY_CODE: Record<string, string> = {
   account_required: "errorAccountRequired",
@@ -32,6 +44,10 @@ const ERROR_KEY_BY_CODE: Record<string, string> = {
   bad_emoji: "errorBadEmoji",
   not_friends: "errorNotFriends",
   rate_limited: "errorRateLimited",
+  party_full: "errorPartyFull",
+  already_member: "errorAlreadyMember",
+  already_invited: "errorAlreadyInvited",
+  already_in_party: "errorAlreadyInParty",
 };
 
 function errorMessage(code: string, t: Translator): string {
@@ -135,6 +151,22 @@ export function FriendsPanel({ onClose, poll }: FriendsPanelProps) {
 
           {status === "ready" && panel && (
             <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+              {panel.party && (
+                <PartySection
+                  party={panel.party}
+                  poll={poll}
+                  t={t}
+                  tWorld={tWorld}
+                  tMaps={tMaps}
+                  tContent={tContent}
+                  tCommon={tCommon}
+                />
+              )}
+
+              {panel.incomingPartyInvites.length > 0 && (
+                <PartyInvitesSection invites={panel.incomingPartyInvites} poll={poll} t={t} />
+              )}
+
               <AddFriendSection poll={poll} t={t} />
 
               {panel.incomingRequests.length > 0 && (
@@ -188,6 +220,13 @@ export function FriendsPanel({ onClose, poll }: FriendsPanelProps) {
                         key={f.userId}
                         friend={f}
                         poll={poll}
+                        // I can invite when I have room (no party, or party < 3) and
+                        // this friend is online and not already a member of my party.
+                        canInvite={
+                          f.online &&
+                          (!panel.party || panel.party.members.length < MAX_PARTY_SIZE) &&
+                          !(panel.party?.members.some((m) => m.userId === f.userId) ?? false)
+                        }
                         t={t}
                         tWorld={tWorld}
                         tMaps={tMaps}
@@ -334,6 +373,7 @@ function AddFriendSection({ poll, t }: { poll: UseFriendsPoll; t: Translator }) 
 function FriendRow({
   friend,
   poll,
+  canInvite,
   t,
   tWorld,
   tMaps,
@@ -342,6 +382,7 @@ function FriendRow({
 }: {
   friend: FriendWire;
   poll: UseFriendsPoll;
+  canInvite: boolean;
   t: Translator;
   tWorld: Translator;
   tMaps: Translator;
@@ -351,11 +392,27 @@ function FriendRow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
 
   async function handleSendEmoji(emoji: string) {
     setPickerOpen(false);
     const res = await poll.sendEmoji(friend.userId, emoji);
     if (!res.ok) {
+      setActionError(errorMessage(res.code, t));
+      window.setTimeout(() => setActionError(null), 3000);
+    }
+  }
+
+  async function handleInvite() {
+    setInviting(true);
+    setActionError(null);
+    const res = await poll.invitePartyMember(friend.userId);
+    setInviting(false);
+    if (res.ok) {
+      setInviteNotice(t("partyInviteSent"));
+      window.setTimeout(() => setInviteNotice(null), 3000);
+    } else {
       setActionError(errorMessage(res.code, t));
       window.setTimeout(() => setActionError(null), 3000);
     }
@@ -400,8 +457,21 @@ function FriendRow({
       </div>
 
       {actionError && <span className="pl-4 text-[11px] font-semibold text-ddp-bad">{actionError}</span>}
+      {inviteNotice && (
+        <span className="pl-4 text-[11px] font-semibold text-emerald-300">{inviteNotice}</span>
+      )}
 
       <div className="flex items-center justify-end gap-1.5 pt-0.5">
+        {canInvite && (
+          <button
+            type="button"
+            onClick={() => void handleInvite()}
+            disabled={inviting}
+            className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-gold/50 bg-ddp-gold/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-gold-bright disabled:opacity-50"
+          >
+            {inviting ? t("sending") : t("partyInviteButton")}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setPickerOpen((v) => !v)}
@@ -454,5 +524,196 @@ function FriendRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ── Party section (top of the panel when I'm in a party) ────────────────────────
+
+function PartyMemberRow({
+  member,
+  isLeader,
+  t,
+  tWorld,
+  tMaps,
+  tContent,
+  tCommon,
+}: {
+  member: PartyMemberWire;
+  isLeader: boolean;
+  t: Translator;
+  tWorld: Translator;
+  tMaps: Translator;
+  tContent: Translator;
+  tCommon: Translator;
+}) {
+  const name = member.displayName ?? t("unknownPlayer");
+  const cls = member.currentCharacter?.class as HeroClass | undefined;
+  return (
+    <div className="flex flex-col gap-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden
+          className={`h-2 w-2 shrink-0 rounded-full ${member.online ? "bg-emerald-400" : "bg-ddp-ink-muted/50"}`}
+        />
+        {isLeader && (
+          <span aria-label={t("partyLeaderBadge")} className="shrink-0 text-xs text-ddp-gold-bright">
+            {LEADER_GLYPH}
+          </span>
+        )}
+        {cls && <span aria-hidden className="shrink-0 text-sm">{HERO_ICONS[cls] ?? ""}</span>}
+        <span className="min-w-0 flex-1 truncate text-xs font-bold text-ddp-ink">{name}</span>
+        {member.currentCharacter && (
+          <span className="shrink-0 text-[10px] text-ddp-ink-muted tabular-nums">
+            {tCommon("levelBadge", { level: member.currentCharacter.level })}
+          </span>
+        )}
+      </div>
+      <div className="pl-4 text-[11px] text-ddp-ink-muted">
+        <span className="min-w-0 truncate">
+          {member.currentCharacter ? (
+            <>
+              {member.currentCharacter.name}
+              {cls && <> · {tContent(`${cls}.name`)}</>}
+              {member.online && member.lastZone && (
+                <> · {zoneLabelFor(member.lastZone, t, tWorld, tMaps)}</>
+              )}
+            </>
+          ) : (
+            t("noCharacter")
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PartySection({
+  party,
+  poll,
+  t,
+  tWorld,
+  tMaps,
+  tContent,
+  tCommon,
+}: {
+  party: PartyWire;
+  poll: UseFriendsPoll;
+  t: Translator;
+  tWorld: Translator;
+  tMaps: Translator;
+  tContent: Translator;
+  tCommon: Translator;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  async function handleLeave() {
+    setConfirming(false);
+    setLeaving(true);
+    await poll.leaveParty();
+    setLeaving(false);
+  }
+
+  return (
+    <section className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/5 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-[10px] font-semibold tracking-wider text-ddp-gold-bright uppercase">
+          {t("partyGroupTitle", { count: party.members.length, max: MAX_PARTY_SIZE })}
+        </h3>
+      </div>
+      <p className="text-[11px] leading-snug text-ddp-ink-muted">{t("partyPhaseNote")}</p>
+
+      <div className="flex flex-col gap-1.5">
+        {party.members.map((m) => (
+          <PartyMemberRow
+            key={m.userId}
+            member={m}
+            isLeader={m.userId === party.leaderUserId}
+            t={t}
+            tWorld={tWorld}
+            tMaps={tMaps}
+            tContent={tContent}
+            tCommon={tCommon}
+          />
+        ))}
+      </div>
+
+      <div className="flex items-center justify-end gap-1.5 pt-0.5">
+        {!confirming ? (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={leaving}
+            className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad/40 bg-ddp-bad/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-bad disabled:opacity-50"
+          >
+            {t("partyLeaveButton")}
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-ddp-bad">{t("partyLeaveConfirmPrompt")}</span>
+            <button
+              type="button"
+              onClick={() => void handleLeave()}
+              className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad bg-ddp-bad px-2.5 py-1.5 text-[11px] font-bold text-white"
+            >
+              {t("partyLeaveConfirmButton")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-border bg-black/30 px-2.5 py-1.5 text-[11px] font-bold text-ddp-ink-muted"
+            >
+              {t("partyLeaveCancelButton")}
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PartyInvitesSection({
+  invites,
+  poll,
+  t,
+}: {
+  invites: IncomingPartyInviteWire[];
+  poll: UseFriendsPoll;
+  t: Translator;
+}) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+        {t("partyInvitesGroupTitle")}
+      </h3>
+      <div className="flex flex-col gap-1.5">
+        {invites.map((inv) => (
+          <div
+            key={inv.inviteId}
+            className="flex items-center justify-between gap-2 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/5 px-2.5 py-2"
+          >
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">
+              {inv.fromDisplayName ?? t("unknownPlayer")}
+            </span>
+            <div className="flex shrink-0 gap-1.5">
+              <button
+                type="button"
+                onClick={() => void poll.respondPartyInvite(inv.inviteId, true)}
+                className="min-h-9 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300"
+              >
+                {t("acceptButton")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void poll.respondPartyInvite(inv.inviteId, false)}
+                className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad/50 bg-ddp-bad/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-bad"
+              >
+                {t("declineButton")}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

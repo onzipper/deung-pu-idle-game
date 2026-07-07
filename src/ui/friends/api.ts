@@ -130,5 +130,66 @@ export async function postSendEmoji(toUserId: string, emoji: string): Promise<Fr
   }
 }
 
+/** POST /api/party/invite — invite a friend into my party (409 party_full /
+ * already_member / already_invited / not_friends / too_many_pending). */
+export async function postPartyInvite(toUserId: string): Promise<FriendActionResult> {
+  try {
+    const res = await fetch("/api/party/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toUserId }),
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (res.ok) return { ok: true };
+    const code =
+      json && typeof json === "object" && "code" in json && typeof json.code === "string"
+        ? json.code
+        : "unknown";
+    return { ok: false, code };
+  } catch {
+    return { ok: false, code: "network" };
+  }
+}
+
+/** POST /api/party/respond — accept/decline a party invite (409 already_in_party /
+ * party_full). */
+export async function postRespondPartyInvite(
+  inviteId: string,
+  accept: boolean,
+): Promise<FriendActionResult> {
+  try {
+    const res = await fetch("/api/party/respond", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ inviteId, accept }),
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (res.ok) return { ok: true };
+    const code =
+      json && typeof json === "object" && "code" in json && typeof json.code === "string"
+        ? json.code
+        : "unknown";
+    return { ok: false, code };
+  } catch {
+    return { ok: false, code: "network" };
+  }
+}
+
+/** POST /api/party/leave — leave my party (idempotent). */
+export async function postLeaveParty(): Promise<FriendActionResult> {
+  try {
+    const res = await fetch("/api/party/leave", { method: "POST" });
+    const json: unknown = await res.json().catch(() => null);
+    if (res.ok) return { ok: true };
+    const code =
+      json && typeof json === "object" && "code" in json && typeof json.code === "string"
+        ? json.code
+        : "unknown";
+    return { ok: false, code };
+  } catch {
+    return { ok: false, code: "network" };
+  }
+}
+
 /** Type-only re-export so components don't need a second import path. */
 export type { EmojiPingWire };
