@@ -1164,7 +1164,14 @@
     "warpToFriendButton": "วาปไปหา",
     "warpToFriendButtonWithCount": "วาปไปหา ({count})",
     "warpNoScrollHint": "ซื้อยันวาปที่ร้านป้าปุ๊",
-    "warpNotClimbedHint": "ยังปีนไปไม่ถึงโซนนั้น"
+    "warpNotClimbedHint": "ยังปีนไปไม่ถึงโซนนั้น",
+    "sameZoneHint": "อยู่โซนเดียวกัน — เห็นตัวกันแล้ว"
+  },
+  "partyCohort": {
+    "connecting": "กำลังเชื่อมต่อปาร์ตี้…",
+    "playingWith": "เล่นกับ {names} ในโซนนี้",
+    "waiting": "รอเพื่อน…",
+    "reconnecting": "กำลังเชื่อมต่อใหม่…"
   },
   "questBoard": {
     "title": "กระดานเควส",

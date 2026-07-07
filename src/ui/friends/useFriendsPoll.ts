@@ -28,6 +28,7 @@ import {
   postSendEmoji,
 } from "@/ui/friends/api";
 import type { FriendsPanelWire, SendFriendRequestResult } from "@/ui/friends/types";
+import { useGameStore } from "@/ui/store/gameStore";
 
 const OPEN_POLL_MS = 20_000;
 const CLOSED_POLL_MS = 60_000;
@@ -80,6 +81,8 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
     if (res.kind === "guest") {
       setStatus("guest");
       setPanel(null);
+      // M8 party P4b: a guest is never in a party — keep `PartySession` dormant.
+      useGameStore.getState().setParty(null);
       return;
     }
     if (res.kind === "error") {
@@ -88,6 +91,12 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
     }
     setStatus("ready");
     setPanel(res.data);
+    // M8 party P4b: push my party membership into the store — `GameClient.tsx`'s
+    // `PartySession` subscribes to this (same "push, subscribe" idiom the
+    // `updateReloadRequested` banner button already uses). This poll is the ONLY
+    // place `party` changes, so it's the single source of truth for the relay's
+    // dormant/active gate.
+    useGameStore.getState().setParty(res.data.party);
 
     const fresh = res.data.emojiPings.filter((p) => !seenPingIds.current.has(p.id));
     if (fresh.length > 0) {
