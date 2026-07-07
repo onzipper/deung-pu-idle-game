@@ -114,6 +114,8 @@ model Character {
   // M7: gear drops are PER CHARACTER (GDD: "ของดรอปจอใครจอมัน"). ownerId of every
   // ItemInstance points here (Character.id, a never-reused cuid).
   items     ItemInstance[]
+  // M8 Quest Wave B: the per-character daily-claim audit rows (anti-double-claim).
+  dailyClaims DailyClaim[]
 
   @@index([userId]) // list an account's characters
   @@index([userId, deletedAt]) // count/enumerate LIVE slots (<=3 rule)
@@ -393,6 +395,33 @@ model SaveState {
   updatedAt   DateTime   @updatedAt
 
   @@index([userId]) // account-scoped queries + cascade (was covered by @unique before)
+}
+
+// M8 Quest Wave B "Daily quests" — the anti-double-claim AUDIT gate. The daily
+// roster is chosen SERVER-side (deterministic from serverDay + userId, no state),
+// the ENGINE counts progress + owns the reward (client-authoritative economy, same
+// trust tier as gold), and THIS table is the server's only job: a one-row-per
+// (character, quest, serverDay) claim ledger. The @@unique makes a second claim of
+// the same quest on the same day impossible at the DB layer (a retry/dup collides on
+// P2002 → the endpoint returns 409 already_claimed) — mirrors the SoldItem/claimKey
+// idempotency pattern. `serverDay` is the Asia/Bangkok (UTC+7) day-epoch integer the
+// server computes from its own wall-clock (client clocks never trusted, like
+// SaveState.lastSeen). NOT re-derivable from the save blob — it is authoritative.
+//
+// Deliberately NO reward column: rewards are engine-side economy (re-derive ceilings
+// already cover client-authoritative gold), so this row records ONLY that a claim
+// happened. `claimedAt` is server-stamped for a future audit sweep. Cascades from
+// Character so a deleted character's claim history is purged with it.
+model DailyClaim {
+  id          String    @id @default(cuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  questId     String    @db.VarChar(32) // engine daily catalog id (quest.daily.<id>)
+  serverDay   Int // Asia/Bangkok (UTC+7) day-epoch the claim landed on
+  claimedAt   DateTime  @default(now()) // server-stamped (client clocks never trusted)
+
+  @@unique([characterId, questId, serverDay]) // at most one claim per quest per day per character
+  @@index([characterId, serverDay]) // "this character's claims today" + cascade-side reads
 }
 
 // ============================================================================

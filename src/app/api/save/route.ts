@@ -23,6 +23,7 @@ import {
   recentAnnouncements,
 } from "@/server/items";
 import { loadUiConfig } from "@/server/uiConfig";
+import { dailyRosterPayload } from "@/server/dailyQuests";
 
 // This route reads/writes cookies and the DB per request — never static.
 export const dynamic = "force-dynamic";
@@ -36,6 +37,10 @@ export async function GET() {
     if (!characterId) {
       return NextResponse.json({
         save: null,
+        // M8 Quest Wave B: today's daily roster is USER-scoped (seeded from serverDay +
+        // userId), so it is meaningful even before a character is selected — the client
+        // (Wave C) fires the engine `setDailies` from this. Zero extra requests.
+        dailies: dailyRosterPayload(userId, new Date()),
         offline: { creditedSeconds: 0, capped: false },
         activeCharacterId: null,
         baseClass: null,
@@ -85,6 +90,10 @@ export async function GET() {
     return NextResponse.json({
       save,
       offline,
+      // M8 Quest Wave B: today's daily roster (serverDay + 3 quest ids), computed per
+      // request from the SERVER clock (Asia/Bangkok UTC+7) — the client fires the engine
+      // `setDailies` from this, so no extra request. See `@/server/dailyQuests`.
+      dailies: dailyRosterPayload(userId, new Date()),
       activeCharacterId: characterId,
       baseClass: character?.baseClass ?? null,
       inventory,
@@ -148,6 +157,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       lastSeen: result.lastSeen,
+      // M8 Quest Wave B: refresh the daily roster on the autosave cycle too, so a client
+      // that crosses the Asia/Bangkok midnight boundary mid-session picks up the new day
+      // within one save tick (zero extra requests) — see `@/server/dailyQuests`.
+      dailies: dailyRosterPayload(userId, new Date()),
       announcements: await recentAnnouncements(),
       // Mid-session "new patch deployed" banner: zero extra requests — this
       // rides the existing autosave POST response (see `@/server/buildId` +
