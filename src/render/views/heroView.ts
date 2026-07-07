@@ -40,6 +40,7 @@ import { CONFIG } from "@/engine/config";
 import { ITEM_TEMPLATES, type ItemRarity } from "@/engine/config/items";
 import type { Hero, HeroClass } from "@/engine/entities";
 import type { GameEvent } from "@/engine/state";
+import { lerpColor } from "@/render/environment/colorUtils";
 import { GROUND_Y } from "@/render/layout";
 import { HERO_COLORS, PALETTE, safeRadius } from "@/render/theme";
 import { drawHpBar } from "@/render/views/hpBar";
@@ -199,6 +200,32 @@ const GHOST_ALPHA = 0.5;
 const GHOST_TINT = PALETTE.deadHero;
 const REVIVE_BOUNCE_DURATION = 0.4;
 
+// ---------------------------------------------------------------------------
+// M8 party P6 "render the party": shadow-body ("ร่างเงา") dim + nameplate/
+// offline-tag labels. State-driven (reads `hero.shadowed` directly every
+// frame, not the `heroShadowed` event — a hero can spawn already-shadowed on
+// a re-seed, which the event stream would miss entirely; see `Hero.shadowed`'s
+// own doc comment). `shadowProgress` eases toward 0/1 over `SHADOW_FADE_DURATION`
+// real seconds UNLESS this is the view's very first frame (state-driven initial
+// value — an already-shadowed spawn shows no fade-in pop).
+// ---------------------------------------------------------------------------
+const SHADOW_ALPHA = 0.45; // bodyRoot alpha floor while fully shadowed
+const SHADOW_FADE_DURATION = 0.4; // real seconds, both directions
+/** Small pulse (scale/alpha bump) the nameplate plays for a beat when this
+ * view is first built (see `!anim.initialized` below) — "a new hero view
+ * appeared" (M8 party P6 juice item 4's "name flash" half; the ring-ping half
+ * lives in `fx/FxController.ts`'s `updatePartyMembership()`, keyed off the
+ * SAME first-sight moment via `Pool`'s own mark-and-sweep convention). */
+const JOIN_FLASH_DURATION = 0.6;
+const JOIN_FLASH_SCALE = 0.35;
+const JOIN_FLASH_ALPHA = 0.15;
+const NAMEPLATE_ALPHA = 0.85;
+/** Stacked labels above the HP bar (`GROUND_Y - 58`), never overlapping it —
+ * the offline tag sits above the nameplate so both can show at once (a
+ * shadowed, non-primary ally). */
+const NAMEPLATE_Y = GROUND_Y - 72;
+const SHADOW_TAG_Y = GROUND_Y - 84;
+
 type AttackKindAnim = "swing" | "spin" | "release" | "triple" | "staffPulse" | "castHold";
 
 interface AttackAnim {
@@ -267,6 +294,15 @@ interface HeroAnimState {
   gearWeaponId: string | null;
   gearArmorId: string | null;
   gearInitialized: boolean;
+  /** M8 party P6: eases toward `hero.shadowed ? 1 : 0` over `SHADOW_FADE_DURATION`
+   * — 0 = fully normal, 1 = fully dimmed/desaturated. Seeded from `hero.shadowed`
+   * on this view's very first frame (no fade-in pop for an already-shadowed
+   * spawn) — see `updateHeroView`'s init block. */
+  shadowProgress: number;
+  /** M8 party P6 "join flash" (item 4): real seconds since the nameplate pulse
+   * started, or -1 while inactive. Set to 0 on this view's first-ever frame
+   * (`!anim.initialized`) — a fresh view IS "a hero just appeared". */
+  joinFlashT: number;
 }
 
 export interface HeroView extends Container {
@@ -312,6 +348,19 @@ export interface HeroView extends Container {
   hpBar: Graphics;
   reviveRing: Graphics;
   reviveLabel: Text;
+  /** M8 party P6: small identity label shown ABOVE non-primary heroes (slot
+   * !== 0) only — `Hero` has no name/identity field (engine stays untouched),
+   * so the text comes from `HeroFrameContext.displayName`, a value the
+   * renderer's own `setHeroDisplayNames()` setter supplies (see
+   * `GameRenderer.ts` — the later networking/room wiring calls it on cohort
+   * membership change). Empty/hidden until a name is supplied. Top-level
+   * sibling (like `hpBar`/`reviveLabel`) so it stays upright and legible
+   * regardless of body lean/death-fall/shadow dim. */
+  nameplate: Text;
+  /** M8 party P6: "ออฟไลน์" tag shown while `hero.shadowed` — state-driven
+   * (read directly every frame), stacked above `nameplate` so both can show
+   * at once. Top-level sibling, same convention as `nameplate`. */
+  shadowTag: Text;
   anim: HeroAnimState;
 }
 
@@ -329,6 +378,16 @@ export interface HeroFrameContext {
   /** True while the formation anchor advanced this frame — the "marching
    * forward" cue (bigger bob + lean). */
   marching: boolean;
+  /**
+   * M8 party P6: this hero's display name for the nameplate (shown only for
+   * `slot !== 0`), or `null`/omitted to hide it. `Hero` has no identity field
+   * beyond its numeric `id` (engine stays untouched, per the render-owns-
+   * cosmetics rule) — the renderer resolves this from a name map supplied via
+   * `GameRenderer.setHeroDisplayNames()`, the hook the later networking/room
+   * wiring will call on cohort membership change. Optional so every existing
+   * call site (solo hero, `slot: 0`) keeps compiling unchanged.
+   */
+  displayName?: string | null;
 }
 
 export function createHeroView(): HeroView {
@@ -411,7 +470,37 @@ export function createHeroView(): HeroView {
   auraRing.position.set(0, GROUND_Y - 2);
   auraRing.visible = false;
 
-  view.addChild(bodyRoot, auraRing, hpBar, reviveRing, reviveLabel);
+  // M8 party P6: nameplate (non-primary heroes) + shadow "ออฟไลน์" tag — both
+  // top-level (upright regardless of body lean/death-fall/shadow dim, same
+  // convention as `hpBar`/`reviveLabel`), hidden until `updateHeroView` has
+  // something to show.
+  const nameplate = new Text({
+    text: "",
+    style: {
+      fontSize: 10,
+      fontWeight: "600",
+      fill: PALETTE.muted,
+      fontFamily: "monospace",
+    },
+  });
+  nameplate.anchor.set(0.5);
+  nameplate.position.set(0, NAMEPLATE_Y);
+  nameplate.visible = false;
+
+  const shadowTag = new Text({
+    text: "ออฟไลน์",
+    style: {
+      fontSize: 9,
+      fontWeight: "600",
+      fill: PALETTE.shadowedTint,
+      fontFamily: "sans-serif",
+    },
+  });
+  shadowTag.anchor.set(0.5);
+  shadowTag.position.set(0, SHADOW_TAG_Y);
+  shadowTag.visible = false;
+
+  view.addChild(bodyRoot, auraRing, hpBar, reviveRing, reviveLabel, nameplate, shadowTag);
 
   view.bodyRoot = bodyRoot;
   view.legBack = legBack;
@@ -431,6 +520,8 @@ export function createHeroView(): HeroView {
   view.hpBar = hpBar;
   view.reviveRing = reviveRing;
   view.reviveLabel = reviveLabel;
+  view.nameplate = nameplate;
+  view.shadowTag = shadowTag;
   view.anim = {
     initialized: false,
     lastX: 0,
@@ -451,6 +542,8 @@ export function createHeroView(): HeroView {
     gearWeaponId: null,
     gearArmorId: null,
     gearInitialized: false,
+    shadowProgress: 0,
+    joinFlashT: -1,
   };
   return view;
 }
@@ -1237,6 +1330,15 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
     anim.lastX = hero.x;
     anim.lastCd = hero.cd;
     anim.wasDead = hero.dead;
+    // M8 party P6: state-driven initial shadow value — a hero that spawns
+    // ALREADY shadowed (e.g. a re-seed) shows no fade-in pop; the 0.4s ease
+    // only plays when the flag flips while this view is already on screen
+    // (see the shadow-progress block below).
+    anim.shadowProgress = hero.shadowed ? 1 : 0;
+    // "A new hero view just appeared" — the nameplate join-flash half of the
+    // party-join juice (the ring-ping half is `fx/FxController.ts`'s own
+    // first-sight mark-and-sweep, keyed off the same moment).
+    anim.joinFlashT = 0;
   }
 
   // ---- death / revive transition detection -------------------------------
@@ -1248,6 +1350,15 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
     setGhostTint(view, false);
   }
   anim.wasDead = hero.dead;
+
+  // ---- shadow-body progress: ease toward hero.shadowed ? 1 : 0 -----------
+  const shadowTarget = hero.shadowed ? 1 : 0;
+  const shadowStep = dt / SHADOW_FADE_DURATION;
+  if (anim.shadowProgress < shadowTarget) {
+    anim.shadowProgress = Math.min(shadowTarget, anim.shadowProgress + shadowStep);
+  } else if (anim.shadowProgress > shadowTarget) {
+    anim.shadowProgress = Math.max(shadowTarget, anim.shadowProgress - shadowStep);
+  }
 
   // ---- locomotion: derive velocity from actual position delta ------------
   const velocity = dt > 0 ? (hero.x - anim.lastX) / dt : 0;
@@ -1395,6 +1506,52 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   } else {
     view.bodyRoot.rotation = 0;
     view.bodyRoot.alpha = 1;
+  }
+
+  // ---- shadow-body dim (M8 party P6): multiplies whatever alpha the death/
+  // revive block above just set — composes, never overwrites (a shadowed
+  // hero mid-death-fall still fades correctly, just dimmer throughout). ------
+  const shadowDim = 1 - anim.shadowProgress * (1 - SHADOW_ALPHA);
+  view.bodyRoot.alpha *= shadowDim;
+
+  // ---- shadow-body desaturation tint: CONTINUOUS while alive (unlike the
+  // death ghost tint, which is edge-triggered ONCE — see `setGhostTint`'s doc
+  // comment); a dead hero keeps its own ghost tint untouched. Flat-alpha/tint
+  // only, no filters (render README rule). -------------------------------
+  if (!hero.dead) {
+    const shadowTint =
+      anim.shadowProgress > 0
+        ? lerpColor(0xffffff, PALETTE.shadowedTint, anim.shadowProgress)
+        : 0xffffff;
+    view.legBack.tint = shadowTint;
+    view.legFront.tint = shadowTint;
+    view.torso.tint = shadowTint;
+    view.offArm.tint = shadowTint;
+    view.weaponArm.tint = shadowTint;
+    view.tierAccent.tint = shadowTint;
+    view.gearWeapon.tint = shadowTint;
+    view.gearArmor.tint = shadowTint;
+  }
+
+  // ---- nameplate (non-primary heroes only) + shadow "ออฟไลน์" tag ---------
+  const showNameplate = ctx.slot !== 0 && !!ctx.displayName;
+  view.nameplate.visible = showNameplate;
+  if (showNameplate) view.nameplate.text = ctx.displayName as string;
+  view.shadowTag.visible = hero.shadowed;
+
+  if (anim.joinFlashT >= 0) {
+    anim.joinFlashT += dt;
+    if (anim.joinFlashT >= JOIN_FLASH_DURATION) {
+      anim.joinFlashT = -1;
+      view.nameplate.scale.set(1, 1);
+      view.nameplate.alpha = NAMEPLATE_ALPHA;
+    } else {
+      const pulse = Math.sin(clamp01(anim.joinFlashT / JOIN_FLASH_DURATION) * Math.PI);
+      view.nameplate.scale.set(1 + pulse * JOIN_FLASH_SCALE, 1 + pulse * JOIN_FLASH_SCALE);
+      view.nameplate.alpha = NAMEPLATE_ALPHA + pulse * JOIN_FLASH_ALPHA;
+    }
+  } else {
+    view.nameplate.alpha = NAMEPLATE_ALPHA;
   }
 
   // ---- root position (base x + any attack lunge) ---------------------------

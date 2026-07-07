@@ -1,10 +1,14 @@
 # M8 Infra Spike — Websocket relay สำหรับ Lockstep Party
 
-> **สถานะ 2026-07-08:** ซัพพอร์ต Hostinger ตอบเป็นลายลักษณ์อักษรว่า Business/Cloud Node.js
-> hosting **ไม่ proxy incoming WebSocket upgrade**, ไม่รองรับ inbound ค้างสาย 10+ นาที,
-> ไม่การันตี single persistent instance (ชี้ไป VPS สำหรับงานแบบนี้) — แต่**เจ้าของขอ
-> ทดลอง deploy probe บน hosting จริงก่อน** (เผื่อได้) · ถ้าผลจริง NO-GO ค่อยวางแผน VPS
-> กันอีกรอบ — ยังไม่เคาะอะไรจนกว่าจะเห็นผล probe บน host จริง
+> **✅ VERDICT (2026-07-08): relay ไป Render** — Hostinger ตอบเป็นลายลักษณ์อักษรว่า
+> Web/Cloud hosting รับได้แค่ outgoing websocket (relay อยู่บนนั้นไม่ได้) · เจ้าของ deploy
+> probe ขึ้น **Render free tier (Singapore)** จริง: ต่อติดทันที, 0 disconnect, **RTT
+> median 36ms / p95 42ms** (เกณฑ์ <150ms — ผ่านขาด, jitter ~6ms), heartbeat นิ่ง —
+> probe URL `wss://deung-pu-idle-game.onrender.com` · ค้างเช็คขั้นยืนยัน: hold ครบ 10 นาที
+> + broadcast ข้ามแท็บ (คาดผ่าน) · ข้อจำกัด free tier ที่ยอมรับ: หลับหลังเงียบ ~15 นาที
+> (ตื่น ~30-60 วิ; แก้ด้วย pre-wake จากเซิร์ฟเวอร์เกมตอนตั้งตี้ หรือ $7/เดือน) · Cloudflare
+> DO เก็บเป็น upgrade path ตอน production (POP กรุงเทพ, ไม่หลับ, ต้อง port + ลด message
+> rate) — P4-P6 พัฒนาบน Node เพียว รัน local + Render ได้ทั้งคู่
 
 คำถามที่ต้องตอบก่อนเริ่มพาร์ตี้จริง (GDD.md §3, ROADMAP.md M8): เกมนี้ต้องการ Node
 websocket server รันต่อเนื่อง (persistent process, bind port, รับ incoming

@@ -53,6 +53,7 @@ import {
 import type { InventoryItem, ItemInstanceWire, SellItemResultWire } from "@/ui/gear/types";
 import { ingestAnnouncements } from "@/ui/announcements/queue";
 import type { AnnouncementEntry, AnnouncementWire } from "@/ui/announcements/types";
+import type { PartyWire } from "@/ui/friends/types";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -923,6 +924,22 @@ export interface FastTravelChannelState {
   zoneIdx: number;
 }
 
+/**
+ * M8 party P4b — the lockstep cohort HUD chip's state (`ui/party/CohortStatus.tsx`),
+ * pushed by `GameClient.tsx`'s `PartySession`/`PartyHandshake` wiring (never per-frame
+ * — only on an actual transition, same low-frequency cadence as `fastTravelChannel`).
+ * `"solo"` covers BOTH "not in a party" and "in a party but alone in my zone" — the
+ * chip renders nothing for it either way (no cohort, no lockstep overhead).
+ */
+export type CohortStatusState =
+  | { kind: "solo" }
+  | { kind: "connecting" }
+  /** Actively lockstep-ticking with `names` (other cohort members' display names). */
+  | { kind: "active"; names: string[] }
+  /** A cohort member's turn lane hasn't arrived in ~2s — the sim is paused for them. */
+  | { kind: "waiting" }
+  | { kind: "reconnecting" };
+
 /** M7.9 server-wide high-refine announcement feed — session-memory (in-
  * process, NOT localStorage) dedup set. Module-level like `dropFeedSeq`
  * above (a plain implementation detail of the ingest action, not something
@@ -1002,6 +1019,17 @@ export interface HudState {
    * indicator. Set on `fastTravelCastStart`, cleared on `fastTravelArrive` /
    * `fastTravelBlocked` (see `GameClient.tsx`'s frame-event handling). */
   fastTravelChannel: FastTravelChannelState | null;
+
+  // ---- M8 party P4b — lockstep cohort (relay-driven, not the throttled engine
+  // snapshot) ----
+  /** My party membership (from the ONE friends poll, `useFriendsPoll.ts` pushes this
+   * via `setParty` — same "push into the store, GameClient subscribes" idiom as
+   * `updateReloadRequested`). `null` = not in a party (or a guest — a guest's poll
+   * never reaches the branch that calls `setParty`). `GameClient.tsx`'s `PartySession`
+   * is fully dormant (zero ticket fetch) whenever this is `null`. */
+  party: PartyWire | null;
+  /** The lockstep cohort HUD chip's state — see `CohortStatusState`'s doc. */
+  cohortStatus: CohortStatusState;
 
   // ---- M7.9 server-wide high-refine announcement feed (no websockets — the
   // feed is polled off the existing autosave/boot response, see
@@ -1304,6 +1332,14 @@ export interface HudState {
   /** Clear the fast-travel channel progress UI (arrival or block/cancel). */
   clearFastTravelChannel: () => void;
 
+  // ---- M8 party P4b ----
+  /** `useFriendsPoll.ts`-only: push the latest `party` field from the ONE friends
+   * poll — see `party`'s doc. */
+  setParty: (party: PartyWire | null) => void;
+  /** `GameClient.tsx`-only: reflect the cohort session's current state into the HUD
+   * chip — see `cohortStatus`'s doc. */
+  setCohortStatus: (status: CohortStatusState) => void;
+
   // ---- M7.9 server-wide high-refine announcement feed ----
   /** Boot-only: record this client's own characterId (see `myCharacterId`'s doc). */
   setMyCharacterId: (characterId: string | null) => void;
@@ -1387,6 +1423,9 @@ export const useGameStore = create<HudState>((set, get) => ({
   sessionKnownTemplateIds: [],
   notices: [],
   fastTravelChannel: null,
+
+  party: null,
+  cohortStatus: { kind: "solo" },
 
   myCharacterId: null,
   announcementQueue: [],
@@ -1670,6 +1709,9 @@ export const useGameStore = create<HudState>((set, get) => ({
       fastTravelChannel: { key: (s.fastTravelChannel?.key ?? 0) + 1, mapId, zoneIdx },
     })),
   clearFastTravelChannel: () => set({ fastTravelChannel: null }),
+
+  setParty: (party) => set({ party }),
+  setCohortStatus: (status) => set({ cohortStatus: status }),
 
   setMyCharacterId: (characterId) => set({ myCharacterId: characterId }),
   ingestAnnouncementFeed: (wire) =>

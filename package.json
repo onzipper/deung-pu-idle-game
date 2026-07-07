@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sim": "tsx src/engine/__tests__/balance-sim.ts",
+    "relay": "node scripts/party-relay/server.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",

@@ -86,6 +86,7 @@ import {
   type SaveData,
   type TownNpcId,
 } from "@/engine";
+import { INPUT_DELAY_TURNS, SUB_STEPS_PER_TURN, TURN_MS, type TurnMessage } from "@/engine/lockstep";
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import type { AnnouncementWire } from "@/ui/announcements/types";
@@ -124,7 +125,34 @@ import {
   type UiConfig,
 } from "@/ui/store/gameStore";
 import { resolveCatchUp } from "./catchUp";
+import {
+  PartyHandshake,
+  extractSoloState,
+  progressionFromHero,
+  sharedSaveFromState,
+  type ReseedAckMsg,
+  type ReseedOfferMsg,
+} from "./partyHandshake";
+import {
+  PartySession,
+  electLeader,
+  synthesizeShadowMessage,
+  type CohortMember,
+  type PartyConnStatus,
+} from "./partySession";
 import { TimeDirector } from "./timeDirector";
+
+/** Wall-clock a cohort turn lane may go missing before the HUD shows "waiting"
+ * (design C: "late lane >~2s ⇒ waiting chip"). */
+const COHORT_WAITING_MS = 2_000;
+
+/** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
+ * relay `g` payloads (handshake messages / lockstep `TurnMessage`s) — mirrors
+ * `partySession.ts`'s internal helper (kept local; not worth exporting one function
+ * across the module boundary). */
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : null;
+}
 
 /** Mirrors `server/items.ts`'s `MAX_CLAIM_BATCH` (server zone, not importable
  * from here — the cap is a plain contract number, duplicated deliberately
@@ -611,6 +639,279 @@ export function GameClient() {
     const acc = createAccumulator();
     const timeDirector = new TimeDirector();
 
+    // ---- M8 party P4b: lockstep cohort (dormant unless the store's `party` is set
+    // AND I share a zone with >=1 live member — see partySession.ts/partyHandshake.ts
+    // module docs for the full design). Solo (no party, or alone in my zone) never
+    // touches ANY of this beyond one cheap `cohortActive` boolean check per frame —
+    // the solo path stays byte-identical. ----
+    let cohortActive = false;
+    /** My party TICKET slot (0..2, from the relay ticket) — used for handshake/
+     * leader-election/shadow bookkeeping, which all operate over ticket slots. */
+    let myTicketSlot = 0;
+    /** My INDEX into the cohort's `state.heroes[]` (== `lanes[]`) — the ASCENDING
+     * position of `myTicketSlot` within `lastCohortSlots`. Distinct from the ticket
+     * slot whenever the cohort's lowest member isn't ticket-slot 0 (e.g. cohort
+     * [1,2] ⇒ ticket-slot 1 is array index 0). This is what the engine's per-hero
+     * `TurnMessage.slot` routing actually needs. */
+    let myCohortIndex = 0;
+    let lastCohortSlots: number[] = [];
+    const shadowedTicketSlots = new Set<number>();
+    /** ticket slot -> display name, for cohort members OTHER than me. */
+    let cohortMemberNames = new Map<number, string>();
+    let handshake: PartyHandshake | null = null;
+    /** The next turn this client will execute (mirrors `LockstepClient.turn`'s
+     * contract exactly — see `tickCohortTurns`'s doc for why the stepping itself is
+     * reimplemented locally rather than calling `LockstepClient.advance()`). */
+    let cohortTurn = 0;
+    /** executeTurn -> (cohort index -> input) — mirrors `LockstepClient`'s private
+     * buffer; kept locally because it needs to be READ (assembling the lane vector)
+     * to step sub-step-by-sub-step, which `LockstepClient`'s public API doesn't
+     * expose (see `tickCohortTurns`). */
+    const cohortTurnBuffer = new Map<number, Map<number, FrameInput>>();
+    let cohortIssueAccumMs = 0;
+    let cohortLastAdvanceAt = performance.now();
+    let cohortWaiting = false;
+    let lastZoneKey: string | null = null;
+
+    /** Rebuild the `heroId -> displayName` map `GameRenderer.setHeroDisplayNames`
+     * wants (keyed by hero id, not slot/index — see its doc). `null` while solo. */
+    function currentHeroDisplayNames(): ReadonlyMap<number, string> | null {
+      if (!cohortActive) return null;
+      const names = new Map<number, string>();
+      for (const [ticketSlot, name] of cohortMemberNames) {
+        const idx = lastCohortSlots.indexOf(ticketSlot);
+        const hero = idx >= 0 ? state.heroes[idx] : undefined;
+        if (hero) names.set(hero.id, name);
+      }
+      return names;
+    }
+
+    function refreshCohortStatus(): void {
+      if (!cohortActive) return;
+      useGameStore.getState().setCohortStatus({ kind: "active", names: [...cohortMemberNames.values()] });
+      renderer.setHeroDisplayNames(currentHeroDisplayNames());
+    }
+
+    /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
+     * `buildCohortState` primitive (`extractSoloState`), resume the ordinary solo
+     * accumulator loop next frame. */
+    function collapseToSolo(): void {
+      if (!cohortActive) return;
+      state = extractSoloState(state, myCohortIndex, seed);
+      cohortActive = false;
+      handshake?.abort();
+      handshake = null;
+      cohortTurnBuffer.clear();
+      cohortTurn = 0;
+      cohortMemberNames = new Map();
+      renderer.setHeroDisplayNames(null);
+      useGameStore.getState().setCohortStatus({ kind: "solo" });
+    }
+
+    /** Begin (or restart) the zone-boundary re-seed handshake for a fresh cohort
+     * membership (design §4). */
+    function beginHandshake(cohortSlots: number[]): void {
+      handshake?.abort();
+      myTicketSlot = partySession.slot;
+      // Pre-handshake, "my own hero" is `heroes[0]` while solo, or `heroes[myCohortIndex]`
+      // if this is a re-seed of an ALREADY-active cohort (e.g. a 3rd member joins).
+      const myProgression = progressionFromHero(cohortActive ? state.heroes[myCohortIndex] : state.heroes[0]);
+      handshake = new PartyHandshake({
+        mySlot: myTicketSlot,
+        cohortSlots,
+        send: (msg) => partySession.send(msg),
+        myProgression,
+        mySharedSave: sharedSaveFromState(state),
+        mintSeed: () => Date.now() >>> 0,
+      });
+      handshake.start();
+    }
+
+    /** Apply a completed handshake (design §4's "every client builds the SAME
+     * state"): swap the live `state` to the rebuilt cohort, reset the cohort turn
+     * bookkeeping, and flip the HUD chip to "active". */
+    function activateCohort(): void {
+      if (!handshake || handshake.phase !== "done") return;
+      const built = handshake.result;
+      if (!built) return;
+      state = built;
+      handshake = null;
+      cohortActive = true;
+      myCohortIndex = lastCohortSlots.indexOf(myTicketSlot);
+      cohortTurn = 0;
+      cohortTurnBuffer.clear();
+      cohortIssueAccumMs = 0;
+      cohortLastAdvanceAt = performance.now();
+      cohortWaiting = false;
+      refreshCohortStatus();
+    }
+
+    function onPartyStatusChange(status: PartyConnStatus): void {
+      if (status === "reconnecting") {
+        // Design C's abort path: a dropped/gapped relay connection breaks the ordered-
+        // stream contract the WHOLE cohort rests on — discard any in-flight handshake
+        // and collapse an active cohort back to solo (extract MY hero) rather than risk
+        // silently drifting. `lastCohortSlots` resets so the NEXT `onCohortChanged`
+        // (once reconnected + membership re-forms) always starts a FRESH handshake,
+        // even if the resulting slot list happens to look identical to the old one.
+        handshake?.abort();
+        handshake = null;
+        collapseToSolo(); // no-op if not active; sets cohortStatus to "solo"
+        lastCohortSlots = [];
+        useGameStore.getState().setCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
+      } else if (status === "connecting" && !cohortActive) {
+        useGameStore.getState().setCohortStatus({ kind: "connecting" });
+      } else if (status === "off" && !cohortActive) {
+        useGameStore.getState().setCohortStatus({ kind: "solo" });
+      }
+    }
+
+    function sameSlots(a: readonly number[], b: readonly number[]): boolean {
+      return a.length === b.length && a.every((v, i) => v === b[i]);
+    }
+
+    function onPartyCohortChanged(
+      cohortSlots: number[],
+      members: ReadonlyMap<number, CohortMember>,
+    ): void {
+      myTicketSlot = partySession.slot;
+      cohortMemberNames = new Map();
+      for (const slot of cohortSlots) {
+        if (slot === myTicketSlot) continue;
+        const m = members.get(slot);
+        if (m) cohortMemberNames.set(slot, m.displayName ?? m.userId);
+      }
+      if (cohortSlots.length <= 1) {
+        lastCohortSlots = cohortSlots;
+        collapseToSolo();
+        return;
+      }
+      const changed = !sameSlots(cohortSlots, lastCohortSlots);
+      lastCohortSlots = cohortSlots;
+      if (changed) beginHandshake(cohortSlots);
+      else refreshCohortStatus(); // membership unchanged — names may have (nick, etc.)
+    }
+
+    function onPartyGameMessage(fromSlot: number, seq: number, payload: unknown): void {
+      const rec = asRecord(payload);
+      if (!rec) return;
+      if (rec.kind === "reseed-offer" && handshake) {
+        handshake.receiveOffer(fromSlot, payload as ReseedOfferMsg, seq);
+        activateCohort();
+        return;
+      }
+      if (rec.kind === "reseed-ack" && handshake) {
+        handshake.receiveAck(fromSlot, payload as ReseedAckMsg);
+        activateCohort();
+        return;
+      }
+      if (cohortActive && typeof rec.executeTurn === "number" && typeof rec.slot === "number") {
+        cohortBufferDeliver(payload as TurnMessage);
+      }
+    }
+
+    function onPartyMemberShadowChanged(ticketSlot: number, shadowed: boolean): void {
+      if (shadowed) shadowedTicketSlots.add(ticketSlot);
+      else shadowedTicketSlots.delete(ticketSlot);
+      if (!cohortActive) return;
+      const liveTicketSlots = lastCohortSlots.filter((s) => !shadowedTicketSlots.has(s));
+      const leader = liveTicketSlots.length ? electLeader(liveTicketSlots) : myTicketSlot;
+      const affectedIndex = lastCohortSlots.indexOf(ticketSlot);
+      if (affectedIndex < 0) return; // not (or no longer) part of this cohort
+      const msg = synthesizeShadowMessage(leader, myTicketSlot, affectedIndex, shadowed, cohortTurn);
+      if (msg) partySession.send(msg);
+    }
+
+    const partySession = new PartySession({
+      onCohortChanged: onPartyCohortChanged,
+      onGameMessage: onPartyGameMessage,
+      onStatusChange: onPartyStatusChange,
+      onMemberShadowChanged: onPartyMemberShadowChanged,
+    });
+
+    /** Buffer one relay-delivered cohort `TurnMessage`, keyed by its `executeTurn`
+     * (mirrors `LockstepClient.deliver()`'s contract exactly — see `tickCohortTurns`'s
+     * doc for why this is reimplemented locally instead of calling it). A stale
+     * message for an already-executed turn is dropped (matches `LockstepClient`). */
+    function cohortBufferDeliver(msg: TurnMessage): void {
+      if (msg.executeTurn < cohortTurn) return;
+      let lane = cohortTurnBuffer.get(msg.executeTurn);
+      if (!lane) {
+        lane = new Map();
+        cohortTurnBuffer.set(msg.executeTurn, lane);
+      }
+      lane.set(msg.slot, msg.input);
+    }
+
+    /**
+     * Cohort turn ticking (design C): drains MY OWN pendingInput into MY lane for
+     * turn `cohortTurn + INPUT_DELAY_TURNS`, broadcasts it, and executes every turn
+     * whose FULL lane set (every cohort member) has arrived — turns advance on WALL-
+     * CLOCK cadence (`TURN_MS`), never on `TimeDirector`'s shaped time (design note:
+     * "lockstep turns advance on wall-clock cadence; hit-stop stays render-side").
+     *
+     * A turn is executed step-by-step here (SUB_STEPS_PER_TURN raw `step()` calls,
+     * the lane applied on sub-step 0 only) RATHER than via `@/engine/lockstep`'s
+     * `LockstepClient.advance()`/`executeTurn()` — those helpers only leave the LAST
+     * sub-step's `state.events` on `state` (each `step()` clears the buffer at its
+     * own start), which is fine for the engine's OWN determinism-hash tests (they
+     * never read events) but would silently drop 5 of every 6 sub-steps' hit/drop/
+     * skill events for render + audio here. `engine/lockstep/**` is frozen for this
+     * task, so the render-safe per-turn stepping lives in this file instead (flagged
+     * as a good small engine follow-up: an event-collecting `executeTurn` variant).
+     *
+     * A lane that hasn't fully arrived is NEVER treated as idle (that would silently
+     * paper over a genuinely slow peer, corrupting THEIR next real input) — ticking
+     * simply pauses until it arrives; past `COHORT_WAITING_MS` the HUD chip flips to
+     * "waiting" (cleared the instant ticking resumes).
+     */
+    function tickCohortTurns(elapsedSeconds: number, myInput: FrameInput): GameEvent[] {
+      const events: GameEvent[] = [];
+      const cohortSize = lastCohortSlots.length;
+      if (cohortSize < 2) return events;
+
+      cohortIssueAccumMs += elapsedSeconds * 1000;
+      let issuedMine = false;
+      while (cohortIssueAccumMs >= TURN_MS) {
+        cohortIssueAccumMs -= TURN_MS;
+        const msg: TurnMessage = {
+          slot: myCohortIndex,
+          executeTurn: cohortTurn + INPUT_DELAY_TURNS,
+          input: issuedMine ? {} : myInput,
+        };
+        issuedMine = true;
+        cohortBufferDeliver(msg); // self-deliver immediately — no need to wait on the echo
+        partySession.send(msg);
+      }
+
+      const now = performance.now();
+      let advancedAny = false;
+      while ((cohortTurnBuffer.get(cohortTurn)?.size ?? 0) >= cohortSize) {
+        const laneMap = cohortTurnBuffer.get(cohortTurn)!;
+        const lanes: FrameInput[] = new Array(cohortSize);
+        for (let i = 0; i < cohortSize; i++) lanes[i] = laneMap.get(i) ?? {};
+        cohortTurnBuffer.delete(cohortTurn);
+        for (let sub = 0; sub < SUB_STEPS_PER_TURN; sub++) {
+          step(state, sub === 0 ? lanes : []);
+          events.push(...state.events);
+        }
+        cohortTurn++;
+        advancedAny = true;
+      }
+
+      if (advancedAny) {
+        cohortLastAdvanceAt = now;
+        if (cohortWaiting) {
+          cohortWaiting = false;
+          refreshCohortStatus();
+        }
+      } else if (!cohortWaiting && now - cohortLastAdvanceAt > COHORT_WAITING_MS) {
+        cohortWaiting = true;
+        useGameStore.getState().setCohortStatus({ kind: "waiting" });
+      }
+      return events;
+    }
+
     let rafId = 0;
     let lastTime = performance.now();
     let uiSyncAccum = 0;
@@ -656,6 +957,9 @@ export function GameClient() {
     // `updateReloadRequested` store subscription (registered once boot
     // succeeds, alongside the other event listeners below).
     let unsubscribeReload: (() => void) | undefined;
+    // M8 party P4b: unsubscribe handle for the `party` store subscription (see
+    // `partySession.setParty`'s call site below).
+    let unsubscribeParty: (() => void) | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
@@ -873,15 +1177,35 @@ export function GameClient() {
       // itself is hardcoded to 1 — the player-facing 1x/2x/3x selector was
       // removed (M6.7); `drainAccumulator`'s speed parameter still exists for
       // the sim/balance harness and engine tests.
-      const steps = drainAccumulator(acc, simElapsed, 1);
-      const frameEvents: GameEvent[] = [];
-      for (let i = 0; i < steps; i++) {
-        step(state, i === 0 ? firstInput : {});
-        frameEvents.push(...state.events);
+      // M8 party P4b: an ACTIVE cohort ticks on its own wall-clock lockstep cadence
+      // (`tickCohortTurns`) instead of the solo fixed-step accumulator — see that
+      // function's doc. `simElapsed` (TimeDirector-shaped) is intentionally UNUSED
+      // in that branch (design note: hit-stop/slow-mo stay render-side for a cohort;
+      // only the SOLO accumulator is time-shaped). The solo path below is otherwise
+      // byte-for-byte unchanged.
+      let frameEvents: GameEvent[];
+      if (cohortActive) {
+        frameEvents = tickCohortTurns(elapsed, firstInput);
+      } else {
+        const steps = drainAccumulator(acc, simElapsed, 1);
+        frameEvents = [];
+        for (let i = 0; i < steps; i++) {
+          step(state, i === 0 ? firstInput : {});
+          frameEvents.push(...state.events);
+        }
       }
 
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
+
+      // M8 party P4b: broadcast a zone beat on every ACTUAL zone change (join +
+      // every zone change, protocol/design §3) — cheap string compare, no-op
+      // whenever `partySession` is dormant (no party).
+      const zoneKey = `${state.location.mapId}:${state.location.zoneIdx}`;
+      if (zoneKey !== lastZoneKey) {
+        lastZoneKey = zoneKey;
+        partySession.setZone(state.location.mapId, state.location.zoneIdx);
+      }
 
       // ---- M7.5 bot-status toasts (transition detection; engine untouched) ----
       // The bot's town round trip resolves in seconds (warps are instant), so
@@ -1013,6 +1337,15 @@ export function GameClient() {
     // re-stamps it. Fire-and-forget: a dropped autosave just means the next one
     // (or the on-hide beacon) carries the progress.
     function serialize(): SaveData {
+      // M8 party P4b (design D): while an ACTIVE cohort is live, `state.heroes` holds
+      // every present member's hero — save ONLY MY OWN (`toSaveData` reads
+      // `heroes[0]`, so this is the one place that matters; the shape is otherwise
+      // unchanged). Never a route for cross-crediting another player's progress —
+      // each client only ever POSTs its own slice.
+      if (cohortActive) {
+        const mine = state.heroes[myCohortIndex] ?? state.heroes[0];
+        return toSaveData({ ...state, heroes: [mine] });
+      }
       return toSaveData(state);
     }
 
@@ -1469,6 +1802,17 @@ export function GameClient() {
         }
       });
 
+      // M8 party P4b: `PartySession` is dormant (zero ticket fetch) until the store's
+      // `party` field is non-null — see `partySession.ts`'s module doc. `party` is
+      // pushed by the ONE friends poll (`useFriendsPoll.ts`), so this is the same
+      // "push into the store, GameClient subscribes" idiom as `updateReloadRequested`
+      // above. Feed the CURRENT value too (a poll may have already landed before this
+      // subscription attaches — e.g. `FriendsButton` mounted earlier in the same tick).
+      unsubscribeParty = useGameStore.subscribe((next, prev) => {
+        if (next.party !== prev.party) partySession.setParty(next.party);
+      });
+      partySession.setParty(useGameStore.getState().party);
+
       lastTime = performance.now();
       lastActiveAt = Date.now();
       rafId = requestAnimationFrame(frame);
@@ -1488,6 +1832,8 @@ export function GameClient() {
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
       unsubscribeReload?.();
+      unsubscribeParty?.();
+      partySession.teardown();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       arenaEl.removeEventListener("pointerdown", onPointerDown);

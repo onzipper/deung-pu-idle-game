@@ -596,6 +596,17 @@ function PartyMemberRow({
 }) {
   const name = member.displayName ?? t("unknownPlayer");
   const cls = member.currentCharacter?.class as HeroClass | undefined;
+  // M8 party P4b: a one-line same-zone hint — the lockstep cohort itself is driven
+  // relay-side (see `ui/party/CohortStatus.tsx`'s HUD chip), this is purely a
+  // "you'll see each other" nudge read straight off the ALREADY-throttled world
+  // snapshot (no extra request).
+  const myWorld = useGameStore((s) => s.world);
+  const parsedZone = parseFriendZone(member.lastZone);
+  const sameZone =
+    member.online &&
+    parsedZone !== null &&
+    parsedZone.mapId === myWorld.mapId &&
+    parsedZone.zoneIdx === myWorld.zoneIdx;
   return (
     <div className="flex flex-col gap-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-2">
       <div className="flex items-center gap-2">
@@ -632,6 +643,7 @@ function PartyMemberRow({
         </span>
         <WarpToMemberButton member={member} t={t} onWarp={onWarp} />
       </div>
+      {sameZone && <span className="pl-4 text-[11px] font-semibold text-emerald-300">{t("sameZoneHint")}</span>}
     </div>
   );
 }

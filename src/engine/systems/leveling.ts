@@ -58,14 +58,20 @@ export function grantHeroXp(state: GameState, hero: Hero, amount: number): void 
 }
 
 /**
- * Award kill XP to every ALIVE hero (dead heroes earn nothing). The per-hero amount is
- * scaled by the cohort `expShareMult` hook (M8 party P1b "แชร์ exp", design §5) — IDENTITY
- * at every party size today (inert; real curve is a balance-sim task). The `mult === 1`
- * fast path leaves `amount` untouched, so a solo (and any current cohort) is byte-identical.
- * Determinism: `state.heroes.length` is identical on all cohort clients (canonical order).
+ * Award kill XP to every ALIVE hero (dead heroes earn nothing). In a SAME-ZONE COHORT
+ * (heroes.length ≥ 2, docs/party-design-m8.md §3 + answers) each present-and-alive hero's
+ * amount is scaled by `party.expKillMult(size, alive)` = the cohort xp BUFF (per extra
+ * member) × the EQUAL share of the per-kill pot (killer 1.0 + every OTHER alive hero at
+ * `expShareRate`). The engine does NOT attribute a kill to one hero (no lastHitBy), so this
+ * credits the design's §5 "equal to every present hero" form — the mean-field of the
+ * killer/share split, identical in aggregate when heroes kill at equal rates (the symmetric
+ * cohort). SOLO (size 1) → `expKillMult` returns 1 and the `mult === 1` fast path leaves
+ * `amount` untouched, so a 1-hero run is BYTE-IDENTICAL. Determinism: `heroes.length` and the
+ * alive count are identical on all cohort clients (canonical slot order); only + - * / used.
  */
 export function grantKillXp(state: GameState, amount: number): void {
-  const mult = CONFIG.party.expShareMult(state.heroes.length);
+  const alive = aliveHeroes(state);
+  const mult = CONFIG.party.expKillMult(state.heroes.length, alive.length);
   const each = mult === 1 ? amount : amount * mult;
-  for (const h of aliveHeroes(state)) grantHeroXp(state, h, each);
+  for (const h of alive) grantHeroXp(state, h, each);
 }

@@ -25,6 +25,7 @@ import {
   step,
   canEvolveHero,
   isEvolutionQuestOffered,
+  makeHero,
   tier3QuestId,
   tier3FrontierLocked,
   learnedSkills,
@@ -84,6 +85,41 @@ const REFINE_ACTIVE = REFINE_ON || REFINE_SWEEP;
 // s15 wall against an aggressively-refining player (the sim's death-only cadence
 // under-samples refine for tanky classes). Salvage feedstock is still town-gated.
 const REFINE_STRESS_SEC = Number(process.env.REFINE_STRESS_SEC ?? 0);
+
+// PARTY=2/3 → run the M8 SAME-ZONE COHORT mode ("Cohort exp pass", docs/balance-m79.md):
+// N heroes share one zone's progression on full autopilot, driven by per-hero input lanes
+// (step(state, FrameInput[])). Measures per-member xp/hr, kills/hero/min (starvation), deaths
+// and boss clear time vs a size-1 baseline run through the SAME cohort runner (so the only
+// variable is the headcount). PARTY_MIX=1 forces a representative [sword,archer,mage] trio
+// (size 3) instead of N-of-one-class. Unset/1 → the ordinary solo report (engine + harness
+// solo paths untouched → canonical sim byte-identical).
+const PARTY = Math.max(1, Math.min(3, Math.round(Number(process.env.PARTY ?? 1)) || 1));
+const PARTY_MIX = process.env.PARTY_MIX === "1";
+
+// Dev-harness cohort-knob override (PSHARE/PBUFF/PSCALE) — mutate the live CONFIG.party
+// curves so a sweep can search values without recompiling the config constants (same
+// pattern as applyRefineCombo). Reassigns the derived closures too. Sim-only.
+function applyPartyTune(): void {
+  const share = process.env.PSHARE === undefined ? undefined : Number(process.env.PSHARE);
+  const buff = process.env.PBUFF === undefined ? undefined : Number(process.env.PBUFF);
+  const scale = process.env.PSCALE === undefined ? undefined : Number(process.env.PSCALE);
+  if (share === undefined && buff === undefined && scale === undefined) return;
+  const P = CONFIG.party as unknown as {
+    expShareRate: number; expBuffPerMember: number; spawnScalePerMember: number;
+    expBuff: (n: number) => number;
+    expKillMult: (n: number, a: number) => number;
+    spawnMaxAliveScale: (n: number) => number;
+  };
+  const r = share ?? P.expShareRate;
+  const b = buff ?? P.expBuffPerMember;
+  const sc = scale ?? P.spawnScalePerMember;
+  P.expShareRate = r; P.expBuffPerMember = b; P.spawnScalePerMember = sc;
+  P.expBuff = (n: number) => (n <= 1 ? 1 : 1 + b * (n - 1));
+  P.expKillMult = (n: number, a: number) =>
+    n <= 1 ? 1 : P.expBuff(n) * ((1 + (Math.max(1, a) - 1) * r) / Math.max(1, a));
+  P.spawnMaxAliveScale = (n: number) => (n <= 1 ? 1 : 1 + sc * (n - 1));
+}
+applyPartyTune();
 
 // ---------------------------------------------------------------------------
 // Refine sweep — the tunables under test (M7.6). Each combo mutates the live
@@ -820,6 +856,230 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   };
 }
 
+// ---------------------------------------------------------------------------
+// M8 SAME-ZONE COHORT harness (PARTY=2/3) — "Cohort exp pass" (docs/balance-m79.md).
+// N heroes share ONE zone's progression on full autopilot. Per-hero input lanes drive
+// each hero's auto-slots / quest-accept / evolve; the shared-zone nav + shop ride lane 0
+// (the "lead", exactly as the lockstep contract routes them). Measures the reward
+// incentive (per-member xp/hr vs solo), starvation (kills/hero/min vs solo), deaths, and
+// boss clear time (headcount trivialization check).
+// ---------------------------------------------------------------------------
+
+const MIX_CLASSES: HeroClass[] = ["swordsman", "archer", "mage"];
+
+/** Cumulative xp EARNED by a hero (levels consumed + partial), the xp/hr numerator. */
+function totalXpOf(hero: Hero): number {
+  let t = hero.xp;
+  for (let l = 1; l < hero.level; l++) t += CONFIG.leveling.xpToLevel(l);
+  return t;
+}
+
+/** Full-autopilot config for a cohort hero (solo mirrors globals; a cohort can't). */
+function configCohortHero(h: Hero): void {
+  h.config.autoCast = true;
+  h.config.autoAllocate = true;
+  h.config.autoHunt = true;
+  // autoHpPotion / autoManaPotion + thresholds are already ON from defaultHeroConfig.
+}
+
+interface CohortRun {
+  size: number;
+  perHeroXp: number[];
+  killEvents: number;
+  deaths: number;
+  finalStage: number;
+  finalLevels: number[];
+  /** stage → farm-zone clear duration (s) for zones cleared this run. */
+  farmClears: Map<number, number>;
+  /** stage → boss-room clear duration (s) for bosses beaten this run. */
+  bossClears: Map<number, number>;
+  /** boss stages ENTERED but never cleared (a wall that still stands at this headcount). */
+  bossWalls: Set<number>;
+}
+
+/**
+ * Run one cohort of `size` heroes (mixed = the [sword,archer,mage] trio, else `baseCls`×N)
+ * on the shared-zone autopilot for the standard horizon. size=1 = the apples-to-apples
+ * baseline through the SAME runner.
+ */
+function runCohort(baseCls: HeroClass, seed: number, size: number, mixed: boolean): CohortRun {
+  const s = initGameState(seed, makeSave(mixed ? MIX_CLASSES[0] : baseCls, seed));
+  s.autoReturn = true;
+  s.autoCast = true;
+  s.autoAllocate = true;
+  configCohortHero(s.heroes[0]);
+  for (let i = 1; i < size; i++) {
+    const cls = mixed ? MIX_CLASSES[i % MIX_CLASSES.length] : baseCls;
+    const h = makeHero(s.nextId++, cls);
+    configCohortHero(h);
+    s.heroes.push(h);
+  }
+
+  const perDead = s.heroes.map((h) => h.dead);
+  let killEvents = 0;
+  let deaths = 0;
+  const farmClears = new Map<number, number>();
+  const bossClears = new Map<number, number>();
+  const bossWalls = new Set<number>();
+  let zoneStage = zoneAt(s.location).stage;
+  let zoneKind = zoneAt(s.location).kind;
+  let zoneEnter = s.time;
+
+  const navCtx: NavCtx = { lastQuestBossChallengeKills: -QUEST_BOSS_FARM_BETWEEN };
+  for (let step_i = 0; step_i < STEPS; step_i++) {
+    const lanes: FrameInput[] = [];
+    for (let i = 0; i < size; i++) {
+      const h = s.heroes[i];
+      const lane: FrameInput = {};
+      const slots = fillAutoSlots(h);
+      if (slots.length) lane.setAutoSlots = slots;
+      if (isEvolutionQuestOffered(h)) lane.acceptQuest = i;
+      if (canEvolveHero(s, h)) lane.evolveHero = i;
+      lanes.push(lane);
+    }
+    // Shared-zone intents (nav + shop) ride lane 0 (the lead), per the lockstep contract.
+    Object.assign(lanes[0], navInput(s, navCtx), shopInput(s));
+
+    step(s, lanes);
+
+    for (const e of s.events) {
+      if (e.type === "kill") killEvents++;
+      if (e.type === "zoneEntered") {
+        // A boss room we're LEAVING without a clear = a wall that held.
+        if (zoneKind === "boss" && !bossClears.has(zoneStage)) bossWalls.add(zoneStage);
+        zoneStage = e.stage;
+        zoneKind = e.kind === "boss" ? "boss" : e.kind === "farm" ? "farm" : zoneKind;
+        zoneEnter = s.time;
+      }
+      if (e.type === "zoneUnlocked" && zoneKind === "farm" && !farmClears.has(zoneStage)) {
+        farmClears.set(zoneStage, s.time - zoneEnter);
+      }
+      if (e.type === "mapUnlocked" && zoneKind === "boss") {
+        bossClears.set(zoneStage, s.time - zoneEnter);
+        bossWalls.delete(zoneStage);
+      }
+    }
+
+    for (let i = 0; i < size; i++) {
+      const nowDead = s.heroes[i].dead;
+      if (nowDead && !perDead[i]) deaths++;
+      perDead[i] = nowDead;
+    }
+  }
+
+  return {
+    size,
+    perHeroXp: s.heroes.map(totalXpOf),
+    killEvents,
+    deaths,
+    finalStage: s.stage,
+    finalLevels: s.heroes.map((h) => h.level),
+    farmClears,
+    bossClears,
+    bossWalls,
+  };
+}
+
+const HOURS = SIM_SECONDS / 3600;
+const MINUTES = SIM_SECONDS / 60;
+
+/** Mean of the defined values in a list of per-run maps at `stage`. */
+function meanAtStage(runs: CohortRun[], stage: number, pick: (r: CohortRun) => Map<number, number>): number | null {
+  const vals = runs.map((r) => pick(r).get(stage)).filter((v): v is number => v !== undefined);
+  return vals.length ? mean(vals) : null;
+}
+
+function reportCohort(label: string, solo: CohortRun[], cohort: CohortRun[]): void {
+  const size = cohort[0].size;
+  const soloXpHr = mean(solo.flatMap((r) => r.perHeroXp)) / HOURS;
+  const cohXpHr = mean(cohort.flatMap((r) => r.perHeroXp)) / HOURS;
+  const soloKpm = mean(solo.map((r) => r.killEvents / r.size)) / MINUTES;
+  const cohKpm = mean(cohort.map((r) => r.killEvents / r.size)) / MINUTES;
+  console.log(`\n=== COHORT ${label} (size ${size}) — ${cohort.length} seeds vs solo baseline ===`);
+  console.log(
+    `  xp/hr per member:  solo ${soloXpHr.toFixed(0)}  →  cohort ${cohXpHr.toFixed(0)}  ` +
+      `(×${(cohXpHr / Math.max(1, soloXpHr)).toFixed(2)} per member)`,
+  );
+  console.log(
+    `  kills/hero/min:    solo ${soloKpm.toFixed(2)}  →  cohort ${cohKpm.toFixed(2)}  ` +
+      `(${((100 * cohKpm) / Math.max(1e-9, soloKpm)).toFixed(0)}% of solo — starvation if < ~70%)`,
+  );
+  console.log(
+    `  deaths (total):    solo ${(mean(solo.map((r) => r.deaths))).toFixed(0)}/run  →  ` +
+      `cohort ${(mean(cohort.map((r) => r.deaths))).toFixed(0)}/run  ` +
+      `| final stage solo ${Math.round(mean(solo.map((r) => r.finalStage)))} cohort ${Math.round(mean(cohort.map((r) => r.finalStage)))}`,
+  );
+  // Farm clear time per stage (solo vs cohort), and boss clear time + walls.
+  const stages = [...new Set(cohort.flatMap((r) => [...r.farmClears.keys()]))].sort((a, b) => a - b);
+  const farmRow = stages
+    .map((st) => {
+      const so = meanAtStage(solo, st, (r) => r.farmClears);
+      const co = meanAtStage(cohort, st, (r) => r.farmClears);
+      return so !== null && co !== null ? `s${st}:${co.toFixed(0)}/${so.toFixed(0)}` : null;
+    })
+    .filter((x): x is string => x !== null);
+  console.log(`  farm clear s (cohort/solo): ${farmRow.join("  ")}`);
+  const bossStages = [5, 10, 15, 20, 25, 30];
+  const bossRow = bossStages
+    .map((st) => {
+      const so = meanAtStage(solo, st, (r) => r.bossClears);
+      const co = meanAtStage(cohort, st, (r) => r.bossClears);
+      if (co === null && so === null) return null;
+      const coS = co === null ? "-" : co.toFixed(0);
+      const soS = so === null ? "-" : so.toFixed(0);
+      return `s${st}:${coS}/${soS}`;
+    })
+    .filter((x): x is string => x !== null);
+  console.log(`  BOSS clear s (cohort/solo): ${bossRow.join("  ")}`);
+  // Trivialization flag: a boss whose cohort clear time collapsed vs solo.
+  const trivi = bossStages
+    .map((st) => {
+      const so = meanAtStage(solo, st, (r) => r.bossClears);
+      const co = meanAtStage(cohort, st, (r) => r.bossClears);
+      if (so === null || co === null || so < 1) return null;
+      const ratio = co / so;
+      return ratio < 0.55 ? `s${st} (×${ratio.toFixed(2)} of solo time)` : null;
+    })
+    .filter((x): x is string => x !== null);
+  const wallStages = [15, 20, 25, 30].filter((st) => cohort.some((r) => r.bossWalls.has(st)));
+  if (trivi.length) console.log(`  ⚠ BOSS TRIVIALIZED (< 0.55× solo clear time): ${trivi.join(", ")}`);
+  if (wallStages.length) console.log(`  wall still stands (not cleared every seed at this size): s${wallStages.join(", s")}`);
+}
+
+function runParty(): void {
+  console.log(
+    `[cohort-sim] PARTY=${PARTY}${PARTY_MIX ? " MIXED[sword,archer,mage]" : ""} ` +
+      `${SIM_SECONDS}s × ${SEEDS.length} seeds — same-zone cohort vs solo baseline\n` +
+      `knobs: expShareRate ${CONFIG.party.expShareRate} · expBuffPerMember ${CONFIG.party.expBuffPerMember} ` +
+      `(buff 2p ×${CONFIG.party.expBuff(2).toFixed(2)} 3p ×${CONFIG.party.expBuff(3).toFixed(2)}) · ` +
+      `spawnScale 2p ×${CONFIG.party.spawnMaxAliveScale(2).toFixed(2)} 3p ×${CONFIG.party.spawnMaxAliveScale(3).toFixed(2)} · ` +
+      `expKillMult 2p ×${CONFIG.party.expKillMult(2, 2).toFixed(3)} 3p ×${CONFIG.party.expKillMult(3, 3).toFixed(3)}`,
+  );
+  if (PARTY_MIX) {
+    const cohort = SEEDS.map((seed) => runCohort("swordsman", seed, 3, true));
+    // Baseline: each mixed hero vs its OWN class solo, so per-member xp/hr is per-class fair.
+    const soloByClass = new Map<HeroClass, CohortRun[]>();
+    for (const cls of MIX_CLASSES) soloByClass.set(cls, SEEDS.map((seed) => runCohort(cls, seed, 1, false)));
+    // Blend the three class solos into a "baseline" whose per-hero xp aligns slot-for-slot.
+    const soloBlend: CohortRun[] = SEEDS.map((_, si) => ({
+      ...cohort[si],
+      perHeroXp: MIX_CLASSES.map((cls) => soloByClass.get(cls)![si].perHeroXp[0]),
+      killEvents: MIX_CLASSES.reduce((a, cls) => a + soloByClass.get(cls)![si].killEvents, 0),
+      deaths: MIX_CLASSES.reduce((a, cls) => a + soloByClass.get(cls)![si].deaths, 0),
+      size: 3,
+      farmClears: soloByClass.get("swordsman")![si].farmClears,
+      bossClears: soloByClass.get("swordsman")![si].bossClears,
+    }));
+    reportCohort("MIXED[sword,archer,mage]", soloBlend, cohort);
+    return;
+  }
+  for (const cls of CLASSES) {
+    const solo = SEEDS.map((seed) => runCohort(cls, seed, 1, false));
+    const cohort = SEEDS.map((seed) => runCohort(cls, seed, PARTY, false));
+    reportCohort(`${PARTY}×${cls}`, solo, cohort);
+  }
+}
+
 function freshZone(s: GameState): ZoneMetric {
   const z = zoneAt(s.location);
   return {
@@ -1160,6 +1420,10 @@ function runBossIso(): void {
 function main(): void {
   if (process.env.BOSSISO === "1") {
     runBossIso();
+    return;
+  }
+  if (PARTY >= 2 || PARTY_MIX) {
+    runParty();
     return;
   }
   if (REFINE_SWEEP) {

@@ -1164,7 +1164,14 @@
     "warpToFriendButton": "Warp to them",
     "warpToFriendButtonWithCount": "Warp to them ({count})",
     "warpNoScrollHint": "Buy a Warp Scroll from Auntie Pu",
-    "warpNotClimbedHint": "You haven't climbed to that zone yet"
+    "warpNotClimbedHint": "You haven't climbed to that zone yet",
+    "sameZoneHint": "Same zone — you can see each other now"
+  },
+  "partyCohort": {
+    "connecting": "Connecting to party…",
+    "playingWith": "Playing with {names} in this zone",
+    "waiting": "Waiting for teammate…",
+    "reconnecting": "Reconnecting…"
   },
   "questBoard": {
     "title": "Quest Board",

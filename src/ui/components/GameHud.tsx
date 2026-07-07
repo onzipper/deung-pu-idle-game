@@ -46,6 +46,7 @@ import { UpdateBanner } from "@/ui/components/UpdateBanner";
 import { WalkControls } from "@/ui/components/WalkControls";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
+import { CohortStatus } from "@/ui/party/CohortStatus";
 
 export interface GameHudProps {
   /** Canvas content (e.g. a Pixi-mounting client component) for the arena slot. */
@@ -84,6 +85,9 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           results — sits above the arena, below the modal panels (z-70). */}
       <DropFeed />
       <NoticeToast />
+      {/* M8 party P4b: lockstep cohort chip — renders nothing solo (the overwhelming
+          common case), see CohortStatus.tsx. */}
+      <CohortStatus />
       <HudBar />
 
       <div

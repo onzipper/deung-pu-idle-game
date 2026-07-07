@@ -33,11 +33,11 @@ const eslintConfig = defineConfig([
     },
   },
 
-  // Standalone zero-dep Node.js probe script (not part of the app bundle) —
-  // plain CommonJS by design (see file header: must run on the barest
-  // possible Node host with nothing else installed).
+  // Standalone zero-dep Node.js scripts (ws-probe infra spike + the party relay) —
+  // NOT part of the app bundle; plain CommonJS by design (must run on the barest
+  // possible Node host / Render free tier with nothing else installed).
   {
-    files: ["scripts/ws-probe/**/*.js"],
+    files: ["scripts/ws-probe/**/*.js", "scripts/party-relay/**/*.js"],
     rules: {
       "@typescript-eslint/no-require-imports": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { caughtErrorsIgnorePattern: "^_" }],

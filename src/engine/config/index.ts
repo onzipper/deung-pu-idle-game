@@ -72,6 +72,62 @@ const enemyAtkDamp = (n: number): number =>
 const enemyHpDamp = (n: number): number =>
   n <= STAGE_HP_DAMP_FROM ? 1 : dpow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
 
+// ---------------------------------------------------------------------------
+// M8 party — SAME-ZONE COHORT tuning scalars (docs/party-design-m8.md §3 + answers;
+// "Cohort exp pass" in docs/balance-m79.md). Owner rule: farming together in ONE zone
+// is REWARDED (exp buff + shared exp) but must NOT become a mandatory meta; drops/gold
+// stay personal ("จอใครจอมัน"). These are the only knobs the sim sweeps for the cohort
+// reward. They are IDENTITY at solo (size 1) so a 1-hero sim is byte-identical, and every
+// derived quantity is a PURE function of the cohort size (heroes present) + the alive
+// count — no RNG, no wall-clock — so all cohort clients compute the same result.
+//   PARTY_EXP_SHARE_RATE (0.6): a kill's xp is credited to the KILLER in full (1.0) and to
+//     every OTHER alive cohort hero at this SHARE (they were present/fighting). The engine
+//     does NOT attribute kills to a hero (no lastHitBy — that needs a structural change,
+//     flagged for game-engine-specialist), so grantKillXp credits the design's §5 EQUAL-to-
+//     all-present form: the mean-field of "killer 1.0 + others share", identical in aggregate
+//     to per-killer crediting when heroes kill at equal rates (the symmetric cohort case).
+//     Sim OVERRULED the 0.5 draft to 0.6 — the net per-member outcome is dominated by an
+//     emergent CO-OP SURVIVAL snowball (fewer deaths per body → deeper reach → xp/kill grows
+//     geometrically), so the share only needs a small lift over the survival floor to seat
+//     the well-behaved classes in-band.
+//   PARTY_EXP_BUFF_PER_MEMBER (0.04): a cohort-wide xp BUFF added per EXTRA member on ALL xp
+//     earned (2p → ×1.04, 3p → ×1.08). Kept SMALL by a hard structural finding: a per-member
+//     buff gives a 3p cohort 2× the boost of a 2p one, and solving "sword-2p ≥ 1.2 AND
+//     archer-3p < 1.6" forces buff×share → 0 — any larger buff pushes the frontier-friction
+//     archer's 3p over the "not-mandatory" ceiling. 0.04 keeps the buff mechanic genuinely
+//     live without breaching the guard for the well-behaved classes.
+//   PARTY_SPAWN_SCALE_PER_MEMBER (0.5): the mob-pool `maxAlive` grows per extra member so a
+//     shared field reads FULL for N bodies (2p → ×1.5, 3p → ×2.0). It barely moves throughput
+//     (clustering-bound, below) — its job is target AVAILABILITY + a busy group field, NOT a
+//     starvation fix. Scales DENSITY only — NOT killGoal (zone-unlock quotas stay personal/
+//     unchanged) and NOT the spawn DRAW order (kind→temperament→placement→makeEnemy is
+//     unperturbed; a bigger cap just lets the same seeded sequence fill further).
+// Result (1800s×5 seeds, "Cohort exp pass" in docs/balance-m79.md): per-member xp/hr sword
+// ×1.25/1.26, mage ×1.32/1.34 (2p/3p — in band); archer ×1.57/1.66 (FLAGGED — a denominator
+// artifact of the known solo-archer frontier death-spiral, not an over-tuned reward).
+// OPEN FLAGS: (1) kills/hero/min ~45-65% of solo = auto-hunt TARGET-CLUSTERING (both heroes
+// chase the nearest mob; raising maxAlive barely helps) — below the ~70% "no starvation" goal;
+// real fix = spatial target-spreading in auto-hunt (structural, game-engine-specialist). The
+// reward is carried by SHARED xp, so per-member PROGRESSION is still clearly ahead. (2) s5/s10
+// bosses clear in ~0.1-0.5× solo time at 2-3 bodies (headcount melt) — boss HP-per-headcount
+// scaling is a DESIGN decision for the owner (do NOT silently buff boss HP).
+const PARTY_EXP_SHARE_RATE = 0.6;
+const PARTY_EXP_BUFF_PER_MEMBER = 0.04;
+const PARTY_SPAWN_SCALE_PER_MEMBER = 0.5;
+// Cohort-wide xp buff from group size S (>=1): 1 at solo, +PARTY_EXP_BUFF_PER_MEMBER per
+// extra member. Pure; deterministic (only + - *).
+const partyExpBuff = (size: number): number =>
+  size <= 1 ? 1 : 1 + PARTY_EXP_BUFF_PER_MEMBER * (size - 1);
+// Per-hero-per-kill xp multiplier for a cohort: the group buff × the EQUAL share of the
+// per-kill xp pot (killer 1.0 + each other alive hero PARTY_EXP_SHARE_RATE), distributed
+// evenly across the `alive` present heroes. Solo (size 1) → 1 (byte-identical). Only
+// + - * / (cross-engine deterministic; no transcendental).
+const partyExpKillMult = (size: number, alive: number): number => {
+  if (size <= 1) return 1;
+  const a = Math.max(1, alive);
+  return partyExpBuff(size) * ((1 + (a - 1) * PARTY_EXP_SHARE_RATE) / a);
+};
+
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
   /** Speed multipliers the player can toggle. */
@@ -422,29 +478,37 @@ export const CONFIG = {
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.
   maxHeroes: 3,
-  // M8 party P1b — shared-zone reward/scaling hooks. ALL default INERT (identity at
-  // any party size) so a solo (1-hero) sim is byte-identical; the real curves are a
-  // later balance-sim task (docs/party-design-m8.md §5, owner numbers pending). Every
-  // hook is a PURE function of `partySize` (= heroes present) so all cohort clients
-  // compute the same result — no RNG, no wall-clock. Wired at the kill/xp/spawn sites.
+  // M8 party — SAME-ZONE COHORT reward/scaling (docs/party-design-m8.md §3 + answers;
+  // "Cohort exp pass" in docs/balance-m79.md). Same zone = exp buff + shared exp; gold +
+  // drops stay PERSONAL (goldShareMult kept INERT per owner). Every hook is IDENTITY at
+  // solo (size 1) so a 1-hero sim is byte-identical, and a PURE function of the cohort
+  // size (heroes present) + alive count — no RNG, no wall-clock — so all cohort clients
+  // agree. The scalar drafts live above CONFIG (PARTY_EXP_SHARE_RATE / …) so the sim can
+  // sweep them; these fields expose them + the derived curves at the kill/xp/spawn sites.
   party: {
-    // Per-hero XP multiplier for a cohort kill (design §5 "แชร์ exp"). Identity today.
-    expShareMult: (partySize: number): number => {
-      void partySize; // inert hook — the real per-size curve is a balance-sim task
-      return 1;
-    },
-    // Per-client gold multiplier for a cohort kill (each client credits its OWN hero;
-    // design §5 "ทุกคนได้เต็ม" vs "หาร" is this knob). Identity today.
+    /** Non-killer present hero's share of a cohort kill's xp (killer gets 1.0). */
+    expShareRate: PARTY_EXP_SHARE_RATE,
+    /** Cohort-wide xp buff added per EXTRA member (2p → +0.10, 3p → +0.20). */
+    expBuffPerMember: PARTY_EXP_BUFF_PER_MEMBER,
+    /** `maxAlive` growth per extra member so more heroes don't starve one field. */
+    spawnScalePerMember: PARTY_SPAWN_SCALE_PER_MEMBER,
+    // Cohort xp BUFF from group size (design §answers "exp buff"). Solo → 1.
+    expBuff: partyExpBuff,
+    // Per-hero-per-kill xp multiplier (buff × equal share of killer-1.0 + others-share).
+    // Read by systems/leveling.grantKillXp. Solo (size 1) → 1 (byte-identical).
+    expKillMult: partyExpKillMult,
+    // Per-client gold multiplier for a cohort kill — KEPT INERT (gold is personal per
+    // owner "จอใครจอมัน"; each cohort client credits its OWN hero). Identity at any size.
     goldShareMult: (partySize: number): number => {
-      void partySize; // inert hook — balance-flagged
+      void partySize; // inert by design — gold does NOT share in a cohort
       return 1;
     },
-    // Mob-pool scale per cohort size (design §2/§6 "density/killGoal ต่อหัว"): more
-    // heroes → a fuller field. Identity today; balance-flagged. Applied to `maxAlive`.
-    spawnMaxAliveScale: (partySize: number): number => {
-      void partySize; // inert hook — balance-flagged
-      return 1;
-    },
+    // Mob-pool `maxAlive` scale per cohort size (design §2/§6 "density ต่อหัว"): more
+    // heroes → a fuller field so they don't starve each other. Solo → 1 (byte-identical);
+    // read by systems/hunt.updateSpawns. Scales DENSITY only, never killGoal (quotas are
+    // personal) nor the seeded draw order.
+    spawnMaxAliveScale: (partySize: number): number =>
+      partySize <= 1 ? 1 : 1 + PARTY_SPAWN_SCALE_PER_MEMBER * (partySize - 1),
   },
   heroBaseAtk: 10,
   heroBaseHp: 150,
