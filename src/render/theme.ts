@@ -160,6 +160,17 @@ export const PALETTE = {
   // regardless of the piece's rolled rarity. ----
   gearApex: 0xd6c8ff,
   gearApexCore: 0xffffff,
+
+  // ---- Owner request: War Cry ATK-buff aura (`fx/warCryAura.ts`) — a
+  // party-wide status effect (any class can carry `hero.atkBuffTimer`), so
+  // this is deliberately its OWN crimson/ember family rather than reusing a
+  // single class's gear-aura tint — must read distinctly from the sword's
+  // weapon-tier flame (`auraFlame*`), the per-class gear-aura colors
+  // (emerald/azure/flame), and refine-prestige's pale gold-white. Footgun 10:
+  // flat/solid on NORMAL blend + a darker outline, never additive. ----
+  warCryAura: 0xe8283e,
+  warCryCore: 0xff9a5c,
+  warCryDark: 0x4a0810,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

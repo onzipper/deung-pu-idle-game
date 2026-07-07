@@ -694,6 +694,7 @@ describe("recentAnnouncements — feed query shape + in-process cache (M7.9)", (
     mockPrisma.refineAnnouncement.findMany.mockResolvedValue([
       {
         id: "ann_1",
+        kind: "refine",
         characterId: "char_2",
         charName: "Bob",
         templateId: "w_sword_t3_epic",
@@ -714,6 +715,7 @@ describe("recentAnnouncements — feed query shape + in-process cache (M7.9)", (
     expect(result).toEqual([
       {
         id: "ann_1",
+        kind: "refine",
         characterId: "char_2",
         charName: "Bob",
         templateId: "w_sword_t3_epic",

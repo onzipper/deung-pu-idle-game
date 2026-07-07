@@ -4,15 +4,17 @@
     "appDescription": "A solo-character idle MMORPG-lite — level up, allocate stats, cast skills, challenge bosses, and change classes to keep growing stronger.",
     "levelBadge": "Lv.{level}",
     "maxLabel": "MAX",
-    "fatalError": "Could not start the game: {reason}"
+    "fatalError": "Could not start the game: {reason}",
+    "infoTipAria": "More info"
   },
   "hud": {
     "stageLabel": "Stage",
-    "waveLabel": "Wave",
-    "autoHuntOn": "AUTO",
-    "autoHuntOff": "MANUAL",
-    "autoHuntAriaOn": "Turn auto-hunt off",
-    "autoHuntAriaOff": "Turn auto-hunt on",
+    "botMasterOn": "Bot: ON",
+    "botMasterOff": "Bot: OFF",
+    "botMasterAriaOn": "Turn the bot off (disables all automation)",
+    "botMasterAriaOff": "Turn the bot on (enables all automation)",
+    "botSettingsButtonAria": "Bot settings",
+    "botMasterHint": "One switch for all automation: hunting, casting skills, stat points, potions, town trips, advancing zones — turn it off anytime to play manually; manual play (tap to move/attack) always works.",
     "cancelCommandButton": "✕ Cancel Command",
     "cancelCommandAria": "Cancel the current move/attack command",
     "zoneUnlockLabel": "Unlock next zone",
@@ -35,13 +37,15 @@
       "zoneBoss": "Clear the map",
       "hallOfFame": "Hall of Fame"
     },
-    "hallOfFameHint": "Coming soon",
+    "hallOfFameHint": "View the Hall of Fame leaderboard",
     "levelUp": {
       "progress": "Lv.{level} → Lv.{gate} unlocks the class-change quest"
     },
     "classQuest": {
       "locked": "🔒 Lv.{gate}",
-      "readyHint": "Quest complete! See the skill bar below to change class."
+      "readyHint": "Quest complete! Tap below to change class.",
+      "bossStatusDone": "Defeated ✓",
+      "bossStatusPending": "Not yet"
     },
     "zoneBoss": {
       "farmingHint": "Kill enemies to unlock the next zone",
@@ -52,7 +56,8 @@
       "victoryHint": "Walk into the next map to keep growing stronger."
     },
     "powerRatioLabel": "Power {pct}%",
-    "bossStatsLabel": "Boss HP {hp} · ATK {atk}"
+    "bossStatsLabel": "Boss HP {hp} · ATK {atk}",
+    "mapNumberLabel": "Map {n}"
   },
   "panels": {
     "skillsLabel": "Skills",
@@ -65,21 +70,47 @@
     "autoSlotAssigned": "Auto {slot}",
     "autoSlotToggleHint": "Toggle this skill into a free auto-cast slot",
     "autoSlotNextUnlock": "More auto slots at Lv.{level}",
-    "evolvedBadgeTitle": "{name} (Evolved)",
     "classQuest": {
-      "lockedHint": "Class-change quest unlocks at Lv.{level}",
-      "ariaLocked": "{heroName}: class change (quest unlocks at Lv.{level})",
       "acceptButton": "Accept quest",
       "ariaAccept": "{heroName}: accept the class-change quest",
-      "progress": "{kills}/{goal} · boss {boss}",
-      "progressTitle": "Class-change quest progress",
-      "ariaProgress": "{heroName}: class-change quest — {kills}/{goal} kills, boss {boss, select, done {defeated} other {pending}}",
       "changeButton": "Change class!",
       "confirmLabel": "Confirm?",
       "confirmHint": "Tap again to confirm",
-      "ariaChange": "{heroName}: change class{state, select, confirm { (tap again to confirm)} other {}}"
+      "ariaChange": "{heroName}: change class{state, select, confirm { (tap again to confirm)} other {}}",
+      "cardTitlePreAccept": "Class-change quest — what you'll do",
+      "objectiveKillScoped": "🗡 Hunt monsters in {map}",
+      "objectiveKillAny": "🗡 Hunt monsters (anywhere)",
+      "objectiveBossScoped": "👑 Defeat the {map} boss",
+      "objectiveBossAny": "👑 Defeat any map boss once",
+      "objectiveBossYoungSovereign": "👑 Defeat the young Glacial Sovereign",
+      "guideKillScoped": "Head to {map} to hunt",
+      "guideKillAny": "Keep hunting in your current zone — it counts anywhere",
+      "guideBossBacktrack": "Walk back to the {map} boss room — the boss respawns for a re-fight",
+      "guideBossAny": "Beat the boss of the map you're currently farming",
+      "guideBossTier3Hint": "You've reached the frontier — hit the challenge button when you're ready",
+      "challengeButton": "Challenge Boss",
+      "ariaChallenge": "{heroName}: challenge the quest boss",
+      "rewardLine": "Reward: become {cls} · a big power jump + a new skill",
+      "rewardLineTier3": "Reward: become {cls} · a big power jump + a new skill + 4th skill + 4th auto-cast slot",
+      "guideButton": "Guide me",
+      "ariaGuide": "{heroName}: guide me to the next quest objective",
+      "disabled": {
+        "dead": "Your hero is down — try again after reviving",
+        "channeling": "Warping in progress — wait a moment",
+        "traveling": "Already traveling — wait until you arrive"
+      }
     },
-    "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})"
+    "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})",
+    "atkBuffTooltip": "+{percent}% ATK",
+    "skillInfoAria": "More info about {skillName}",
+    "skillStat": {
+      "damage": "DMG ×{mult}",
+      "radius": "Radius {radius}",
+      "targets": "{targets} hits",
+      "buff": "+{percent}% ATK for {seconds}s",
+      "mana": "Mana {cost}",
+      "cooldown": "CD {cd}s"
+    }
   },
   "stats": {
     "title": "Stats",
@@ -88,6 +119,7 @@
     "combatPower": "Power",
     "autoAllocateToggle": "🎯 Auto Stat: {state, select, on {ON} other {OFF}}",
     "allocateAria": "Add 1 point to {stat}",
+    "autoBlockedHint": "Turn off Auto Stat to allocate manually",
     "primaryTag": "main",
     "names": {
       "str": "STR",
@@ -117,9 +149,24 @@
     "openButton": "⚙ Settings",
     "title": "Settings",
     "closeButton": "Close",
-    "autoBehaviorGroup": "Auto-behavior",
     "audioLanguageGroup": "Audio & language",
-    "deathBehaviorLabel": "When your hero dies",
+    "botModal": {
+      "title": "Bot settings",
+      "closeButton": "Close",
+      "masterOffHint": "The bot switch is off — you can still adjust these settings, but they won't run until you turn the bot switch back on.",
+      "combatGroup": "Combat",
+      "combatGroupHint": "Let the hero cast skills and allocate stat points on its own.",
+      "potionGroup": "Potions",
+      "potionGroupHint": "Auto-use HP/mana potions once a pool drops below its threshold.",
+      "townGroup": "Town trips",
+      "townGroupHint": "The bot warps to town to buy potions / sell / equip its best gear on its own.",
+      "dropGroup": "Drops",
+      "dropGroupHint": "Rules for what the bot sells/salvages/keeps per drop rarity on its town trips.",
+      "walkGroup": "Walking",
+      "walkGroupHint": "Behavior after your hero dies, and auto-advancing to the next zone.",
+      "autoReturnHint": "After your hero respawns in town, walk back to farming automatically.",
+      "autoAdvanceHint": "Once a zone's quota is cleared, walk into the next unlocked zone automatically (never a boss room)."
+    },
     "bot": {
       "title": "Helper bots",
       "hint": "The bot warps to town on its own when your bags fill up or potions run low, then walks back to farming automatically.",
@@ -130,13 +177,20 @@
       "mpTarget": "Mana potion target",
       "scrollReserve": "Return scroll target",
       "goldReserve": "Minimum gold reserve",
-      "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)"
+      "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)",
+      "restockHint": "Warps to town on its own once HP/mana potions run out, then buys back up to target.",
+      "sellTripHint": "Warps to town on its own once the bag is full, then sells/salvages per the drop rules.",
+      "masterOffDisabledHint": "Turn the main bot switch on first to enable this.",
+      "autoSlotsTitle": "Auto-cast slots",
+      "autoSlotEmpty": "Empty",
+      "autoSlotClearAria": "Remove {skill} from its auto-cast slot"
     },
     "autoSell": {
       "title": "Auto-dispose drops",
       "commonLabel": "Common",
       "rareLabel": "Rare",
-      "epicHint": "Epic: always kept (locked off)",
+      "epicLabel": "Epic",
+      "epicHint": "Epic protection is always forced on: the bot can only sell/salvage an epic that's worse than what's equipped and isn't the best piece for an empty slot — even with \"Protect good gear\" off",
       "actionOff": "Off",
       "actionSell": "Sell",
       "actionSalvage": "Salvage",
@@ -168,7 +222,11 @@
       },
       "slotAutoSkill": {
         "title": "Slot a skill into auto-cast",
-        "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (up to 3, unlocked by level). Skills outside a slot still need a manual tap."
+        "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (3 unlock by level, a 4th opens at Class Tier 3). Skills outside a slot still need a manual tap."
+      },
+      "botSwitchIntro": {
+        "title": "This is the bot switch",
+        "body": "This is the bot switch — you can turn it off if you want to play manually. Turning it off stops ALL automation (skills, stats, potions, town trips, advancing zones); manual play (tap to move/attack) always keeps working. Tap ⚙ next to it to fine-tune each behavior."
       },
       "bossChallenge": {
         "title": "Challenge the map boss",
@@ -176,7 +234,7 @@
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Tap \"⚙ Settings\" to mute/unmute sound, switch languages, or tune auto-behavior, and tap \"📖 Guide\" to reopen the game guide anytime from this row."
+        "body": "Tap \"⚙ Settings\" to mute/unmute sound or switch languages, and tap \"📖 Guide\" to reopen the game guide anytime from this row. All automation now lives under the 🤖 Bot switch up top instead."
       },
       "outro": {
         "title": "You're ready!",
@@ -194,11 +252,11 @@
       },
       "questOffered": {
         "title": "Class-change quest available!",
-        "body": "Your hero hit the level gate for the class-change quest. Tap \"Accept quest\" next to the level badge to start it."
+        "body": "Your hero hit the level gate for the class-change quest. Tap \"Accept quest\" in the quest card above to start it."
       },
       "questComplete": {
         "title": "Quest complete!",
-        "body": "Objectives done. Tap \"Change class!\" (tap again to confirm) to advance to the next class tier with a new skill."
+        "body": "Objectives done. Tap \"Change class!\" in the quest card (tap again to confirm) to advance to the next class tier with a new skill."
       },
       "autoSlotUnlocked": {
         "title": "New auto-cast slot unlocked!",
@@ -218,11 +276,11 @@
       },
       "manualPlayHint": {
         "title": "You can play manually now!",
-        "body": "Tap the ground to walk, tap a monster to attack. Tap \"✕ Cancel Command\" to stop, or turn AUTO back on to let your hero hunt on its own again."
+        "body": "Tap the ground to walk, tap a monster to attack. Tap \"✕ Cancel Command\" to stop, or flip the 🤖 Bot switch back on to let your hero hunt on its own again."
       },
       "tier3QuestOffered": {
         "title": "Tier-3 class quest available!",
-        "body": "Your evolved hero hit the level gate for its final class-change quest. Tap \"Accept quest\" next to the level badge to start it."
+        "body": "Your evolved hero hit the level gate for its final class-change quest. Tap \"Accept quest\" in the quest card above to start it."
       },
       "skill4Unlocked": {
         "title": "4th skill slot unlocked!",
@@ -264,7 +322,7 @@
       },
       "manaSkills": {
         "title": "Mana, skills & auto slots",
-        "body": "Skills cost mana (fed by INT) plus a cooldown. Each class tier learns 2-3 skills, unlocked by level. Tap a skill to cast it yourself, or drop it into an auto-cast slot with \"+ Auto\" (up to 3 slots, unlocked at Lv 1/15/30) — skills left outside a slot still need a manual tap."
+        "body": "Skills cost mana (fed by INT) plus a cooldown. Each class tier learns 2-3 skills, unlocked by level. Tap a skill to cast it yourself, or drop it into an auto-cast slot with \"+ Auto\" (3 slots unlock at Lv 1/15/30, a 4th opens at Class Tier 3) — skills left outside a slot still need a manual tap."
       },
       "classQuest": {
         "title": "Class-change quest",
@@ -285,7 +343,7 @@
       },
       "autoCast": {
         "title": "✨ Auto Skill",
-        "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. Up to 3 slots unlock by level (Lv 1/15/30) — no need to tap the skill buttons yourself."
+        "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. 3 slots unlock by level (Lv 1/15/30), and a 4th opens at Class Tier 3 — no need to tap the skill buttons yourself."
       },
       "autoAllocate": {
         "title": "🎯 Auto Stat",
@@ -305,7 +363,7 @@
       },
       "classTier3": {
         "title": "Tier-3 class change (Grand Expansion)",
-        "body": "At Lv.40 a second class-change quest unlocks: hunt in the Wild Frontier map plus re-defeat the Demon Realm boss. Completing it advances your hero to its final class tier — a huge power spike, a 4th skill, and a 4th auto-cast slot, the key to breaking through the stage-15 wall."
+        "body": "At Lv.40 a second class-change quest unlocks: the gate to the Frozen Tundra frontier (map 4, first zone) opens early — hunt 90 monsters there. Once you're done, the boss-room gate opens — walk in and defeat the young Glacial Sovereign, a weakened taste of the real stage-20 fight. Completing it advances your hero to its final class tier — a huge power spike, a 4th skill, and a 4th auto-cast slot — then come back and smash the stage-15 boss."
       },
       "boss-map4": {
         "title": "Glacial Sovereign (stage 20) — Charge",
@@ -313,11 +371,11 @@
       },
       "boss-map5": {
         "title": "Buried Pharaoh (stage 25) — Summon",
-        "body": "As its HP drops, the desert ruins' boss calls in waves of adds to fight alongside it — clear the summons quickly so they don't pile up."
+        "body": "As its HP drops, the desert ruins' boss summons adds in bursts to fight alongside it — clear the summons quickly so they don't pile up."
       },
       "boss-map6": {
         "title": "Infernal Sovereign (stage 30) — Field Hazard",
-        "body": "The hell city's boss unleashes a telegraphed arena-wide hazard wave that damages you no matter where you stand — heal up and out-DPS it before the strike lands."
+        "body": "The hell city's boss unleashes a telegraphed arena-wide hazard strike that damages you no matter where you stand — heal up and out-DPS it before the strike lands."
       }
     }
   },
@@ -657,7 +715,8 @@
     "fastTravelTitle": "Fast Travel",
     "fastTravelClose": "Close",
     "fastTravelCurrent": "You're here",
-    "fastTravelChanneling": "Warping to {map}…"
+    "fastTravelChanneling": "Warping to {map}…",
+    "fastTravelStageRange": "Stage {min}–{max}"
   },
   "shop": {
     "title": "Town Shop",
@@ -709,13 +768,11 @@
     "classOnlyToggle": "My class only",
     "capacityLabel": "{count}/{cap} slots",
     "sellTownOnly": "Can only sell in town",
-    "sellOneButton": "Sell one",
-    "sellAllButton": "Sell all ({count})",
+    "sellButton": "Sell",
     "sellAllCommonButton": "Sell all common",
     "confirmSell": "Confirm sell?",
     "refinePlus": "+{level}",
-    "salvageOneButton": "Salvage (+{yield})",
-    "salvageAllButton": "Salvage all ({count}) (+{yield})",
+    "salvageButton": "Salvage (+{yield})",
     "salvageJunkCommonButton": "Salvage junk common",
     "confirmSalvage": "Confirm salvage?"
   },
@@ -724,7 +781,9 @@
   },
   "announcements": {
     "landed": "🔥 {charName} landed a +{level} on {itemName}!",
-    "landedMax": "🔥 {charName} landed a +{level} on {itemName}! The whole server bows down!"
+    "landedMax": "🔥 {charName} landed a +{level} on {itemName}! The whole server bows down!",
+    "firstToCap": "🏆 {charName} is the first player to reach Lv.{level}!",
+    "rankOne": "👑 {charName} has claimed the #1 Combat Power throne!"
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
@@ -735,6 +794,8 @@
     "botReturning": "🏃 Bot is heading back to the farm...",
     "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
+    "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
+    "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -822,7 +883,52 @@
           "warpFix": "🌀 Picking a warp zone now closes the window — see your warp instantly",
           "modalFix": "📱 Mobile fix: inventory/refine/settings windows no longer get covered by HUD buttons"
         }
+      },
+      "2026-07-08": {
+        "items": {
+          "hof": "🏆 The Hall of Fame is OPEN! 5 top-10 boards — level · power · total gold earned · best boss-clear times · online time — filter by class + tap anyone to inspect their gear and auras",
+          "announce": "📣 Server-wide announcements: first player to Lv.90 and every new power #1 — everyone hears about it",
+          "quest3": "👑 Tier-3 quest reborn: the tundra frontier gate opens early for you — hunt 90 monsters, then duel the young Glacial Sovereign. No more backtracking",
+          "questCard": "🧭 New quest card: see every objective, progress bar, and reward up front — accept, change class, and guide-me buttons all in one place",
+          "botSwitch": "🤖 The bot is now ONE switch! On = plays everything for you, off = pure manual — with all bot settings in a single panel and ⓘ hints everywhere",
+          "botConfig": "💾 Bot settings now stick to your character — set once, works on every device",
+          "species": "🐺 12 new monster species across maps 4-6: frost wolves, ice golems, sand scorpions, mummies, imps, charcoal brutes and more",
+          "warcry": "⚔ War Cry got its due: a crimson battle aura while buffed + an on-screen countdown chip (party-wide once parties arrive)",
+          "skillInfo": "ⓘ Every skill is now inspectable: damage multiplier, radius, mana, cooldown — real numbers",
+          "travel": "🌀 Redesigned warp menu with themed sections per map — town pinned right at the top",
+          "inventory": "🎒 Inventory now sorts best-first and shows every item individually — no more stacks",
+          "refineSmooth": "🔨 Smoother refining: hammer away, tap to skip the reveal, your selection never slips",
+          "facing": "🏹 Archers/mages stopped spinning when surrounded and now face their target while kiting — looks so much better",
+          "epicBot": "✨ The bot can manage epic drops now (opt-in) — with an always-on keep-your-good-gear guard"
+        }
       }
+    }
+  },
+  "hof": {
+    "openButton": "🏆 Hall of Fame",
+    "title": "Hall of Fame",
+    "closeButton": "Close",
+    "profileTitle": "Profile",
+    "emptySlot": "No item equipped",
+    "loading": "Loading…",
+    "notOpenYet": "The Hall of Fame isn't open yet",
+    "empty": "No one has ranked yet",
+    "myRank": "Your rank: #{rank}",
+    "notRanked": "Not ranked yet",
+    "onlineValue": "{hours}h {minutes}m",
+    "stageChip": "S{stage}",
+    "boards": {
+      "level": "Level",
+      "power": "Combat Power",
+      "gold": "Total Gold Earned",
+      "boss": "Boss Clear Time",
+      "online": "Online Time"
+    },
+    "classFilter": {
+      "all": "All",
+      "swordsman": "Sword",
+      "archer": "Bow",
+      "mage": "Magic"
     }
   }
 }

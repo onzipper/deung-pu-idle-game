@@ -295,6 +295,26 @@ export interface Hero {
    * (rebuilt null on load, cleared on any zone arrival).
    */
   command: ManualCommand | null;
+  /**
+   * This step's COMBAT AIM — the world-x of whatever the hero is engaging this
+   * step (the basic-attack / hunt target, a manual attack-command target, the
+   * boss, or a skill's primary target/centroid), or `null` when the hero is not
+   * fighting (idle / merely walking to a move order / in town / traveling).
+   *
+   * OBSERVER STATE for `render/` only: it drives the rig FACING so a kiting
+   * ranged hero faces (and fires at) its target while retreating the other way,
+   * instead of flipping to its velocity direction (the "spin when surrounded" +
+   * "shoots backwards" bugs). The sim never reads it — zero effect on
+   * combat/movement, so enabling it is byte-identical for balance.
+   *
+   * Fully TRANSIENT, like `command`: reset to `null` every `step()` and
+   * re-derived deterministically (pure state read, NO RNG) by the combat/skill
+   * pass. NOT persisted (no SAVE bump), rebuilt `null` on load. When a target
+   * dies/vanishes and nothing replaces it, this goes `null` and the renderer
+   * HOLDS the last facing (the documented reason the view keeps no live target
+   * ref) rather than snapping to velocity.
+   */
+  aimX: number | null;
 }
 
 export interface Enemy {

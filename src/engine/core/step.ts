@@ -17,6 +17,7 @@ import type { GameState } from "@/engine/state";
 import type { BotSettings, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
 import type { GearSlot } from "@/engine/config/items";
 import { equipItem } from "@/engine/systems/gear";
+import { creditGold } from "@/engine/systems/economy";
 import { onBotTownArrival, setBotSettings, updateBots } from "@/engine/systems/bots";
 import {
   applyReturnScroll,
@@ -26,7 +27,7 @@ import {
 } from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
 import { applyManualCommand } from "@/engine/systems/manual";
-import { updateSpawns } from "@/engine/systems/waves";
+import { updateSpawns } from "@/engine/systems/hunt";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";
@@ -226,6 +227,13 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // buffer). Clear-in-place keeps the array identity stable and allocation-light.
   state.events.length = 0;
 
+  // Reset each hero's transient COMBAT AIM (render-only facing observer). The
+  // combat/skill pass re-derives it deterministically this step; clearing it
+  // here means town/travel/victory steps (which never reach that pass) leave it
+  // `null`, so the renderer falls back to velocity-based facing while merely
+  // walking. Pure state derivation — no effect on the sim (byte-identical).
+  for (const h of state.heroes) h.aimX = null;
+
   // Tick per-type consumable-use cooldowns (M6) — unconditional so a cooldown
   // counts down in every phase (town / travel / battle).
   tickConsumableCds(state);
@@ -271,7 +279,12 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // attempt's gold cost arrives as a negative delta; floored at 0 so a stale/
   // out-of-order client application can never drive gold negative.
   if (input.goldCredit !== undefined && Number.isFinite(input.goldCredit) && input.goldCredit !== 0) {
-    state.gold = Math.max(0, state.gold + Math.floor(input.goldCredit));
+    const delta = Math.floor(input.goldCredit);
+    // A POSITIVE credit (NPC sale) funnels through creditGold so it also banks the
+    // M7.95 lifetime `goldEarned` total; a NEGATIVE delta (refine cost) only debits
+    // spendable gold (floored at 0) and must NEVER decrease the earned total.
+    if (delta > 0) creditGold(state, delta);
+    else state.gold = Math.max(0, state.gold + delta);
   }
 
   // --- world navigation (M6 "World & Town") ---

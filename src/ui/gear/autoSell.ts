@@ -6,11 +6,19 @@
  *
  * Rules v2 (2026-07-07, M7.7 salvage-by-rarity): each of common/rare gets a
  * 3-way action — "off" | "sell" | "salvage" — instead of the old two booleans.
- * Epic still NEVER auto-disposes (no field for it at all — the rule doesn't
- * exist, not just defaulted "off"). `keepBetterStat` is unchanged and guards
- * BOTH actions identically: it decides whether an instance is a disposal
- * CANDIDATE at all; the per-rarity action then decides whether that candidate
- * is sold or salvaged. The guard protects:
+ *
+ * Rules v3 (2026-07-07, owner "option A"): epic gets the SAME 3-way action
+ * field (`rules.epic`, defaults "off" so existing players see NO behavior
+ * change), but its "กันของดี" keep-guard protection is FORCED ON regardless of
+ * the global `keepBetterStat` toggle — an epic may only be disposed when it's
+ * strictly worse than what's equipped in its slot AND isn't the best
+ * class-equippable candidate for an empty slot. `keepBetterStat` still governs
+ * common/rare as before; it can never be used to strip an epic of protection.
+ *
+ * `keepBetterStat` (plus the forced epic case) guards BOTH actions
+ * identically: it decides whether an instance is a disposal CANDIDATE at all;
+ * the per-rarity action then decides whether that candidate is sold or
+ * salvaged. The guard protects:
  *  - a SLOT WITH GEAR EQUIPPED: any candidate whose flat stat total BEATS the
  *    equipped item (a real upgrade survives the sweep), and
  *  - an EMPTY slot: the single BEST candidate equippable by the hero's class
@@ -34,8 +42,13 @@ export type AutoSellAction = "off" | "sell" | "salvage";
 export interface AutoSellRules {
   common: AutoSellAction;
   rare: AutoSellAction;
+  /** Epic's own 3-way action (v3, owner "option A"). Optional + defaults "off"
+   * so any pre-v3 caller (existing tests, stale localStorage) that omits this
+   * field keeps the old "epic never disposes" behavior byte-identical. */
+  epic?: AutoSellAction;
   /** Keep-guard: never dispose of a stat upgrade over what's equipped; on an
-   * empty slot, keep the best class-equippable candidate (see module doc). */
+   * empty slot, keep the best class-equippable candidate (see module doc).
+   * Epic is ALWAYS guarded regardless of this flag (see `isGuarded`). */
   keepBetterStat: boolean;
 }
 
@@ -66,9 +79,17 @@ function equippableBy(t: SellableTemplate, cls: HeroClass | undefined): boolean 
 }
 
 function actionFor(rarity: ItemRarity, rules: AutoSellRules): AutoSellAction {
-  if (rarity === "epic") return "off"; // v1: epic is never auto-disposed, period
+  if (rarity === "epic") return rules.epic ?? "off"; // v3: real toggle, default off (keep)
   if (rarity === "common") return rules.common;
   return rules.rare;
+}
+
+/** Whether the keep-guard applies to this rarity right now. Epic is FORCED
+ * guarded — the owner's "กันของดี" protection can never be turned off for it,
+ * even when the global `keepBetterStat` toggle is off (that toggle only
+ * governs common/rare). */
+function isGuarded(rarity: ItemRarity, rules: AutoSellRules): boolean {
+  return rarity === "epic" || rules.keepBetterStat;
 }
 
 /**
@@ -99,28 +120,27 @@ export function selectAutoSellSalvageIds(
   // candidates regardless of sell-vs-salvage action, since the guard is about
   // "is this a candidate at all", not which action would apply to it.
   const bestBackup: Partial<Record<GearSlot, string>> = {};
-  if (rules.keepBetterStat) {
-    for (const item of items) {
-      if (item.equippedSlot !== null) continue;
-      const t = templates[item.templateId];
-      if (!t || equippedStatSum[t.slot] !== undefined) continue; // slot has gear
-      if (actionFor(t.rarity, rules) === "off") continue; // not a candidate at all
-      if (!equippableBy(t, heroClass)) continue;
-      const incumbentId = bestBackup[t.slot];
-      if (incumbentId === undefined) {
-        bestBackup[t.slot] = item.instanceId;
-        continue;
-      }
-      const incumbent = items.find((i) => i.instanceId === incumbentId);
-      const it = incumbent ? templates[incumbent.templateId] : undefined;
-      const better =
-        !it ||
-        statSum(t.stats) > statSum(it.stats) ||
-        (statSum(t.stats) === statSum(it.stats) &&
-          ((t.tier ?? 0) > (it.tier ?? 0) ||
-            ((t.tier ?? 0) === (it.tier ?? 0) && item.instanceId < incumbentId)));
-      if (better) bestBackup[t.slot] = item.instanceId;
+  for (const item of items) {
+    if (item.equippedSlot !== null) continue;
+    const t = templates[item.templateId];
+    if (!t || equippedStatSum[t.slot] !== undefined) continue; // slot has gear
+    if (actionFor(t.rarity, rules) === "off") continue; // not a candidate at all
+    if (!isGuarded(t.rarity, rules)) continue; // this rarity isn't protected right now
+    if (!equippableBy(t, heroClass)) continue;
+    const incumbentId = bestBackup[t.slot];
+    if (incumbentId === undefined) {
+      bestBackup[t.slot] = item.instanceId;
+      continue;
     }
+    const incumbent = items.find((i) => i.instanceId === incumbentId);
+    const it = incumbent ? templates[incumbent.templateId] : undefined;
+    const better =
+      !it ||
+      statSum(t.stats) > statSum(it.stats) ||
+      (statSum(t.stats) === statSum(it.stats) &&
+        ((t.tier ?? 0) > (it.tier ?? 0) ||
+          ((t.tier ?? 0) === (it.tier ?? 0) && item.instanceId < incumbentId)));
+    if (better) bestBackup[t.slot] = item.instanceId;
   }
 
   const sellIds: string[] = [];
@@ -131,7 +151,7 @@ export function selectAutoSellSalvageIds(
     if (!t) continue;
     const action = actionFor(t.rarity, rules);
     if (action === "off") continue;
-    if (rules.keepBetterStat) {
+    if (isGuarded(t.rarity, rules)) {
       const baseline = equippedStatSum[t.slot];
       // Slot has gear: keep only genuine upgrades. Empty slot: keep only the
       // best-backup pick (see module doc — never everything, never nothing).

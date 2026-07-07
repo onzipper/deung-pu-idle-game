@@ -28,7 +28,9 @@
 import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { grantKillXp } from "@/engine/systems/leveling";
+import { creditGold } from "@/engine/systems/economy";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
+import { tier3QuestId, isTier3BossObjectiveActive } from "@/engine/systems/quests";
 import type { WorldLocation, ZoneKind } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -150,8 +152,99 @@ export function farmLocationForStage(stage: number): WorldLocation {
 // map; a zone is unlocked iff `zoneIdx < count`.
 // ---------------------------------------------------------------------------
 
-export function isZoneUnlocked(state: GameState, loc: WorldLocation): boolean {
+/** Persisted (real) unlock: a zone is normally unlocked iff its idx is below the
+ * map's saved unlocked count. This is the ONLY unlock that cascades / persists —
+ * the quest preview grant below is deliberately kept OUT of it (see `checkZoneUnlock`). */
+function isZonePersistUnlocked(state: GameState, loc: WorldLocation): boolean {
   return loc.zoneIdx < (state.unlockedZones[loc.mapId] ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Tier-3 quest PREVIEW access (M7.9 redesign, owner "option ข" 2026-07-08).
+// While the solo hero holds the ACCEPTED tier-3 quest, the quest's frontier field —
+// map4 zone 1 (s16), the FIRST farm zone of `CONFIG.quest.tier3.killMapId` — becomes
+// enterable/travelable even though the s15 boss hasn't unlocked it. This is a DERIVED
+// grant (read from `hero.quest` each call), NOT a persisted unlock: dropping the quest
+// or evolving (which consumes it) removes the grant, so map4 stays locked unless the
+// s15 boss has since done the REAL unlock. ONLY zone 1 is granted — zones 2+ and the
+// boss room stay gated behind the s15 boss kill (see the redesign note in config).
+// Deterministic (no RNG, no wall-clock).
+// ---------------------------------------------------------------------------
+
+/** The single frontier zone the ACTIVE tier-3 quest previews (map4 zone 1, s16), or
+ * null if the quest's kill-map has no farm zone. Derived from CONFIG, not hard-coded. */
+function tier3PreviewZone(): WorldLocation | null {
+  const mapId = CONFIG.quest.tier3.killMapId;
+  const z = WORLD_ZONES.find((zn) => zn.mapId === mapId && zn.kind === "farm");
+  return z ? { mapId: z.mapId, zoneIdx: z.zoneIdx } : null;
+}
+
+/** The map4 BOSS ROOM (the young-Sovereign fight), the tier-3 quest's second-objective
+ * arena. Derived from CONFIG's kill-map, not hard-coded. Null if the map has no boss room. */
+function tier3BossRoomZone(): WorldLocation | null {
+  const mapId = CONFIG.quest.tier3.killMapId;
+  const z = WORLD_ZONES.find((zn) => zn.mapId === mapId && zn.kind === "boss");
+  return z ? { mapId: z.mapId, zoneIdx: z.zoneIdx } : null;
+}
+
+/** Whether the solo hero's ACTIVE tier-3 quest grants derived access to `loc`. Grants:
+ *  - map4 ZONE 1 (the frontier field) — whenever the quest is held (both objectives);
+ *  - the map4 BOSS ROOM — ONLY once the kill objective is banked (boss objective active),
+ *    so the "young Sovereign" arena opens for the second objective.
+ * Zones 2-5 are NEVER granted (they stay gated behind the s15 boss). The boss-room grant
+ * revokes the instant the boss objective completes / the quest is consumed on evolve. */
+export function questGrantsZoneAccess(state: GameState, loc: WorldLocation): boolean {
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return false;
+  const preview = tier3PreviewZone();
+  if (preview && preview.mapId === loc.mapId && preview.zoneIdx === loc.zoneIdx) return true;
+  const bossRoom = tier3BossRoomZone();
+  if (
+    bossRoom &&
+    bossRoom.mapId === loc.mapId &&
+    bossRoom.zoneIdx === loc.zoneIdx &&
+    isTier3BossObjectiveActive(state)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Zone access = the persisted unlock OR the derived tier-3 quest preview grant. This is
+ * the read used for ENTERING a zone (walk arrows, fast travel, auto-return), so the
+ * preview zone is travelable while the quest is active. It is NOT used by
+ * `checkZoneUnlock` (a preview zone must never cascade a persisted unlock).
+ */
+export function isZoneUnlocked(state: GameState, loc: WorldLocation): boolean {
+  return isZonePersistUnlocked(state, loc) || questGrantsZoneAccess(state, loc);
+}
+
+/**
+ * The per-map unlocked-zone counts with any ACTIVE tier-3 quest preview grant folded in
+ * — a clean extension of the `state.unlockedZones` read path so the UI's zone/fast-travel
+ * surface (which reads a plain count map, `ui/world/zones.isZoneUnlockedUi`) sees the
+ * granted preview zone WITHOUT reaching into engine internals. Returns a COPY (never
+ * mutates `state.unlockedZones`, so the grant is never persisted): the granted map's
+ * count is bumped just far enough to include the preview zone. Identity-safe to call
+ * every snapshot — with no active quest it equals `{...state.unlockedZones}`.
+ *
+ * NB (M7.9b): the boss-room grant is deliberately NOT folded in here — a count map can't
+ * express "zone 1 + boss room but not zones 2-5" (a count of 6 would wrongly open 2-5).
+ * The boss room isn't a zone-list / fast-travel target anyway; its access is the per-loc
+ * `questGrantsZoneAccess` boolean (used by the challenge-into-the-boss-room path), so the
+ * count map stays precisely "map4 z1 only" and zones 2-5 read locked.
+ */
+export function effectiveUnlockedZones(state: GameState): Record<string, number> {
+  const out: Record<string, number> = { ...state.unlockedZones };
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (q && q.accepted && q.id === tier3QuestId(hero!.cls)) {
+    const preview = tier3PreviewZone();
+    if (preview) out[preview.mapId] = Math.max(out[preview.mapId] ?? 0, preview.zoneIdx + 1);
+  }
+  return out;
 }
 
 /** Per-map unlocked counts covering every global zone up to (and incl.) `loc`. */
@@ -275,10 +368,42 @@ export function walkToZone(state: GameState, target: WorldLocation): boolean {
 }
 
 /**
+ * The map4 boss room to challenge for the tier-3 quest's second objective, IF the solo hero
+ * is eligible right now: standing in the granted frontier (map4 z1 preview), with the kill
+ * objective banked (boss objective active), not already traveling / in the boss phase / dead.
+ * Returns the boss-room location (a DIRECT, non-adjacent walk target — zones 2-5 are never
+ * walked through) or null. Deterministic. */
+function tier3QuestBossEntry(state: GameState): WorldLocation | null {
+  if (state.traveling || state.phase === "boss") return null;
+  const hero = state.heroes[0];
+  if (!hero || hero.dead) return null;
+  if (!isTier3BossObjectiveActive(state)) return null;
+  const preview = tier3PreviewZone();
+  const bossRoom = tier3BossRoomZone();
+  if (!preview || !bossRoom) return null;
+  // Challenge only from within the granted frontier field (map4 z1).
+  if (state.location.mapId !== preview.mapId || state.location.zoneIdx !== preview.zoneIdx) {
+    return null;
+  }
+  return bossRoom;
+}
+
+/**
  * Convenience: walk into the current map's BOSS ROOM (the "เข้าห้องบอส" action),
  * valid when standing at the last farm zone with the boss room unlocked.
+ *
+ * M7.9b tier-3 quest boss: from the granted map4 frontier, once the kill objective is banked,
+ * this same "challenge" action walks the hero DIRECTLY into the map4 boss room (non-adjacent —
+ * zones 2-5 stay locked and are never traversed) to fight the quest-scaled young Sovereign.
+ * It's a "walk" transit, so step() fires startBossFight on arrival (which picks the quest
+ * scales). Guards mirror walkToZone (no double-travel / mid-boss / dead).
  */
 export function enterBossRoom(state: GameState): boolean {
+  const questBossRoom = tier3QuestBossEntry(state);
+  if (questBossRoom) {
+    beginTransit(state, questBossRoom, CONFIG.world.transitSeconds, "walk");
+    return true;
+  }
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
   if (!next || next.kind !== "boss") return false;
@@ -340,12 +465,10 @@ export function arriveAtZone(
   state.stage = zone.stage;
   state.enemies = [];
   state.projectiles = [];
-  state.wave = 0;
   state.kills =
     zone.kind === "farm" ? (state.zoneKills[`${target.mapId}:${target.zoneIdx}`] ?? 0) : 0;
   state.bossReady = false;
   state.anchorX = CONFIG.baseAnchor;
-  state.waveGap = CONFIG.firstWaveGap;
   // Fresh footing: clear the per-type consumable-use cooldowns (M6) alongside the
   // per-hero skill cooldowns reset in reviveHeroesFull.
   state.consumableCds = {};
@@ -413,6 +536,11 @@ export function checkZoneUnlock(state: GameState): void {
   if (state.traveling || state.phase !== "battle") return;
   const zone = zoneAt(state.location);
   if (zone.kind !== "farm") return;
+  // A tier-3 quest PREVIEW zone (map4 z1, only quest-GRANTED, not persist-unlocked)
+  // must NEVER cascade a real unlock to its neighbour — that would permanently open
+  // map4 without the s15 boss kill (the redesign's core invariant). Only a
+  // persist-unlocked farm zone advances the frontier.
+  if (!isZonePersistUnlocked(state, state.location)) return;
   if (state.kills < CONFIG.killGoal(zone.stage)) return;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
@@ -429,7 +557,7 @@ export function checkZoneUnlock(state: GameState): void {
   state.events.push({ type: "zoneUnlocked", mapId: next.mapId, zoneIdx: next.zoneIdx });
 
   if (next.kind === "farm") {
-    state.gold += CONFIG.goldPerBoss(zone.stage);
+    creditGold(state, CONFIG.goldPerBoss(zone.stage));
     grantKillXp(state, CONFIG.leveling.xpPerBossKill(zone.stage));
   }
 }

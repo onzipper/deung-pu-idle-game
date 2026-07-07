@@ -443,7 +443,6 @@ export const CONFIG = {
   // ---- waves ----
   waveGap: 1.2, // gap before each subsequent wave
   firstWaveGap: 0.5, // gap before the very first wave of a stage
-  waveHpScale: 0.05, // per-wave multiplier wm = 1 + wave * this
   waveCountBase: 3,
   waveCountPerWave: 1.1,
   waveCountPerStage: 0.6,
@@ -966,22 +965,53 @@ export const CONFIG = {
       // Boss defeats required (a stage-clear milestone — proves real progress).
       bossKills: 1,
     },
-    // ---- M7.9 "Grand Expansion" tier-3 (class-3) quest ----
+    // ---- M7.9 "Grand Expansion" tier-3 (class-3) quest — REDESIGN (owner "option ข", 2026-07-08) ----
     // The tier-2 -> tier-3 evolution key (offered at level >= evolution.tier3.
-    // levelRequired while tier 2). Objectives are MAP-SCOPED (systems/quests +
-    // QuestObjective.mapId): grind kills in MAP3, then defeat the MAP2 boss AGAIN —
-    // a REPEAT boss kill (the boss room stays unlocked, so walking back re-fights it;
-    // no new mechanic needed — see systems/world). NO refine-level condition by design
-    // (owner). Completing it enables the tier-3 class change (systems/evolution), the
-    // power spike that breaks the s15 wall. Same numbers per class in this pass;
+    // levelRequired while tier 2). REDESIGNED to tie into the NEW M7.9 frontier instead
+    // of backtracking to the map2 boss: a SINGLE kill objective, MAP-SCOPED to the
+    // ICE-TUNDRA FRONTIER field map4 zone 1 (s16, "ทุ่งหน้าด่านทุนดรา"). NO boss objective
+    // (removes the confusing map2 backtrack) + NO refine-level condition (owner).
+    //
+    // Accepting the quest PREVIEWS map4 zone 1 (ONLY zone 1 — the world-unlock system
+    // grants deterministic quest-derived access there, systems/world `questGrantsZoneAccess`;
+    // zones 2+ and the boss room stay gated behind the s15 boss kill). A tier-2 Lv40 hero
+    // fast-travels into the frontier, banks the kills as a genuine (dangerous) expedition,
+    // then evolves — the atk×1.6/hp×1.7 spike that breaks the s15 wall. After tier-3 the
+    // hero returns, beats the s15 boss, and the NORMAL unlock takes over (the grant is not
+    // a persisted unlock — see systems/world). Same numbers per class in this pass;
     // per-class quest IDS (`tier3QuestId`) let a later pass diverge them.
+    //
+    // `kills` is SIM-TUNED (docs/balance-m79.md "Tier-3 quest redesign"): map4 s16 mobs are
+    // far tougher than map3's (the old count was 120 in map3), so the count scales DOWN to a
+    // serious-but-fair frontier gate a tier-2 hero can bank without a permanent stall.
+    //
+    // ---- M7.9b tier-3 quest BOSS objective (owner 2026-07-08, "fight the MAP4 boss") ----
+    // A SECOND objective now follows the kill grind: defeat the map4 boss (a QUEST-SCALED
+    // "young" Glacial Sovereign). The real s20 Sovereign (bossVariety[20]: hp×0.7/atk×0.62)
+    // is tier-3-tuned and provably unbeatable at tier 2, so while the tier-3 quest is the
+    // ACTIVE reason for boss-room access (tier-2 hero, quest held, boss objective pending —
+    // systems/quests.isTier3QuestBossFight) the Sovereign spawns with these gentler scales
+    // instead (systems/boss.startBossFight → makeBoss override). It KEEPS the CHARGE mechanic
+    // + telegraphs (teaching the s20 fight early) — only its hp/atk soften. A tier-3 hero (or
+    // anyone post-quest) entering that room later gets the REAL s20 boss: the override keys off
+    // the QUEST STATE, never hero tier alone. Scales are on the SAME base-curve basis as the
+    // bossVariety row (× bossHp(20)/bossAtk(20)); SIM-TUNED (docs/balance-m79.md "Tier-3 quest
+    // boss") so every class needs a real, multi-attempt-tolerant fight the squishiest tier-2
+    // Lv40 (archer) survives (the charge hit = round(atk×charge.hitMult 1.6) stays well under
+    // the archer's ~1000 tier-2 HP). Access to the boss room EXTENDS the quest's derived,
+    // never-persisted grant (systems/world.questGrantsZoneAccess) once the kills are banked;
+    // zones 2-5 stay locked and beating the young Sovereign does NOT unlock map5 (the hero
+    // still returns to beat the REAL s15 boss for the persisted map4 unlock).
     tier3: {
-      // Kills to bank in map3 (the grind portion — bigger than the tier-2 grind).
-      kills: 120,
-      killMapId: "map3",
-      // Repeat map2-boss defeats required (proves the player can re-clear it).
+      // Kills to bank in the map4-zone-1 frontier field (the FIRST objective).
+      kills: 90,
+      // Boss defeats required in map4 — the young Glacial Sovereign (the SECOND objective).
       bossKills: 1,
-      bossMapId: "map2",
+      killMapId: "map4",
+      // Quest-scaled young-Sovereign hp/atk (× the s20 base curve; softer than the real
+      // bossVariety[20] 0.7/0.62 so a tier-2 Lv40 hero can win it in a real fight).
+      bossHpScale: 0.58,
+      bossAtkScale: 0.5,
     },
   },
 

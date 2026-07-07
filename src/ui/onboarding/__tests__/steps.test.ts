@@ -102,28 +102,35 @@ describe("resolveNextStepIndex", () => {
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 4, prev, slotted, false)).toBe(5);
   });
 
+  it("botSwitchIntro (next-kind) advances only on an explicit tap", () => {
+    expect(idOf(5)).toBe("botSwitchIntro");
+    const s = snapshot();
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, s, s, false)).toBe(5);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, s, s, true)).toBe(6);
+  });
+
   it("bossChallenge (action-kind) advances on the battle -> boss phase transition", () => {
-    expect(idOf(5)).toBe("bossChallenge");
+    expect(idOf(6)).toBe("bossChallenge");
     const prev = snapshot({ phase: "battle" });
     const stillBattle = snapshot({ phase: "battle" });
     const engaged = snapshot({ phase: "boss" });
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, prev, stillBattle, false)).toBe(5);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 5, prev, engaged, false)).toBe(6);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 6, prev, stillBattle, false)).toBe(6);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 6, prev, engaged, false)).toBe(7);
   });
 
   it("settingsTour and outro (next-kind) require an explicit tap each", () => {
-    expect(idOf(6)).toBe("settingsTour");
-    expect(idOf(7)).toBe("outro");
+    expect(idOf(7)).toBe("settingsTour");
+    expect(idOf(8)).toBe("outro");
     const s = snapshot();
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 6, s, s, false)).toBe(6);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 6, s, s, true)).toBe(7);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 7, s, s, false)).toBe(7);
     expect(resolveNextStepIndex(ONBOARDING_STEPS, 7, s, s, true)).toBe(8);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 8, s, s, true)).toBe(9);
   });
 
   it("is a no-op once already complete or before started", () => {
     const s = snapshot();
     expect(resolveNextStepIndex(ONBOARDING_STEPS, -1, s, s, true)).toBe(-1);
-    expect(resolveNextStepIndex(ONBOARDING_STEPS, 8, s, s, true)).toBe(8);
+    expect(resolveNextStepIndex(ONBOARDING_STEPS, 9, s, s, true)).toBe(9);
   });
 });
 

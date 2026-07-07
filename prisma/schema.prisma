@@ -55,6 +55,19 @@ model Character {
   // (ItemInstance.ownerId -> Character.id); gold stays MVP-client-authoritative in
   // the save blob until the M5 gold re-derivation lands.
   materials Int        @default(0)
+  // Cross-device UI/automation config (owner request 2026-07-07): the browser-
+  // localStorage-owned bot/automation preferences (autoCast/autoAllocate/potion
+  // thresholds/autoSell rules incl. the epic toggle/autoAdvance/autoEquip) now
+  // FOLLOW THE CHARACTER instead of resetting on a phone↔PC switch. Additive +
+  // NULLABLE so every pre-existing row reads null → the client keeps its own
+  // localStorage/defaults (no reset). This is NOT the engine save (SAVE_VERSION)
+  // and NOT authoritative game state — it is a pure preference sidecar (same tier
+  // as the old localStorage keys), deliberately kept OUT of SaveData so the
+  // engine-persisted config (bot targets/gold reserve, SAVE v11/v12; autoHunt) —
+  // which is the single source of truth for those — is never duplicated here.
+  // Validated field-by-field server-side before write (src/server/uiConfig.ts);
+  // an unknown/out-of-bounds shape is rejected, never stored raw.
+  uiConfig  Json?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete: slot freed, row kept for audit
@@ -146,12 +159,18 @@ model ItemEvent {
   @@index([itemId]) // read an item's full history (ordered by createdAt in-memory)
 }
 
-// M7.9 server-wide high-refine announcement feed (owner-approved design; NO
+// M7.9/M7.95 server-wide announcement feed (owner-approved design; NO
 // websockets this phase — polling piggybacked on the existing autosave cycle,
-// see `src/server/items.ts`'s `recentAnnouncements`). A row is written ONLY
-// when a refine attempt SUCCEEDS and lands the item at +8/+9/+10, in the SAME
-// tx as the refine mutation itself (`refineItem`) — a row can therefore never
-// exist without the refine having actually landed.
+// see `src/server/items.ts`'s `recentAnnouncements`). Originally refine-only
+// (name kept to avoid a table rename / data-loss push); now a GENERALIZED feed
+// via the additive `kind` column (default "refine" preserves every old row):
+//   - "refine"   — a refine attempt SUCCEEDED at +8/+9/+10, written in the SAME
+//                  tx as the refine mutation (`refineItem`, src/server/items.ts).
+//   - "levelCap" — the FIRST non-suspect character to reach the level cap (M7.95,
+//                  src/server/leaderboard.ts). SINGLETON: exactly-once globally.
+//   - "rankOne"  — a character NEWLY took #1 on the power board (M7.95). Throttled
+//                  to at most one per character per 24h.
+// A row can never exist without the underlying event having actually landed.
 //
 // Deliberately NOT a relation to Character (raw denormalized fields, mirrors
 // `ItemEvent.fromCharacterId`'s "immutable ledger, no FK" convention): this is
@@ -160,18 +179,114 @@ model ItemEvent {
 // tiny, so a cascading FK buys nothing and would only complicate a
 // soft-deleted character's row.
 //
-// `templateId` (NOT a display name) — the client localizes it client-side via
-// its own item-catalog i18n (`content.items.<templateId>.name`), so this
-// table never bakes in a server-side locale.
+// `templateId`/`refineLevel` are NULLABLE (refine kind only). For "levelCap",
+// `refineLevel` carries the cap level reached (client copy interpolation); for
+// "rankOne" both are null. The client localizes item names from `templateId`
+// (`content.items.<templateId>.name`) and picks copy by `kind` — this table
+// never bakes in a server-side locale.
+//
+// `singletonKey` is the EXACTLY-ONCE guard for singleton kinds: "levelCap" sets
+// it to "levelCap" so the @unique index rejects any second insert (a concurrent
+// second-to-cap save collides on P2002 → swallowed). Every non-singleton row
+// leaves it NULL (MySQL treats NULLs as DISTINCT, so unlimited rows allowed).
 model RefineAnnouncement {
-  id          String   @id @default(cuid())
-  characterId String
-  charName    String   @db.VarChar(24)
-  templateId  String   @db.VarChar(64)
-  refineLevel Int
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  kind         String   @default("refine") @db.VarChar(16) // refine | levelCap | rankOne
+  characterId  String
+  charName     String   @db.VarChar(24)
+  templateId   String?  @db.VarChar(64) // refine kind only (localized client-side)
+  refineLevel  Int? // refine kind: +level landed; levelCap kind: cap level reached
+  singletonKey String?  @unique @db.VarChar(32) // exactly-once guard for singleton kinds (NULL = non-singleton)
+  createdAt    DateTime @default(now())
 
   @@index([createdAt]) // feed reads ("last 5 minutes") + the opportunistic prune sweep
+  @@index([kind, characterId, createdAt]) // rankOne 24h per-character throttle lookup
+}
+
+// M7.95 "Hall of Fame" — the ranked-boards read model. ONE row per character, a
+// DENORMALIZED PROJECTION of the save blob (like Character.level/power): the
+// SaveState.data JSON stays the source of truth; this row is rebuilt server-side
+// on every `persistSave` (see src/server/leaderboard.ts `upsertLeaderboardEntry`)
+// so a board read never touches/parses a save blob and never trusts a client
+// number. Everything ranked here is derived SERVER-SIDE from the validated save:
+//   - `power` is recomputed via the engine's `combatPower` over the hero rebuilt
+//     WITH the AUTHORITATIVE equipped loadout (ItemInstance ledger + refine), never
+//     a client-supplied power.
+//   - `goldEarned`/`bossBest` are copied from the validated (migrated) save.
+//   - `levelCapAt` + each `bossBest[stage].at` are SERVER-STAMPED (server wall-clock,
+//     same trust model as `SaveState.lastSeen`): the engine emits 0/null, the server
+//     writes the epoch. A client cannot forge an achievement time.
+//   - `onlineSeconds` is an AFK accumulator: each save adds (now − lastTickAt) only
+//     when that delta is a plausible in-session gap (0 < Δ < 300s), so a client
+//     clock jump or a long offline gap grants nothing.
+//
+// `suspect` is the anti-cheat kill-switch the re-derive wave (M-later) fills:
+// suspect=true rows are EXCLUDED from every board read. Default false for now.
+//
+// Per-stat `*At` timestamps are kept for FUTURE SEASONS (a season reset needs to
+// know when each value was set). `levelCapAt` doubles as the level-board tiebreak
+// (first-to-cap wins → ordered ASC). goldEarned is BigInt (lifetime idle gold can
+// pass 2^31); onlineSeconds is Int (2^31 s ≈ 68y).
+model LeaderboardEntry {
+  id            String    @id @default(cuid())
+  characterId   String    @unique // 1:1 with Character (opaque cuid)
+  userId        String // owning account (my-rank + account-scoped queries)
+  charName      String    @db.VarChar(24) // denormalized for a board render without a join
+  cls           String    @db.VarChar(16) // Character.baseClass (immutable) — the cls board filter
+  tier          Int       @default(1) // class-advancement tier (1..3), display only
+  level         Int       @default(1) // level board metric
+  levelCapAt    DateTime? // server-stamped when level>=levelCap first seen; level-board tiebreak (ASC = first-to-cap wins)
+  power         Int       @default(0) // power board metric (engine combatPower over stats+gear+refine)
+  goldEarned    BigInt    @default(0) // gold board metric (lifetime, never decremented)
+  onlineSeconds Int       @default(0) // online board metric (AFK accumulator)
+  bossBest      Json // Record<stage, {seconds, at(ISO)}> — full snapshot (boss board is projected to BossRecord for indexed reads)
+  profile       Json // paper-doll snapshot: {loadout:{weapon,armor}, refineLevels:{weapon,armor}} — the profile view
+  suspect       Boolean   @default(false) // anti-cheat: true = hidden from all boards (re-derive wave fills)
+  lastTickAt    DateTime? // INTERNAL: previous save's server time — the onlineSeconds delta reference
+  levelAt       DateTime? // future-seasons: when `level` was last written
+  powerAt       DateTime? // future-seasons: when `power` was last written
+  goldAt        DateTime? // future-seasons: when `goldEarned` was last written
+  onlineAt      DateTime? // future-seasons: when `onlineSeconds` was last written
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([suspect, level, levelCapAt]) // level board (DESC level, ASC levelCapAt) + suspect exclusion
+  @@index([suspect, cls, level, levelCapAt]) // cls-filtered level board
+  @@index([suspect, power]) // power board
+  @@index([suspect, cls, power]) // cls-filtered power board
+  @@index([suspect, goldEarned]) // gold board
+  @@index([suspect, cls, goldEarned]) // cls-filtered gold board
+  @@index([suspect, onlineSeconds]) // online board
+  @@index([suspect, cls, onlineSeconds]) // cls-filtered online board
+  @@index([userId]) // account-scoped queries
+}
+
+// M7.95 boss-board projection — ONE row per (character, boss stage). The boss
+// board ranks by clear time, which lives inside LeaderboardEntry.bossBest JSON;
+// MySQL can't index a JSON path, so this side-table is the INDEXED projection
+// (mirrors the "denormalized cache" pattern above). Written in the SAME tx as the
+// LeaderboardEntry upsert (no skew). Render fields (charName/cls/tier/level) are
+// denormalized so the board renders without a join; `profile` is fetched from the
+// LeaderboardEntry for just the top-N ids. `at` is the SERVER-STAMPED achievement
+// time carried from bossBest[stage].at. A `seconds` below the plausibility floor
+// (src/server/leaderboard.ts BOSS_TIME_FLOOR) is never written (ingest drops it).
+model BossRecord {
+  id          String   @id @default(cuid())
+  characterId String
+  userId      String
+  charName    String   @db.VarChar(24)
+  cls         String   @db.VarChar(16)
+  tier        Int      @default(1)
+  level       Int      @default(1)
+  stage       Int // boss stage (5/10/15/20/25/30)
+  seconds     Float // clear time (lower = better); Float ordering is indexable
+  at          DateTime // server-stamped achievement time
+  suspect     Boolean  @default(false) // mirror of the character's suspect flag (board exclusion)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([characterId, stage]) // one best per character per stage (upsert key)
+  @@index([stage, suspect, seconds]) // boss board (ASC seconds) + my-rank count
+  @@index([stage, cls, suspect, seconds]) // cls-filtered boss board
 }
 
 // One row per player save slot. `data` holds the versioned SaveData JSON blob

@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   UI_WORLD_ZONES,
   fastTravelTargets,
+  farmZonesForMap,
+  firstFarmZone,
+  highestUnlockedFarmZone,
   isZoneUnlockedUi,
+  lastFarmZone,
   zonesGroupedByMap,
 } from "@/ui/world/zones";
 
@@ -65,5 +69,36 @@ describe("isZoneUnlockedUi", () => {
   it("is locked at/above the unlocked count, or with no entry at all", () => {
     expect(isZoneUnlockedUi({ mapId: "map1", zoneIdx: 3 }, { map1: 3 })).toBe(false);
     expect(isZoneUnlockedUi({ mapId: "map2", zoneIdx: 0 }, { map1: 3 })).toBe(false);
+  });
+});
+
+describe("farmZonesForMap / lastFarmZone / highestUnlockedFarmZone", () => {
+  it("lists only farm-kind zones for a map, in ascending zoneIdx order", () => {
+    const farms = farmZonesForMap("map2");
+    expect(farms.map((z) => z.kind)).toEqual(["farm", "farm", "farm", "farm", "farm"]);
+    expect(farms.map((z) => z.zoneIdx)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("lastFarmZone is the zone right before the boss room", () => {
+    expect(lastFarmZone("map2")).toEqual({
+      mapId: "map2",
+      zoneIdx: 4,
+      kind: "farm",
+      stage: 10,
+    });
+  });
+
+  it("highestUnlockedFarmZone picks the deepest reachable farm zone", () => {
+    expect(highestUnlockedFarmZone("map3", { map3: 2 })?.zoneIdx).toBe(1);
+    expect(highestUnlockedFarmZone("map3", {})).toBeNull();
+  });
+
+  it("firstFarmZone is map4's frontier field (zone 0) — the tier-3 quest's granted zone", () => {
+    expect(firstFarmZone("map4")).toEqual({
+      mapId: "map4",
+      zoneIdx: 0,
+      kind: "farm",
+      stage: 16,
+    });
   });
 });

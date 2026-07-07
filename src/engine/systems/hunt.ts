@@ -107,7 +107,7 @@ function spawnMob(state: GameState, rng: Rng, sp: SpawnParams): void {
   const kind = rollMobKind(state.stage, rng); // draw 1
   const aggressive = rng.next() < sp.aggroFraction; // draw 2
   const x = pickSpawnX(state, rng, sp); // draws 3..(2 + spawnCandidates): min-spacing
-  const e = makeEnemy(state.nextId++, kind, state.stage, 0, rng); // final 2 draws
+  const e = makeEnemy(state.nextId++, kind, state.stage, rng); // final 2 draws
   e.x = x;
   e.homeX = x;
   e.aggressive = aggressive;

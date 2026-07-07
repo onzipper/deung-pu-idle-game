@@ -5,9 +5,9 @@
  * and the combat-power ("พลังต่อสู้") readout for the solo hero. All numbers come
  * from the throttled `HeroSummary` snapshot; a +tap queues an `allocateStat`
  * intent (drained once per real frame, like evolve). The auto-allocate ON/OFF
- * toggle itself moved into the settings drawer (M6 settings-panel task,
- * `SettingsPanel.tsx`) — this panel still READS `autoAllocate` (below) to
- * disable manual +taps while it's on, since auto owns the primary stat then.
+ * toggle itself lives in the consolidated `BotSettingsModal.tsx` (owner UX
+ * consolidation, 2026-07-07) — this panel still READS `autoAllocate` (below)
+ * to disable manual +taps while it's on, since auto owns the primary stat then.
  *
  * M7.9 stat-tap-fix (UAT "กดไม่ค่อยติด"): the store now ACCUMULATES same-frame
  * taps instead of last-wins (see `PendingInput.allocateStat`'s doc), so no tap
@@ -17,7 +17,7 @@
  * (`CONFIG.uiSyncHz`), which felt "dead" for up to ~100ms and invited re-taps.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { StatKey } from "@/engine";
 import type { HeroSummary } from "@/ui/store/gameStore";
@@ -56,16 +56,38 @@ function StatRow({
   // action's doc in gameStore.ts).
   const value = hero.stats[stat] + optimisticHere;
   const isPrimary = hero.primaryStat === stat;
+  const pointsExhausted = hero.statPoints - pendingSpend <= 0;
   // +1 is available only when there are unspent points (reading the OPTIMISTIC
   // count, not the stale snapshot one, so a mashed button disables cleanly the
   // instant its points run out) and auto-allocate is off (auto owns the
   // primary stat; a manual tap would race it every frame).
-  const canAdd = hero.statPoints - pendingSpend > 0 && !autoAllocate;
+  const canAdd = !pointsExhausted && !autoAllocate;
 
   const [risers, setRisers] = useState<{ id: number }[]>([]);
   const [tapKey, setTapKey] = useState(0);
+  // Audit #5 (owner-reported "silence"): while Auto Stat is on, the + button
+  // used to just sit there disabled with no explanation. `title` covers desktop
+  // hover; this flash covers mobile taps — the button stays TAPPABLE (not the
+  // native `disabled` attribute, which would swallow the click entirely) so a
+  // tap flashes the "turn off Auto Stat" hint instead of dead silence.
+  const [autoHintFlash, setAutoHintFlash] = useState(false);
+  const autoHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (autoHintTimer.current) clearTimeout(autoHintTimer.current);
+    },
+    [],
+  );
 
   const handleClick = () => {
+    if (autoAllocate) {
+      setAutoHintFlash(true);
+      if (autoHintTimer.current) clearTimeout(autoHintTimer.current);
+      autoHintTimer.current = setTimeout(() => setAutoHintFlash(false), 1800);
+      return;
+    }
+    if (!canAdd) return;
     allocateStat(stat, 1);
     setTapKey((k) => k + 1);
     setRisers((prev) => [...prev, { id: ++riserSeq }].slice(-MAX_RISERS));
@@ -112,13 +134,21 @@ function StatRow({
         ))}
         <button
           type="button"
-          disabled={!canAdd}
+          // Native `disabled` ONLY for the "truly nothing to do" case (no
+          // points left, auto off) — while auto-allocate is ON the button
+          // stays a real, tappable element (so `handleClick`'s flash-hint
+          // branch above actually fires; a `disabled` button eats the click
+          // entirely) even though it reads visually the same as disabled.
+          disabled={!autoAllocate && pointsExhausted}
           onClick={handleClick}
+          title={autoAllocate ? t("autoBlockedHint") : undefined}
           aria-label={t("allocateAria", { stat: t(`full.${stat}`) })}
           className={`relative grid h-11 min-h-11 w-11 min-w-11 place-items-center rounded-full border text-lg font-bold leading-none transition-transform duration-100 active:scale-90 ${
             canAdd
               ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-300 hover:bg-emerald-400/25"
-              : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted"
+              : autoAllocate
+                ? "cursor-pointer border-ddp-border bg-black/30 text-ddp-ink-muted"
+                : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted"
           }`}
         >
           {/* Key-remounted flash ring on every accepted tap — instant, visible
@@ -135,6 +165,14 @@ function StatRow({
             />
           )}
           <span className="relative">+</span>
+          {autoHintFlash && (
+            <span
+              role="tooltip"
+              className="absolute bottom-full left-1/2 z-20 mb-1.5 w-36 -translate-x-1/2 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-1.5 text-[10px] leading-snug font-normal whitespace-normal text-ddp-ink shadow-(--ddp-shadow-panel)"
+            >
+              {t("autoBlockedHint")}
+            </span>
+          )}
         </button>
       </div>
     </div>

@@ -5,7 +5,11 @@
  * only caller; it owns the actual store-state side effects.
  */
 
-import type { AnnouncementEntry, AnnouncementWire } from "./types";
+import type { AnnouncementEntry, AnnouncementKind, AnnouncementWire } from "./types";
+
+/** Kinds the banner can render — a wire row of any other (future) kind is
+ *  marked seen but never queued (forward-compatible with a newer server). */
+const KNOWN_KINDS: ReadonlySet<string> = new Set<AnnouncementKind>(["refine", "levelCap", "rankOne"]);
 
 export interface IngestAnnouncementsResult {
   /** New entries to append to the display queue, OLDEST-first (the server
@@ -36,8 +40,10 @@ export function ingestAnnouncements(
     if (nextSeen.has(a.id)) continue;
     nextSeen.add(a.id);
     if (myCharacterId !== null && a.characterId === myCharacterId) continue; // self-exclude
+    if (!KNOWN_KINDS.has(a.kind)) continue; // unknown/future kind → seen but not shown
     fresh.push({
       id: a.id,
+      kind: a.kind as AnnouncementKind,
       charName: a.charName,
       templateId: a.templateId,
       refineLevel: a.refineLevel,

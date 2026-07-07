@@ -4,7 +4,7 @@
  * CRITICAL: never put per-frame simulation state in here. React re-renders on
  * every store change; syncing 60 Hz would tank performance. The engine loop
  * pushes a THROTTLED snapshot (~10 Hz, see CONFIG.uiSyncHz) of only the fields
- * the HUD shows (gold, stage/wave/kills, heroes, boss hint, upgrade levels).
+ * the HUD shows (gold, stage/kills, heroes, boss hint, upgrade levels).
  *
  * This store also holds the PLAYER -> ENGINE direction of the seam:
  *  - `autoCast` / `autoAllocate` / `autoReturn` / `autoHpPotion` / `autoManaPotion`
@@ -99,6 +99,29 @@ export interface HeroQuestSummary {
   killGoal: number;
   /** Boss-defeat objective satisfied (✓/✗). */
   bossDone: boolean;
+  /**
+   * Map scope of each objective (owner-approved quest UX upgrade), straight
+   * off `QuestObjective.mapId` — `null` means the objective counts ANYWHERE
+   * (the tier-1 class-change quest's kill/boss objectives). The tier-3 quest
+   * scopes kills to `"map3"` and the boss re-kill to `"map2"`. Drives the
+   * full quest card's per-objective location line + the "พาไปเลย" guide
+   * button's fast-travel target (`ui/questGuide.ts`). */
+  killMapId: string | null;
+  bossMapId: string | null;
+  /**
+   * M7.9b tier-3 quest boss objective: true iff this quest is the tier-3
+   * "young Glacial Sovereign" quest, the kill objective is banked, and the
+   * boss objective is still pending — straight off the engine's
+   * `isTier3BossObjectiveActive(state)` (same one-way "engine computes, store
+   * just carries it" pattern as `canEvolve`). Drives the quest card's "⚔
+   * ท้าบอส" challenge button (`GoalLadder.tsx`'s `ClassQuestCard`), which
+   * queues the same `challengeBoss` intent as the regular boss rung — the
+   * engine's `enterBossRoom` picks the quest-boss path over the normal one.
+   * Location-independent by design (see the engine doc); the UI button only
+   * additionally guards traveling/channeling/dead, same as other one-shot
+   * actions.
+   */
+  bossChallengeActive: boolean;
 }
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
@@ -112,6 +135,13 @@ export interface HeroSummary {
    * kit lives in `skills` below.
    */
   skillCd: number;
+  /** War Cry ATK buff (`hero.atkBuffMult`/`atkBuffTimer`, engine skill
+   * `sword_warcry` — applies to every living hero, not just the caster).
+   * `atkBuffTimer` is the raw remaining seconds (0 = no buff active); the
+   * HUD chip (`SkillBar.tsx`) interpolates its own smooth countdown between
+   * throttled snapshots off this value, same convention as `skillCd`. */
+  atkBuffMult: number;
+  atkBuffTimer: number;
   /** Current mana + pool (M5 "mana"). Drives the mana bar. */
   mana: number;
   maxMana: number;
@@ -205,7 +235,6 @@ export interface ShopSummary {
 export interface EngineSnapshot {
   gold: number;
   stage: number;
-  wave: number;
   kills: number;
   killGoal: number;
   phase: Phase;
@@ -458,13 +487,15 @@ export function writeSeenPatchNotes(id: string): void {
 }
 
 /** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
- * salvage-by-rarity) — same client-preference tier as `soundMuted`/
- * `ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't game progress;
- * the bot's ENGINE-side config, `BotSettings`, is the thing that's actually
- * save-persisted). Owner-locked defaults: common "sell", rare "sell", epic
- * never (no field — see `ui/gear/autoSell.ts`), keep-guard ON (don't dispose
- * of a stat upgrade over what's equipped). SAME storage key as the old v1.1
- * boolean shape — deliberately NOT bumped, so `readStoredAutoSellRules`
+ * salvage-by-rarity, extended again M7.9 "option A" for a real epic toggle) —
+ * same client-preference tier as `soundMuted`/`ftueCompleted`: UI-owned, not
+ * `SaveData` (the RULES aren't game progress; the bot's ENGINE-side config,
+ * `BotSettings`, is the thing that's actually save-persisted). Owner-locked
+ * defaults: common "sell", rare "sell", epic "off" (existing players see NO
+ * behavior change — epic used to be hard-locked never-dispose), keep-guard ON
+ * for common/rare (epic's own "กันของดี" protection is FORCED ON regardless of
+ * this flag, see `ui/gear/autoSell.ts`'s `isGuarded`). SAME storage key as the
+ * old v1.1 boolean shape — deliberately NOT bumped, so `readStoredAutoSellRules`
  * migrates old `{sellCommon, sellRare}` booleans → `"sell"/"off"` in place
  * rather than resetting every existing player's preference. */
 const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2";
@@ -475,12 +506,15 @@ export type AutoSellAction = "off" | "sell" | "salvage";
 export interface StoredAutoSellRules {
   common: AutoSellAction;
   rare: AutoSellAction;
+  /** M7.9 "option A" — epic's own real toggle, default "off" (keep). */
+  epic: AutoSellAction;
   keepBetterStat: boolean;
 }
 
 const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
   common: "sell",
   rare: "sell", // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
+  epic: "off", // owner default: keep, no behavior change for existing players
   keepBetterStat: true,
 };
 
@@ -491,7 +525,11 @@ function isAutoSellAction(v: unknown): v is AutoSellAction {
 /** Migrates one rarity field from either shape: v2 action string (preferred),
  * v1.1 boolean (`true` → "sell", `false` → "off"), or missing/corrupt → the
  * default. */
-function migrateAction(actionField: unknown, boolField: unknown, fallback: AutoSellAction): AutoSellAction {
+function migrateAction(
+  actionField: unknown,
+  boolField: unknown,
+  fallback: AutoSellAction,
+): AutoSellAction {
   if (isAutoSellAction(actionField)) return actionField;
   if (typeof boolField === "boolean") return boolField ? "sell" : "off";
   return fallback;
@@ -509,6 +547,7 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
     const p = parsed as {
       common?: unknown;
       rare?: unknown;
+      epic?: unknown;
       sellCommon?: unknown;
       sellRare?: unknown;
       keepBetterStat?: unknown;
@@ -516,6 +555,9 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
     return {
       common: migrateAction(p.common, p.sellCommon, DEFAULT_AUTO_SELL_RULES.common),
       rare: migrateAction(p.rare, p.sellRare, DEFAULT_AUTO_SELL_RULES.rare),
+      // No pre-v3 boolean shape existed for epic (it was hard-locked, no field
+      // at all) — a missing/corrupt value always falls back to "off".
+      epic: migrateAction(p.epic, undefined, DEFAULT_AUTO_SELL_RULES.epic),
       keepBetterStat:
         typeof p.keepBetterStat === "boolean"
           ? p.keepBetterStat
@@ -551,6 +593,49 @@ function writeAutoEquip(on: boolean): void {
   }
 }
 
+/** One-shot snapshot of the two ENGINE-PERSISTED bot sub-flags
+ * (`bot.enabled`/`bot.sellTripEnabled`) captured at the moment the master
+ * switch (`toggleBotMaster`) turns OFF, so they can be restored exactly when
+ * it turns back ON — see that action's doc for why this can't be a per-frame
+ * mirror like `autoCast`/etc (those aren't persisted; these two ARE, via
+ * `state.bot`/SAVE v11). Persisted to localStorage (not just in-memory) so a
+ * reload while the master is off doesn't lose the "what to restore" memory —
+ * same client-preference tier as `soundMuted`. */
+const BOT_MASTER_SNAPSHOT_KEY = "ddp-bot-master-snapshot";
+
+interface BotMasterSnapshot {
+  enabled: boolean;
+  sellTripEnabled: boolean;
+}
+
+function readBotMasterSnapshot(): BotMasterSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(BOT_MASTER_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const p = parsed as { enabled?: unknown; sellTripEnabled?: unknown };
+    if (typeof p.enabled !== "boolean" || typeof p.sellTripEnabled !== "boolean") {
+      return null;
+    }
+    return { enabled: p.enabled, sellTripEnabled: p.sellTripEnabled };
+  } catch {
+    return null; // storage blocked/corrupt — restore is a no-op, safe default
+  }
+}
+
+/** `null` clears the snapshot (consumed by a successful restore). */
+function writeBotMasterSnapshot(snap: BotMasterSnapshot | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (snap) window.localStorage.setItem(BOT_MASTER_SNAPSHOT_KEY, JSON.stringify(snap));
+    else window.localStorage.removeItem(BOT_MASTER_SNAPSHOT_KEY);
+  } catch {
+    /* storage blocked — the snapshot just won't survive a reload */
+  }
+}
+
 function writeAutoSellRules(rules: StoredAutoSellRules): void {
   if (typeof window === "undefined") return;
   try {
@@ -558,6 +643,103 @@ function writeAutoSellRules(rules: StoredAutoSellRules): void {
   } catch {
     /* storage blocked — this session's rules just won't persist across reloads */
   }
+}
+
+/**
+ * Cross-device UI/automation config (owner request 2026-07-07). The browser-
+ * localStorage-owned automation PREFERENCES that used to reset on a phone↔PC
+ * switch; now persisted PER CHARACTER server-side (`Character.uiConfig`, see
+ * `src/server/uiConfig.ts`) so they FOLLOW THE CHARACTER. This is the exact set
+ * of fields synced — deliberately EXCLUDING the engine-persisted config (bot
+ * targets / gold reserve, SAVE v11; autoHunt, SAVE v12), whose single source of
+ * truth stays the engine save blob.
+ *
+ * localStorage stays as a WRITE-THROUGH offline fallback (this unified key +
+ * the legacy per-feature keys), so nothing regresses if the boot API fails: on
+ * boot the client hydrates from localStorage first, then the SERVER value (when
+ * present) WINS and is written through so any late mount-effect hydration reads
+ * the fresh value.
+ */
+export interface UiConfig {
+  autoCast: boolean;
+  autoAllocate: boolean;
+  autoReturn: boolean;
+  autoAdvance: boolean;
+  autoHpPotion: boolean;
+  autoManaPotion: boolean;
+  autoHpThreshold: number;
+  autoManaThreshold: number;
+  autoSellCommon: AutoSellAction;
+  autoSellRare: AutoSellAction;
+  autoSellEpic: AutoSellAction;
+  autoSellKeepBetterStat: boolean;
+  autoEquip: boolean;
+}
+
+const UI_CONFIG_STORAGE_KEY = "ddp-ui-config.v1";
+
+/** Read the write-through localStorage mirror (offline fallback), or null if
+ * absent/blocked/corrupt. Loosely narrowed — an unknown key is dropped, a
+ * missing/mistyped field is omitted so `hydrateUiConfig`'s merge keeps the
+ * current default for it. */
+export function readStoredUiConfig(): Partial<UiConfig> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(UI_CONFIG_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const p = parsed as Record<string, unknown>;
+    const out: Partial<UiConfig> = {};
+    if (typeof p.autoCast === "boolean") out.autoCast = p.autoCast;
+    if (typeof p.autoAllocate === "boolean") out.autoAllocate = p.autoAllocate;
+    if (typeof p.autoReturn === "boolean") out.autoReturn = p.autoReturn;
+    if (typeof p.autoAdvance === "boolean") out.autoAdvance = p.autoAdvance;
+    if (typeof p.autoHpPotion === "boolean") out.autoHpPotion = p.autoHpPotion;
+    if (typeof p.autoManaPotion === "boolean") out.autoManaPotion = p.autoManaPotion;
+    if (typeof p.autoHpThreshold === "number" && Number.isFinite(p.autoHpThreshold))
+      out.autoHpThreshold = p.autoHpThreshold;
+    if (typeof p.autoManaThreshold === "number" && Number.isFinite(p.autoManaThreshold))
+      out.autoManaThreshold = p.autoManaThreshold;
+    if (isAutoSellAction(p.autoSellCommon)) out.autoSellCommon = p.autoSellCommon;
+    if (isAutoSellAction(p.autoSellRare)) out.autoSellRare = p.autoSellRare;
+    if (isAutoSellAction(p.autoSellEpic)) out.autoSellEpic = p.autoSellEpic;
+    if (typeof p.autoSellKeepBetterStat === "boolean")
+      out.autoSellKeepBetterStat = p.autoSellKeepBetterStat;
+    if (typeof p.autoEquip === "boolean") out.autoEquip = p.autoEquip;
+    return out;
+  } catch {
+    return null; // storage blocked/corrupt — server value / defaults still apply
+  }
+}
+
+export function writeUiConfig(cfg: UiConfig): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(UI_CONFIG_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {
+    /* storage blocked — the config just won't survive offline across reloads */
+  }
+}
+
+/** Build the current uiConfig snapshot from the store — the exact object the
+ * autosave POST body carries and the write-through mirror stores. */
+export function selectUiConfig(s: UiConfig): UiConfig {
+  return {
+    autoCast: s.autoCast,
+    autoAllocate: s.autoAllocate,
+    autoReturn: s.autoReturn,
+    autoAdvance: s.autoAdvance,
+    autoHpPotion: s.autoHpPotion,
+    autoManaPotion: s.autoManaPotion,
+    autoHpThreshold: s.autoHpThreshold,
+    autoManaThreshold: s.autoManaThreshold,
+    autoSellCommon: s.autoSellCommon,
+    autoSellRare: s.autoSellRare,
+    autoSellEpic: s.autoSellEpic,
+    autoSellKeepBetterStat: s.autoSellKeepBetterStat,
+    autoEquip: s.autoEquip,
+  };
 }
 
 const emptyBossHint: BossHint = {
@@ -631,7 +813,6 @@ export interface HudState {
   // ---- throttled engine snapshot (~CONFIG.uiSyncHz) ----
   gold: number;
   stage: number;
-  wave: number;
   kills: number;
   killGoal: number;
   phase: Phase;
@@ -693,6 +874,8 @@ export interface HudState {
   // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
   autoSellCommon: AutoSellAction;
   autoSellRare: AutoSellAction;
+  /** M7.9 "option A" — epic's own real toggle (default "off" = keep). */
+  autoSellEpic: AutoSellAction;
   autoSellKeepBetterStat: boolean;
   /** M7.5 auto-equip executor toggle (localStorage-persisted, default ON). */
   autoEquip: boolean;
@@ -845,6 +1028,28 @@ export interface HudState {
   setBotSettings: (patch: Partial<BotSettings>) => void;
   /** Queue the auto-hunt toggle intent (M7.5; last-wins per frame). */
   queueSetAutoHunt: (on: boolean) => void;
+  /** Bot MASTER switch (owner UX consolidation, 2026-07-07) — ONE toggle that
+   * gates every automation sub-behavior at once. Deliberately reuses `autoHunt`
+   * as the switch's own on/off value (no new persisted field: `autoHunt` IS
+   * "is the bot on") — `GameClient.tsx` gates every OTHER transient auto-*
+   * flag (autoCast/autoAllocate/autoReturn/autoAdvance/auto-potion) against
+   * this same field every frame, which is safe because those aren't
+   * persisted (turning the master back on just resumes reading whatever the
+   * player already had those sub-toggles set to).
+   *
+   * The two ENGINE-PERSISTED bot sub-flags (`bot.enabled`/`bot.sellTripEnabled`,
+   * SAVE v11) can't use that per-frame trick (they'd permanently overwrite the
+   * player's real preference the instant the master goes off — there's no
+   * second copy of "what the player actually wants" once the mirrored field
+   * itself is zeroed every frame). So this action instead: on OFF, snapshots
+   * their CURRENT values (`writeBotMasterSnapshot`) then queues a real
+   * `setBotSettings` patch forcing them both false (a genuine committed
+   * change, exactly like a manual toggle click); on ON, reads the snapshot
+   * back and queues it as the restore patch. Also queues the matching
+   * `setAutoHunt`. This guarantees "OFF = zero automation" covers bot town
+   * trips too, while "ON = each sub-behavior runs per its own setting"
+   * restores exactly what the player had. */
+  toggleBotMaster: () => void;
   /** Queue a fast-travel channel start (M7.5, last-wins per frame) — the
    * engine no-ops/rejects (`fastTravelBlocked`) an invalid/locked/aggro'd
    * attempt. */
@@ -918,6 +1123,7 @@ export interface HudState {
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
   setAutoSellCommon: (action: AutoSellAction) => void;
   setAutoSellRare: (action: AutoSellAction) => void;
+  setAutoSellEpic: (action: AutoSellAction) => void;
   toggleAutoSellKeepBetterStat: () => void;
   /** Mount-effect-only: apply the persisted rules once, post-hydration (same
    * "don't re-persist on mount" rule as `setSoundMuted`). */
@@ -926,6 +1132,15 @@ export interface HudState {
   /** Mount-effect-only: apply the persisted auto-equip preference once. */
   hydrateAutoEquip: (on: boolean) => void;
 
+  /** Apply a cross-device uiConfig blob (owner request 2026-07-07) — used for
+   * BOTH the localStorage fallback and the server (server WINS, applied last on
+   * boot). Only DEFINED fields are applied (a partial keeps the current default
+   * for a missing field); the merged full config is written THROUGH to
+   * localStorage (unified + legacy auto-sell/auto-equip keys) so any later
+   * mount-effect hydration reads the fresh value rather than clobbering it.
+   * See `UiConfig`'s doc + `GameClient.tsx`'s boot/autosave wiring. */
+  hydrateUiConfig: (cfg: Partial<UiConfig>) => void;
+
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
 }
@@ -933,7 +1148,6 @@ export interface HudState {
 export const useGameStore = create<HudState>((set, get) => ({
   gold: 0,
   stage: 1,
-  wave: 0,
   kills: 0,
   killGoal: 0,
   phase: "battle",
@@ -969,6 +1183,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   // same two-step pattern as `soundMuted`/`setSoundMuted`.
   autoSellCommon: DEFAULT_AUTO_SELL_RULES.common,
   autoSellRare: DEFAULT_AUTO_SELL_RULES.rare,
+  autoSellEpic: DEFAULT_AUTO_SELL_RULES.epic,
   autoSellKeepBetterStat: DEFAULT_AUTO_SELL_RULES.keepBetterStat,
   autoEquip: true,
 
@@ -1113,6 +1328,43 @@ export const useGameStore = create<HudState>((set, get) => ({
   queueSetAutoHunt: (on) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, setAutoHunt: on } })),
 
+  toggleBotMaster: () =>
+    set((s) => {
+      const turningOff = s.autoHunt; // currently ON -> this call turns it off
+      if (turningOff) {
+        writeBotMasterSnapshot({
+          enabled: s.bot.enabled,
+          sellTripEnabled: s.bot.sellTripEnabled,
+        });
+        return {
+          pendingInput: {
+            ...s.pendingInput,
+            setAutoHunt: false,
+            setBotSettings: {
+              ...(s.pendingInput.setBotSettings ?? {}),
+              enabled: false,
+              sellTripEnabled: false,
+            },
+          },
+        };
+      }
+      const snap = readBotMasterSnapshot();
+      writeBotMasterSnapshot(null);
+      return {
+        pendingInput: {
+          ...s.pendingInput,
+          setAutoHunt: true,
+          setBotSettings: snap
+            ? {
+                ...(s.pendingInput.setBotSettings ?? {}),
+                enabled: snap.enabled,
+                sellTripEnabled: snap.sellTripEnabled,
+              }
+            : s.pendingInput.setBotSettings,
+        },
+      };
+    }),
+
   creditGold: (amount) =>
     set((s) => ({
       pendingInput: {
@@ -1129,7 +1381,8 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
-  queueMoveTo: (x) => set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
+  queueMoveTo: (x) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
 
   queueAttackTarget: (id) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, attackTarget: { id } } })),
@@ -1202,6 +1455,7 @@ export const useGameStore = create<HudState>((set, get) => ({
       writeAutoSellRules({
         common: action,
         rare: s.autoSellRare,
+        epic: s.autoSellEpic,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
       return { autoSellCommon: action };
@@ -1211,9 +1465,20 @@ export const useGameStore = create<HudState>((set, get) => ({
       writeAutoSellRules({
         common: s.autoSellCommon,
         rare: action,
+        epic: s.autoSellEpic,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
       return { autoSellRare: action };
+    }),
+  setAutoSellEpic: (action) =>
+    set((s) => {
+      writeAutoSellRules({
+        common: s.autoSellCommon,
+        rare: s.autoSellRare,
+        epic: action,
+        keepBetterStat: s.autoSellKeepBetterStat,
+      });
+      return { autoSellEpic: action };
     }),
   toggleAutoSellKeepBetterStat: () =>
     set((s) => {
@@ -1221,6 +1486,7 @@ export const useGameStore = create<HudState>((set, get) => ({
       writeAutoSellRules({
         common: s.autoSellCommon,
         rare: s.autoSellRare,
+        epic: s.autoSellEpic,
         keepBetterStat: autoSellKeepBetterStat,
       });
       return { autoSellKeepBetterStat };
@@ -1229,6 +1495,7 @@ export const useGameStore = create<HudState>((set, get) => ({
     set({
       autoSellCommon: rules.common,
       autoSellRare: rules.rare,
+      autoSellEpic: rules.epic,
       autoSellKeepBetterStat: rules.keepBetterStat,
     }),
   toggleAutoEquip: () =>
@@ -1238,6 +1505,28 @@ export const useGameStore = create<HudState>((set, get) => ({
       return { autoEquip };
     }),
   hydrateAutoEquip: (on) => set({ autoEquip: on }),
+
+  hydrateUiConfig: (cfg) =>
+    set((s) => {
+      // Merge only DEFINED fields over the current config so a partial blob
+      // never wipes a field to `undefined`.
+      const merged: UiConfig = { ...selectUiConfig(s) };
+      for (const key of Object.keys(cfg) as (keyof UiConfig)[]) {
+        const v = cfg[key];
+        if (v !== undefined) (merged[key] as UiConfig[typeof key]) = v;
+      }
+      // Write-through so the legacy mount-effect hydrations (which read their own
+      // keys) pick up the winning value instead of re-applying a stale local one.
+      writeUiConfig(merged);
+      writeAutoSellRules({
+        common: merged.autoSellCommon,
+        rare: merged.autoSellRare,
+        epic: merged.autoSellEpic,
+        keepBetterStat: merged.autoSellKeepBetterStat,
+      });
+      writeAutoEquip(merged.autoEquip);
+      return merged;
+    }),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;

@@ -9,7 +9,10 @@
  * per-frame-state-in-React rule). Each rAF tick:
  *   1. copies the UI-owned `autoCast`/`autoAllocate`/`autoReturn`/auto-potion/
  *      `soundMuted` flags off the Zustand store onto the engine state /
- *      `AudioController`,
+ *      `AudioController` — every automation flag here (all but `soundMuted`)
+ *      is ALSO ANDed against the bot MASTER switch (`store.autoHunt` — see
+ *      `gameStore.ts`'s `toggleBotMaster` doc) so a single switch silences
+ *      every sub-behavior at once,
  *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
  *      once and hands it to the FIRST fixed sub-step of the frame,
  *   2b. shapes this frame's real elapsed seconds through `TimeDirector`
@@ -55,6 +58,7 @@ import {
   evolutionQuestFor,
   initGameState,
   isEvolutionQuestOffered,
+  isTier3BossObjectiveActive,
   learnedSkills,
   migrate,
   repairHeroClass,
@@ -66,6 +70,7 @@ import {
   toSaveData,
   unlockedAutoSlotCount,
   worldNav,
+  effectiveUnlockedZones,
   type FrameInput,
   type GameEvent,
   type GameState,
@@ -89,11 +94,15 @@ import { toInventoryItem } from "@/ui/gear/types";
 import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
 import {
   useGameStore,
+  readStoredUiConfig,
+  selectUiConfig,
+  writeUiConfig,
   type EngineSnapshot,
   type HeroQuestSummary,
   type HeroSummary,
   type ShopSummary,
   type SkillSummary,
+  type UiConfig,
 } from "@/ui/store/gameStore";
 import { resolveCatchUp } from "./catchUp";
 import { TimeDirector } from "./timeDirector";
@@ -204,7 +213,7 @@ function buildSkillSummaries(h: Hero): SkillSummary[] {
  * quest, the bar shows the final-form badge instead), or below the level gate
  * with no active quest (the bar shows the locked hint from tier/level).
  */
-function buildQuestSummary(h: Hero): HeroQuestSummary | null {
+function buildQuestSummary(state: GameState, h: Hero, isSolo: boolean): HeroQuestSummary | null {
   if (h.tier === 3) return null;
   const offered = isEvolutionQuestOffered(h);
   const q = h.quest;
@@ -220,7 +229,21 @@ function buildQuestSummary(h: Hero): HeroQuestSummary | null {
   const accepted = q?.accepted ?? false;
   const complete =
     accepted && def.objectives.every((o, i) => (q?.progress[i] ?? 0) >= o.count);
-  return { offered, accepted, complete, kills, killGoal, bossDone };
+  const killMapId = killIdx >= 0 ? (def.objectives[killIdx].mapId ?? null) : null;
+  const bossMapId = bossIdx >= 0 ? (def.objectives[bossIdx].mapId ?? null) : null;
+  return {
+    offered,
+    accepted,
+    complete,
+    kills,
+    killGoal,
+    bossDone,
+    killMapId,
+    bossMapId,
+    // M7.9b: `isTier3BossObjectiveActive` reads `state.heroes[0]` internally
+    // (it's a solo-hero concept), so it's only meaningful for that hero.
+    bossChallengeActive: isSolo && isTier3BossObjectiveActive(state),
+  };
 }
 
 function buildSnapshot(state: GameState): EngineSnapshot {
@@ -239,6 +262,9 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       maxHp: h.maxHp,
       // Signature skill cooldown (onboarding's "you cast a skill" detector).
       skillCd: skillCdOf(h, SIGNATURE_SKILL[h.cls]),
+      // Owner request: War Cry buff status chip — raw values, no engine math.
+      atkBuffMult: h.atkBuffMult,
+      atkBuffTimer: h.atkBuffTimer,
       mana: h.mana,
       maxMana: h.maxMana,
       skills: buildSkillSummaries(h),
@@ -253,7 +279,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       // `xpProgress` uses: engine helpers compute it, the store just carries
       // the display-ready result.
       canEvolve: canEvolveHero(state, h),
-      quest: buildQuestSummary(h),
+      quest: buildQuestSummary(state, h, h === state.heroes[0]),
       // M5 "Base stats" — same one-way display read-path: engine helpers compute
       // it, the store just carries the display-ready result.
       statPoints: h.statPoints,
@@ -303,7 +329,6 @@ function buildSnapshot(state: GameState): EngineSnapshot {
   return {
     gold: state.gold,
     stage: state.stage,
-    wave: state.wave,
     kills: state.kills,
     killGoal: CONFIG.killGoal(state.stage),
     phase: state.phase,
@@ -325,7 +350,11 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // fast-travel picker's lock read).
     bot: { ...state.bot },
     autoHunt: state.autoHunt,
-    unlockedZones: { ...state.unlockedZones },
+    // M7.9 tier-3 preview (owner "option ข"): surface the EFFECTIVE unlocked counts —
+    // the persisted map + any active tier-3 quest grant (map4 z1) folded in — so the
+    // fast-travel picker + walk arrows offer the preview zone. Derived, never persisted
+    // (effectiveUnlockedZones returns a copy; toSaveData still writes state.unlockedZones).
+    unlockedZones: effectiveUnlockedZones(state),
     // M7.6 ตีบวก material counter — same one-way "engine carries it, store just
     // reflects it" pattern as `gold`.
     materials: state.materials,
@@ -356,7 +385,10 @@ let autoEquipInFlight = false;
 async function performAutoEquip(): Promise<void> {
   if (autoEquipInFlight) return;
   const store = useGameStore.getState();
-  if (!store.autoEquip) return;
+  // Bot MASTER switch gate (owner UX consolidation, 2026-07-07): `autoHunt`
+  // doubles as the master's on/off value — see `gameStore.ts`'s
+  // `toggleBotMaster` doc. OFF must mean zero auto-equip too.
+  if (!store.autoHunt || !store.autoEquip) return;
   const picks = selectAutoEquip(store.inventory, ITEM_TEMPLATES, store.heroes[0]?.cls);
   if (picks.length === 0) return;
   autoEquipInFlight = true;
@@ -380,12 +412,18 @@ async function performAutoEquip(): Promise<void> {
 
 async function performAutoSell(suppressNothingNotice = false): Promise<void> {
   const store = useGameStore.getState();
+  // Bot MASTER switch gate (owner UX consolidation, 2026-07-07): belt-and-
+  // suspenders — the engine's own bot sub-flags are already force-disabled
+  // while the master is off (see `toggleBotMaster`'s doc), so this event
+  // should never fire in that state, but never auto-dispose regardless.
+  if (!store.autoHunt) return;
   const { sellIds, salvageIds } = selectAutoSellSalvageIds(
     store.inventory,
     ITEM_TEMPLATES,
     {
       common: store.autoSellCommon,
       rare: store.autoSellRare,
+      epic: store.autoSellEpic,
       keepBetterStat: store.autoSellKeepBetterStat,
     },
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
@@ -644,14 +682,23 @@ export function GameClient() {
         scroll: state.consumables.returnScroll,
       };
 
+      // Bot MASTER switch (owner UX consolidation, 2026-07-07) — `state.autoHunt`
+      // doubles as the master's own on/off value (see `gameStore.ts`'s
+      // `toggleBotMaster` doc). Every OTHER UI-owned automation flag below is
+      // NOT persisted (unlike `autoHunt`/`state.bot`), so ANDing them against it
+      // every frame is a safe, reversible gate: turning the master back on just
+      // resumes reading whatever the player already had each sub-toggle set to
+      // — nothing here needs its own snapshot/restore.
+      const botOn = store.autoHunt;
+
       // UI-owned flags the engine reads directly (not part of FrameInput).
-      state.autoCast = store.autoCast;
-      state.autoAllocate = store.autoAllocate;
-      state.autoReturn = store.autoReturn;
-      state.autoAdvance = store.autoAdvance;
+      state.autoCast = botOn && store.autoCast;
+      state.autoAllocate = botOn && store.autoAllocate;
+      state.autoReturn = botOn && store.autoReturn;
+      state.autoAdvance = botOn && store.autoAdvance;
       // Auto-use potion toggles + thresholds (M6), same UI-owned pattern.
-      state.autoHpPotion = store.autoHpPotion;
-      state.autoManaPotion = store.autoManaPotion;
+      state.autoHpPotion = botOn && store.autoHpPotion;
+      state.autoManaPotion = botOn && store.autoManaPotion;
       state.autoHpThreshold = store.autoHpThreshold;
       state.autoManaThreshold = store.autoManaThreshold;
       // UI-owned sound preference — applied to the audio module every frame,
@@ -821,11 +868,22 @@ export function GameClient() {
       return toSaveData(state);
     }
 
+    // Cross-device UI config (owner request 2026-07-07): the autosave POST body
+    // carries the current preference snapshot as a sibling `uiConfig` key (the
+    // server splits it off before the strict save-schema validation). ALSO
+    // write-through to localStorage on the same cadence so the offline fallback
+    // stays current with mid-session toggles.
+    function serializeWithUiConfig(): SaveData & { uiConfig: UiConfig } {
+      const uiConfig = selectUiConfig(useGameStore.getState());
+      writeUiConfig(uiConfig);
+      return { ...serialize(), uiConfig };
+    }
+
     function autosave(): void {
       void fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(serialize()),
+        body: JSON.stringify(serializeWithUiConfig()),
         keepalive: true,
       })
         .then((res) =>
@@ -900,7 +958,7 @@ export function GameClient() {
     function onVisibility(): void {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
-        const blob = new Blob([JSON.stringify(serialize())], {
+        const blob = new Blob([JSON.stringify(serializeWithUiConfig())], {
           type: "application/json",
         });
         navigator.sendBeacon("/api/save", blob);
@@ -984,6 +1042,12 @@ export function GameClient() {
     // (React Strict Mode's dev mount/unmount/mount) by tearing the renderer
     // back down instead of leaking an orphaned canvas.
     const boot = async (): Promise<void> => {
+      // ---- cross-device UI config: seed from the localStorage FALLBACK first
+      // (owner request 2026-07-07) so a boot with a dead/slow API still restores
+      // the last-known preferences; the SERVER value (below) then WINS. ----
+      const localUiConfig = readStoredUiConfig();
+      if (localUiConfig) useGameStore.getState().hydrateUiConfig(localUiConfig);
+
       // ---- load the server-authoritative save (before initGameState) ----
       let loaded: SaveData | undefined;
       let bootClass: HeroClass | undefined; // fresh-character first boot class
@@ -1007,6 +1071,11 @@ export function GameClient() {
              * overwrites the save blob's own mirror, same precedence rule as
              * `equipped` below. */
             materials?: number;
+            /** Cross-device UI config (owner request 2026-07-07): the
+             * per-character preference blob, or null (pre-existing/fresh
+             * character → keep the localStorage fallback/defaults). When present
+             * it WINS over localStorage — see `UiConfig`'s doc. */
+            uiConfig?: Partial<UiConfig> | null;
             /** Authoritative character class (Character.baseClass) — corrects
              * a save whose hero.cls drifted + seeds a first boot (2026-07-06
              * "everyone is a swordsman" fix). */
@@ -1041,6 +1110,10 @@ export function GameClient() {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
           }
+          // Cross-device UI config: the SERVER value WINS over the localStorage
+          // fallback seeded above (applied last). Null (pre-existing/fresh
+          // character) → keep whatever the fallback/defaults gave us.
+          if (json.uiConfig) useGameStore.getState().hydrateUiConfig(json.uiConfig);
           // M7: the DB `ItemInstance` ledger is AUTHORITATIVE over the save
           // blob's own `equipped` cache (precedence documented at the API) —
           // overwrite it BEFORE `initGameState` derives max HP from it below.

@@ -160,6 +160,19 @@ export const saveDataSchema = z
     // M7.6 ตีบวก material counter (SAVE v14). OPTIONAL so a pre-v14 (or trimmed)
     // payload is backfilled to 0 by `migrate()` — same resilience as the fields above.
     materials: z.number().int().min(0).optional(),
+    // M7.95 "Hall of Fame" observers (SAVE v16). All OPTIONAL so a pre-v16 (or
+    // trimmed) payload is backfilled by `migrate()` (goldEarned -> 0, bossBest -> {},
+    // levelCapAt -> null). Loose non-negative numbers — `normalizeBossBest` /
+    // `normalizeLevelCapAt` on load validate + clamp, so a stale/foreign shape never
+    // needlessly 400s (same resilience as the fields above).
+    goldEarned: z.number().min(0).finite().optional(),
+    bossBest: z
+      .record(
+        z.string(),
+        z.object({ seconds: z.number().min(0).finite(), at: z.number().min(0).finite() }),
+      )
+      .optional(),
+    levelCapAt: z.number().min(0).finite().nullable().optional(),
     // Server-owned. Present in the client shape (as 0) but IGNORED — persistSave
     // re-stamps it from the server clock. Optional so a client may omit it.
     lastSeen: z.number().optional(),

@@ -118,16 +118,20 @@
 
 > **หมายเหตุปิด M7.9 (2026-07-07):** in-browser visual pass ยังไม่ได้ทำ — แนะนำ owner playtest: หน้าตาบอส 6 ตัว (เขากว้าง map2/map6 vs HP bar), spectacle สกิล 4 ทั้ง 3, ความรู้สึกไต่ s16-30 (โดยเฉพาะธนู)
 
+> **แก้ดีไซน์เควสคลาส 3 (option ข, เจ้าของเคาะ 2026-07-08):** เปลี่ยนจาก "ล่า map3 + ล้มบอส map2 ซ้ำ" → **objective เดียว: ล่า 90 ตัวใน map4 โซน 1 (ทุ่งหน้าด่านทุนดรา s16)** ไม่มี boss objective, ไม่มีเงื่อนไขตีบวก · **รับเควส (Lv40 tier2) → ปลดล็อกพรีวิว map4 โซน 1 เท่านั้น** (โซน 2+ และห้องบอสยังล็อกหลังบอส s15) — สิทธิ์เข้าโซนเป็น *derived จาก hero.quest ไม่ persist* (`systems/world.questGrantsZoneAccess`; ดรอป/จบเควสแล้วสิทธิ์หาย เว้นแต่ล้มบอส s15 แล้ว) · flow: tier2 fast-travel เข้าฟรอนเทียร์ → ฟาร์มเก็บคิล → evolve tier3 → กลับมาทุบบอส s15 → unlock ปกติเทคโอเวอร์ · sim (5 seed × 3 คลาส): tier3@s16 ครบ, ถึง map6/s30 ครบ, ไม่มี stall, mana sink คงเดิม, s1-15 byte-identical · **ไม่ต้อง bump SAVE** (id/shape เดิม; เควสเก่ากลางคัน 2-objective รีเซ็ตเป็น re-offer อัตโนมัติ) · i18n: ต้องแก้คำอธิบายเควส tier3 th/en (ดู note ส่งต่อ) · details = docs/balance-m79.md "Appendix — Tier-3 quest REDESIGN"
+
 ## M7.95 — Hall of Fame 🏆 (สเปกเคาะกับเจ้าของ 2026-07-08 · ดึงขึ้นมาก่อน M8 ได้ ไม่พึ่ง websocket · ประมาณ ~4.5-5.5 ชม.)
 
 > **Top 10 ต่อหมวด** + ฟิลเตอร์อาชีพ (ดาบ/ธนู/เวท) บนทุกบอร์ด · หมวด: ① Level สูงสุด (tiebreaker = ใครถึงก่อน, เก็บ timestamp แตะ 90) ② Power สูงสุด (สูตรคำนวณฝั่ง server จาก save blob เท่านั้น) ③ **ยอดเงินหาได้รวม (total gold earned)** — ผลรวมทองที่*เคยได้รับ*ทั้งหมดตั้งแต่สร้างตัวละคร (ฆ่ามอน+ขายของ) ใช้จ่ายแล้วไม่ลด; ไม่ใช่เงินคงเหลือ และไม่เกี่ยวกับเวลาออนไลน์ (เจ้าของเคาะชื่อ 2026-07-08 — เดิมเรียก "เงินสะสม lifetime" แล้วชวนสับสน) ④ เวลาเคลียร์บอสดีที่สุดต่อโซน (6 บอร์ดย่อย s5-s30, ตัดค่าที่เร็วกว่า "พื้นความเป็นไปได้" จาก sim อัตโนมัติ) ⑤ **เวลาออนไลน์รวม** (เพิ่ม 2026-07-08 — server สะสมจากส่วนต่าง lastSeen ระหว่าง save ที่ < เกณฑ์ ~5 นาที: นับเฉพาะตอนเปิดเกมจริงรวม AFK, ไม่นับ offline idle, server-clock ล้วนจึงโกงไม่ได้ ไม่ต้องรอ re-derive, ไม่มี SAVE bump) · **หน้าโปรไฟล์กดดูได้** (paper-doll + ออร่า + ชื่อทอง prestige) · เก็บ timestamp ทุกสถิติเผื่อซีซันในอนาคต · ปุ่ม 🏆 บนการ์ดเป้าหมายเปิดแผงนี้ · ยังไม่ทำ: รางวัลอันดับ/ซีซัน/ของตกแต่งโปรไฟล์
 
-- [ ] Engine/SAVE v16: counter ยอดเงินหาได้รวม + best boss-clear time ต่อโซน (+timestamp) + migrate v15→v16
-- [ ] **Anti-cheat re-derive (หนี้ M5 — เงื่อนไขก่อนเปิดบอร์ด 1-3):** server ตรวจความเป็นไปได้ของ level/power/เงินสะสม จาก lastSeen + เคิร์ฟเกม (engine deterministic → re-derive ได้จริง); ค่าเกินเพดาน = ไม่ขึ้นทำเนียบ (ไม่แบน)
-- [ ] Server/DB: ตาราง leaderboard snapshot (Prisma db push), อัปเดตตอน /api/save, endpoint top-10 + my-rank ต่อหมวด + class filter, พื้นเวลาบอสต่อโซนจาก sim, **onlineSeconds accumulator** (delta lastSeen < เกณฑ์)
-- [ ] UI: แผงทำเนียบ (ModalPortal, มือถือ first-class), 4 หมวด + 6 บอร์ดย่อยบอส, แถวอันดับตัวเอง, หน้าโปรไฟล์, i18n th/en
-- [ ] ประกาศ server-wide: คนแรกแตะ 90 / แซงอันดับ 1 (ท่อ announcement เดิม) + patch notes entry
-- [ ] QA + sim sanity (บอร์ดต้องไม่แตะ gameplay/balance เลย — read-only จาก save)
+- [x] Engine/SAVE v16: counter ยอดเงินหาได้รวม (creditGold choke point, ใช้จ่ายไม่ลด) + best boss-clear time ต่อโซน (นับ step deterministic, timestamp ฝั่ง server) + level-90 timestamp + migrate v15→v16 — sim byte-identical
+- [x] **Anti-cheat re-derive (หนี้ M5 ปิดแล้ว):** judgePlausibility เพดาน ×2 จาก balance-m79 (เลเวล/เงิน/พลัง/levelCapAt ที่ใช้ server clock ล้วน) — เกินเพดาน = suspect ซ่อนจากบอร์ด ไม่แบน ไม่บล็อกเซฟ
+- [x] Server/DB: LeaderboardEntry + BossRecord (db push แล้ว), ingest ตอน /api/save (power คำนวณ server จาก makeHero+DB loadout), GET /api/hof top-10 + my-rank + class filter, พื้นเวลาบอส 0.5× boss-iso, onlineSeconds accumulator (delta < 300s), **ลบตัวละคร = purge แถวบอร์ดใน tx เดียว + orphan sweep** (เจ้าของขอ 2026-07-08)
+- [x] UI: แผงทำเนียบ 5 บอร์ด + 6 บอร์ดย่อยบอส + แถวอันดับตัวเอง + โปรไฟล์ paper-doll + ปุ่ม 🏆 (เลิกหน้าตาโดนล็อก) + i18n ครบ
+- [x] ประกาศ server-wide: คนแรกแตะ 90 (exactly-once ผ่าน singleton unique) / แซงอันดับ 1 power (dedupe 24 ชม.) + patch notes 2026-07-08
+- [x] QA + sim sanity: บอร์ด read-only จาก save ยืนยันแล้ว (sim byte-identical ทุกเวฟ) — 930/930
+
+> **M7.95 CLOSED (2026-07-08)** + UAT round-2 polish ในรอบเดียวกัน: เควสคลาส 3 โฉมใหม่ (ทุ่งทุนดรา 90 + Glacial Sovereign ร่างเยาว์) · บอทสวิตช์เดียว + ตั้งค่ารวม + config ติดตัวละคร (Character.uiConfig) · มอน 12 สายพันธุ์แมพ 4-6 · aim-driven facing · ตีบวก tap-to-skip · เมนูวาปธีม · inventory unstack+sort · การ์ดเควสรวมปุ่ม · ⓘ ทุกสกิล · war-cry aura+chip (บัฟทั้งทีม party-ready) · กวาดซาก wave (state.wave/waveGap/waveLabel ตาย, waves.ts→hunt.ts) · UX-fix 10 ข้อจาก audit เต็ม · /proto-shaders ทดลองแล้วเจ้าของไม่เอา (ลบแล้ว กู้ได้จาก history) — **ค้างฝั่งเจ้าของ: `npx prisma db push` (additive announcements schema) + playtest + confirm merge**
 
 ## M8 — Party
 

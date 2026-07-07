@@ -126,8 +126,6 @@ describe("save round-trip", () => {
     expect(restored.heroes).toHaveLength(1);
     expect(restored.heroes[0].cls).toBe("mage");
     expect(restored.heroes[0].level).toBe(8);
-    // A restored save always starts fresh at wave 0 of the saved stage.
-    expect(restored.wave).toBe(0);
     expect(restored.phase).toBe("battle");
   });
 

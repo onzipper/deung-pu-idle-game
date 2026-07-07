@@ -1,13 +1,19 @@
 "use client";
 
 /**
- * M7.5 Inventory UX overhaul — a RO-style stacked GRID (replaces the M7 flat
- * per-instance list). Instances are identical v1, so owned items STACK by
- * templateId (`ui/gear/stacking.ts`'s `groupIntoStacks`) with a `×N` badge;
- * every stack-level action (equip/sell) resolves to ONE representative
- * instance id out of the group. Same modal shell convention as
- * `SettingsPanel.tsx`/`CodexPanel.tsx` (fixed overlay, sim never pauses
- * behind it).
+ * M7.5→M7.9 Inventory UX — a RO-style GRID, one tile PER OWNED INSTANCE
+ * (M7.9 "owner: no stacking" — the old `templateId:refineLevel` ×N grouping,
+ * `ui/gear/stacking.ts`'s `groupIntoStacks`, is used ONLY by other consumers
+ * now — `RefinePanel.tsx` and the bot's auto-dispose sweep, `ui/gear/autoSell.ts`
+ * — this display layer reads `inventory` directly). Default sort is
+ * BEST → WORST: tier desc, then refine +level desc, then rarity (epic > rare
+ * > common) desc, then flat primary-stat total desc (`inventorySortRank`).
+ * Every tile action (equip/sell/salvage) now targets exactly ONE instance id —
+ * no more "sell all of this stack" bulk action at the tile level (the
+ * inventory-wide "sell all common"/"salvage junk common" bulk buttons above
+ * the grid are unchanged, they already scan `inventory` directly). Same modal
+ * shell convention as `SettingsPanel.tsx`/`CodexPanel.tsx` (fixed overlay, sim
+ * never pauses behind it).
  *
  * EQUIP FLOW (unchanged from M7): POST `/api/items/equip`|`unequip` FIRST —
  * only on success do we optimistically patch the local `inventory` slice AND
@@ -32,15 +38,15 @@ import {
   salvageYield,
   type GearSlot,
   type HeroClass,
+  type ItemRarity,
   type ItemTemplate,
 } from "@/engine";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
 import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
-import { groupIntoStacks, type ItemStack } from "@/ui/gear/stacking";
 import { computeStatDelta, type StatBlock } from "@/ui/gear/statDelta";
-import { toInventoryItem } from "@/ui/gear/types";
+import { toInventoryItem, type InventoryItem } from "@/ui/gear/types";
 import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import {
@@ -59,13 +65,6 @@ function tierBorder(tier: number): string {
   return TIER_BORDER_COLORS[tier] ?? TIER_BORDER_COLORS[6];
 }
 
-/** Stack-level selection key — compound `templateId:refineLevel` (M7.6), since
- * a +0 and a +5 copy of the same template are now separate `ItemStack`s (see
- * `ui/gear/stacking.ts`). */
-function stackKey(stack: Pick<ItemStack, "templateId" | "refineLevel">): string {
-  return `${stack.templateId}:${stack.refineLevel}`;
-}
-
 /** The template's flat stat block, refined to `refineLevel` (M7.6 ตีบวก — a
  * +0 item is byte-identical to its base template). */
 function refinedStatsOf(template: ItemTemplate, refineLevel: number): StatBlock {
@@ -77,37 +76,64 @@ function refinedStatsOf(template: ItemTemplate, refineLevel: number): StatBlock 
 }
 
 /** Flat refined stat total (M7.6 ตีบวก) — used by the "salvage junk common"
- * bulk affordance to compare a candidate against what's equipped in its slot. */
+ * bulk affordance to compare a candidate against what's equipped in its slot,
+ * and (M7.9) as the last tie-break of the default inventory sort below. */
 function statSumOf(template: ItemTemplate, refineLevel: number): number {
   const s = refinedStatsOf(template, refineLevel);
   return (s.atk ?? 0) + (s.def ?? 0) + (s.hp ?? 0);
 }
 
+/** M7.9 "no stacking" default sort — BEST → WORST: tier desc, then refine
+ * +level desc, then rarity (epic > rare > common) desc, then flat primary-stat
+ * total desc. A missing/retired template sorts to the very bottom. */
+const RARITY_RANK: Record<ItemRarity, number> = { epic: 2, rare: 1, common: 0 };
+
+function inventorySortRank(item: InventoryItem): [number, number, number, number] {
+  const template = ITEM_TEMPLATES[item.templateId];
+  if (!template) return [-1, -1, -1, -1];
+  return [
+    template.tier,
+    item.refineLevel,
+    RARITY_RANK[template.rarity],
+    statSumOf(template, item.refineLevel),
+  ];
+}
+
+function compareInventoryItems(a: InventoryItem, b: InventoryItem): number {
+  const ra = inventorySortRank(a);
+  const rb = inventorySortRank(b);
+  for (let i = 0; i < ra.length; i++) {
+    if (ra[i] !== rb[i]) return rb[i] - ra[i]; // descending
+  }
+  return 0;
+}
+
 function GridCell({
-  stack,
+  item,
   isNew,
   selected,
   onSelect,
 }: {
-  stack: ItemStack;
+  item: InventoryItem;
   isNew: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const template = ITEM_TEMPLATES[stack.templateId];
+  const template = ITEM_TEMPLATES[item.templateId];
   const tContent = useTranslations("content.items");
   const t = useTranslations("inventory");
   if (!template) return null; // stale/retired template — defensively skip
 
   const colors = RARITY_COLORS[template.rarity];
   const glow = RARITY_GLOW[template.rarity];
+  const equipped = item.equippedSlot !== null;
 
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      aria-label={tContent(`${stack.templateId}.name`)}
+      aria-label={tContent(`${item.templateId}.name`)}
       className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${tierBorder(
         template.tier,
       )} ${glow} ${selected ? "ring-2 ring-ddp-gold-bright" : ""}`}
@@ -117,8 +143,8 @@ function GridCell({
       </span>
       <span className="text-[9px] font-bold text-ddp-ink-muted">
         {t("tierShort", { tier: template.tier })}
-        {stack.refineLevel > 0 && (
-          <span className="text-emerald-400"> {t("refinePlus", { level: stack.refineLevel })}</span>
+        {item.refineLevel > 0 && (
+          <span className="text-emerald-400"> {t("refinePlus", { level: item.refineLevel })}</span>
         )}
       </span>
       {template.classReq && (
@@ -138,17 +164,12 @@ function GridCell({
           {colors.icon}
         </span>
       )}
-      {stack.count > 1 && (
-        <span className="absolute -top-1.5 -right-1.5 rounded-full bg-ddp-gold px-1.5 py-0.5 text-[9px] font-black text-ddp-panel-strong">
-          ×{stack.count}
-        </span>
-      )}
-      {stack.equippedInstanceId && (
+      {equipped && (
         <span className="absolute -top-1.5 -left-1.5 rounded-full bg-emerald-400 px-1 text-[9px] font-black text-emerald-950">
           E
         </span>
       )}
-      {isNew && !stack.equippedInstanceId && (
+      {isNew && !equipped && (
         <span className="absolute top-0.5 left-0.5 rounded-sm bg-rose-500 px-1 text-[8px] font-black text-white uppercase">
           {t("newBadge")}
         </span>
@@ -207,7 +228,7 @@ function StatDeltaChips({
 }
 
 function DetailCard({
-  stack,
+  item,
   heroCls,
   equippedTemplateId,
   equippedRefineLevel,
@@ -215,60 +236,53 @@ function DetailCard({
   busy,
   onEquip,
   onUnequip,
-  onSellOne,
-  onSellAll,
-  onSalvageOne,
-  onSalvageAll,
+  onSell,
+  onSalvage,
 }: {
-  stack: ItemStack;
+  item: InventoryItem;
   heroCls: HeroClass;
   equippedTemplateId: string | null;
   equippedRefineLevel: number;
   inTown: boolean;
   busy: boolean;
-  onEquip: (stack: ItemStack) => void;
-  onUnequip: (stack: ItemStack) => void;
-  onSellOne: (stack: ItemStack) => void;
-  onSellAll: (stack: ItemStack) => void;
-  onSalvageOne: (stack: ItemStack) => void;
-  onSalvageAll: (stack: ItemStack) => void;
+  onEquip: (item: InventoryItem) => void;
+  onUnequip: (item: InventoryItem) => void;
+  onSell: (item: InventoryItem) => void;
+  onSalvage: (item: InventoryItem) => void;
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
-  const template = ITEM_TEMPLATES[stack.templateId];
+  const template = ITEM_TEMPLATES[item.templateId];
   const [confirmingSell, setConfirmingSell] = useState(false);
   const [confirmingSalvage, setConfirmingSalvage] = useState(false);
   if (!template) return null;
 
-  const equipped = stack.equippedInstanceId !== null;
+  const equipped = item.equippedSlot !== null;
   const classBlocked = template.classReq !== null && template.classReq !== heroCls;
   const colors = RARITY_COLORS[template.rarity];
   const needsConfirm = template.rarity === "rare" || template.rarity === "epic";
-  const sellableCount = stack.unequippedIds.length;
   // M7.6 ตีบวก: preview the material yield BEFORE salvaging (spec — the server
   // rolls nothing here, `salvageYield` is a pure tier/rarity table read).
   const perItemYield = salvageYield(template.tier, template.rarity);
   // M7.6+ polish: +8 and up gets prestige-gold name styling (see ui/labels.ts).
-  const prestigeCls = prestigeNameClass(stack.refineLevel);
+  const prestigeCls = prestigeNameClass(item.refineLevel);
 
-  function handleSell(all: boolean): void {
+  function handleSell(): void {
     if (needsConfirm && !confirmingSell) {
       setConfirmingSell(true);
       return;
     }
     setConfirmingSell(false);
-    if (all) onSellAll(stack);
-    else onSellOne(stack);
+    onSell(item);
   }
 
-  function handleSalvage(all: boolean): void {
+  function handleSalvage(): void {
     if (needsConfirm && !confirmingSalvage) {
       setConfirmingSalvage(true);
       return;
     }
     setConfirmingSalvage(false);
-    if (all) onSalvageAll(stack);
-    else onSalvageOne(stack);
+    onSalvage(item);
   }
 
   return (
@@ -279,11 +293,11 @@ function DetailCard({
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className={`truncate text-sm ${prestigeCls || `font-bold ${colors.text}`}`}>
-            {colors.icon} {tContent(`${stack.templateId}.name`)}
-            {stack.refineLevel > 0 && (
+            {colors.icon} {tContent(`${item.templateId}.name`)}
+            {item.refineLevel > 0 && (
               <span className={prestigeCls || "text-emerald-400"}>
                 {" "}
-                {t("refinePlus", { level: stack.refineLevel })}
+                {t("refinePlus", { level: item.refineLevel })}
               </span>
             )}
           </span>
@@ -294,8 +308,8 @@ function DetailCard({
       </div>
 
       <StatDeltaChips
-        candidateTemplateId={stack.templateId}
-        candidateRefineLevel={stack.refineLevel}
+        candidateTemplateId={item.templateId}
+        candidateRefineLevel={item.refineLevel}
         equippedTemplateId={equipped ? null : equippedTemplateId}
         equippedRefineLevel={equippedRefineLevel}
       />
@@ -305,7 +319,7 @@ function DetailCard({
           <button
             type="button"
             disabled={busy}
-            onClick={() => onUnequip(stack)}
+            onClick={() => onUnequip(item)}
             className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-ddp-panel-strong px-3 text-xs font-bold text-ddp-ink-muted disabled:opacity-50"
           >
             {t("unequipButton")}
@@ -319,7 +333,7 @@ function DetailCard({
                 ? t("classReqBlocked", { cls: t(`classNames.${template.classReq}`) })
                 : undefined
             }
-            onClick={() => onEquip(stack)}
+            onClick={() => onEquip(item)}
             className={`min-h-11 flex-1 rounded-(--ddp-radius-md) border px-3 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
               classBlocked
                 ? "border-ddp-border bg-black/30 text-ddp-ink-muted"
@@ -330,65 +344,31 @@ function DetailCard({
           </button>
         )}
 
-        {sellableCount > 0 && (
-          <>
-            <button
-              type="button"
-              disabled={busy || !inTown}
-              title={!inTown ? t("sellTownOnly") : undefined}
-              onClick={() => handleSell(false)}
-              className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-amber-400/60 bg-amber-400/10 px-3 text-xs font-bold text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {confirmingSell ? t("confirmSell") : t("sellOneButton")}
-            </button>
-            {sellableCount > 1 && (
-              <button
-                type="button"
-                disabled={busy || !inTown}
-                title={!inTown ? t("sellTownOnly") : undefined}
-                onClick={() => handleSell(true)}
-                className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-amber-400/40 bg-amber-400/5 px-3 text-xs font-bold text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {confirmingSell
-                  ? t("confirmSell")
-                  : t("sellAllButton", { count: sellableCount })}
-              </button>
-            )}
-          </>
+        {!equipped && (
+          <button
+            type="button"
+            disabled={busy || !inTown}
+            title={!inTown ? t("sellTownOnly") : undefined}
+            onClick={handleSell}
+            className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-amber-400/60 bg-amber-400/10 px-3 text-xs font-bold text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {confirmingSell ? t("confirmSell") : t("sellButton")}
+          </button>
         )}
       </div>
 
-      {sellableCount > 0 && (
+      {!equipped && (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             disabled={busy || !inTown}
             title={!inTown ? t("sellTownOnly") : undefined}
-            onClick={() => handleSalvage(false)}
+            onClick={handleSalvage}
             className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/50 bg-violet-400/10 px-3 text-xs font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <MaterialIcon className="h-3.5 w-3.5" />
-            {confirmingSalvage
-              ? t("confirmSalvage")
-              : t("salvageOneButton", { yield: perItemYield })}
+            {confirmingSalvage ? t("confirmSalvage") : t("salvageButton", { yield: perItemYield })}
           </button>
-          {sellableCount > 1 && (
-            <button
-              type="button"
-              disabled={busy || !inTown}
-              title={!inTown ? t("sellTownOnly") : undefined}
-              onClick={() => handleSalvage(true)}
-              className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/30 bg-violet-400/5 px-3 text-xs font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <MaterialIcon className="h-3.5 w-3.5" />
-              {confirmingSalvage
-                ? t("confirmSalvage")
-                : t("salvageAllButton", {
-                    count: sellableCount,
-                    yield: perItemYield * sellableCount,
-                  })}
-            </button>
-          )}
         </div>
       )}
     </div>
@@ -411,76 +391,64 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
 
   const [activeTab, setActiveTab] = useState<GearSlot>("weapon");
   const [classOnly, setClassOnly] = useState(false);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const allStacks = useMemo(() => groupIntoStacks(inventory), [inventory]);
-  const stacks = useMemo(() => {
-    return allStacks
-      .filter((s) => s.slot === activeTab)
-      .filter((s) => {
+  // M7.9 "no stacking" — every owned instance is its own tile, sorted
+  // BEST -> WORST (see `compareInventoryItems`).
+  const items = useMemo(() => {
+    return inventory
+      .filter((i) => i.slot === activeTab)
+      .filter((i) => {
         if (!classOnly || !heroCls) return true;
-        const tpl = ITEM_TEMPLATES[s.templateId];
+        const tpl = ITEM_TEMPLATES[i.templateId];
         return !tpl || tpl.classReq === null || tpl.classReq === heroCls;
       })
-      .sort((a, b) => {
-        const tierDiff =
-          (ITEM_TEMPLATES[b.templateId]?.tier ?? 0) - (ITEM_TEMPLATES[a.templateId]?.tier ?? 0);
-        return tierDiff !== 0 ? tierDiff : b.refineLevel - a.refineLevel;
-      });
-  }, [allStacks, activeTab, classOnly, heroCls]);
+      .sort(compareInventoryItems);
+  }, [inventory, activeTab, classOnly, heroCls]);
 
   const equippedItem = inventory.find((i) => i.equippedSlot === activeTab) ?? null;
   const equippedTemplateId = equippedItem?.templateId ?? null;
   const equippedRefineLevel = equippedItem?.refineLevel ?? 0;
-  const selectedStack = stacks.find((s) => stackKey(s) === selectedKey) ?? null;
+  const selectedItem = items.find((i) => i.instanceId === selectedInstanceId) ?? null;
 
   async function resync(): Promise<void> {
     const res = await fetchInventory();
     if (res) setInventory(res.items.map(toInventoryItem));
   }
 
-  async function handleEquip(stack: ItemStack): Promise<void> {
-    if (stack.unequippedIds.length === 0) return;
-    const instanceId = stack.unequippedIds[0];
+  async function handleEquip(target: InventoryItem): Promise<void> {
+    if (target.equippedSlot !== null) return;
     setBusy(true);
-    const res = await postEquip(instanceId);
+    const res = await postEquip(target.instanceId);
     if (res.ok) {
-      setInventory(applyEquipChange(inventory, instanceId, stack.slot));
-      // M7.6 ตีบวก: carry the stack's refine level so the sim applies the
+      setInventory(applyEquipChange(inventory, target.instanceId, target.slot));
+      // M7.6 ตีบวก: carry the item's refine level so the sim applies the
       // RIGHT stats immediately (a +7 sword must never equip as if +0).
-      queueEquip(stack.slot, stack.templateId, stack.refineLevel);
+      queueEquip(target.slot, target.templateId, target.refineLevel);
     } else {
       await resync();
     }
     setBusy(false);
   }
 
-  async function handleUnequip(stack: ItemStack): Promise<void> {
-    if (!stack.equippedInstanceId) return;
-    const instanceId = stack.equippedInstanceId;
+  async function handleUnequip(target: InventoryItem): Promise<void> {
+    if (target.equippedSlot === null) return;
     setBusy(true);
-    const res = await postUnequip(instanceId);
+    const res = await postUnequip(target.instanceId);
     if (res.ok) {
-      setInventory(applyUnequipChange(inventory, instanceId));
-      queueEquip(stack.slot, null);
+      setInventory(applyUnequipChange(inventory, target.instanceId));
+      queueEquip(target.slot, null);
     } else {
       await resync();
     }
     setBusy(false);
   }
 
-  async function handleSellOne(stack: ItemStack): Promise<void> {
-    if (stack.unequippedIds.length === 0) return;
+  async function handleSell(target: InventoryItem): Promise<void> {
+    if (target.equippedSlot !== null) return;
     setBusy(true);
-    await executeSell([stack.unequippedIds[0]]);
-    setBusy(false);
-  }
-
-  async function handleSellAll(stack: ItemStack): Promise<void> {
-    if (stack.unequippedIds.length === 0) return;
-    setBusy(true);
-    await executeSell(stack.unequippedIds);
+    await executeSell([target.instanceId]);
     setBusy(false);
   }
 
@@ -495,17 +463,10 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     setBusy(false);
   }
 
-  async function handleSalvageOne(stack: ItemStack): Promise<void> {
-    if (stack.unequippedIds.length === 0) return;
+  async function handleSalvage(target: InventoryItem): Promise<void> {
+    if (target.equippedSlot !== null) return;
     setBusy(true);
-    await executeSalvage([stack.unequippedIds[0]]);
-    setBusy(false);
-  }
-
-  async function handleSalvageAll(stack: ItemStack): Promise<void> {
-    if (stack.unequippedIds.length === 0) return;
-    setBusy(true);
-    await executeSalvage(stack.unequippedIds);
+    await executeSalvage([target.instanceId]);
     setBusy(false);
   }
 
@@ -591,7 +552,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
               type="button"
               onClick={() => {
                 setActiveTab(slot);
-                setSelectedKey(null);
+                setSelectedInstanceId(null);
               }}
               className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
                 activeTab === slot
@@ -640,28 +601,27 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-          {stacks.length === 0 ? (
+          {items.length === 0 ? (
             <p className="text-[11px] text-ddp-ink-muted/70">{t("emptySlotHint")}</p>
           ) : (
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-              {stacks.map((stack) => {
-                const key = stackKey(stack);
-                return (
-                  <GridCell
-                    key={key}
-                    stack={stack}
-                    isNew={!sessionKnownTemplateIds.includes(stack.templateId)}
-                    selected={selectedKey === key}
-                    onSelect={() => setSelectedKey((cur) => (cur === key ? null : key))}
-                  />
-                );
-              })}
+              {items.map((it) => (
+                <GridCell
+                  key={it.instanceId}
+                  item={it}
+                  isNew={!sessionKnownTemplateIds.includes(it.templateId)}
+                  selected={selectedInstanceId === it.instanceId}
+                  onSelect={() =>
+                    setSelectedInstanceId((cur) => (cur === it.instanceId ? null : it.instanceId))
+                  }
+                />
+              ))}
             </div>
           )}
 
-          {selectedStack && (
+          {selectedItem && (
             <DetailCard
-              stack={selectedStack}
+              item={selectedItem}
               heroCls={heroCls}
               equippedTemplateId={equippedTemplateId}
               equippedRefineLevel={equippedRefineLevel}
@@ -669,10 +629,8 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
               busy={busy}
               onEquip={handleEquip}
               onUnequip={handleUnequip}
-              onSellOne={handleSellOne}
-              onSellAll={handleSellAll}
-              onSalvageOne={handleSalvageOne}
-              onSalvageAll={handleSalvageAll}
+              onSell={handleSell}
+              onSalvage={handleSalvage}
             />
           )}
         </div>

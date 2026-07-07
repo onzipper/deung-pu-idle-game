@@ -15,7 +15,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
-import { AutoHuntToggle } from "@/ui/components/AutoHuntToggle";
+import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
 import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
 import { useGameStore, type NavNeighborSummary } from "@/ui/store/gameStore";
@@ -46,26 +46,39 @@ export function WalkControls() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
+      {/* Structural overflow guard (audit #7): `flex-wrap` is the FALLBACK —
+          at a comfortable width every child fits on one line as before, but
+          at a narrow logical width (~320px) the fixed-size clusters (nav
+          arrows, bot switch + warp + right arrow) never squish or overlap;
+          instead the row wraps onto a second line while the center label
+          truncates to whatever space it's given. Verified by width
+          arithmetic (44px arrows + ~140px bot switch + 44px warp button
+          already exceed a 320px-wide panel before the center label even
+          gets a turn) — a real in-browser check is still recommended. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
         <WalkArrow
           dir="left"
           neighbor={world.left}
           traveling={world.traveling}
           onWalk={walkToZone}
         />
-        <div className="flex min-w-0 flex-col items-center text-center">
-          <span className="truncate text-base font-bold text-emerald-300">{mapName}</span>
-          <span className="text-xs font-medium text-ddp-ink-muted">{zoneLabel}</span>
+        <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+          <span className="w-full truncate text-base font-bold text-emerald-300">
+            {mapName}
+          </span>
+          <span className="w-full truncate text-xs font-medium text-ddp-ink-muted">
+            {zoneLabel}
+          </span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <AutoHuntToggle />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <BotMasterSwitch />
           <button
             type="button"
             disabled={world.traveling || channeling}
             onClick={() => setFastTravelOpen(true)}
             title={t("fastTravelButton")}
             aria-label={t("fastTravelButton")}
-            className="flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 text-lg text-sky-300 shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 text-lg text-sky-300 shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <span aria-hidden>🌀</span>
           </button>
@@ -123,7 +136,7 @@ function WalkArrow({
       onClick={() =>
         neighbor && onWalk({ mapId: neighbor.mapId, zoneIdx: neighbor.zoneIdx })
       }
-      className={`relative flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border px-3 py-2 text-lg font-black shadow-(--ddp-shadow-btn) transition-all duration-100 ${
+      className={`relative flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border px-3 py-2 text-lg font-black shadow-(--ddp-shadow-btn) transition-all duration-100 ${
         enabled
           ? isBossRoom
             ? "border-ddp-boss bg-ddp-boss text-violet-950 hover:brightness-110 active:translate-y-0.5 active:scale-[0.97]"

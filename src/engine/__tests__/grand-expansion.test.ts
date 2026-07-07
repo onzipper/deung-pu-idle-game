@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { CONFIG } from "@/engine";
 import { WORLD_ZONES } from "@/engine/systems/world";
-import { zoneSpawnParams } from "@/engine/systems/waves";
+import { zoneSpawnParams } from "@/engine/systems/hunt";
 import { makeBoss } from "@/engine/entities";
 
 /**

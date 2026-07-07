@@ -53,11 +53,25 @@ export {
   tier3QuestId,
   evolutionQuestFor,
   isEvolutionQuestOffered,
+  // M7.9b tier-3 quest BOSS objective: the UI surfaces the "challenge the young Sovereign"
+  // affordance from `isTier3BossObjectiveActive` (kill objective banked, boss pending).
+  isTier3BossObjectiveActive,
 } from "@/engine/systems/quests";
 
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";
+
+// M7.95 "Hall of Fame" read surface: the server ranks characters + the UI draws the
+// board from `hallOfFame(state)` (lifetime gold / best boss clears / level-cap
+// timestamp). The counters are engine-internal write-only observers, updated only
+// through `step()`; only the pure read + its types are public.
+export {
+  hallOfFame,
+  HOF_UNSTAMPED,
+  type HallOfFameStats,
+  type BossClearBest,
+} from "@/engine/systems/hallOfFame";
 
 // World / zone read helpers (M6 "World & Town"): the UI derives the current
 // map/zone label + walk-arrow (adjacent/locked) affordances from these pure
@@ -67,6 +81,13 @@ export {
   zoneAt,
   worldNav,
   isZoneUnlocked,
+  // M7.9 tier-3 quest preview (owner "option ข"): `questGrantsZoneAccess` is the pure
+  // derived grant (map4 z1 while the tier-3 quest is held); `effectiveUnlockedZones` is
+  // the count map with the grant folded in — the UI builds its zone/fast-travel snapshot
+  // off THIS (a clean extension of the `unlockedZones` read path) so the preview zone
+  // surfaces without a persisted unlock.
+  questGrantsZoneAccess,
+  effectiveUnlockedZones,
   firstFarmLocation,
   type Zone,
   type WorldNav,

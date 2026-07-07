@@ -19,9 +19,15 @@ import { makeBoss, makeBossAdd } from "@/engine/entities";
 import type { Boss, BossBehavior, BossVarietyState, EnemyKind } from "@/engine/entities";
 import { combatPower } from "@/engine/systems/stats";
 import { grantKillXp } from "@/engine/systems/leveling";
-import { advanceQuestObjective } from "@/engine/systems/quests";
+import {
+  advanceQuestObjective,
+  isTier3QuestBossFight,
+  tier3QuestBossScale,
+} from "@/engine/systems/quests";
 import { onBossRoomCleared } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
+import { creditGold } from "@/engine/systems/economy";
+import { recordBossClear } from "@/engine/systems/hallOfFame";
 import { rollBossDrop } from "@/engine/systems/gear";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
@@ -36,7 +42,15 @@ function has(v: BossVarietyState, name: BossBehavior): boolean {
 /** Begin the boss fight. Precondition (checked by caller): bossReady + battle. */
 export function startBossFight(state: GameState): void {
   state.phase = "boss";
-  state.boss = makeBoss(state.nextId++, state.stage);
+  // Stamp the fight-start sim-time (M7.95 HOF): the clear DURATION is `state.time`
+  // minus this at the boss's death — deterministic step counting, no wall-clock.
+  state.bossFightStart = state.time;
+  // M7.9b tier-3 quest boss: while the tier-3 quest is the ACTIVE reason for map4 boss-room
+  // access (tier-2 hero, quest held, boss objective pending), the Glacial Sovereign spawns
+  // with the softer quest-override scales (a "young" version a tier-2 hero can beat) — same
+  // CHARGE behavior/telegraphs, just gentler hp/atk. Null for the REAL s20 boss (tier-3 /
+  // post-quest), so it spawns at full bossVariety scale. Keys off quest state, not tier alone.
+  state.boss = makeBoss(state.nextId++, state.stage, tier3QuestBossScale(state) ?? undefined);
   state.enemies = [];
   // Drop any in-flight enemy projectiles; keep the team's own shots.
   state.projectiles = state.projectiles.filter((p) => p.team === "hero");
@@ -244,8 +258,24 @@ function updateHazard(state: GameState, b: Boss, v: BossVarietyState): boolean {
 
 /** Boss defeated: pay out and flag victory (nextStage is a separate action). */
 export function onBossKilled(state: GameState): void {
+  // M7.9b: capture the quest-boss flag BEFORE advancing the killBoss objective (which
+  // flips the flag off). The young Sovereign completes the tier-3 quest + rewards the
+  // fight, but must NOT progress the WORLD — it skips the HOF s20 record (its scaled
+  // difficulty must not pollute the real-boss best), the guaranteed drop (the real s20
+  // gear is earned by the real fight), and the map unlock (the hero still returns to beat
+  // the REAL s15 boss for the persisted map4 unlock — see onBossRoomCleared below).
+  const questBoss = isTier3QuestBossFight(state);
+  // M7.95 HOF: record this boss stage's clear DURATION (fastest kept) before the
+  // phase flip. Deterministic — `state.time` less the fight-start stamp (steps ×
+  // FIXED_DT). A directly-invoked kill (no startBossFight) has no start -> skip.
+  if (state.bossFightStart !== null) {
+    if (!questBoss) {
+      recordBossClear(state, state.stage, Math.max(0, state.time - state.bossFightStart));
+    }
+    state.bossFightStart = null;
+  }
   const goldGained = CONFIG.goldPerBoss(state.stage);
-  state.gold += goldGained;
+  creditGold(state, goldGained);
   // Boss kills grant a larger XP milestone to every alive hero (before payout /
   // phase flip, while the winning team is still on the field).
   grantKillXp(state, CONFIG.leveling.xpPerBossKill(state.stage));
@@ -253,8 +283,10 @@ export function onBossKilled(state: GameState): void {
   // while the winning hero is still on the field (before the phase flip).
   advanceQuestObjective(state, "killBoss");
   // M7: a boss is a GUARANTEED drop (stateless hash; never the wave RNG). Rolled
-  // while the boss is still on the field so the drop position/id are real.
-  if (state.boss) rollBossDrop(state, state.boss);
+  // while the boss is still on the field so the drop position/id are real. The tier-3
+  // QUEST boss (young Sovereign) drops nothing — the real s20 gear is earned by the real
+  // fight (a scaled practice boss must not be a loot faucet).
+  if (!questBoss && state.boss) rollBossDrop(state, state.boss);
   const bx = state.boss?.x ?? 0;
   const by = state.boss?.y ?? 0;
   state.boss = null;
@@ -268,7 +300,12 @@ export function onBossKilled(state: GameState): void {
   // MAP's first zone (emits mapUnlocked + zoneUnlocked). No-op for a non-boss-room
   // boss (there are none in M6, but the guard keeps this safe). The player then
   // walks out of the victory via `advanceStage` (-> next map) or backtracks.
-  onBossRoomCleared(state);
+  //
+  // M7.9b: the tier-3 QUEST boss (young Sovereign) SKIPS this — beating it completes the
+  // quest but never unlocks map5 or persists any map4 progression. The hero evolves to
+  // tier 3, then returns to beat the REAL s15 boss, and THAT does the persisted map4
+  // unlock; the next (real) s20 fight then unlocks map5 the normal way.
+  if (!questBoss) onBossRoomCleared(state);
 }
 
 /** Team wiped: boss leaves, revive the team, resume normal waves (retry allowed). */
@@ -286,7 +323,6 @@ export function bossRetreat(state: GameState): void {
     h.hp = h.maxHp;
   }
   state.enemies = [];
-  state.waveGap = CONFIG.bossRetreatWaveGap;
   // bossReady stays true — the player can immediately re-challenge.
 }
 

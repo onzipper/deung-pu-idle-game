@@ -13,13 +13,11 @@ import type { GameState } from "@/engine/state";
 /** Advance to the next stage. Precondition (checked by caller): phase "victory". */
 export function nextStage(state: GameState): void {
   state.stage++;
-  state.wave = 0;
   state.kills = 0;
   state.bossReady = false;
   state.phase = "battle";
   state.enemies = [];
   state.projectiles = [];
-  state.waveGap = CONFIG.nextStageWaveGap;
   state.anchorX = CONFIG.baseAnchor;
   // Refill the hunt-field pool for the new stage (M6 "สนามล่ามอน").
   state.spawnBurst = true;

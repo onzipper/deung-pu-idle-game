@@ -27,6 +27,8 @@ import {
 import { prisma } from "@/lib/db";
 import { computeOfflineTime, type OfflineResult } from "@/server/offline";
 import { powerFromSave } from "@/server/characters";
+import { upsertLeaderboardEntry } from "@/server/leaderboard";
+import { parseUiConfig, uiConfigWriteValue } from "@/server/uiConfig";
 
 // HANDOFF: the incoming-save payload zod (`saveDataSchema`) now lives in the
 // engine (`src/engine/state/saveSchema.ts`, colocated with the SAVE_VERSION shape)
@@ -107,6 +109,7 @@ export async function persistSave(
   userId: string,
   input: unknown,
   now: Date = new Date(),
+  uiConfig?: unknown,
 ): Promise<PersistResult> {
   const parsed = parseSaveData(input);
   if (!parsed.ok) return parsed;
@@ -119,6 +122,22 @@ export async function persistSave(
   const data: SaveData = { ...parsed.data, lastSeen: now.getTime() };
   const jsonData = data as unknown as Prisma.InputJsonObject;
   const power = powerFromSave(data.hero);
+
+  // Cross-device UI/automation config (owner request 2026-07-07). OPTIONAL +
+  // BEST-EFFORT: a cosmetic preference blob must NEVER fail the player's real
+  // save. Missing (`undefined`) → leave the stored value untouched (an old
+  // client that doesn't send it doesn't wipe it). Present-but-invalid → drop it
+  // (log) and still persist the save. Only a valid one is written, in the SAME
+  // Character.update as the HOF caches below.
+  const characterData: Prisma.CharacterUpdateInput = {
+    level: data.hero.level,
+    power,
+  };
+  if (uiConfig !== undefined) {
+    const uic = parseUiConfig(uiConfig);
+    if (uic.ok) characterData.uiConfig = uiConfigWriteValue(uic.data);
+    else console.warn("[persistSave] rejected uiConfig (kept prior):", uic.error);
+  }
 
   await prisma.$transaction([
     prisma.saveState.upsert({
@@ -134,9 +153,20 @@ export async function persistSave(
     // client grant itself materials.
     prisma.character.update({
       where: { id: characterId },
-      data: { level: data.hero.level, power },
+      data: characterData,
     }),
   ]);
+
+  // M7.95 Hall of Fame: rebuild the character's leaderboard projection from the
+  // just-persisted (validated) save. BEST-EFFORT — a leaderboard-cache failure
+  // must never fail the player's save (the blob is already committed above); it
+  // self-heals on the next autosave. Everything ranked is re-derived server-side
+  // (power over stats+gear+refine, server-stamped times) — see @/server/leaderboard.
+  try {
+    await upsertLeaderboardEntry(characterId, userId, data, now);
+  } catch (err) {
+    console.error("[persistSave] leaderboard upsert failed (non-fatal):", err);
+  }
 
   return { ok: true, lastSeen: now.toISOString() };
 }

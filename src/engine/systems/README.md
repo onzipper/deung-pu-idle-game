@@ -4,7 +4,7 @@ Each system is a pure function `(state, dt, ctx) => void | state'` invoked once 
 
 - `movement` — heroes advance, enemies close in, positioning (melee front / ranged back)
 - `combat` — attack timers, damage, death, kill → gold + XP, solo respawn (field-clear anti-stall)
-- `waves` — spawn schedule, per-wave/stage scaling (held while no hero is alive)
+- `hunt` — spawn schedule, per-zone/stage scaling (held while no hero is alive)
 - `skills` — cooldowns + auto-cast (with the "no target in range" guard)
 - `leveling` — kill XP → per-hero level (the primary power axis post-M5-pivot)
 - `evolution` — player-triggered tier-2 class advancement (gold + level gate)

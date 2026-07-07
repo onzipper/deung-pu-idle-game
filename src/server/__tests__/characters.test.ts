@@ -18,6 +18,8 @@ const { mockPrisma } = vi.hoisted(() => ({
       updateMany: vi.fn(),
       update: vi.fn(),
     },
+    leaderboardEntry: { deleteMany: vi.fn() },
+    bossRecord: { deleteMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -51,6 +53,8 @@ beforeEach(() => {
   mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) =>
     fn(mockPrisma),
   );
+  mockPrisma.leaderboardEntry.deleteMany.mockResolvedValue({ count: 0 });
+  mockPrisma.bossRecord.deleteMany.mockResolvedValue({ count: 0 });
 });
 
 describe("createCharacterSchema — name/class validation", () => {
@@ -142,7 +146,7 @@ describe("owner/liveness gating", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("deleteCharacter soft-deletes an owned live character", async () => {
+  it("deleteCharacter soft-deletes an owned live character AND purges its board rows", async () => {
     mockPrisma.character.updateMany.mockResolvedValue({ count: 1 });
     const r = await deleteCharacter(USER, "char_1");
     expect(r.ok).toBe(true);
@@ -152,6 +156,20 @@ describe("owner/liveness gating", () => {
         data: expect.objectContaining({ deletedAt: expect.any(Date) }),
       }),
     );
+    // Hall-of-Fame projection removed in the same tx (soft delete ≠ FK cascade).
+    expect(mockPrisma.leaderboardEntry.deleteMany).toHaveBeenCalledWith({
+      where: { characterId: "char_1" },
+    });
+    expect(mockPrisma.bossRecord.deleteMany).toHaveBeenCalledWith({
+      where: { characterId: "char_1" },
+    });
+  });
+
+  it("deleteCharacter does NOT purge board rows when nothing was deleted", async () => {
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 0 });
+    await deleteCharacter("non_owner", "char_1");
+    expect(mockPrisma.leaderboardEntry.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.bossRecord.deleteMany).not.toHaveBeenCalled();
   });
 });
 

@@ -118,7 +118,19 @@ export function toOnboardingSnapshot(s: {
 /** CSS selector target (`data-onboarding-anchor="<value>"`) a step spotlights.
  * Omitted for steps that aren't anchored to a control (welcome/outro). */
 export type OnboardingAnchor =
-  "kill-progress" | "stat-panel" | "skill-bar" | "boss-panel" | "settings-row";
+  | "kill-progress"
+  | "stat-panel"
+  | "skill-bar"
+  | "boss-panel"
+  | "settings-row"
+  /** The bot MASTER switch (`BotMasterSwitch.tsx`, owner UX consolidation
+   * 2026-07-07) — see the `botSwitchIntro` step below. */
+  | "bot-master"
+  /** The WHOLE goal-ladder card (`GoalLadder.tsx`'s outer container) — the
+   * class-change quest's accept/change-class controls live inside it now
+   * (UX-fix wave, moved off `skill-bar`), so quest-related tips spotlight
+   * this instead. */
+  | "goal-ladder";
 
 /** Player intents the "action" advance rule can detect via a snapshot diff.
  * Add a case here + in `didActionOccur` when a later step needs a new one. */
@@ -179,6 +191,17 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
     id: "slotAutoSkill",
     anchor: "skill-bar",
     advance: { kind: "action", action: "setAutoSlot" },
+  },
+  {
+    // Owner UX consolidation (2026-07-07): introduces the ONE bot master
+    // switch that gates every automation sub-behavior just shown above
+    // (auto-slotting) plus the ones still to come (auto-allocate, auto-
+    // potion, bot town trips, auto-advance) — right after the player has
+    // just learned "the hero can act on its own", teach them where the
+    // off-switch for all of that lives.
+    id: "botSwitchIntro",
+    anchor: "bot-master",
+    advance: { kind: "next" },
   },
   {
     id: "bossChallenge",

@@ -105,27 +105,22 @@ export function makeHero(
     },
     // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
     command: null,
+    // Combat aim (render-only facing observer) — re-derived each step. Transient.
+    aimX: null,
   };
 }
 
 /**
- * Build an enemy scaled by stage + wave. Consumes exactly two RNG draws
- * (initial attack cd, engage jitter), in that order — see `waves.ts` for how
- * this interleaves with wave-composition draws.
+ * Build an enemy scaled by stage. Consumes exactly two RNG draws
+ * (initial attack cd, engage jitter), in that order — see `hunt.ts` for how
+ * this interleaves with spawn-composition draws.
  *
- * `x` is left at 0; the wave spawner positions it.
+ * `x` is left at 0; the hunt-field spawner positions it.
  */
-export function makeEnemy(
-  id: number,
-  kind: EnemyKind,
-  stage: number,
-  wave: number,
-  rng: Rng,
-): Enemy {
+export function makeEnemy(id: number, kind: EnemyKind, stage: number, rng: Rng): Enemy {
   const et = ENEMY_TYPES[kind];
-  const wm = 1 + wave * CONFIG.waveHpScale;
-  const hp = Math.round(CONFIG.enemyHp(stage) * et.hpMult * wm);
-  const atk = Math.round(CONFIG.enemyAtk(stage) * et.atkMult * wm);
+  const hp = Math.round(CONFIG.enemyHp(stage) * et.hpMult);
+  const atk = Math.round(CONFIG.enemyAtk(stage) * et.atkMult);
   return {
     id,
     kind,
@@ -141,7 +136,7 @@ export function makeEnemy(
     cd: rng.next() * CONFIG.enemyInitialCdJitter,
     engageOffset: rng.next() * CONFIG.enemyEngageJitter,
     // Hunt-field fields (M6 "สนามล่ามอน"): the spawn system positions the mob and
-    // sets its temperament (see systems/waves.ts `spawnMob`). Defaults are a
+    // sets its temperament (see systems/hunt.ts `spawnMob`). Defaults are a
     // passive mob anchored at x=0 — safe for a directly-injected test enemy.
     homeX: 0,
     aggressive: false,
@@ -150,16 +145,25 @@ export function makeEnemy(
   };
 }
 
-/** Build the stage boss (Phase B wiring; factory ready now). */
-export function makeBoss(id: number, stage: number): Boss {
+/** Build the stage boss (Phase B wiring; factory ready now).
+ *
+ * `scaleOverride` (M7.9b tier-3 quest boss): when provided, its hp/atk scales REPLACE the
+ * bossVariety row's scales while the boss KEEPS the row's `behaviors` (mechanics + telegraphs
+ * unchanged). Used by `systems/boss.startBossFight` to spawn the quest-scaled "young" Glacial
+ * Sovereign for a tier-2 hero mid-tier-3-quest; the real s20 boss passes no override. */
+export function makeBoss(
+  id: number,
+  stage: number,
+  scaleOverride?: { hpScale: number; atkScale: number },
+): Boss {
   // M7.9 boss variety: stamp the per-stage behavior snapshot + init the mechanic
   // timers. `hpScale`/`atkScale` are identity (1) in this first pass, so a boss's
   // stats stay byte-identical to the parametric curve; a stage with no roster row
   // (e.g. a test forcing a boss at a non-boss stage) falls back to the classic kit.
   const bb = CONFIG.bossBehavior;
   const row = CONFIG.bossVariety[stage];
-  const hpScale = row?.hpScale ?? 1;
-  const atkScale = row?.atkScale ?? 1;
+  const hpScale = scaleOverride?.hpScale ?? row?.hpScale ?? 1;
+  const atkScale = scaleOverride?.atkScale ?? row?.atkScale ?? 1;
   const hp = Math.round(CONFIG.bossHp(stage) * hpScale);
   return {
     id,

@@ -43,6 +43,7 @@ import {
   type TravelState,
 } from "@/engine/systems/world";
 import type { GameEvent } from "@/engine/state/events";
+import { cloneBossBest, type BossClearBest } from "@/engine/systems/hallOfFame";
 import { SAVE_VERSION } from "@/engine/state/version";
 
 export * from "@/engine/state/events";
@@ -56,13 +57,38 @@ export interface GameState {
   time: number;
   stage: number;
   phase: Phase;
-  wave: number;
   /** Kills toward THIS zone's unlock quota (live counter; see `zoneKills`). */
   kills: number;
   /** Persisted per-zone unlock progress (SAVE v13) backing `kills` across zone
    * moves — see `arriveAtZone` (stash old zone / restore new zone). */
   zoneKills: Record<string, number>;
   gold: number;
+  /**
+   * Lifetime gold ever earned (M7.95 HOF "total gold" board, SAVE v16). Rises with
+   * every POSITIVE gold credit (via `creditGold`); SPENDING never touches it. A
+   * write-only observer — never gates gameplay.
+   */
+  goldEarned: number;
+  /**
+   * Best (lowest) boss-clear time per boss stage (M7.95 HOF, SAVE v16), keyed by
+   * stage number (5/10/15/20/25/30). `seconds` is deterministic step counting;
+   * `at` is epoch-ms stamped at the save boundary (0 = unstamped — see
+   * systems/hallOfFame.ts). Persisted; write-only observer.
+   */
+  bossBest: Record<number, BossClearBest>;
+  /**
+   * Sim-time (`state.time`) at which the CURRENT boss fight started, or null when
+   * not fighting a boss (M7.95). Transient — the fight duration is `state.time`
+   * minus this at the kill. A boss fight never spans a save, so it is NEVER
+   * persisted (rebuilt null on load, like `traveling`).
+   */
+  bossFightStart: number | null;
+  /**
+   * Epoch-ms the hero FIRST reached `levelCap` (M7.95 HOF tiebreaker, SAVE v16), or
+   * null if never. 0 = reached-unstamped (the save boundary stamps the wall-clock,
+   * mirroring `lastSeen`). Persisted; write-only observer.
+   */
+  levelCapAt: number | null;
   /** The player's chosen base class (M5). Drives which hero is spawned. */
   heroClass: HeroClass;
   autoCast: boolean;
@@ -198,12 +224,6 @@ export interface GameState {
   /** Formation anchor x the team advances toward. */
   anchorX: number;
   /**
-   * Legacy wave gap (M6 "สนามล่ามอน" retired the march-model wave scheduler). Kept
-   * on the state as an inert field so the boss/flow resets that still touch it
-   * compile; the hunting spawn pool uses `spawnCd`/`spawnBurst` instead.
-   */
-  waveGap: number;
-  /**
    * Hunting spawn pool (M6 "สนามล่ามอน"). `spawnCd` counts down to the next
    * respawn; `spawnBurst` (set on a farm-zone arrival) fills the field to
    * `maxAlive` in one step; `spawnPaused` freezes spawns (tests inject their own
@@ -284,6 +304,14 @@ export interface SaveData {
   /** Content stage of the current zone (M6: mirrors `zoneAt(location).stage`). */
   stage: number;
   gold: number;
+  /** Lifetime gold ever earned (M7.95 HOF, SAVE v16). Never decreased by spending. */
+  goldEarned: number;
+  /** Best boss-clear time per boss stage (M7.95 HOF, SAVE v16), keyed by stage
+   * number. `at` epoch-ms is stamped at the save boundary (0 = unstamped). */
+  bossBest: Record<number, BossClearBest>;
+  /** Epoch-ms the hero first reached `levelCap` (M7.95 HOF tiebreaker, SAVE v16),
+   * or null if never (0 = reached-unstamped; boundary stamps the wall-clock). */
+  levelCapAt: number | null;
   /** The single active character (M5 — replaces the team's `unlocked`/`heroes`). */
   hero: CharacterSave;
   /** Current world position (M6 "World & Town", SAVE v8). */
@@ -405,7 +433,7 @@ export function repairHeroClass(save: SaveData, trueClass: HeroClass): SaveData 
 /**
  * Construct a live `GameState` from a seed and (optionally) a loaded save.
  * A save restores stage / gold / chosen class / character progression; the
- * battlefield always starts fresh at wave 0 of the saved stage.
+ * battlefield always starts fresh on the saved stage's hunting field.
  * `fallbackClass` seeds a FRESH state (no save yet — a just-created character's
  * first boot) with the account's true class instead of the swordsman default.
  */
@@ -432,12 +460,21 @@ export function initGameState(
     time: 0,
     stage,
     phase: "battle",
-    wave: 0,
     // Restore this zone's persisted unlock progress (v13) — a reload mid-zone
     // resumes the gauge instead of restarting it.
     kills: save?.zoneKills?.[`${location.mapId}:${location.zoneIdx}`] ?? 0,
     zoneKills: { ...(save?.zoneKills ?? {}) },
     gold: save?.gold ?? 0,
+    // Hall of Fame (M7.95, SAVE v16): restore the lifetime totals / boss bests /
+    // level-cap timestamp; a fresh (or pre-v16) start begins empty. `bossFightStart`
+    // is transient (a boss fight never spans a save) — always null on boot.
+    goldEarned: Math.max(0, Math.floor(save?.goldEarned ?? 0)),
+    bossBest: cloneBossBest(save?.bossBest),
+    bossFightStart: null,
+    levelCapAt:
+      typeof save?.levelCapAt === "number" && Number.isFinite(save.levelCapAt) && save.levelCapAt >= 0
+        ? save.levelCapAt
+        : null,
     heroClass,
     autoCast: false,
     autoAllocate: false,
@@ -474,7 +511,6 @@ export function initGameState(
     boss: null,
     projectiles: [],
     anchorX: CONFIG.baseAnchor,
-    waveGap: CONFIG.firstWaveGap,
     // Hunting spawn pool (M6): burst-fill the field on the first battle step of a
     // farm zone (a fresh start / loaded save both begin in one).
     spawnCd: CONFIG.hunt.initialGap,
@@ -558,8 +594,16 @@ function normalizeHeroQuest(
   const def = evolutionQuestFor(cls, tier); // null at tier 3 (fully evolved, no quest)
   if (!def || !saved || saved.accepted !== true) return null;
   if (saved.id !== def.id) return null;
+  // Objective-SHAPE guard (M7.9 tier-3 REDESIGN, owner "option ข"): a pre-redesign
+  // in-flight tier-3 quest (old 2-objective map3+map2-boss shape) has a progress array
+  // whose length no longer matches the new 1-objective (map4-z1 kills) def — reset it to
+  // un-accepted (re-offered) rather than mis-map the count. See the twin guard +
+  // rationale in state/version.ts `normalizeQuest` (no SAVE_VERSION bump needed).
+  if (!Array.isArray(saved.progress) || saved.progress.length !== def.objectives.length) {
+    return null;
+  }
   const progress = def.objectives.map((_, i) => {
-    const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
+    const v = saved.progress[i];
     return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
   });
   return { id: def.id, accepted: true, progress };
@@ -599,6 +643,12 @@ export function toSaveData(state: GameState): SaveData {
     version: SAVE_VERSION,
     stage: state.stage,
     gold: state.gold,
+    // Hall of Fame (M7.95, SAVE v16): lifetime gold + best boss clears + level-cap
+    // timestamp. `bossFightStart` is transient (not persisted). The unstamped `at`/
+    // `levelCapAt` (0) are stamped by the save boundary, like `lastSeen`.
+    goldEarned: state.goldEarned,
+    bossBest: cloneBossBest(state.bossBest),
+    levelCapAt: state.levelCapAt,
     // World position (M6, SAVE v8). `traveling` is transient — a reload resumes
     // standing in `location` (mid-walk is not persisted).
     location: { mapId: state.location.mapId, zoneIdx: state.location.zoneIdx },

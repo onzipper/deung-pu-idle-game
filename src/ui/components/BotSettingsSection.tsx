@@ -13,6 +13,7 @@
 import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { CONFIG } from "@/engine";
+import { InfoTip } from "@/ui/components/InfoTip";
 import { readStoredAutoEquip, useGameStore } from "@/ui/store/gameStore";
 
 const TARGET_CAP = CONFIG.shop.stackCap;
@@ -22,25 +23,37 @@ function ToggleRow({
   label,
   on,
   onToggle,
+  disabled,
+  title,
 }: {
   label: string;
   on: boolean;
   onToggle: () => void;
+  /** Forced off + non-interactive while the bot MASTER switch is off (the two
+   * ENGINE-PERSISTED sub-flags this guards can't be per-frame gated — see
+   * `gameStore.ts`'s `toggleBotMaster` doc — so a direct tap here must never
+   * be able to quietly re-enable automation the master switch says is off). */
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onToggle}
+      disabled={disabled}
+      title={title}
       aria-pressed={on}
       className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-bold transition-all duration-100 active:scale-[0.97] ${
-        on
-          ? "border-emerald-400 bg-emerald-400 text-emerald-950"
-          : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
+        disabled
+          ? "cursor-not-allowed border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted opacity-50"
+          : on
+            ? "border-emerald-400 bg-emerald-400 text-emerald-950"
+            : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
       }`}
     >
       <span
         aria-hidden
-        className={`h-1.5 w-1.5 rounded-full ${on ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
+        className={`h-1.5 w-1.5 rounded-full ${on && !disabled ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
       />
       {label}
     </button>
@@ -63,6 +76,13 @@ function Stepper({
   onChange: (next: number) => void;
 }) {
   const clamp = (n: number) => Math.max(min, max !== undefined ? Math.min(max, n) : n);
+  // Hit-zone trick (audit #6, same pattern as `InfoTip.tsx`'s `before:-inset-3`):
+  // the buttons stay their current VISUAL width (`w-9` = 36px, so the whole
+  // stepper doesn't bulk up), but each gets an invisible `before` pseudo-element
+  // extending its actual tap target out to the ≥44px mobile-safe minimum
+  // (36px + 4px each side = 44px). Height is already `min-h-11` (44px).
+  const hitZone =
+    "relative before:absolute before:inset-y-0 before:-inset-x-1 before:content-['']";
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-[11px] text-ddp-ink-muted/80">{label}</span>
@@ -71,7 +91,7 @@ function Stepper({
           type="button"
           onClick={() => onChange(clamp(value - step))}
           aria-label={`${label} -${step}`}
-          className="min-h-11 w-9 text-base font-black text-ddp-ink-muted"
+          className={`min-h-11 w-9 text-base font-black text-ddp-ink-muted ${hitZone}`}
         >
           −
         </button>
@@ -82,7 +102,7 @@ function Stepper({
           type="button"
           onClick={() => onChange(clamp(value + step))}
           aria-label={`${label} +${step}`}
-          className="min-h-11 w-9 text-base font-black text-ddp-ink-muted"
+          className={`min-h-11 w-9 text-base font-black text-ddp-ink-muted ${hitZone}`}
         >
           +
         </button>
@@ -91,7 +111,16 @@ function Stepper({
   );
 }
 
-export function BotSettingsSection() {
+export interface BotSettingsSectionProps {
+  /** The bot MASTER switch's current value (see `BotMasterSwitch.tsx`) — when
+   * false, the restock/sell-trip toggles are disabled + hinted (they're the
+   * two ENGINE-PERSISTED sub-flags the master force-disables while off; every
+   * OTHER control here is a per-frame-gated UI preference, safe to keep
+   * editable regardless of the master state). */
+  masterOn: boolean;
+}
+
+export function BotSettingsSection({ masterOn }: BotSettingsSectionProps) {
   const bot = useGameStore((s) => s.bot);
   const setBotSettings = useGameStore((s) => s.setBotSettings);
   // Auto-equip is a CLIENT-side executor preference (localStorage, like the
@@ -111,17 +140,23 @@ export function BotSettingsSection() {
         {t("title")}
       </h3>
       <p className="text-[11px] text-ddp-ink-muted/70">{t("hint")}</p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <ToggleRow
           label={t("restockToggle")}
           on={bot.enabled}
           onToggle={() => setBotSettings({ enabled: !bot.enabled })}
+          disabled={!masterOn}
+          title={!masterOn ? t("masterOffDisabledHint") : undefined}
         />
+        <InfoTip text={t("restockHint")} />
         <ToggleRow
           label={t("sellTripToggle")}
           on={bot.sellTripEnabled}
           onToggle={() => setBotSettings({ sellTripEnabled: !bot.sellTripEnabled })}
+          disabled={!masterOn}
+          title={!masterOn ? t("masterOffDisabledHint") : undefined}
         />
+        <InfoTip text={t("sellTripHint")} />
         <ToggleRow label={t("autoEquipToggle")} on={autoEquip} onToggle={toggleAutoEquip} />
       </div>
       <div className="flex flex-col gap-1.5">
