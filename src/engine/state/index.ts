@@ -158,6 +158,16 @@ export interface GameState {
    */
   botPending: { restock: boolean; sell: boolean } | null;
   /**
+   * An in-town bot WALK to the merchant NPC (M6 town NPCs phase 2), or null. After a
+   * bot town TRIP arrives, the hero is placed at the town entry and walks (deterministic,
+   * huntSpeed) to ป้าปุ๊'s anchor before ANY transaction arms — `restock`/`sell` carry the
+   * trip's chores until the hero is within the NPC's interaction radius, at which point
+   * `doBotBusiness` runs (restock + sell sweep, `npcTrade` + `townArrived`). Transient —
+   * NEVER persisted (a reload standing mid-walk simply resumes in `location`, no chores
+   * lost that matter). See systems/bots.ts.
+   */
+  botWalk: { restock: boolean; sell: boolean } | null;
+  /**
    * A SELL trip's in-town dwell (M7.5 anti-warp-loop fix), or null. While
    * non-null the bot stands in town waiting for the client's async sell to
    * shrink the fed `inventoryCount` below the cap (then returns early) or for
@@ -492,6 +502,7 @@ export function initGameState(
     // (unchanged behaviour for a fresh/pre-v12 start).
     autoHunt: typeof save?.autoHunt === "boolean" ? save.autoHunt : true,
     botPending: null,
+    botWalk: null,
     botDwell: null,
     sellTripWatermark: null,
     fastTravelCast: null,

@@ -350,6 +350,21 @@ export const CONFIG = {
     arriveEps: 6,
   },
 
+  // ---- town NPC anchors (M6 town NPCs, phase 2 — engine owns the geometry) ----
+  // The two named town actors' WORLD positions + interaction radius (engine units, the
+  // same space as the hunt field / render layout). The ENGINE is the single source of
+  // truth: render derives its rigs from this (render/townNpcs.ts) and phase-3 UI gates
+  // tap-to-talk on `npcInRange` (systems/townNpcs.ts) — so the layer rule holds (engine
+  // never imports render). `id` matches entities `TownNpcId`; `x` is the feet anchor at
+  // the town's ground line; `radius` is the half-width a hero must be within to interact
+  // (the idle bot's auto-walk target + the phase-3 tap gate). ป้าปุ๊ = merchant (buy/
+  // sell/salvage — the ONLY NPC the bot transacts with); ลุงดึ๋ง = refine smith
+  // (player-only; never botted). Same values render phase-1 shipped with (commit 20b3da3).
+  townNpcs: [
+    { id: "npc:pahpu", x: 230, radius: 42 },
+    { id: "npc:lungdueng", x: 560, radius: 42 },
+  ],
+
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.

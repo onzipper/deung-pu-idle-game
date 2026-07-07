@@ -115,6 +115,11 @@ export {
 // mutator is the `setBotSettings` FrameInput intent, so it stays internal.
 export { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
 
+// Town NPC anchors (M6 town NPCs phase 2): the ENGINE owns the geometry (CONFIG.townNpcs)
+// so render derives its rigs from `townNpcConfig` and phase-3 UI gates tap-to-talk on the
+// pure `npcInRange(state, id)` read — the layer rule holds (engine never imports render).
+export { npcInRange, townNpcConfig, type TownNpcAnchor } from "@/engine/systems/townNpcs";
+
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure
 // reads. Casting / slot assignment happen ONLY through `step()` intents

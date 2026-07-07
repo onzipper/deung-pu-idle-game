@@ -20,6 +20,7 @@ import type {
   ProjectileKind,
   ShopItemId,
   StatKey,
+  TownNpcId,
   ZoneKind,
 } from "@/engine/entities";
 
@@ -120,6 +121,12 @@ export type GameEvent =
   // that clears the bag too) — the client only shows the "nothing to dispose" notice
   // when true, since a tidy-bag potions run giving up is normal, not a stuck bot.
   | { type: "townArrived"; reason: "restock" | "sell" | "restockSell"; sellTriggered: boolean }
+  // Town NPCs phase 2 (M6): the idle BOT reached a town NPC and its transaction window
+  // OPENED (restock buy / sell / salvage arm this very moment, after the in-town walk).
+  // `npcId` names the actor — only the merchant ป้าปุ๊ is botted (the refine smith is
+  // player-only). Minimal payload; one-way like every event (render may bubble a
+  // "ซื้อของหน่อยนะ" speech bubble later). An unhandled kind stays safe per the contract.
+  | { type: "npcTrade"; npcId: TownNpcId }
   // Fast travel lifecycle (M7.5): a short damage-cancellable channel to any
   // UNLOCKED zone, then an instant FREE hop arriving at the zone's gate-side x.
   // Positions are included so render can place the warp-portal fx. `fastTravelBlocked`

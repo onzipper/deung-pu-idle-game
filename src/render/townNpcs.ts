@@ -1,27 +1,24 @@
 /**
- * Town NPC anchors — SINGLE SOURCE OF TRUTH for where the two named town
- * actors stand (ป้าปุ๊ the merchant / ลุงดึ๋ง the refine smith) plus their
- * tap-interaction radius (world/engine units, same space as `render/layout.ts`'s
- * `WORLD_WIDTH`/`GROUND_Y`).
+ * Town NPC anchors — the render-side view of where the two named town actors stand
+ * (ป้าปุ๊ the merchant / ลุงดึ๋ง the refine smith) plus their tap-interaction radius
+ * (world/engine units, same space as `render/layout.ts`'s `WORLD_WIDTH`/`GROUND_Y`).
  *
- * Render-side only for now (M7.x "Town NPCs" task): `views/npcView.ts` reads
- * this to position the two rigs, `GameRenderer.hitTestNpc()` reads it for tap
- * hit-testing. A later engine/bot-routing wave is expected to import this
- * SAME constant (or mirror it exactly, same convention `zoneGates.ts` already
- * uses for engine-derived-but-render-owned geometry) rather than re-deriving
- * its own x positions — keep this the ONE place these numbers live.
- *
- * Placement: both sit well clear of the town zone's walkable edges
- * (`CONFIG.hunt.heroMinX` = 55 on the left; town has no left gate archway —
- * see `zoneGateProps.ts` — and its single right gate sits around x ≈ 876) so
- * neither overlaps the gate props or crowds the hero's spawn/walk path.
+ * SINGLE SOURCE OF TRUTH IS THE ENGINE (M6 town NPCs phase 2): the id / x / radius live
+ * in `CONFIG.townNpcs` (engine/config) so the engine owns the geometry the bot walk +
+ * phase-3 UI tap gate depend on, and this module DERIVES its `TOWN_NPCS` from it. Render
+ * adds only its own presentation concern — the Thai display NAME on the floating plate.
+ * The exported shape is unchanged (`views/npcView.ts` reads `townNpcAnchor` to position
+ * the rigs; `GameRenderer.hitTestNpc()`/`npcViews` iterate `TOWN_NPCS`), so no consumer
+ * changed. `TownNpcId` is re-exported from the engine (its canonical home).
  */
 
-export type TownNpcId = "npc:pahpu" | "npc:lungdueng";
+import { CONFIG, type TownNpcId } from "@/engine";
+
+export type { TownNpcId };
 
 export interface TownNpcAnchor {
   id: TownNpcId;
-  /** Thai display name for the floating name plate. */
+  /** Thai display name for the floating name plate (render presentation only). */
   name: string;
   /** World-x anchor (feet position); world-y is always the town's `GROUND_Y`. */
   x: number;
@@ -29,12 +26,20 @@ export interface TownNpcAnchor {
   radius: number;
 }
 
-/** The ONE exported constant — keep every anchor position in this single
- * array so render/engine/UI all agree on where these two actors stand. */
-export const TOWN_NPCS: readonly TownNpcAnchor[] = [
-  { id: "npc:pahpu", name: "ป้าปุ๊", x: 230, radius: 42 },
-  { id: "npc:lungdueng", name: "ลุงดึ๋ง", x: 560, radius: 42 },
-] as const;
+/** Thai display names for the plate (render-only; the engine owns id/x/radius). */
+const NPC_NAMES: Record<TownNpcId, string> = {
+  "npc:pahpu": "ป้าปุ๊",
+  "npc:lungdueng": "ลุงดึ๋ง",
+};
+
+/** Render anchors DERIVED from the engine's `CONFIG.townNpcs` (x/radius) plus the
+ * render-only display name — so render/engine/UI all agree on where these stand. */
+export const TOWN_NPCS: readonly TownNpcAnchor[] = CONFIG.townNpcs.map((n) => ({
+  id: n.id,
+  name: NPC_NAMES[n.id],
+  x: n.x,
+  radius: n.radius,
+}));
 
 export function townNpcAnchor(id: TownNpcId): TownNpcAnchor {
   const a = TOWN_NPCS.find((n) => n.id === id);
