@@ -203,6 +203,12 @@ export const PALETTE = {
   npcAffordance: 0xffd76b,
   /** Shared warm skin tone for the town NPCs' head/hands. */
   npcSkin: 0xe0b48a,
+  // ---- M8 party P6 (render the party): shadow-body ("ร่างเงา") accents ----
+  /** Continuous desaturation tint lerped in as a hero's `shadowed` flag rises
+   * (see `heroView.ts`'s `updateHeroView` — flat `tint`, no filter/gradient),
+   * distinct from `deadHero`'s ghost tint (a shadow can be alive-but-offline,
+   * a wholly different read from "downed"). */
+  shadowedTint: 0x6b7094,
   /** ผู้ใหญ่บ้าน's (M8 quest Wave C, `npc:elder`) robe — a muted sage-brown so he
    * reads as a THIRD distinct silhouette from the merchant's rust-orange and the
    * smith's cool soot-grey, still inside the desaturated-scenery family. */

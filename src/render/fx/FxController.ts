@@ -102,6 +102,19 @@ const BOSS_CY = GROUND_Y - 30; // matches bossView's CY
  * `updateWarCryFx()`/`fx/warCryAura.ts`). */
 const WARCRY_FADE_WINDOW = 0.5;
 
+// ---- M8 party P6 "render the party" — cohort join/leave juice -------------
+// A soft ring ping + burst when a hero view FIRST appears (`updatePartyMembership()`
+// mirrors `updateEnemySpawns()`'s own first-sight mark-and-sweep convention — no
+// dedicated engine event, same reasoning: a whole party can appear in one step),
+// a small INWARD-converging puff at the last-known position when one disappears.
+// Small/capped, reuses the existing `rings`/`particles` pools — no new pool class.
+const PARTY_JOIN_RING_R0 = 4;
+const PARTY_JOIN_RING_R1 = 30;
+const PARTY_JOIN_RING_DURATION = 0.4;
+const PARTY_JOIN_PARTICLE_COUNT = 8;
+const PARTY_LEAVE_PARTICLE_COUNT = 6;
+const PARTY_LEAVE_PUFF_RADIUS = 20; // burstInward's starting ring radius
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -799,6 +812,15 @@ export class FxController {
   private readonly seenEnemyIds = new Set<number>();
   private readonly frameEnemyIdScratch = new Set<number>();
 
+  /** M8 party P6: same first-sight mark-and-sweep convention as `seenEnemyIds`
+   * above, applied to `state.heroes` — a party-join/leave ping has no
+   * dedicated engine event (a whole cohort can appear/leave in one step; see
+   * `updatePartyMembership()`). Keyed id -> last-seen x (needed for the leave
+   * puff, which fires AFTER the hero has already dropped out of
+   * `state.heroes` — there's no position left to read from `state` by then). */
+  private readonly seenHeroPos = new Map<number, number>();
+  private readonly framePartyIdScratch = new Set<number>();
+
   /** In-flight staged boss-defeat pulses + the deferred "final" payout beat —
    * see `onBossDefeated()`/`updateBossDeathStages()`. */
   private readonly bossDeathStages: BossDeathStage[] = [];
@@ -1174,6 +1196,7 @@ export class FxController {
     this.updateRainArrowTracking(state);
     this.updateKnockback(dt);
     this.updateEnemySpawns(state);
+    this.updatePartyMembership(state);
     this.updateBossDeathStages(dt);
     this.updatePendingFieldFx(dt);
     this.detectBossEntrance(state);
@@ -2990,6 +3013,52 @@ export class FxController {
     for (const id of this.seenEnemyIds) {
       if (!this.frameEnemyIdScratch.has(id)) this.seenEnemyIds.delete(id);
     }
+  }
+
+  /** M8 party P6 juice: render-side mirror of `Pool`'s own hero mark-and-sweep
+   * (same convention as `updateEnemySpawns()` above) — a ring ping + burst the
+   * instant a hero view FIRST appears (member joined the cohort/zone; the
+   * nameplate's own "flash" half of this beat lives in `heroView.ts`, keyed
+   * off the SAME first-sight moment via its `!anim.initialized` edge), and a
+   * small fade-out puff at the last-known position when one disappears. */
+  private updatePartyMembership(state: GameState): void {
+    this.framePartyIdScratch.clear();
+    for (const h of state.heroes) {
+      this.framePartyIdScratch.add(h.id);
+      if (!this.seenHeroPos.has(h.id)) this.onHeroJoinedCohort(h.x);
+      this.seenHeroPos.set(h.id, h.x);
+    }
+    for (const [id, lastX] of this.seenHeroPos) {
+      if (!this.framePartyIdScratch.has(id)) {
+        this.seenHeroPos.delete(id);
+        this.onHeroLeftCohort(lastX);
+      }
+    }
+  }
+
+  private onHeroJoinedCohort(x: number): void {
+    this.rings.spawn({
+      x,
+      y: HERO_TOP_Y,
+      r0: PARTY_JOIN_RING_R0,
+      r1: PARTY_JOIN_RING_R1,
+      duration: PARTY_JOIN_RING_DURATION,
+      width: 2,
+      color: PALETTE.hpGood,
+    });
+    burst(this.particles, x, HERO_MID_Y, PARTY_JOIN_PARTICLE_COUNT, PALETTE.hpGood, {
+      speed: 55,
+      life: 0.4,
+      radius: 2.2,
+    });
+  }
+
+  private onHeroLeftCohort(x: number): void {
+    burstInward(this.particles, x, HERO_MID_Y, PARTY_LEAVE_PARTICLE_COUNT, PALETTE.muted, PARTY_LEAVE_PUFF_RADIUS, {
+      speed: 45,
+      life: 0.45,
+      radius: 2.2,
+    });
   }
 
   /** Boss entrance (item 5): `state.boss` has no dedicated "challenge

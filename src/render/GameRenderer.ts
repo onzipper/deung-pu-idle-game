@@ -131,6 +131,15 @@ export class GameRenderer {
   /** Previous frame's `state.anchorX`, used to derive the "formation is
    * advancing" cue heroView reads for its determined-march lean/bob boost. */
   private lastAnchorX: number | null = null;
+  /**
+   * M8 party P6 hook: per-hero display names for the nameplate shown above
+   * non-primary heroes (slot !== 0) — `Hero` has no name/identity field
+   * (engine stays untouched), so this is the seam the LATER networking/room
+   * wiring calls (e.g. on cohort membership change) to supply each peer's
+   * name. `null`/unset hides every nameplate (today's solo/sim-only state).
+   * See `setHeroDisplayNames()`.
+   */
+  private heroDisplayNames: ReadonlyMap<number, string> | null = null;
 
   /** Set up the Pixi Application and scene layers. Client-only. */
   async create(canvasParent: HTMLElement): Promise<void> {
@@ -277,7 +286,13 @@ export class GameRenderer {
     const heroPool = this.heroPool;
     heroPool.beginFrame();
     state.heroes.forEach((h, slot) => {
-      updateHeroView(heroPool.get(h.id), h, { dt, slot, events: frameEvents, marching });
+      updateHeroView(heroPool.get(h.id), h, {
+        dt,
+        slot,
+        events: frameEvents,
+        marching,
+        displayName: this.heroDisplayNames?.get(h.id) ?? null,
+      });
     });
     heroPool.endFrame();
 
@@ -387,6 +402,7 @@ export class GameRenderer {
     }
     this.currentBossId = null;
     this.lastAnchorX = null;
+    this.heroDisplayNames = null;
     this.bossHpBar = null;
     this.bossLabel = null;
     this.layers = null;
@@ -511,6 +527,21 @@ export class GameRenderer {
     const view = this.npcViews?.get(npcId);
     if (!view || !this.npcSpeech) return;
     this.npcSpeech.show(view.headAnchor, text);
+  }
+
+  /**
+   * M8 party P6 hook: register per-hero display names for the nameplate shown
+   * above non-primary heroes (slot !== 0 in `state.heroes`). There is no
+   * `Hero.name` field (deliberately — the engine stays untouched by cosmetic
+   * identity), so the LATER networking/room wiring calls this whenever cohort
+   * membership/names change (e.g. on a peer joining/renaming). Pass `null` to
+   * clear every nameplate; a hero id simply absent from the map hides only
+   * that hero's nameplate. Safe to call any time (before `create()` resolves,
+   * mid-session, or after `destroy()` — the value is just read defensively in
+   * `draw()`).
+   */
+  setHeroDisplayNames(names: ReadonlyMap<number, string> | null): void {
+    this.heroDisplayNames = names;
   }
 
   /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */
