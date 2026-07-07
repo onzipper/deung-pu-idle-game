@@ -1,0 +1,13 @@
+{
+  "name": "dpu-party-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency lockstep party relay (M8 P4a) - dumb ordered fan-out + membership + connection arbiter. Deploys standalone on Render free tier (root-directory + npm start).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
