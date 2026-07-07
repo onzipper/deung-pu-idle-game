@@ -60,6 +60,12 @@ export const PALETTE = {
    * evolution accent's plain `gold` above (this is a GEAR rarity signal, not
    * the hero-tier evolution one) and from `gearRare`'s cool blue. */
   gearEpic: 0xffb347,
+  /** หินเสริมพลัง (enhancement-stone) drop pop — a flat violet matching the
+   * HUD's `MaterialIcon` (`bg-violet-400`/`border-violet-700`) so the field fx
+   * and the materials counter read as "the same currency" at a glance. Solid
+   * fill, no gradient (footgun 3/10). */
+  stoneMaterial: 0xa78bfa,
+  stoneMaterialDark: 0x6d28d9,
   /** Tier-6/epic weapon "Super Saiyan" aura flame tones (footgun 10: solid
    * flame colors on NORMAL blend, never additive over bright scenes) — two
    * flat tones (outer/core) standing in for a flame gradient without one,

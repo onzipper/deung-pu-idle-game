@@ -2,8 +2,8 @@
  * UAT "ซื้อคืน" (buy-back) — re-purchase an accidentally-SOLD item from ป้าปุ๊
  * within the server's 3-day window, at the price it was originally sold for.
  * Same "POST first, only mutate local state on success" rule as
- * `sellFlow.ts`/`salvageFlow.ts`/`refineFlow.ts`: `ShopPanel.tsx`'s third tab
- * is the only caller.
+ * `sellFlow.ts`/`refineFlow.ts`: `ShopPanel.tsx`'s third tab is the only
+ * caller.
  *
  * On success the returned item (same wire shape as an inventory-GET item) is
  * merged into the local inventory slice (reusing the exact same

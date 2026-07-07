@@ -9,12 +9,41 @@
  * engine events). Epic gets a stronger visual beat (brighter border + the ✨
  * marker from `RARITY_COLORS`) — same fixed/viewport-anchored z-layer
  * vocabulary as `OnboardingOverlay`/`ContextualTipOverlay`.
+ *
+ * หินเสริมพลัง (enhancement-stone) drops get their OWN, smaller `StoneToast`,
+ * store-driven off `stoneFeed` — UNLIKE the item toast above, this fires
+ * straight off the raw `stoneDrop` engine event (`GameClient.tsx`), not a
+ * server claim-mint confirmation: a stone has no rarity/identity worth a
+ * round-trip wait for, it's pure "you just picked some up" juice.
  */
 
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
+import { MaterialIcon } from "@/ui/components/icons";
 import { RARITY_COLORS } from "@/ui/labels";
-import { useGameStore, type DropFeedEntry } from "@/ui/store/gameStore";
+import { useGameStore, type DropFeedEntry, type StoneFeedEntry } from "@/ui/store/gameStore";
+
+/** Wall-clock display duration for a stone toast — shorter/snappier than an
+ * item toast since it's purely a currency tick, not a discovery moment. */
+const STONE_TOAST_DISPLAY_MS = 2200;
+
+function StoneToast({ entry }: { entry: StoneFeedEntry }) {
+  const dismiss = useGameStore((s) => s.dismissStoneFeed);
+  const t = useTranslations("dropFeed");
+
+  useEffect(() => {
+    const timer = setTimeout(() => dismiss(entry.id), STONE_TOAST_DISPLAY_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `entry`/`dismiss` are stable per mount
+  }, []);
+
+  return (
+    <div className="animate-buy-pulse pointer-events-none flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-violet-400/50 bg-black/80 px-3 py-1.5 text-xs font-bold text-violet-300 shadow-(--ddp-shadow-btn)">
+      <MaterialIcon className="h-3.5 w-3.5" />
+      {t("gotStones", { qty: entry.qty })}
+    </div>
+  );
+}
 
 /** Wall-clock display duration per toast — epic lingers a beat longer. */
 function displayMs(entry: DropFeedEntry): number {
@@ -47,12 +76,16 @@ function DropToast({ entry }: { entry: DropFeedEntry }) {
 
 export function DropFeed() {
   const dropFeed = useGameStore((s) => s.dropFeed);
-  if (dropFeed.length === 0) return null;
+  const stoneFeed = useGameStore((s) => s.stoneFeed);
+  if (dropFeed.length === 0 && stoneFeed.length === 0) return null;
 
   return (
     <div className="pointer-events-none fixed top-3 left-1/2 z-60 flex -translate-x-1/2 flex-col items-center gap-1.5">
       {dropFeed.map((entry) => (
         <DropToast key={entry.id} entry={entry} />
+      ))}
+      {stoneFeed.map((entry) => (
+        <StoneToast key={entry.id} entry={entry} />
       ))}
     </div>
   );

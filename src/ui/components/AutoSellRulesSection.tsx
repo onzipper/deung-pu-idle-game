@@ -1,15 +1,22 @@
 "use client";
 
 /**
- * M7.5→M7.9 auto-dispose rules — the town-trip bot's per-rarity 3-way action
- * (off/sell/salvage) + keep-guard. localStorage-persisted UI preference
+ * M7.5→M7.9 auto-dispose rules — the town-trip bot's per-rarity toggle
+ * (off/sell) + keep-guard. localStorage-persisted UI preference
  * (`readStoredAutoSellRules`'s doc, `gameStore.ts`), same tier as
  * `soundMuted`: the rules THEMSELVES aren't game progress, only the bot's own
- * `state.bot` config is engine-persisted. Epic (M7.9 "option A") is now a REAL
+ * `state.bot` config is engine-persisted. Epic (M7.9 "option A") is its own
  * toggle defaulting OFF (keep) — existing players see no behavior change until
  * they opt in — but its "กันของดี" keep-guard protection is FORCED ON
  * regardless of the shared `keepBetterStat` toggle below (see
  * `ui/gear/autoSell.ts`'s `isGuarded`).
+ *
+ * Owner request 2026-07-08 (หินเสริมพลัง final wave): salvage is RETIRED
+ * (refine stones now drop directly from mobs instead), so the per-rarity
+ * action is a plain off/sell toggle (was a 3-way off/sell/salvage through
+ * M7.7-M7.9) — a previously-persisted "salvage" value gracefully falls back
+ * to this rarity's default (see `isAutoSellAction`'s doc, `gameStore.ts`);
+ * nothing migrates it to "sell" automatically.
  *
  * The per-rarity control reuses `LocaleSwitch.tsx`'s exact segmented-button
  * visual language (an existing exclusive-choice pattern in this HUD) rather
@@ -24,7 +31,7 @@ import {
   type AutoSellAction,
 } from "@/ui/store/gameStore";
 
-const ACTIONS: AutoSellAction[] = ["off", "sell", "salvage"];
+const ACTIONS: AutoSellAction[] = ["off", "sell"];
 
 function RaritySegment({
   label,
@@ -86,7 +93,7 @@ export function AutoSellRulesSection() {
   }, []);
 
   const actionLabel = (action: AutoSellAction): string =>
-    action === "off" ? t("actionOff") : action === "sell" ? t("actionSell") : t("actionSalvage");
+    action === "off" ? t("actionOff") : t("actionSell");
 
   return (
     <section className="flex flex-col gap-2">

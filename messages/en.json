@@ -162,7 +162,7 @@
       "townGroup": "Town trips",
       "townGroupHint": "The bot warps to town to buy potions / sell / equip its best gear on its own.",
       "dropGroup": "Drops",
-      "dropGroupHint": "Rules for what the bot sells/salvages/keeps per drop rarity on its town trips.",
+      "dropGroupHint": "Rules for what the bot sells/keeps per drop rarity on its town trips.",
       "walkGroup": "Walking",
       "walkGroupHint": "Behavior after your hero dies, and auto-advancing to the next zone.",
       "autoReturnHint": "After your hero respawns in town, walk back to farming automatically.",
@@ -180,7 +180,7 @@
       "goldReserve": "Minimum gold reserve",
       "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)",
       "restockHint": "Warps to town on its own once HP/mana potions run out, then buys back up to target.",
-      "sellTripHint": "Warps to town on its own once the bag is full, then sells/salvages per the drop rules.",
+      "sellTripHint": "Warps to town on its own once the bag is full, then sells per the drop rules.",
       "masterOffDisabledHint": "Turn the main bot switch on first to enable this.",
       "autoSlotsTitle": "Auto-cast slots",
       "autoSlotEmpty": "Empty",
@@ -191,10 +191,9 @@
       "commonLabel": "Common",
       "rareLabel": "Rare",
       "epicLabel": "Epic",
-      "epicHint": "Epic protection is always forced on: the bot can only sell/salvage an epic that's worse than what's equipped and isn't the best piece for an empty slot — even with \"Protect good gear\" off",
+      "epicHint": "Epic protection is always forced on: the bot can only sell an epic that's worse than what's equipped and isn't the best piece for an empty slot — even with \"Protect good gear\" off",
       "actionOff": "Off",
       "actionSell": "Sell",
-      "actionSalvage": "Salvage",
       "keepBetterStat": "Protect good gear (upgrades over equipped + best piece for an empty slot)"
     }
   },
@@ -360,7 +359,7 @@
       },
       "gear": {
         "title": "Drops & Gear",
-        "body": "Enemies and bosses have a chance to drop weapons/armor to collect. Each item has a tier and rarity (common/rare/epic). Open your Inventory (🎒) to equip one weapon + one armor — some pieces require a matching class."
+        "body": "Enemies and bosses have a chance to drop weapons/armor to collect. Each item has a tier and rarity (common/rare/epic). Open your Inventory (🎒) to equip one weapon + one armor — some pieces require a matching class. Monsters also drop Enhancement Stones — collect them to power up your gear at Uncle Dueng's refine station in town."
       },
       "worldMaps": {
         "title": "6 maps, 30 stages",
@@ -783,7 +782,7 @@
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
     "tabBuy": "Buy",
-    "tabSell": "Sell & Salvage",
+    "tabSell": "Sell",
     "tabBuyback": "Buy back",
     "sellEmptyHint": "Bag's empty — nothing to sell.",
     "buybackEmptyHint": "Nothing to buy back — sold items stick around here for 3 days",
@@ -848,13 +847,11 @@
     "sellButton": "Sell",
     "sellAllCommonButton": "Sell all common",
     "confirmSell": "Confirm sell?",
-    "refinePlus": "+{level}",
-    "salvageButton": "Salvage (+{yield})",
-    "salvageJunkCommonButton": "Salvage junk common",
-    "confirmSalvage": "Confirm salvage?"
+    "refinePlus": "+{level}"
   },
   "dropFeed": {
-    "gotItem": "Item obtained: {name}"
+    "gotItem": "Item obtained: {name}",
+    "gotStones": "Enhancement Stone ×{qty}"
   },
   "announcements": {
     "landed": "🔥 {charName} landed a +{level} on {itemName}!",
@@ -870,7 +867,6 @@
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
-    "autoSalvageDone": "Bot auto-salvaged {count} item(s) +{materials} material(s)",
     "botTripStart": "🧭 Bot is walking to town...",
     "botSelling": "💰 Bot is selling at the shop...",
     "botRestocked": "🧪 Bot restocked (HP +{hp} / MP +{mp} / scroll +{scroll})",

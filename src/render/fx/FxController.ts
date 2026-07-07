@@ -414,6 +414,20 @@ function itemDropAccentColor(rarity: ItemRarity): number {
   return PALETTE.steel;
 }
 
+// ---- หินเสริมพลัง (enhancement-stone) drop pop — reuses the itemDrop ground-
+// pop RECIPE (small ring + burst at a fixed ground y) but with its own fixed
+// violet accent (rarity-less — stones don't have a rarity band) and a smaller,
+// cheaper footprint since a stone can drop on nearly every kill (unlike gear's
+// per-rarity odds). No additive blend (footgun 10) — solid fill only. ----
+const STONE_DROP_RING_R0 = 2;
+const STONE_DROP_RING_R1 = 15;
+const STONE_DROP_RING_DURATION = 0.26;
+const STONE_DROP_PARTICLE_COUNT = 4;
+const STONE_DROP_PARTICLE_SPEED = 65;
+const STONE_DROP_PARTICLE_LIFE = 0.28;
+/** Ground-anchored, same convention as `ITEM_DROP_POP_Y`. */
+const STONE_DROP_POP_Y = GROUND_Y - 6;
+
 // ---------------------------------------------------------------------------
 // M7.7 "Skill Spectacle" — per-class SIGNATURE/UTILITY/ULTIMATE skill fx.
 // Every `skillCast` now routes by `ev.skillId` (see `onSkillCast()`), not
@@ -1086,6 +1100,9 @@ export class FxController {
           break;
         case "itemDrop":
           this.onItemDrop(ev);
+          break;
+        case "stoneDrop":
+          this.onStoneDrop(ev);
           break;
         case "zoneGateEnter":
           this.onZoneGateEnter(ev);
@@ -2675,6 +2692,30 @@ export class FxController {
       life: ITEM_DROP_PARTICLE_LIFE[rarity],
       radius: rarity === "epic" ? 3 : 2.2,
       gravity: -20, // slight rise — a "loot glimmer", not falling debris
+      drag: 0.3,
+    });
+  }
+
+  /** หินเสริมพลัง drop beat: a small, fixed-violet ground pop wherever
+   * `systems/gear`'s `stoneDrop` fired — same "cheap, can fire often" budget
+   * as `onItemDrop` above (kill chance is high on deeper maps, so this stays
+   * even smaller than the common-gear pop). */
+  private onStoneDrop(ev: Extract<GameEvent, { type: "stoneDrop" }>): void {
+    const y = STONE_DROP_POP_Y;
+    this.rings.spawn({
+      x: ev.x,
+      y,
+      r0: STONE_DROP_RING_R0,
+      r1: STONE_DROP_RING_R1,
+      duration: STONE_DROP_RING_DURATION,
+      width: 2,
+      color: PALETTE.stoneMaterial,
+    });
+    burst(this.particles, ev.x, y, STONE_DROP_PARTICLE_COUNT, PALETTE.stoneMaterial, {
+      speed: STONE_DROP_PARTICLE_SPEED,
+      life: STONE_DROP_PARTICLE_LIFE,
+      radius: 2,
+      gravity: -20,
       drag: 0.3,
     });
   }

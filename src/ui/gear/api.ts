@@ -12,8 +12,8 @@ import type {
   ClaimItemResultWire,
   ItemInstanceWire,
   RefineApiResult,
-  SalvageItemResultWire,
   SellItemResultWire,
+  StoneClaimResultWire,
 } from "@/ui/gear/types";
 
 export interface InventoryFetchResult {
@@ -78,18 +78,34 @@ export function postUnequip(itemId: string): Promise<EquipApiResult> {
 
 /** Batched POST /api/items/claim. Returns `null` on a network/parse failure so
  * the caller (GameClient's flush) can re-queue the batch for the next cadence
- * tick — the claim is idempotent server-side, so a retry is always safe. */
+ * tick — the claim is idempotent server-side, so a retry is always safe.
+ *
+ * `stones` (หินเสริมพลัง enhancement-stone claims) rides the SAME batch
+ * alongside `items` — the server credits `Character.materials` and returns
+ * `stoneResults`/`totalMaterials`/`materials` ONLY when `stones` is non-empty
+ * (an empty/omitted array stays byte-identical to the pre-stone response). */
 export async function postClaimBatch(
   items: { rollId: string; templateId: string; stage: number }[],
-): Promise<{ results: ClaimItemResultWire[] } | null> {
+  stones: { rollId: string; qty: number }[] = [],
+): Promise<{
+  results: ClaimItemResultWire[];
+  stoneResults?: StoneClaimResultWire[];
+  totalMaterials?: number;
+  materials?: number;
+} | null> {
   try {
     const res = await fetch("/api/items/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, stones }),
     });
     if (!res.ok) return null;
-    return (await res.json()) as { results: ClaimItemResultWire[] };
+    return (await res.json()) as {
+      results: ClaimItemResultWire[];
+      stoneResults?: StoneClaimResultWire[];
+      totalMaterials?: number;
+      materials?: number;
+    };
   } catch {
     return null;
   }
@@ -111,28 +127,6 @@ export async function postSell(
     });
     if (!res.ok) return null;
     return (await res.json()) as { results: SellItemResultWire[]; totalGold: number };
-  } catch {
-    return null;
-  }
-}
-
-/** POST /api/items/salvage (M7.6 ตีบวก). Same "null on network failure, leave
- * local state untouched" contract as `postSell`. */
-export async function postSalvage(
-  itemIds: string[],
-): Promise<{ results: SalvageItemResultWire[]; totalMaterials: number; materials: number } | null> {
-  try {
-    const res = await fetch("/api/items/salvage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemIds }),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as {
-      results: SalvageItemResultWire[];
-      totalMaterials: number;
-      materials: number;
-    };
   } catch {
     return null;
   }

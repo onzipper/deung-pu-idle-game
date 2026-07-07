@@ -46,15 +46,9 @@ import {
   applyRefineLevelChange,
   mergeClaimedItems,
   removeInstanceId,
-  removeSalvagedItems,
   removeSoldItems,
 } from "@/ui/gear/inventoryOps";
-import type {
-  InventoryItem,
-  ItemInstanceWire,
-  SalvageItemResultWire,
-  SellItemResultWire,
-} from "@/ui/gear/types";
+import type { InventoryItem, ItemInstanceWire, SellItemResultWire } from "@/ui/gear/types";
 import { ingestAnnouncements } from "@/ui/announcements/queue";
 import type { AnnouncementEntry, AnnouncementWire } from "@/ui/announcements/types";
 
@@ -354,10 +348,11 @@ export interface PendingInput {
    * (SAVE v12) — the HUD button queues this and reads the current value back
    * from the snapshot's `autoHunt`, never shadow-owning it. */
   setAutoHunt: boolean | null;
-  /** Signed material-counter delta (M7.6 ตีบวก): salvage grants +, refine spends
-   * −, decided SERVER-side. SUMMED across same-frame calls (not last-wins) —
-   * same pattern as `goldCredit`, since a bulk salvage + an overlapping single
-   * refine in the same tick must never drop one. `null`/`0` = nothing pending. */
+  /** Signed material-counter delta (M7.6 ตีบวก): หินเสริมพลัง stone claims grant
+   * +, refine spends −, decided SERVER-side. SUMMED across same-frame calls
+   * (not last-wins) — same pattern as `goldCredit`, since a stone-claim credit
+   * and an overlapping single refine in the same tick must never drop one.
+   * `null`/`0` = nothing pending. */
   materialsDelta: number | null;
   /** Manual play (M7.8): tap-the-ground move order, or `null` (last-wins per
    * frame — a tap walks to exactly one x; the engine clamps it to the zone's
@@ -519,8 +514,9 @@ export function writeSeenPatchNotes(id: string): void {
 }
 
 /** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
- * salvage-by-rarity, extended again M7.9 "option A" for a real epic toggle) —
- * same client-preference tier as `soundMuted`/`ftueCompleted`: UI-owned, not
+ * salvage-by-rarity, extended again M7.9 "option A" for a real epic toggle;
+ * salvage RETIRED 2026-07-08 — see `AutoSellAction`'s doc) — same
+ * client-preference tier as `soundMuted`/`ftueCompleted`: UI-owned, not
  * `SaveData` (the RULES aren't game progress; the bot's ENGINE-side config,
  * `BotSettings`, is the thing that's actually save-persisted). Owner-locked
  * defaults: common "sell", rare "sell", epic "off" (existing players see NO
@@ -532,8 +528,14 @@ export function writeSeenPatchNotes(id: string): void {
  * rather than resetting every existing player's preference. */
 const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2";
 
-/** Per-rarity disposal action (M7.7 — replaces the old two booleans). */
-export type AutoSellAction = "off" | "sell" | "salvage";
+/** Per-rarity disposal action (M7.7 — replaces the old two booleans). Owner
+ * request 2026-07-08 (หินเสริมพลัง final wave): salvage is RETIRED — refine
+ * stones now drop directly from mobs, so this is a plain off/sell toggle
+ * (was a 3-way "off"|"sell"|"salvage" through M7.7-M7.9). A previously-
+ * persisted `"salvage"` value (localStorage OR `Character.uiConfig`) simply
+ * fails `isAutoSellAction` below and falls back to this rarity's default —
+ * NOT migrated to `"sell"`, per owner spec. */
+export type AutoSellAction = "off" | "sell";
 
 export interface StoredAutoSellRules {
   common: AutoSellAction;
@@ -551,7 +553,7 @@ const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
 };
 
 function isAutoSellAction(v: unknown): v is AutoSellAction {
-  return v === "off" || v === "sell" || v === "salvage";
+  return v === "off" || v === "sell";
 }
 
 /** Migrates one rarity field from either shape: v2 action string (preferred),
@@ -806,6 +808,21 @@ export interface DropFeedEntry {
 /** Cap on live toasts (oldest drop first out) — a burst of kills shouldn't
  * pile up an unbounded stack. */
 const MAX_DROP_FEED = 4;
+
+/** One หินเสริมพลัง (enhancement-stone) drop toast (`DropFeed.tsx`'s
+ * `StoneToast`) — pushed straight off the raw `stoneDrop` engine event (NOT
+ * gated on the server claim confirming, unlike `DropFeedEntry` above): a
+ * stone has no rarity/identity worth waiting on a round-trip for, it's purely
+ * "you just picked some up" juice. One entry per event, uncoalesced — capped
+ * the same "oldest out first" way as `dropFeed` so a dense field can't pile up
+ * an unbounded stack. */
+export interface StoneFeedEntry {
+  id: string;
+  qty: number;
+}
+
+const MAX_STONE_FEED = 3;
+let stoneFeedSeq = 0;
 let dropFeedSeq = 0;
 
 /** A generic one-line notice toast (M7.5) — same tier/shape as `DropFeedEntry`
@@ -890,6 +907,9 @@ export interface HudState {
   /** Live drop-notification toasts (M7 juice), oldest-first, capped at
    * `MAX_DROP_FEED`. Pushed only for a freshly-minted claim result. */
   dropFeed: DropFeedEntry[];
+  /** Live หินเสริมพลัง stone-drop toasts, oldest-first, capped at
+   * `MAX_STONE_FEED` — see `StoneFeedEntry`'s doc. */
+  stoneFeed: StoneFeedEntry[];
   /** Template ids owned at BOOT (M7.5 "NEW" badge baseline) — a template not in
    * this set is "new this session" for the WHOLE session (see
    * `ui/gear/inventoryOps.ts`'s `isNewTemplate`). Set once by `GameClient.tsx`
@@ -1161,15 +1181,17 @@ export interface HudState {
   pushDropFeed: (templateId: string, rarity: ItemRarity) => void;
   /** Dismiss one toast (called by `DropFeed.tsx` after its display timer). */
   dismissDropFeed: (id: string) => void;
+  /** Push a หินเสริมพลัง stone-drop toast (`StoneFeedEntry`'s doc) — capped,
+   * oldest evicted first. */
+  pushStoneFeed: (qty: number) => void;
+  /** Dismiss one stone toast (called by `DropFeed.tsx` after its display timer). */
+  dismissStoneFeed: (id: string) => void;
   /** Boot-only (M7.5 "NEW" badge baseline): set once from the boot payload's
    * inventory templateIds — see `sessionKnownTemplateIds`'s doc. */
   setSessionKnownTemplateIds: (ids: string[]) => void;
   /** Remove sold instances from the inventory slice (M7.5, manual + auto-sell
    * flows — see `gear/inventoryOps.ts`'s `removeSoldItems`). */
   removeSoldFromInventory: (results: SellItemResultWire[]) => void;
-  /** Remove salvaged instances from the inventory slice (M7.6 ตีบวก — see
-   * `gear/inventoryOps.ts`'s `removeSalvagedItems`). */
-  removeSalvagedFromInventory: (results: SalvageItemResultWire[]) => void;
   /** Patch one instance's refine +level after a non-destroying refine outcome
    * (M7.6 ตีบวก — see `gear/inventoryOps.ts`'s `applyRefineLevelChange`). */
   setInventoryRefineLevel: (instanceId: string, refineLevel: number) => void;
@@ -1263,6 +1285,7 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   inventory: [],
   dropFeed: [],
+  stoneFeed: [],
   sessionKnownTemplateIds: [],
   notices: [],
   fastTravelChannel: null,
@@ -1504,12 +1527,19 @@ export const useGameStore = create<HudState>((set, get) => ({
   dismissDropFeed: (id) =>
     set((s) => ({ dropFeed: s.dropFeed.filter((d) => d.id !== id) })),
 
+  pushStoneFeed: (qty) =>
+    set((s) => ({
+      stoneFeed: [...s.stoneFeed, { id: `stone-${++stoneFeedSeq}`, qty }].slice(
+        -MAX_STONE_FEED,
+      ),
+    })),
+  dismissStoneFeed: (id) =>
+    set((s) => ({ stoneFeed: s.stoneFeed.filter((d) => d.id !== id) })),
+
   setSessionKnownTemplateIds: (ids) =>
     set({ sessionKnownTemplateIds: [...new Set(ids)] }),
   removeSoldFromInventory: (results) =>
     set((s) => ({ inventory: removeSoldItems(s.inventory, results) })),
-  removeSalvagedFromInventory: (results) =>
-    set((s) => ({ inventory: removeSalvagedItems(s.inventory, results) })),
   setInventoryRefineLevel: (instanceId, refineLevel) =>
     set((s) => ({
       inventory: applyRefineLevelChange(s.inventory, instanceId, refineLevel),
@@ -1618,7 +1648,20 @@ export const useGameStore = create<HudState>((set, get) => ({
       const merged: UiConfig = { ...selectUiConfig(s) };
       for (const key of Object.keys(cfg) as (keyof UiConfig)[]) {
         const v = cfg[key];
-        if (v !== undefined) (merged[key] as UiConfig[typeof key]) = v;
+        if (v === undefined) continue;
+        // A legacy `Character.uiConfig` row (server, pre-2026-07-08) may still
+        // carry the RETIRED "salvage" action — the server's own schema stays
+        // backward-compatible and doesn't reject it, so guard it here too: an
+        // invalid action is simply skipped, leaving whatever this rarity's
+        // CURRENT value is untouched (never migrated to "sell", per owner spec —
+        // see `AutoSellAction`'s doc).
+        if (
+          (key === "autoSellCommon" || key === "autoSellRare" || key === "autoSellEpic") &&
+          !isAutoSellAction(v)
+        ) {
+          continue;
+        }
+        (merged[key] as UiConfig[typeof key]) = v;
       }
       // Write-through so the legacy mount-effect hydrations (which read their own
       // keys) pick up the winning value instead of re-applying a stale local one.

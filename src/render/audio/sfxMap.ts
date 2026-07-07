@@ -207,6 +207,10 @@ export const SFX_MIN_INTERVAL_MS = {
   evolve: 400,
   upgradeBought: 40,
   itemDrop: 180,
+  // หินเสริมพลัง stone drops reuse `playItemDrop`'s "common" chime (own
+  // throttle-key namespace so a busy field's stone chimes never starve/share
+  // budget with the gear chime above).
+  stoneDrop: 220,
   fastTravelCastStart: 500,
   fastTravelArrive: 300,
   fastTravelFizzle: 300,

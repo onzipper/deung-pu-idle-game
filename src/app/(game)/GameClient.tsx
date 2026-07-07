@@ -89,14 +89,21 @@ import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
-import { selectAutoSellSalvageIds } from "@/ui/gear/autoSell";
-import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
+import { selectAutoSellIds } from "@/ui/gear/autoSell";
+import {
+  takeBatch,
+  type ClaimBufferEntry,
+  type StoneClaimBufferEntry,
+} from "@/ui/gear/claimBuffer";
 import { postClaimBatch, postEquip } from "@/ui/gear/api";
 import { applyEquipChange } from "@/ui/gear/inventoryOps";
-import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { toInventoryItem } from "@/ui/gear/types";
-import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
+import type {
+  ClaimItemResultWire,
+  ItemInstanceWire,
+  StoneClaimResultWire,
+} from "@/ui/gear/types";
 import {
   useGameStore,
   readStoredUiConfig,
@@ -392,16 +399,14 @@ function buildSnapshot(state: GameState): EngineSnapshot {
 }
 
 /**
- * M7.5→M7.7 auto-dispose executor — runs off a `townArrived` event (reason
- * "sell" / "restockSell"): computes the sell AND salvage lists from the
- * CURRENT inventory slice + persisted rules in ONE sweep
- * (`selectAutoSellSalvageIds`), then reuses the same POST-first flows the
- * manual `InventoryPanel` sell/salvage buttons use (`executeSell` /
- * `executeSalvage`) — sell first, then salvage (order doesn't matter
- * functionally; sequential keeps the shared 100-slot inventory bookkeeping
- * simple). Fire-and-forget: a dropped/failed run simply leaves the inventory
- * full, so the NEXT trip (or a manual dispose) retries it — never a stuck
- * state.
+ * M7.5→M7.9 auto-dispose executor — runs off a `townArrived` event (reason
+ * "sell" / "restockSell"): computes the sell list from the CURRENT inventory
+ * slice + persisted rules in ONE sweep (`selectAutoSellIds`), then reuses the
+ * same POST-first flow the manual `InventoryPanel` sell button uses
+ * (`executeSell`). Fire-and-forget: a dropped/failed run simply leaves the
+ * inventory full, so the NEXT trip (or a manual dispose) retries it — never a
+ * stuck state. Owner request 2026-07-08 (หินเสริมพลัง final wave): salvage is
+ * RETIRED (refine stones now drop directly from mobs instead) — sell-only.
  */
 /**
  * M7.5 auto-equip executor (owner request 2026-07-06) — keeps the hero in its
@@ -447,7 +452,9 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
   // while the master is off (see `toggleBotMaster`'s doc), so this event
   // should never fire in that state, but never auto-dispose regardless.
   if (!store.autoHunt) return;
-  const { sellIds, salvageIds } = selectAutoSellSalvageIds(
+  // Owner request 2026-07-08 (หินเสริมพลัง final wave): salvage is RETIRED —
+  // the bot is sell-only now (refine stones drop directly from mobs instead).
+  const sellIds = selectAutoSellIds(
     store.inventory,
     ITEM_TEMPLATES,
     {
@@ -458,12 +465,12 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
     },
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
   );
-  if (sellIds.length === 0 && salvageIds.length === 0) {
+  if (sellIds.length === 0) {
     // Rules matched nothing. On a GENUINE full-bag sell trip the engine latches its
     // sell-trip watermark and stops tripping, so tell the player WHY the bot gave up
-    // (fix = loosen the rules in Settings or sell/salvage manually). On an
-    // OPPORTUNISTIC sweep (a potions trip that also tidies the bag) a nothing-to-do
-    // result is normal, not a stuck bot — stay silent (`suppressNothingNotice`).
+    // (fix = loosen the rules in Settings or sell manually). On an OPPORTUNISTIC
+    // sweep (a potions trip that also tidies the bag) a nothing-to-do result is
+    // normal, not a stuck bot — stay silent (`suppressNothingNotice`).
     if (!suppressNothingNotice) store.pushNotice("autoSellNothing");
     return;
   }
@@ -479,17 +486,6 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
     // makes the "warps but sells nothing" report undiagnosable in the field.
     console.warn("[GameClient] auto-sell POST failed; bag stays full, will retry", {
       requested: sellIds.length,
-    });
-  }
-  const salvageResult = await executeSalvage(salvageIds);
-  if (salvageResult.ok && salvageResult.salvagedCount > 0) {
-    useGameStore.getState().pushNotice("autoSalvageDone", {
-      count: salvageResult.salvagedCount,
-      materials: salvageResult.totalMaterials.toLocaleString(),
-    });
-  } else if (!salvageResult.ok) {
-    console.warn("[GameClient] auto-salvage POST failed; bag stays full, will retry", {
-      requested: salvageIds.length,
     });
   }
 }
@@ -608,9 +604,14 @@ export function GameClient() {
 
     // ---- M7 Gear & Drops: drop-claim buffer (closure state, NOT React/Zustand
     // — same "never per-frame state in React" rule as engine state itself).
-    // `itemDrop` events are collected here every frame and flushed as a batch
-    // on the autosave cadence + tab-hide (see `flushClaims`/`onVisibility`). ----
+    // `itemDrop`/`stoneDrop` events are collected here every frame and flushed
+    // as one batch on the autosave cadence + tab-hide (see
+    // `flushClaims`/`onVisibility`). ----
     let pendingClaims: ClaimBufferEntry[] = [];
+    // หินเสริมพลัง (enhancement-stone) claim buffer — the `stones[]` sibling of
+    // `pendingClaims` above, sent in the SAME `/api/items/claim` batch (see
+    // `flushClaims`/`flushSaveBeacon` below).
+    let pendingStoneClaims: StoneClaimBufferEntry[] = [];
     let claimInFlight = false;
 
     /**
@@ -671,9 +672,9 @@ export function GameClient() {
      * Event-flood suppression: like the boot replay, this calls `step()`
      * directly and never touches `frameEvents`/`renderer.draw`/
      * `audio.consumeEvents`/drop-claim buffering — the replayed steps' events
-     * are simply discarded (same as boot: a `itemDrop` rolled during a replay
-     * is not claimed, an accepted parity with the existing offline-idle
-     * behavior). The very next live `frame()` tick draws + UI-syncs the
+     * are simply discarded (same as boot: an `itemDrop`/`stoneDrop` rolled
+     * during a replay is not claimed, an accepted parity with the existing
+     * offline-idle behavior). The very next live `frame()` tick draws + UI-syncs the
      * POST-replay state normally, so the HUD just "jumps" to the caught-up
      * numbers instead of visibly fast-forwarding.
      */
@@ -865,6 +866,13 @@ export function GameClient() {
             templateId: ev.templateId,
             stage: state.stage,
           });
+        } else if (ev.type === "stoneDrop") {
+          // หินเสริมพลัง drop juice: buffer the claim for the same batched
+          // flush AND toast immediately (unlike gear, a stone toast doesn't
+          // wait on the server mint — see `DropFeed.tsx`'s module doc). The
+          // field fx/SFX pop is handled one-way by the renderer/audio below.
+          pendingStoneClaims.push({ rollId: ev.rollId, qty: ev.qty });
+          useGameStore.getState().pushStoneFeed(ev.qty);
         } else if (ev.type === "townArrived") {
           // M7.5 sell-trip bot: the engine restocked already (engine-side);
           // the CLIENT owns item instances, so a "sell"/"restockSell" arrival
@@ -1003,15 +1011,50 @@ export function GameClient() {
       }
     }
 
+    /** หินเสริมพลัง claim results (`stoneResults`) — mirrors `applyClaimResults`'
+     * shape, but the only local-state mutation is crediting the AUTHORITATIVE
+     * `totalMaterials` the server already summed (same `creditMaterials`
+     * intent path the old salvage response used — see `postClaimBatch`'s doc). */
+    function applyStoneClaimResults(
+      results: StoneClaimResultWire[],
+      totalMaterials: number,
+    ): void {
+      const rejectedCounts: Partial<Record<string, number>> = {};
+      for (const r of results) {
+        if (r.status === "rejected") {
+          rejectedCounts[r.reason] = (rejectedCounts[r.reason] ?? 0) + 1;
+        }
+      }
+      if (totalMaterials > 0) useGameStore.getState().creditMaterials(totalMaterials);
+      if (Object.keys(rejectedCounts).length) {
+        console.warn("[GameClient] stone-claim rejections:", rejectedCounts);
+      }
+    }
+
     function flushClaims(): void {
-      if (claimInFlight || pendingClaims.length === 0) return;
+      if (claimInFlight || (pendingClaims.length === 0 && pendingStoneClaims.length === 0)) {
+        return;
+      }
       const { batch, remaining } = takeBatch(pendingClaims, MAX_CLAIM_BATCH);
+      const { batch: stoneBatch, remaining: stoneRemaining } = takeBatch(
+        pendingStoneClaims,
+        MAX_CLAIM_BATCH,
+      );
       pendingClaims = remaining;
+      pendingStoneClaims = stoneRemaining;
       claimInFlight = true;
-      void postClaimBatch(batch)
+      void postClaimBatch(batch, stoneBatch)
         .then((res) => {
-          if (res) applyClaimResults(res.results);
-          else pendingClaims = [...batch, ...pendingClaims]; // network failure — retry next cadence
+          if (res) {
+            applyClaimResults(res.results);
+            if (res.stoneResults) {
+              applyStoneClaimResults(res.stoneResults, res.totalMaterials ?? 0);
+            }
+          } else {
+            // network failure — retry next cadence
+            pendingClaims = [...batch, ...pendingClaims];
+            pendingStoneClaims = [...stoneBatch, ...pendingStoneClaims];
+          }
         })
         .finally(() => {
           claimInFlight = false;
@@ -1030,16 +1073,24 @@ export function GameClient() {
       navigator.sendBeacon("/api/save", blob);
 
       // Best-effort drop-claim flush via the same fire-and-forget beacon
-      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
-      // accepted v1 loss (no response to merge into the inventory slice even
-      // if it lands) — documented tradeoff, see this function's doc comment.
-      if (pendingClaims.length > 0) {
+      // mechanism (gear items AND หินเสริมพลัง stones in the SAME batch, same
+      // contract as `flushClaims`). UNLIKE the save beacon, a lost claim
+      // beacon here is an accepted v1 loss (no response to merge into the
+      // inventory/materials slices even if it lands) — documented tradeoff,
+      // see this function's doc comment.
+      if (pendingClaims.length > 0 || pendingStoneClaims.length > 0) {
         const claimBlob = new Blob(
-          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+          [
+            JSON.stringify({
+              items: pendingClaims.slice(0, MAX_CLAIM_BATCH),
+              stones: pendingStoneClaims.slice(0, MAX_CLAIM_BATCH),
+            }),
+          ],
           { type: "application/json" },
         );
         navigator.sendBeacon("/api/items/claim", claimBlob);
         pendingClaims = [];
+        pendingStoneClaims = [];
       }
     }
 

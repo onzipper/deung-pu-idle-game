@@ -193,6 +193,13 @@ export class AudioController {
             playItemDrop(this.engine, ITEM_TEMPLATES[ev.templateId]?.rarity ?? "common");
           }
           break;
+        case "stoneDrop":
+          // หินเสริมพลัง reuses the gear chime's cheapest ("common") recipe on
+          // its OWN throttle key — a stone drop is not a gear-rarity event.
+          if (this.engine.allow("stoneDrop", SFX_MIN_INTERVAL_MS.stoneDrop)) {
+            playItemDrop(this.engine, "common");
+          }
+          break;
         case "zoneUnlocked":
           // The general case stays silent (see sfxMap.ts's module doc
           // comment); the boss-door-unlock EXCEPTION gets its own low drone.

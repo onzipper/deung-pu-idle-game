@@ -10,13 +10,16 @@
  * > common) desc, then flat primary-stat total desc (`ui/gear/sortRank.ts`'s
  * `compareInventoryItems` — extracted so `ShopPanel.tsx`'s sell tab shares the
  * exact same ranking).
- * Every tile action (equip/sell/salvage) now targets exactly ONE instance id —
- * no more "sell all of this stack" bulk action at the tile level (the
- * inventory-wide "sell all common"/"salvage junk common" bulk buttons above
- * the grid are unchanged, they already scan `inventory` directly — also in
- * `sortRank.ts`, shared with `ShopPanel.tsx`). Same modal shell convention as
- * `SettingsPanel.tsx`/`CodexPanel.tsx` (fixed overlay, sim never pauses
- * behind it).
+ * Every tile action (equip/sell) now targets exactly ONE instance id — no more
+ * "sell all of this stack" bulk action at the tile level (the inventory-wide
+ * "sell all common" bulk button above the grid is unchanged, it already scans
+ * `inventory` directly — also in `sortRank.ts`, shared with `ShopPanel.tsx`).
+ * Same modal shell convention as `SettingsPanel.tsx`/`CodexPanel.tsx` (fixed
+ * overlay, sim never pauses behind it).
+ *
+ * Owner request 2026-07-08 (หินเสริมพลัง final wave): salvage is RETIRED
+ * (refine stones now drop directly from mobs instead of a salvage grind) —
+ * the per-item/bulk salvage buttons this panel used to have are gone.
  *
  * EQUIP FLOW (unchanged from M7): POST `/api/items/equip`|`unequip` FIRST —
  * only on success do we optimistically patch the local `inventory` slice AND
@@ -34,23 +37,11 @@
 
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import {
-  ITEM_TEMPLATES,
-  INVENTORY_CAP,
-  salvageYield,
-  type GearSlot,
-  type HeroClass,
-} from "@/engine";
+import { ITEM_TEMPLATES, INVENTORY_CAP, type GearSlot, type HeroClass } from "@/engine";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
-import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
-import {
-  compareInventoryItems,
-  refinedStatsOf,
-  sellAllCommonIds,
-  salvageJunkCommonIds,
-} from "@/ui/gear/sortRank";
+import { compareInventoryItems, refinedStatsOf, sellAllCommonIds } from "@/ui/gear/sortRank";
 import { computeStatDelta } from "@/ui/gear/statDelta";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import { toInventoryItem, type InventoryItem } from "@/ui/gear/types";
@@ -201,7 +192,6 @@ function DetailCard({
   onEquip,
   onUnequip,
   onSell,
-  onSalvage,
 }: {
   item: InventoryItem;
   heroCls: HeroClass;
@@ -212,31 +202,22 @@ function DetailCard({
   onEquip: (item: InventoryItem) => void;
   onUnequip: (item: InventoryItem) => void;
   onSell: (item: InventoryItem) => void;
-  onSalvage: (item: InventoryItem) => void;
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
   const template = ITEM_TEMPLATES[item.templateId];
   const sellGuard = useConfirmGuard();
-  const salvageGuard = useConfirmGuard();
   if (!template) return null;
 
   const equipped = item.equippedSlot !== null;
   const classBlocked = template.classReq !== null && template.classReq !== heroCls;
   const colors = RARITY_COLORS[template.rarity];
   const needsConfirm = template.rarity === "rare" || template.rarity === "epic";
-  // M7.6 ตีบวก: preview the material yield BEFORE salvaging (spec — the server
-  // rolls nothing here, `salvageYield` is a pure tier/rarity table read).
-  const perItemYield = salvageYield(template.tier, template.rarity);
   // M7.6+ polish: +8 and up gets prestige-gold name styling (see ui/labels.ts).
   const prestigeCls = prestigeNameClass(item.refineLevel);
 
   function handleSell(): void {
     sellGuard.trigger(needsConfirm, () => onSell(item));
-  }
-
-  function handleSalvage(): void {
-    salvageGuard.trigger(needsConfirm, () => onSalvage(item));
   }
 
   return (
@@ -310,21 +291,6 @@ function DetailCard({
           </button>
         )}
       </div>
-
-      {!equipped && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy || !inTown}
-            title={!inTown ? t("sellTownOnly") : undefined}
-            onClick={handleSalvage}
-            className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/50 bg-violet-400/10 px-3 text-xs font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <MaterialIcon className="h-3.5 w-3.5" />
-            {salvageGuard.confirming ? t("confirmSalvage") : t("salvageButton", { yield: perItemYield })}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -411,24 +377,6 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     if (ids.length === 0) return;
     setBusy(true);
     await executeSell(ids);
-    setBusy(false);
-  }
-
-  async function handleSalvage(target: InventoryItem): Promise<void> {
-    if (target.equippedSlot !== null) return;
-    setBusy(true);
-    await executeSalvage([target.instanceId]);
-    setBusy(false);
-  }
-
-  /** M7.6 ตีบวก bulk affordance: "ย่อยของ common ทั้งหมดที่ต่ำกว่าของที่ใส่" —
-   * see `sortRank.ts`'s `salvageJunkCommonIds` for the exact eligibility rule
-   * (shared with `ShopPanel.tsx`'s sell tab). */
-  async function handleSalvageJunkCommon(): Promise<void> {
-    const ids = salvageJunkCommonIds(inventory);
-    if (ids.length === 0) return;
-    setBusy(true);
-    await executeSalvage(ids);
     setBusy(false);
   }
 
@@ -523,16 +471,6 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           >
             {t("sellAllCommonButton")}
           </button>
-          <button
-            type="button"
-            disabled={busy || !inTown}
-            title={!inTown ? t("sellTownOnly") : undefined}
-            onClick={handleSalvageJunkCommon}
-            className="flex min-h-11 items-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/40 bg-violet-400/10 px-2.5 py-1.5 text-[11px] font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <MaterialIcon className="h-3.5 w-3.5" />
-            {t("salvageJunkCommonButton")}
-          </button>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
@@ -565,7 +503,6 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
               onEquip={handleEquip}
               onUnequip={handleUnequip}
               onSell={handleSell}
-              onSalvage={handleSalvage}
             />
           )}
         </div>
