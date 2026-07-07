@@ -29,6 +29,7 @@ function emptyPending(): PendingInput {
     claimDaily: null,
     claimMainReward: null,
     useWarpScroll: null,
+    spawnWorldBoss: null,
   };
 }
 

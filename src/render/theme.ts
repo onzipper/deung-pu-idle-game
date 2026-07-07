@@ -223,6 +223,29 @@ export const PALETTE = {
   npcBoardFace: 0xd9c9a0,
   /** White beard accent (reuses no other NPC tone). */
   npcElderBeard: 0xe8e0d0,
+
+  // ---- WORLD BOSS "เสี่ยจ๋อง" (hourly world boss, render wave) accents ------
+  // A deliberately DIFFERENT silhouette identity from every stage boss (owner
+  // spec: "รูปทรงไม่เหมือนกับบอส/มอนที่มีตอนนี้") — a broad round "flashy tycoon"
+  // body instead of the hexagon-crowned stage-boss look, so no shared BOSS_COLORS
+  // theme entry is reused here (see `views/worldBossView.ts`). Footgun 10: flat/
+  // solid fills on NORMAL blend + a darker outline, never additive/gradient.
+  /** Suit body — a deep wine/burgundy so it reads as "expensive", distinct
+   * from every stage boss's body hue and every enemy kind's palette. */
+  worldBossSuit: 0x5a1f3a,
+  worldBossSuitShade: 0x350f22,
+  /** Belly/shirt highlight — a warm cream so the big round silhouette reads
+   * as a rotund figure, not a flat disc. */
+  worldBossShirt: 0xf0d9b0,
+  /** Gold chain / aura ring / coin-glint family — the "flashy wealth" motif
+   * running through the whole rig (chain, medallion, aura, idle sparkle). */
+  worldBossGold: 0xffcf3d,
+  worldBossGoldDark: 0x8a6a10,
+  /** Dark sunglasses lenses. */
+  worldBossLens: 0x0c0c14,
+  /** Nameplate/HP-bar gold trim (a touch brighter than `worldBossGold` so the
+   * UI chrome pops against the arena background). */
+  worldBossPlateGold: 0xffe27a,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

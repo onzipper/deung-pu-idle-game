@@ -626,6 +626,12 @@
       },
       "a_infernal_t10_aegis": {
         "name": "Infernal Aegis"
+      },
+      "fort_weapon": {
+        "name": "Weapon Fortifier"
+      },
+      "fort_armor": {
+        "name": "Armor Fortifier"
       }
     },
     "maps": {
@@ -902,6 +908,7 @@
     "rewardManaPotion": "+{amount} mana potions",
     "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
     "warpToFriendStarted": "🌀 Warping to your friend...",
+    "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -936,8 +943,10 @@
     },
     "refineButton": "Refine!",
     "refiningButton": "Refining...",
+    "fortifyButton": "Use Fortifier (×{count} left) — 100% success",
     "outcomeBreak": "Shattered!",
     "outcomeSafeFail": "Miss — nothing lost",
+    "outcomeFortified": "(guaranteed!)",
     "disabled": {
       "pickItem": "Pick an item to refine",
       "townOnly": "Refining only works in town",
@@ -1109,6 +1118,13 @@
           "reconnect": "🔄 Reloading or tabbing away and back now rejoins your party group automatically — no more dead-end \"connecting…\"",
           "multiSell": "🛒 Multi-select selling! A \"select multiple\" mode in Pah Pu's shop — pick items, see the total, sell in one tap"
         }
+      },
+      "2026-07-09": {
+        "items": {
+          "worldBoss": "🌟 The world boss \"Sia Jong\" has arrived! Spawns every hour in Map 1 (5-min pre-announce), lives for 15 minutes — defeat it for 5,000 gold + 350 enhancement stones + 1 Fortifier — bring friends for a faster kill",
+          "fortifier": "⚔️🛡️ \"Fortifiers\" from Sia Jong's reward — use one at Uncle Dueng's refine station to GUARANTEE that attempt's success (same cost, zero chance of a miss/break)",
+          "warpVictoryFix": "🔧 Bugfix: warping back to town after a boss victory no longer gets stuck"
+        }
       }
     }
   },
@@ -1214,6 +1230,11 @@
     "playingWith": "Playing with {names} in this zone",
     "waiting": "Waiting for teammate…",
     "reconnecting": "Reconnecting…"
+  },
+  "worldBoss": {
+    "pre": "🌟 Sia Jong is about to invade Map 1! {time} left",
+    "active": "🌟 Sia Jong has appeared somewhere in Map 1 — hunt him down! ({time})",
+    "activeHere": "🌟 Sia Jong is in THIS zone!!"
   },
   "questBoard": {
     "title": "Quest Board",

@@ -66,6 +66,7 @@ import { WarCryAuraController } from "@/render/fx/warCryAura";
 import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
 import { gateX, isBossZoneIdx } from "@/render/environment/zoneGates";
 import { enemyColorFor } from "@/render/views/enemySpecies";
+import { WORLD_BOSS_CY } from "@/render/views/worldBossView";
 import {
   getArmorAnchorPos,
   getSwordTipPos,
@@ -626,6 +627,41 @@ const HAZARD_STRIKE_SHAKE = 6;
 const HAZARD_STRIKE_FLASH_ALPHA = 0.2;
 const HAZARD_STRIKE_PARTICLE_COUNT = 10;
 
+// ---------------------------------------------------------------------------
+// WORLD BOSS "เสี่ยจ๋อง" (hourly world boss, render wave) — spawn/despawn/defeat
+// juice. Its shared combat telegraphs (slam/charge/hazard) reuse the EXISTING
+// handlers above unmodified except for the boss's own screen-height anchor
+// (see `bossCy()`) and tint (see `resolveBossTint()`) — only these THREE new
+// lifecycle events get dedicated beats here. Gated by `isLocalInWorldBossZone()`
+// (screen-level beats only fire for a client actually standing in the boss's
+// zone — a zone-wide world event, not a POV-hero concern; see that helper's
+// doc comment) rather than `povHeroIndex`.
+// ---------------------------------------------------------------------------
+const WORLD_BOSS_SPAWN_DUST_COUNT = 22;
+const WORLD_BOSS_SPAWN_DUST_SPEED = 100;
+const WORLD_BOSS_SPAWN_DUST_LIFE = 0.6;
+const WORLD_BOSS_SPAWN_DARK_ALPHA = 0.3; // a touch stronger than the stage boss's 0.25
+const WORLD_BOSS_SPAWN_SHAKE = 7;
+
+const WORLD_BOSS_DESPAWN_SMOKE_COUNT = 16;
+const WORLD_BOSS_DESPAWN_SMOKE_SPEED = 40;
+const WORLD_BOSS_DESPAWN_SMOKE_LIFE = 0.9;
+const WORLD_BOSS_DESPAWN_RING_R0 = 20;
+const WORLD_BOSS_DESPAWN_RING_R1 = 4;
+const WORLD_BOSS_DESPAWN_RING_DURATION = 0.5;
+
+/** Bigger than the stage boss's `BOSS_DEATH_STAGE_SPEC` — a world event
+ * deserves the biggest gold payoff in the game. */
+const WORLD_BOSS_DEFEAT_STAGE_SPEC: readonly BossDeathStageSpec[] = [
+  { t: 0, radius: 70, particleCount: 16, speed: 160, color: PALETTE.worldBossGold },
+  { t: 0.15, radius: 110, particleCount: 22, speed: 190, color: PALETTE.worldBossGold },
+  { t: 0.32, radius: 150, particleCount: 30, speed: 220, color: PALETTE.killGold },
+];
+const WORLD_BOSS_DEFEAT_SHAKE = 12;
+const WORLD_BOSS_DEFEAT_FLASH_ALPHA = 0.3;
+const WORLD_BOSS_DEFEAT_SHOWER_COUNT = 40; // a real coin FOUNTAIN, not a shower
+const WORLD_BOSS_DEFEAT_SHOWER_WIDTH = 260;
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -833,6 +869,17 @@ export class FxController {
    * beat is detected the same continuous-per-frame way as
    * `updateWeaponTrail()`/`updateCastAura()` below, in `update()`. */
   private hadBoss = false;
+
+  /** WORLD BOSS "เสี่ยจ๋อง": last-seen live position, refreshed every `update()`
+   * call while `state.worldBoss.entity` exists. `worldBossDespawned`/
+   * `worldBossDefeated` carry only a `windowId` (no x/y — unlike `bossDefeated`,
+   * which carries its own position) and the entity is ALREADY nulled by the
+   * step that emits them (`systems/worldBoss.ts`'s `retireWorldBoss` clears
+   * `entity` before pushing the event), so this cache — populated a frame
+   * earlier while the boss was still alive — is the only way those two
+   * handlers know where to anchor their beat. Never cleared back to null (the
+   * last-known spot stays valid across the one frame the entity disappears). */
+  private worldBossLastPos: { x: number; y: number } | null = null;
 
   /** Render-side mirror of `Pool`'s own mark-and-sweep "first sight" — a
    * whole wave of enemies can appear in ONE engine step, so this is checked
@@ -1055,9 +1102,12 @@ export class FxController {
           this.onEvolve(ev, state);
           break;
         case "bossSlamTelegraph":
+          // `bossCy()`: WORLD BOSS "เสี่ยจ๋อง" reuses this same event but sits
+          // much taller than the stage boss's fixed `BOSS_CY` (see that
+          // helper's doc comment).
           this.rings.spawn({
             x: ev.x,
-            y: BOSS_CY,
+            y: this.bossCy(state),
             r0: 30,
             r1: 100,
             duration: 0.5,
@@ -1104,6 +1154,15 @@ export class FxController {
           break;
         case "bossDefeated":
           this.onBossDefeated(ev);
+          break;
+        case "worldBossSpawned":
+          this.onWorldBossSpawned(state);
+          break;
+        case "worldBossDespawned":
+          this.onWorldBossDespawned(state);
+          break;
+        case "worldBossDefeated":
+          this.onWorldBossDefeated(state);
           break;
         case "mobAggroed":
           // M6 "สนามล่ามอน" follow-up (open hunting field): an aggressive mob just
@@ -1242,6 +1301,7 @@ export class FxController {
     this.updateBossDeathStages(dt);
     this.updatePendingFieldFx(dt);
     this.detectBossEntrance(state);
+    this.updateWorldBossTracking(state);
     this.updateGearFx(dt, state);
     this.updateWarCryFx(dt, state);
     this.updateTargetLock(dt, state);
@@ -3200,25 +3260,150 @@ export class FxController {
    * .crown`, same field `bossThemes.ts` uses for the idle crown/eye look) via
    * `zoneAt(state.location)` — mirrors `bossView.ts`'s own `ctx.mapId`
    * plumbing (render has no engine `Boss.mapId` field to read directly).
-   * Falls back to the universal `PALETTE.warn` if the map id is ever outside
-   * the configured roster (shouldn't happen — these events only fire while
-   * standing in that map's boss room — but keeps this render-only, never a
-   * crash). */
+   * WORLD BOSS "เสี่ยจ๋อง": its shared charge/hazard telegraphs (see
+   * `onBossChargeTelegraph()`/`onBossHazardWarn()` below) reuse this same
+   * resolver — checked FIRST so its telegraph rings tint gold (the tycoon's
+   * own wealth motif) instead of whatever stage-boss theme happens to belong
+   * to the farm zone's map. Falls back to the universal `PALETTE.warn` if the
+   * map id is ever outside the configured roster (shouldn't happen — these
+   * events only fire while standing in that map's boss room — but keeps this
+   * render-only, never a crash). */
   private resolveBossTint(state: GameState): number {
+    if (state.worldBoss?.active) return PALETTE.worldBossGold;
     const mapId = zoneAt(state.location).mapId as BossMapId;
     return BOSS_COLORS[mapId]?.crown ?? PALETTE.warn;
   }
 
-  // ---- CHARGE (map4 s20): telegraphed dash + heavy landing hit -------------
+  /** WORLD BOSS "เสี่ยจ๋อง": the screen-height anchor shared-event handlers
+   * (`bossSlamTelegraph`'s ring, `hitY()`'s damage numbers) should use — the
+   * stage boss's fixed `BOSS_CY` (GROUND_Y-30) sits far too low on the much
+   * taller tycoon rig (`WORLD_BOSS_CY`, GROUND_Y-74; see `worldBossView.ts`). */
+  private bossCy(state: GameState): number {
+    return state.worldBoss?.active ? WORLD_BOSS_CY : BOSS_CY;
+  }
+
+  /**
+   * WORLD BOSS "เสี่ยจ๋อง" zone-wide beats (spawn/despawn/defeat) are a shared
+   * world event, not a per-hero skill cast — gating them on `povHeroIndex`
+   * would make no sense (nobody "cast" the boss's arrival). Instead this
+   * conditions the SCREEN-level part of each beat (shake/flash — the
+   * particle/ring burst at the boss's own position always fires, same as
+   * every other world-anchored fx in this file) on whether the LOCAL client
+   * rendering this frame is actually standing in the boss's zone — i.e.
+   * whether the boss would be on THIS screen at all. Solo play: always true
+   * at spawn (the spawn intent requires standing there) and true at defeat
+   * (dealing the killing blow requires being in-zone); a despawn triggered by
+   * the hero walking away resolves `state.location` to the NEW zone, so this
+   * correctly comes back false for that case (no shake for a boss you just
+   * walked away from). */
+  private isLocalInWorldBossZone(state: GameState, mapId: string, zoneIdx: number): boolean {
+    return state.location.mapId === mapId && state.location.zoneIdx === zoneIdx;
+  }
+
+  /** Refreshes `worldBossLastPos` every frame while the world boss is alive —
+   * see that field's own doc comment for why the despawn/defeat handlers need
+   * a frame-earlier cache instead of reading `state.worldBoss.entity` (already
+   * null by the time those events are visible). */
+  private updateWorldBossTracking(state: GameState): void {
+    const entity = state.worldBoss?.entity;
+    if (state.worldBoss?.active && entity) {
+      this.worldBossLastPos = { x: entity.x, y: entity.y };
+    }
+  }
+
+  /** `worldBossSpawned`: the entity is ALREADY populated in `state` by the
+   * time this event is visible (see `systems/worldBoss.ts`'s `trySpawnWorldBoss`
+   * — it sets `state.worldBoss.entity` THEN pushes the event, same step), so
+   * this reads position live rather than from the last-known cache. A
+   * darken + dust + shake entrance, weightier than the stage boss's own
+   * `onBossEntrance()` (a world event announcing itself deserves more than a
+   * routine boss-room entry). */
+  private onWorldBossSpawned(state: GameState): void {
+    const wb = state.worldBoss;
+    if (!wb || !wb.entity) return;
+    const x = wb.entity.x;
+    burst(this.particles, x, GROUND_Y - 4, WORLD_BOSS_SPAWN_DUST_COUNT, PALETTE.muted, {
+      speed: WORLD_BOSS_SPAWN_DUST_SPEED,
+      life: WORLD_BOSS_SPAWN_DUST_LIFE,
+      radius: 4,
+    });
+    if (!this.isLocalInWorldBossZone(state, wb.mapId, wb.zoneIdx)) return;
+    this.flash.trigger(BOSS_ENTRANCE_DARK_TINT, WORLD_BOSS_SPAWN_DARK_ALPHA);
+    this.shake.trigger(WORLD_BOSS_SPAWN_SHAKE);
+  }
+
+  /** `worldBossDespawned` (lifetime expiry OR the hero left the zone): a
+   * smoke-out poof at the last-known position — deliberately QUIET (no shake/
+   * flash even when the local client IS in-zone) since this is "he wandered
+   * off", not a combat beat. */
+  private onWorldBossDespawned(state: GameState): void {
+    const wb = state.worldBoss;
+    const pos = this.worldBossLastPos;
+    if (!wb || !pos) return;
+    if (!this.isLocalInWorldBossZone(state, wb.mapId, wb.zoneIdx)) return;
+    burst(this.particles, pos.x, GROUND_Y - 10, WORLD_BOSS_DESPAWN_SMOKE_COUNT, PALETTE.muted, {
+      speed: WORLD_BOSS_DESPAWN_SMOKE_SPEED,
+      life: WORLD_BOSS_DESPAWN_SMOKE_LIFE,
+      radius: 6,
+      gravity: -30, // rises like smoke, not falling debris
+      drag: 0.3,
+    });
+    this.rings.spawn({
+      x: pos.x,
+      y: GROUND_Y - 10,
+      r0: WORLD_BOSS_DESPAWN_RING_R0,
+      r1: WORLD_BOSS_DESPAWN_RING_R1,
+      duration: WORLD_BOSS_DESPAWN_RING_DURATION,
+      width: 3,
+      color: PALETTE.muted,
+    });
+  }
+
+  /** `worldBossDefeated`: the biggest gold payoff beat in the game — staged
+   * escalating pulses (bigger version of `BOSS_DEATH_STAGE_SPEC`) plus a real
+   * coin FOUNTAIN (`shower()`, wider + denser than `playBossDefeated`'s own
+   * coin-shower SFX texture implies). Gated the same way as spawn/despawn. */
+  private onWorldBossDefeated(state: GameState): void {
+    const wb = state.worldBoss;
+    const pos = this.worldBossLastPos;
+    if (!wb || !pos) return;
+    if (!this.isLocalInWorldBossZone(state, wb.mapId, wb.zoneIdx)) return;
+    this.shake.trigger(WORLD_BOSS_DEFEAT_SHAKE);
+    this.punch.trigger("bossDefeated");
+    this.flash.trigger(PALETTE.worldBossGold, WORLD_BOSS_DEFEAT_FLASH_ALPHA);
+    // Defensive clear (mirrors `onBossDefeated()`) — the stage boss and the
+    // world boss never coexist, so this is normally already empty.
+    this.bossDeathStages.length = 0;
+    for (const spec of WORLD_BOSS_DEFEAT_STAGE_SPEC) {
+      this.bossDeathStages.push({ ...spec, x: pos.x, y: WORLD_BOSS_CY });
+    }
+    shower(
+      this.particles,
+      pos.x,
+      WORLD_BOSS_DEFEAT_SHOWER_WIDTH,
+      GROUND_Y - 140,
+      WORLD_BOSS_DEFEAT_SHOWER_COUNT,
+      PALETTE.worldBossGold,
+    );
+  }
+
+  // ---- CHARGE (map4 s20, ALSO reused by the world boss): telegraphed dash --
   /** A low ground streak (universal `PALETTE.warn`, the dominant "danger"
    * read) from the boss toward the locked dash target, held for the whole
    * windup, plus a tighter map-tinted windup ring right at the boss so the
-   * tell still reads as "this boss's own attack". */
+   * tell still reads as "this boss's own attack". WORLD BOSS "เสี่ยจ๋อง": its
+   * own charge windup is LONGER (`CONFIG.worldBoss.bossBehavior.charge
+   * .telegraph`, 1.1s vs the stage boss's 0.85s — see `systems/worldBoss.ts`'s
+   * doc comment on the deliberately fairer open-field timing) — using the
+   * stage-boss constant unconditionally would end this ring/streak a quarter
+   * second before the dash actually launches. */
   private onBossChargeTelegraph(
     ev: Extract<GameEvent, { type: "bossChargeTelegraph" }>,
     state: GameState,
   ): void {
-    const windup = CONFIG.bossBehavior.charge.telegraph;
+    const windup = state.worldBoss?.active
+      ? CONFIG.worldBoss.bossBehavior.charge.telegraph
+      : CONFIG.bossBehavior.charge.telegraph;
     this.flashLines.spawn({
       x1: ev.x,
       y1: CHARGE_STREAK_Y,
@@ -3231,7 +3416,7 @@ export class FxController {
     });
     this.rings.spawn({
       x: ev.x,
-      y: BOSS_CY,
+      y: this.bossCy(state),
       r0: CHARGE_WINDUP_RING_R0,
       r1: CHARGE_WINDUP_RING_R1,
       duration: windup,
@@ -3307,11 +3492,17 @@ export class FxController {
     ev: Extract<GameEvent, { type: "bossHazardWarn" }>,
     state: GameState,
   ): void {
-    const telegraph = CONFIG.bossBehavior.hazard.telegraph;
+    // WORLD BOSS "เสี่ยจ๋อง": its own hazard warn window is LONGER
+    // (`CONFIG.worldBoss.bossBehavior.hazard.telegraph`, 1.6s vs the stage
+    // boss's 1.3s) — same "don't end the tell early" reasoning as the charge
+    // telegraph fix above.
+    const telegraph = state.worldBoss?.active
+      ? CONFIG.worldBoss.bossBehavior.hazard.telegraph
+      : CONFIG.bossBehavior.hazard.telegraph;
     this.hazardBand.trigger(PALETTE.warn, HAZARD_WARN_PEAK_ALPHA, telegraph);
     this.rings.spawn({
       x: ev.x,
-      y: BOSS_CY,
+      y: this.bossCy(state),
       r0: 20,
       r1: 90,
       duration: telegraph,
@@ -3336,10 +3527,12 @@ export class FxController {
 
   /** Best-effort "above the head" y for a hit's damage number (entities are
    * drawn from GROUND_Y + fixed per-kind offsets, NOT their raw `y` field —
-   * see heroView/enemyView/bossView, which all ignore entity.y the same way). */
+   * see heroView/enemyView/bossView, which all ignore entity.y the same way).
+   * WORLD BOSS "เสี่ยจ๋อง": `bossCy()` swaps in the much-taller rig's own
+   * anchor so damage numbers land above ITS head, not the stage boss's. */
   private hitY(target: HitTargetKind, id: number, state: GameState): number {
     if (target === "hero") return HERO_TOP_Y;
-    if (target === "boss") return BOSS_CY - 44;
+    if (target === "boss") return this.bossCy(state) - 44;
     const enemy = state.enemies.find((e) => e.id === id);
     const size = enemy?.size ?? 1;
     return GROUND_Y - 42 - 8 * size - 10;

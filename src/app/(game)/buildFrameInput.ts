@@ -60,6 +60,10 @@ export function buildFrameInput(
     claimDaily: pending.claimDaily ?? undefined,
     claimMainReward: pending.claimMainReward ?? undefined,
     useWarpScroll: pending.useWarpScroll ?? undefined,
+    // World boss "เสี่ยจ๋อง": GameClient's own schedule check queues this (never a
+    // direct player action) while standing in the window's boss zone — plain
+    // passthrough, no hero-index remap needed (it's location-based, not per-hero).
+    spawnWorldBoss: pending.spawnWorldBoss ?? undefined,
   };
 }
 

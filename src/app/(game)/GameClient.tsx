@@ -62,6 +62,7 @@ import {
   isEvolutionQuestOffered,
   isTier3BossObjectiveActive,
   learnedSkills,
+  lookupTemplate,
   mainChapterDefs,
   mainQuestChapters,
   migrate,
@@ -77,6 +78,7 @@ import {
   townNpcConfig,
   unlockedAutoSlotCount,
   worldNav,
+  worldBossPhaseAt,
   effectiveUnlockedZones,
   type GameEvent,
   type GameState,
@@ -122,7 +124,14 @@ import {
   type SkillSummary,
   type TownPanelId,
   type UiConfig,
+  type WorldBossStatus,
 } from "@/ui/store/gameStore";
+import { postWorldBossClaim } from "@/ui/worldBoss/api";
+import {
+  deriveWorldBossStatus,
+  sameWorldBossStatus,
+  shouldQueueWorldBossSpawn,
+} from "@/ui/worldBoss/schedule";
 import { resolveCatchUp } from "./catchUp";
 import {
   PartyHandshake,
@@ -166,6 +175,15 @@ function asRecord(v: unknown): Record<string, unknown> | null {
  * rather than reached into `@/server/**`). A buffer bigger than this flushes
  * across multiple autosave-cadence ticks instead of being truncated. */
 const MAX_CLAIM_BATCH = 64;
+
+/** Mirrors `server/worldBoss.ts`'s `WORLD_BOSS_REWARD.materials` (server zone,
+ * not importable from here — same "duplicated deliberately" convention as
+ * `MAX_CLAIM_BATCH` above). The claim response's `materialsTotal` is an
+ * ABSOLUTE post-credit balance, not a delta — `creditMaterials` wants a signed
+ * delta (same convention as every other materials credit in this file), so the
+ * known fixed reward is applied directly rather than diffed against a
+ * possibly-stale local mirror. */
+const WORLD_BOSS_REWARD_MATERIALS = 350;
 
 /** Party handshake deadline safety net (partySession.ts D1/D2 fixes). A re-seed exchange
  * that hasn't converged within `HANDSHAKE_DEADLINE_MS` is aborted + retried; a trip backs
@@ -582,6 +600,64 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
   }
 }
 
+/** World boss "เสี่ยจ๋อง" claim: at most one attempt in flight; a genuinely stale/
+ * network-failed attempt is remembered here so the next autosave tick retries it
+ * (same "small holder, retried on the next cadence" shape as the drop-claim
+ * buffer, just for a single one-shot claim rather than a batch). */
+let worldBossClaimInFlight = false;
+let pendingWorldBossClaim: { windowId: number } | null = null;
+
+/**
+ * Claim the world-boss reward for `windowId` (fires off a `worldBossDefeated`
+ * frame event — see `frame()`'s event loop below). POST-first, same "never
+ * mutate local state before the server confirms" rule as sell/refine:
+ *  - `res === null` (network/parse failure) → re-queue for the next autosave
+ *    tick via `pendingWorldBossClaim` (also the path taken when `myCharacterId`
+ *    hasn't resolved yet — a boot-race edge case, resolves within one tick).
+ *  - `res.ok === false` (403 not_owned / 409 stale_window / 409 already_claimed)
+ *    → terminal, silent — a genuinely stale/foreign claim will never succeed on
+ *    retry (see the route's doc).
+ *  - `res.ok === true` → credit gold via the SAME `goldCredit` intent sell/
+ *    refine use, credit the known fixed materials reward, merge the minted
+ *    fortifier into the inventory slice (its OWN drop-feed toast resolves the
+ *    item's translated name — no cross-namespace lookup needed here), and push
+ *    a generic gold+stones notice.
+ * IN A COHORT every member calls this independently for their OWN character —
+ * the shared sim's `worldBossDefeated` event fires identically on every
+ * client, and each one claims into its own save row (by design).
+ */
+async function attemptWorldBossClaim(windowId: number): Promise<void> {
+  if (worldBossClaimInFlight) {
+    pendingWorldBossClaim = { windowId };
+    return;
+  }
+  const characterId = useGameStore.getState().myCharacterId;
+  if (!characterId) {
+    pendingWorldBossClaim = { windowId };
+    return;
+  }
+  worldBossClaimInFlight = true;
+  try {
+    const res = await postWorldBossClaim(characterId, windowId);
+    if (res === null) {
+      pendingWorldBossClaim = { windowId }; // network failure — retry next autosave tick
+      return;
+    }
+    if (!res.ok) return; // terminal rejection — silent, no retry
+    const store = useGameStore.getState();
+    store.creditGold(res.goldCredit);
+    store.creditMaterials(WORLD_BOSS_REWARD_MATERIALS);
+    store.mergeInventory([res.item]);
+    store.pushDropFeed(res.item.templateId, lookupTemplate(res.item.templateId)?.rarity ?? "epic");
+    store.pushNotice("worldBossClaimed", {
+      gold: res.goldCredit.toLocaleString(),
+      stones: WORLD_BOSS_REWARD_MATERIALS,
+    });
+  } finally {
+    worldBossClaimInFlight = false;
+  }
+}
+
 export function GameClient() {
   const arenaRef = useRef<HTMLDivElement | null>(null);
   const t = useTranslations("common");
@@ -707,6 +783,22 @@ export function GameClient() {
     /** Last-seen `waiting` value from the engine, to detect chip transitions per frame. */
     let cohortPrevWaiting = false;
     let lastZoneKey: string | null = null;
+
+    // ---- World boss "เสี่ยจ๋อง" schedule (server-clock aligned; see `serverNowMs`'s
+    // doc) ----
+    /** `serverNow - Date.now()` at boot (from the `/api/save` GET response's
+     * `serverNow` field) — the device clock is never trusted for the world-boss
+     * schedule math (`worldBossPhaseAt` reads a wall clock, unlike the rest of the
+     * pure engine). `0` (device clock, unadjusted) until boot's fetch resolves —
+     * a harmless few-second skew for the brief window before that. */
+    let serverTimeOffset = 0;
+    function serverNowMs(): number {
+      return Date.now() + serverTimeOffset;
+    }
+    /** Last status PUSHED to the store — gates `setWorldBossStatus` to actual
+     * transitions only (see `sameWorldBossStatus`'s doc: comparing `secondsLeft`
+     * too gives the countdown its ~1Hz cadence for free). */
+    let lastWorldBossStatus: WorldBossStatus = { kind: "idle" };
 
     /** Rebuild the `heroId -> displayName` map `GameRenderer.setHeroDisplayNames`
      * wants (keyed by hero id, not slot/index — see its doc). `null` while solo. */
@@ -1221,6 +1313,25 @@ export function GameClient() {
 
       const store = useGameStore.getState();
 
+      // World boss "เสี่ยจ๋อง": cheap per-frame schedule check off the SERVER-clock-
+      // aligned `serverNowMs()` (never the device clock). The store push is gated to
+      // actual transitions by `sameWorldBossStatus` (its ceil-second comparison also
+      // gives the countdown its ~1Hz refresh for free — no separate throttle timer
+      // needed). While standing in the window's boss zone during "active", queue the
+      // spawn intent for THIS frame — idempotent both here (`shouldQueueWorldBossSpawn`
+      // checks the live `state.worldBoss` window) and engine-side (`trySpawnWorldBoss`).
+      const worldBossPhase = worldBossPhaseAt(serverNowMs());
+      const worldBossStatus = deriveWorldBossStatus(worldBossPhase, state.location);
+      if (!sameWorldBossStatus(worldBossStatus, lastWorldBossStatus)) {
+        lastWorldBossStatus = worldBossStatus;
+        store.setWorldBossStatus(worldBossStatus);
+      }
+      if (
+        shouldQueueWorldBossSpawn(worldBossPhase, worldBossStatus, state.worldBoss?.windowId ?? null)
+      ) {
+        store.queueSpawnWorldBoss(worldBossPhase.windowId, Math.ceil(worldBossPhase.msRemaining / 1000));
+      }
+
       // M7.5 bot-status toasts ("มันเกิดขึ้นไวไป มองไม่ทัน" — owner request):
       // capture pre-step consumable counts so a town restock this frame can be
       // reported with real numbers after the sub-steps run.
@@ -1492,6 +1603,11 @@ export function GameClient() {
           // M8 quest Wave C: throttled by the engine already (fires once, on
           // the complete transition) — points the player at ผู้ใหญ่บ้าน to claim.
           useGameStore.getState().pushNotice("dailyQuestComplete");
+        } else if (ev.type === "worldBossDefeated") {
+          // World boss "เสี่ยจ๋อง": the engine grants NO xp/gold itself (rewards are
+          // SERVER-claimed) — fire the claim POST for MY character. In a cohort every
+          // member sees this same shared-sim event and claims independently (by design).
+          void attemptWorldBossClaim(ev.windowId);
         }
       }
 
@@ -1627,6 +1743,13 @@ export function GameClient() {
         });
       // Same cadence as the save POST (see the drop-claim flush's own doc below).
       flushClaims();
+      // World boss "เสี่ยจ๋อง": retry a network-failed (or characterId-not-yet-
+      // resolved) claim on the same cadence — see `attemptWorldBossClaim`'s doc.
+      if (pendingWorldBossClaim && !worldBossClaimInFlight) {
+        const claim = pendingWorldBossClaim;
+        pendingWorldBossClaim = null;
+        void attemptWorldBossClaim(claim.windowId);
+      }
     }
 
     // ---- M7 Gear & Drops: batched drop-claim flush (same cadence as autosave,
@@ -1931,10 +2054,19 @@ export function GameClient() {
              * `rosterSize` quest ids), present even pre-character (the roster
              * is USER-scoped) — see `@/server/dailyQuests`. */
             dailies?: { serverDay: number; questIds: string[] };
+            /** World boss "เสี่ยจ๋อง": the server's wall clock at response time —
+             * seeds `serverTimeOffset` so the spawn-schedule countdown is aligned
+             * to the SERVER clock, never the device clock (see `serverNowMs`'s
+             * doc). Always present (both the pre-character and full branches of
+             * the GET handler send it). */
+            serverNow?: number;
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
           if (json.save) loaded = migrate(json.save);
+          if (typeof json.serverNow === "number") {
+            serverTimeOffset = json.serverNow - Date.now();
+          }
           // Class repair (2026-07-06): the account's baseClass is authoritative
           // over the save blob's hero.cls — a corrupted save gets its class
           // corrected + wrong-primary stat points refunded (engine helper).

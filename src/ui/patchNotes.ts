@@ -189,6 +189,17 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08i.items.multiSell",
     ],
   },
+  // World boss "เสี่ยจ๋อง" (hourly, party-gated) + "แกร่ง" fortifier (guaranteed-
+  // success refine) + the warp-after-boss-victory softlock fix.
+  {
+    id: "2026-07-09",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09.items.worldBoss",
+      "releases.2026-07-09.items.fortifier",
+      "releases.2026-07-09.items.warpVictoryFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

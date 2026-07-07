@@ -44,6 +44,7 @@ import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
 import { TownNpcPanelHost } from "@/ui/components/TownNpcPanelHost";
 import { UpdateBanner } from "@/ui/components/UpdateBanner";
 import { WalkControls } from "@/ui/components/WalkControls";
+import { WorldBossBanner } from "@/ui/components/WorldBossBanner";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 import { CohortStatus } from "@/ui/party/CohortStatus";
@@ -88,6 +89,9 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       {/* M8 party P4b: lockstep cohort chip — renders nothing solo (the overwhelming
           common case), see CohortStatus.tsx. */}
       <CohortStatus />
+      {/* World boss "เสี่ยจ๋อง": hourly countdown/found-it banner — renders nothing
+          outside the pre-announce/active windows, see WorldBossBanner.tsx. */}
+      <WorldBossBanner />
       <HudBar />
 
       <div

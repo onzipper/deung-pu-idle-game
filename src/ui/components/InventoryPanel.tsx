@@ -37,7 +37,14 @@
 
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { ITEM_TEMPLATES, INVENTORY_CAP, type GearSlot, type HeroClass } from "@/engine";
+import {
+  FORTIFIER_FOR_SLOT,
+  ITEM_TEMPLATES,
+  INVENTORY_CAP,
+  lookupTemplate,
+  type GearSlot,
+  type HeroClass,
+} from "@/engine";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
 import { executeSell } from "@/ui/gear/sellFlow";
@@ -301,6 +308,7 @@ export interface InventoryPanelProps {
 
 export function InventoryPanel({ onClose }: InventoryPanelProps) {
   const t = useTranslations("inventory");
+  const tContent = useTranslations("content.items");
   const inventory = useGameStore((s) => s.inventory);
   const materials = useGameStore((s) => s.materials);
   const heroCls = useGameStore((s) => s.heroes[0]?.cls);
@@ -315,10 +323,14 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   const [busy, setBusy] = useState(false);
 
   // M7.9 "no stacking" — every owned instance is its own tile, sorted
-  // BEST -> WORST (see `compareInventoryItems`).
+  // BEST -> WORST (see `compareInventoryItems`). World-boss wave: "แกร่ง"
+  // fortifiers reuse a gear `slot` as their MATCH key (not an equip slot), so
+  // they're excluded from this equip/sell grid entirely — see the dedicated
+  // owned-fortifier readout below instead (no equip/sell affordances for them).
   const items = useMemo(() => {
     return inventory
       .filter((i) => i.slot === activeTab)
+      .filter((i) => lookupTemplate(i.templateId)?.kind !== "fortifier")
       .filter((i) => {
         if (!classOnly || !heroCls) return true;
         const tpl = ITEM_TEMPLATES[i.templateId];
@@ -326,6 +338,15 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
       })
       .sort(compareInventoryItems);
   }, [inventory, activeTab, classOnly, heroCls]);
+
+  // World-boss wave: owned "แกร่ง" fortifier counts (weapon/armor) — inert
+  // readout only (consumed via the refine panel's guaranteed-success button,
+  // never equipped/sold here).
+  const fortifierCounts = useMemo(() => {
+    const weapon = inventory.filter((i) => i.templateId === FORTIFIER_FOR_SLOT.weapon).length;
+    const armor = inventory.filter((i) => i.templateId === FORTIFIER_FOR_SLOT.armor).length;
+    return { weapon, armor };
+  }, [inventory]);
 
   const equippedItem = inventory.find((i) => i.equippedSlot === activeTab) ?? null;
   const equippedTemplateId = equippedItem?.templateId ?? null;
@@ -426,6 +447,23 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             {materials.toLocaleString()}
           </span>
         </div>
+
+        {/* World-boss wave: owned "แกร่ง" fortifier readout (inert — no equip/sell
+            here, spend them at ลุงดึ๋ง's refine panel). Hidden when both are 0. */}
+        {(fortifierCounts.weapon > 0 || fortifierCounts.armor > 0) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {fortifierCounts.weapon > 0 && (
+              <span className="flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-400/10 px-2 py-0.5 text-[10px] font-bold tabular-nums text-violet-300">
+                <span aria-hidden>⚔</span> {tContent("fort_weapon.name")} ×{fortifierCounts.weapon}
+              </span>
+            )}
+            {fortifierCounts.armor > 0 && (
+              <span className="flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-400/10 px-2 py-0.5 text-[10px] font-bold tabular-nums text-violet-300">
+                <span aria-hidden>🛡</span> {tContent("fort_armor.name")} ×{fortifierCounts.armor}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex items-center gap-1.5">
