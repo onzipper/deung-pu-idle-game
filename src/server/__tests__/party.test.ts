@@ -201,7 +201,7 @@ describe("respondPartyInvite", () => {
     expect(mockPrisma.partyMember.create).not.toHaveBeenCalled();
   });
 
-  it("enforces the cap of 3 at accept-time (race re-check under the party row-lock)", async () => {
+  it("enforces the MAX_PARTY_SIZE cap at accept-time (race re-check under the party row-lock)", async () => {
     registered();
     mockPrisma.partyInvite.findUnique.mockResolvedValueOnce({
       id: "i1",
@@ -213,7 +213,7 @@ describe("respondPartyInvite", () => {
       .mockResolvedValueOnce(null) // I'm not in a party
       .mockResolvedValueOnce({ partyId: "p1" }); // inviter's party
     mockPrisma.party.update.mockResolvedValue({}); // acquires the row lock
-    mockPrisma.partyMember.count.mockResolvedValueOnce(3); // already full after the lock
+    mockPrisma.partyMember.count.mockResolvedValueOnce(MAX_PARTY_SIZE); // already full after the lock
     const r = await respondPartyInvite(ME, { inviteId: "i1", accept: true });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("party_full");

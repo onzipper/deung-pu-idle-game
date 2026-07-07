@@ -1,8 +1,9 @@
 /**
  * Party domain (M8 Phase 1 — social container, polling, no websockets).
  *
- * A party is a MEMBERSHIP CONTAINER only this wave: max 3 members, free-roam, no
- * gameplay coupling (the lockstep cohort sim is a later wave, docs/party-design-m8.md).
+ * A party is a MEMBERSHIP CONTAINER only this wave: max MAX_PARTY_SIZE members,
+ * free-roam, no gameplay coupling (the lockstep cohort sim is a later wave,
+ * docs/party-design-m8.md).
  *
  * Trust boundary (mirrors friends.ts): identity (`userId`) is resolved from the
  * httpOnly cookie by the route handler and passed in here — NEVER from the body.
@@ -13,8 +14,8 @@
  *
  * DB INVARIANTS (see prisma/schema.prisma Party/PartyMember comments):
  *   - PartyMember.userId @unique → a user is in AT MOST one party (DB-enforced).
- *   - <=3 cap re-checked inside the accept tx after an exclusive Party row-lock
- *     (tx.party.update bumps updatedAt) which serializes concurrent accepts.
+ *   - <=MAX_PARTY_SIZE cap re-checked inside the accept tx after an exclusive Party
+ *     row-lock (tx.party.update bumps updatedAt) which serializes concurrent accepts.
  */
 
 import { z } from "zod";
@@ -24,8 +25,9 @@ import { isRegistered, areFriends } from "@/server/friends";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Hard cap on ACCEPTED party members (leader + up to 2). */
-export const MAX_PARTY_SIZE = 3;
+/** Hard cap on ACCEPTED party members (leader + up to 5 — owner raised 3 → 6,
+ * 2026-07-08; the relay's MAX_SLOTS and FriendsPanel's mirror must match). */
+export const MAX_PARTY_SIZE = 6;
 
 /** Soft cap on a single account's OUTSTANDING pending party invites (spam guard). */
 export const MAX_PENDING_INVITES = 5;

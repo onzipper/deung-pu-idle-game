@@ -647,6 +647,13 @@ interface PendingMeteor {
    * per-meteor `onApocalypseMeteorImpact()` beat instead of cataclysm's
    * single big `onCataclysmImpact()`. */
   isApocalypse?: boolean;
+  /** M8 party P6 POV gating: whether the CASTING hero was the point-of-view
+   * hero at cast time — captured here (not re-derived at landing time, when
+   * the caster may have changed slot/died) so the delayed impact beat
+   * (`onCataclysmImpact()`/`onApocalypseMeteorImpact()`) can gate its
+   * SCREEN-level shake/punch/filter on the caster's identity, not whoever
+   * happens to be POV when the meteor actually lands. */
+  pov: boolean;
 }
 
 /** One in-flight ARROW RAIN drop being tracked from cast to landing — `id`
@@ -664,6 +671,10 @@ interface PendingRainArrow {
    * `stormArrowsRemaining` toward the finale beat instead of BARRAGE's
    * per-landing ring/shake. */
   isStorm?: boolean;
+  /** M8 party P6 POV gating — see `PendingMeteor.pov`'s doc comment; same
+   * reasoning, captured at cast time for the delayed landing beat
+   * (`onRainArrowLanded()`'s BARRAGE re-punch shake). */
+  pov: boolean;
 }
 
 /** One scheduled field-wide beat (M7.7 quake ultimate, M7.9 skyfall) — a
@@ -777,6 +788,26 @@ export class FxController {
    * counter and fires one finale once BOTH batches finish landing — a
    * render-only simplification, never a correctness concern. */
   private stormArrowsRemaining = 0;
+  /** M8 party P6 POV gating: whether ANY still-in-flight STORM cast that
+   * contributed to the current `stormArrowsRemaining` countdown was cast by
+   * the POV hero — the finale (`onStormFinale()`) is a single aggregate beat
+   * (see `stormArrowsRemaining`'s own doc comment on why overlapping casts
+   * merge into one counter), so this is set (never cleared early) whenever a
+   * POV cast contributes, and reset once the finale actually fires. Default
+   * `false` is correct: solo play never touches this flag before a real POV
+   * storm cast sets it (see `onArcherStormCast()`). */
+  private stormFinalePov = false;
+
+  /** M8 party P6 "co-op spectacle stays world-anchored, screen beats stay
+   * personal": index into `state.heroes` of the LOCAL point-of-view hero.
+   * World-anchored fx (particles/rings/ground decals/sky overlays anchored at
+   * a caster's position) fire for every co-op skill cast regardless of who
+   * cast it; screen-level beats (camera shake/punch, full-viewport sky/flash
+   * overlays, `ImpactFilterController` shockwave) are gated to fire ONLY when
+   * the casting hero (`skillCast.slot`) matches this index — see
+   * `onSkillCast()`. Default 0 + every solo event's `slot` is always 0, so
+   * solo play is unaffected (`pov` always true) without this ever being set. */
+  private povHeroIndex = 0;
 
   // ---- M7.8 "Manual Play" command feedback ---------------------------------
   // Continuous per-frame read of `state.heroes[0].command` (same convention
@@ -963,6 +994,17 @@ export class FxController {
    * onto the letterbox offset + screenshake offset. */
   get punchOffset(): { x: number; y: number } {
     return this.punch.offset;
+  }
+
+  /** M8 party P6 seam (mirrors `GameRenderer.setHeroDisplayNames()`) —
+   * registers which `state.heroes` slot is the LOCAL point-of-view hero, so
+   * `onSkillCast()` can gate SCREEN-level beats (shake/punch/sky-darken/
+   * impact filters) to that hero's own casts while world-anchored fx keeps
+   * firing for every cohort member's casts. Safe to call any time; default 0
+   * matches solo's always-slot-0 heroes, so unset behaves identically to
+   * before this seam existed. */
+  setPovHeroIndex(index: number): void {
+    this.povHeroIndex = index;
   }
 
   /** React to this frame's (already-collected, cross-sub-step) events. */
@@ -1750,7 +1792,14 @@ export class FxController {
     const hero = state.heroes[ev.slot];
     const x = hero ? hero.x : 0;
     const colors = HERO_COLORS[ev.heroClass];
-    this.punch.trigger("skillCast", x);
+    // M8 party P6: co-op spectacle stays world-anchored for everyone, but
+    // SCREEN-level beats (camera shake/punch, full-viewport sky/flash
+    // overlays, impact filters) only fire when the CASTING hero is the local
+    // point-of-view hero — see `setPovHeroIndex()`'s doc comment. Default
+    // `povHeroIndex` 0 + solo events always at `slot` 0 means `pov` is always
+    // `true` in solo play, so this is a pure no-op there.
+    const pov = ev.slot === this.povHeroIndex;
+    if (pov) this.punch.trigger("skillCast", x);
 
     // M7.7 "Skill Spectacle": route by the actual SKILL, not just class —
     // each class's SIGNATURE/UTILITY/ULTIMATE now reads as three distinct
@@ -1758,40 +1807,40 @@ export class FxController {
     // which was the "current fx read too alike" gap this pass closes).
     switch (ev.skillId) {
       case "sword_whirl":
-        this.onSwordWhirlCast(hero, x, colors.light);
+        this.onSwordWhirlCast(hero, x, colors.light, pov);
         break;
       case "sword_warcry":
         this.onSwordWarcryCast(x, colors.light);
         break;
       case "sword_quake":
-        this.onSwordQuakeCast(x);
+        this.onSwordQuakeCast(x, pov);
         break;
       case "sword_skyfall":
-        this.onSwordSkyfallCast(x);
+        this.onSwordSkyfallCast(x, pov);
         break;
       case "archer_rain":
-        this.onArcherRainCast(x, colors.light, state, false);
+        this.onArcherRainCast(x, colors.light, state, false, pov);
         break;
       case "archer_powershot":
         this.onArcherPowershotCast(x, colors.light);
         break;
       case "archer_barrage":
-        this.onArcherRainCast(x, colors.light, state, true);
+        this.onArcherRainCast(x, colors.light, state, true, pov);
         break;
       case "archer_storm":
-        this.onArcherStormCast(x, colors.light, state);
+        this.onArcherStormCast(x, colors.light, state, pov);
         break;
       case "mage_meteor":
-        this.onMageMeteorCast(x, colors.light, state, false);
+        this.onMageMeteorCast(x, colors.light, state, false, pov);
         break;
       case "mage_frostnova":
         this.onMageFrostNovaCast(x, colors.light);
         break;
       case "mage_cataclysm":
-        this.onMageMeteorCast(x, colors.light, state, true);
+        this.onMageMeteorCast(x, colors.light, state, true, pov);
         break;
       case "mage_apocalypse":
-        this.onMageApocalypseCast(x, state);
+        this.onMageApocalypseCast(x, state, pov);
         break;
       default:
         break; // unknown skill id — no fx beat rather than guessing wrong
@@ -1805,11 +1854,14 @@ export class FxController {
    * `swordEmber`) give the sword kit its own fx language, distinct from the
    * archer's emerald/mage's violet — the RIG itself stays the class's own
    * teal (`color`), only the impact/crack accents go hot-metal. */
-  private onSwordWhirlCast(hero: Hero | undefined, x: number, color: number): void {
+  private onSwordWhirlCast(hero: Hero | undefined, x: number, color: number, pov: boolean): void {
     // Stronger, spin-specific punch — "strongest wins" against the generic
     // `skillCast` punch already triggered by the caller (see cameraPunch.ts).
-    this.punch.trigger("swordSpin", x);
-    this.shake.trigger(WHIRL_IMPACT_SHAKE);
+    // M8 party P6: SCREEN-level only for the POV hero's own cast.
+    if (pov) {
+      this.punch.trigger("swordSpin", x);
+      this.shake.trigger(WHIRL_IMPACT_SHAKE);
+    }
 
     // Charge-up: front-loaded blade glow + inward-drifting sparkle at the
     // live blade tip (the spin's own 0.4s whirl already runs in heroView;
@@ -1905,10 +1957,14 @@ export class FxController {
    * single point flash. `strike` resolves the AoE damage INSTANTLY (no
    * projectile), so every beat here fires at cast time — there is no
    * separate "impact" moment to wait for. */
-  private onSwordQuakeCast(x: number): void {
-    this.punch.trigger("swordQuake", x);
-    this.shake.trigger(QUAKE_SHAKE);
-    this.impactFilters.triggerShockwave(x, GROUND_Y);
+  private onSwordQuakeCast(x: number, pov: boolean): void {
+    // M8 party P6: SCREEN-level only for the POV hero's own cast; the ground
+    // crack/ring/dust/scatter below stays world-anchored for everyone.
+    if (pov) {
+      this.punch.trigger("swordQuake", x);
+      this.shake.trigger(QUAKE_SHAKE);
+      this.impactFilters.triggerShockwave(x, GROUND_Y);
+    }
 
     this.rings.spawn({
       x,
@@ -1959,10 +2015,13 @@ export class FxController {
    * (`timeDirector.ts`'s `FREEZE_SWORD_SKYFALL`, wired off this same
    * `skillCast` event) that quake never had, selling "clearly bigger than
    * quake" per the owner's out-spectacle spec. */
-  private onSwordSkyfallCast(x: number): void {
-    this.punch.trigger("swordSkyfall", x);
-    this.shake.trigger(SKYFALL_SHAKE);
-    this.impactFilters.triggerShockwave(x, GROUND_Y);
+  private onSwordSkyfallCast(x: number, pov: boolean): void {
+    // M8 party P6: SCREEN-level only for the POV hero's own cast.
+    if (pov) {
+      this.punch.trigger("swordSkyfall", x);
+      this.shake.trigger(SKYFALL_SHAKE);
+      this.impactFilters.triggerShockwave(x, GROUND_Y);
+    }
 
     this.rings.spawn({
       x,
@@ -2091,7 +2150,13 @@ export class FxController {
    * step. The ultimate additionally gets its own big shake/punch AT CAST
    * (the "whole field is about to get hit" read) and a bigger/brighter
    * emerald curtain than the signature's paler dusting. */
-  private onArcherRainCast(x: number, color: number, state: GameState, isUltimate: boolean): void {
+  private onArcherRainCast(
+    x: number,
+    color: number,
+    state: GameState,
+    isUltimate: boolean,
+    pov: boolean,
+  ): void {
     // Bow flash: quick expanding ring + a tiny release burst at the bow.
     this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 11, duration: 0.15, width: 2, color });
     burst(this.particles, x, HERO_MID_Y, 5, color, { speed: 60, life: 0.2, radius: 2 });
@@ -2113,7 +2178,8 @@ export class FxController {
       });
     }
 
-    if (isUltimate) {
+    // M8 party P6: SCREEN-level only for the POV hero's own cast.
+    if (isUltimate && pov) {
       this.punch.trigger("archerBarrage", x);
       this.shake.trigger(BARRAGE_CAST_SHAKE);
     }
@@ -2141,7 +2207,7 @@ export class FxController {
         width: curtainWidth,
         alpha: curtainAlpha,
       });
-      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: isUltimate });
+      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: isUltimate, pov });
     }
   }
 
@@ -2157,7 +2223,7 @@ export class FxController {
       const entry = this.pendingRainArrows[i];
       const stillFalling = state.projectiles.some((p) => p.id === entry.id);
       if (!stillFalling) {
-        this.onRainArrowLanded(entry.tx, entry.ty, entry.big, entry.isStorm);
+        this.onRainArrowLanded(entry.tx, entry.ty, entry.big, entry.isStorm, entry.pov);
         this.pendingRainArrows.splice(i, 1);
         if (entry.isStorm) {
           this.stormArrowsRemaining = Math.max(0, this.stormArrowsRemaining - 1);
@@ -2176,7 +2242,7 @@ export class FxController {
    * instead its decal lingers much longer (`STORM_GROUND_ARROW_LIFE`) so the
    * field bristles with arrows by the time `onStormFinale()` fires the one
    * big field-wide beat. */
-  private onRainArrowLanded(x: number, y: number, big: boolean, isStorm = false): void {
+  private onRainArrowLanded(x: number, y: number, big: boolean, isStorm = false, pov = true): void {
     burst(this.particles, x, y, big ? RAIN_LAND_DIRT_COUNT + 2 : RAIN_LAND_DIRT_COUNT, PALETTE.muted, {
       speed: big ? 75 : 55,
       life: big ? 0.28 : 0.22,
@@ -2192,6 +2258,9 @@ export class FxController {
     );
     this.groundArrows.spawn(x, y, HERO_COLORS.archer.light, isStorm ? STORM_GROUND_ARROW_LIFE : undefined);
     if (big && !isStorm) {
+      // World-level ring stays unconditional; the re-punch shake (M8 party
+      // P6) only fires when the caster who scheduled THIS drop was the POV
+      // hero at cast time (`entry.pov`, captured in `onArcherRainCast()`).
       this.rings.spawn({
         x,
         y,
@@ -2201,7 +2270,7 @@ export class FxController {
         width: 2.5,
         color: PALETTE.archerEmerald,
       });
-      this.shake.trigger(BARRAGE_LAND_SHAKE);
+      if (pov) this.shake.trigger(BARRAGE_LAND_SHAKE);
     }
   }
 
@@ -2212,7 +2281,7 @@ export class FxController {
    * the whole storm (vs cataclysm's brief pulse), and tracks its 20 drops as
    * STORM-flagged entries so `updateRainArrowTracking()` fires
    * `onStormFinale()` the instant the last one lands. */
-  private onArcherStormCast(x: number, color: number, state: GameState): void {
+  private onArcherStormCast(x: number, color: number, state: GameState, pov: boolean): void {
     // Bow flash + volley launch streaks — same cast-time cue as the
     // signature/barrage.
     this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 12, duration: 0.16, width: 2.4, color });
@@ -2232,13 +2301,19 @@ export class FxController {
       });
     }
 
-    this.punch.trigger("archerStorm", x);
-    this.shake.trigger(STORM_CAST_SHAKE);
+    // M8 party P6: SCREEN-level cast punch/shake + the sky-darken overlay
+    // only fire for the POV hero's own cast; the arrow-swarm band below stays
+    // world-anchored (positioned relative to the caster, not full-viewport)
+    // and plays for everyone. Also latch `stormFinalePov` so the finale beat
+    // (fired later, once `stormArrowsRemaining` drains — see that field's own
+    // doc comment) knows whether a POV cast contributed to this countdown.
+    if (pov) {
+      this.punch.trigger("archerStorm", x);
+      this.shake.trigger(STORM_CAST_SHAKE);
+      this.skyDarken.trigger(PALETTE.archerStormSky, STORM_SKY_ALPHA, STORM_SKY_HOLD);
+      this.stormFinalePov = true;
+    }
 
-    // Archer-flavored sky event: a green-tinted storm cast sustained for the
-    // whole ~4s drop window (vs cataclysm's brief mage-violet pulse), plus a
-    // dark arrow-swarm silhouette band sweeping the top of the sky.
-    this.skyDarken.trigger(PALETTE.archerStormSky, STORM_SKY_ALPHA, STORM_SKY_HOLD);
     this.arrowSwarm.spawnBand(
       x,
       STORM_SWARM_COUNT,
@@ -2263,7 +2338,7 @@ export class FxController {
         width: BARRAGE_CURTAIN_WIDTH,
         alpha: BARRAGE_CURTAIN_ALPHA,
       });
-      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: true, isStorm: true });
+      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: true, isStorm: true, pov });
       this.stormArrowsRemaining++;
     }
   }
@@ -2276,8 +2351,15 @@ export class FxController {
    * once". */
   private onStormFinale(): void {
     const cx = WORLD_WIDTH / 2;
-    this.punch.trigger("archerStorm", cx);
-    this.shake.trigger(STORM_FINALE_SHAKE);
+    // M8 party P6: SCREEN-level punch/shake only if a POV cast contributed
+    // to this countdown (`stormFinalePov`, latched in `onArcherStormCast()`);
+    // the field-wide ring/particle payout + ground-arrow glint below stays
+    // world-anchored and unconditional.
+    if (this.stormFinalePov) {
+      this.punch.trigger("archerStorm", cx);
+      this.shake.trigger(STORM_FINALE_SHAKE);
+    }
+    this.stormFinalePov = false;
     this.rings.spawn({
       x: cx,
       y: GROUND_Y - 20,
@@ -2327,15 +2409,27 @@ export class FxController {
    * language) and gets a bigger rune/flourish — its shake/impact spectacle
    * lands ON IMPACT, not cast (see `onCataclysmImpact()`), matching how the
    * boss's own slam telegraphs before it lands. */
-  private onMageMeteorCast(x: number, color: number, state: GameState, isUltimate: boolean): void {
+  private onMageMeteorCast(
+    x: number,
+    color: number,
+    state: GameState,
+    isUltimate: boolean,
+    pov: boolean,
+  ): void {
     // The meteor's fixed ground-target point is `tx` on the projectile the
     // engine pushed synchronously in this same step (see
     // `engine/systems/skills.ts`) — read it back rather than re-deriving it.
     const meteor = state.projectiles.find((p) => p.team === "hero" && p.kind === "meteor");
     const tx = meteor ? meteor.tx : x;
 
-    this.meteorSky.trigger(isUltimate ? PALETTE.mageAzure : color, isUltimate ? 0.34 : 0.22);
-    if (isUltimate) this.skyDarken.trigger(PALETTE.skyDarkTint, CATACLYSM_SKY_ALPHA);
+    // M8 party P6: both are full-viewport/near-full-width overlays (same
+    // category as `ArenaFlash` — see `meteorScene.ts`'s/`skyDarken.ts`'s own
+    // doc comments), so SCREEN-level, gated to the POV hero's own cast. The
+    // rune glyph + cast flourish below stay world-anchored, unconditional.
+    if (pov) {
+      this.meteorSky.trigger(isUltimate ? PALETTE.mageAzure : color, isUltimate ? 0.34 : 0.22);
+      if (isUltimate) this.skyDarken.trigger(PALETTE.skyDarkTint, CATACLYSM_SKY_ALPHA);
+    }
 
     const fallTime = estimateMeteorFallTime();
     this.runeGlyphs.spawn({
@@ -2353,7 +2447,7 @@ export class FxController {
       // `meteor` is guaranteed by the cast guard (`castSkill` requires ≥1
       // target before committing) — the `-1` fallback only matters for a
       // render-side defensive read, never a real gameplay path.
-      this.pendingMeteors.push({ id: meteor ? meteor.id : -1, tx, isUltimate });
+      this.pendingMeteors.push({ id: meteor ? meteor.id : -1, tx, isUltimate, pov });
     }
 
     // Cast flourish at the staff.
@@ -2374,12 +2468,16 @@ export class FxController {
    * volley's staggered landing window read as SUSTAINED devastation rather
    * than cataclysm's one single flash. Tracked by projectile id (not `tx`
    * proximity — several drops can share nearby target x's here). */
-  private onMageApocalypseCast(x: number, state: GameState): void {
+  private onMageApocalypseCast(x: number, state: GameState, pov: boolean): void {
     const meteors = state.projectiles.filter((p) => p.team === "hero" && p.kind === "meteor");
     const alreadyTracked = new Set(this.pendingMeteors.map((m) => m.id));
 
-    this.meteorSky.trigger(PALETTE.mageAzure, 0.4);
-    this.skyDarken.trigger(PALETTE.mageVoidTint, APOCALYPSE_SKY_ALPHA, APOCALYPSE_SKY_HOLD);
+    // M8 party P6: SCREEN-level sky overlays gated to the POV hero's own
+    // cast — see `onMageMeteorCast()`'s matching doc comment.
+    if (pov) {
+      this.meteorSky.trigger(PALETTE.mageAzure, 0.4);
+      this.skyDarken.trigger(PALETTE.mageVoidTint, APOCALYPSE_SKY_ALPHA, APOCALYPSE_SKY_HOLD);
+    }
 
     const fallTime = estimateMeteorFallTime();
     for (const m of meteors) {
@@ -2396,13 +2494,13 @@ export class FxController {
         alpha: 0.5,
         fadeInFrac: 0.15,
       });
-      this.pendingMeteors.push({ id: m.id, tx: m.tx, isUltimate: true, isApocalypse: true });
+      this.pendingMeteors.push({ id: m.id, tx: m.tx, isUltimate: true, isApocalypse: true, pov });
     }
 
     // Cast flourish at the staff — bigger than the signature/cataclysm's,
     // reading as "channeling the whole volley at once".
     burst(this.particles, x, HERO_TOP_Y, 14, PALETTE.mageAzure, { speed: 55, life: 0.32, radius: 2.8 });
-    this.punch.trigger("mageApocalypse", x);
+    if (pov) this.punch.trigger("mageApocalypse", x);
   }
 
   /** CATACLYSM ultimate's impact beat (M7.7, fired from `updateMeteorTracking()`
@@ -2411,10 +2509,15 @@ export class FxController {
    * the field (selling the r460 field-wide reach without one dominating
    * 460px stroked circle), and lingering embers that drift a moment after
    * everything else has settled. */
-  private onCataclysmImpact(tx: number): void {
-    this.punch.trigger("mageCataclysm", tx);
-    this.shake.trigger(CATACLYSM_SHAKE);
-    this.impactFilters.triggerShockwave(tx, GROUND_Y);
+  private onCataclysmImpact(tx: number, pov: boolean): void {
+    // M8 party P6: SCREEN-level only if the caster who scheduled this drop
+    // was the POV hero at cast time (`entry.pov`); the scorch scatter/ring/
+    // ember burst below stays world-anchored, unconditional.
+    if (pov) {
+      this.punch.trigger("mageCataclysm", tx);
+      this.shake.trigger(CATACLYSM_SHAKE);
+      this.impactFilters.triggerShockwave(tx, GROUND_Y);
+    }
 
     const scatterXs = [tx - CATACLYSM_SCATTER_SCORCH_SPAN, tx, tx + CATACLYSM_SCATTER_SCORCH_SPAN];
     for (const sx of scatterXs) {
@@ -2452,9 +2555,13 @@ export class FxController {
    * the volley's staggered landing window (`ScreenShake.trigger()`'s "max
    * wins" policy means these don't stack additively — the READ is sustained
    * repeated pulses, not one bigger spike). */
-  private onApocalypseMeteorImpact(tx: number): void {
-    this.shake.trigger(APOCALYPSE_IMPACT_SHAKE);
-    this.impactFilters.triggerShockwave(tx, GROUND_Y);
+  private onApocalypseMeteorImpact(tx: number, pov: boolean): void {
+    // M8 party P6: SCREEN-level only for the POV hero's own cast (`entry.pov`);
+    // the scorch/ring/burst below stays world-anchored, unconditional.
+    if (pov) {
+      this.shake.trigger(APOCALYPSE_IMPACT_SHAKE);
+      this.impactFilters.triggerShockwave(tx, GROUND_Y);
+    }
     this.scorches.spawn(clamp(tx, 0, WORLD_WIDTH), GROUND_Y, PALETTE.mageAzure);
     this.rings.spawn({
       x: tx,
@@ -2898,9 +3005,9 @@ export class FxController {
       const stillFalling = state.projectiles.some((p) => p.id === entry.id);
       if (!stillFalling) {
         if (entry.isApocalypse) {
-          this.onApocalypseMeteorImpact(entry.tx);
+          this.onApocalypseMeteorImpact(entry.tx, entry.pov);
         } else if (entry.isUltimate) {
-          this.onCataclysmImpact(entry.tx);
+          this.onCataclysmImpact(entry.tx, entry.pov);
         } else {
           this.scorches.spawn(entry.tx, GROUND_Y, HERO_COLORS.mage.light);
         }

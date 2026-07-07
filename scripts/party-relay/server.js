@@ -38,7 +38,7 @@ const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 // Canonical party cap. MUST match MAX_PARTY_SIZE in src/server/party.ts and the slot
 // range the ticket is minted against — kept as a literal here because the relay takes
 // ZERO game imports (standalone deploy). If the party cap ever changes, change both.
-const MAX_SLOTS = 3;
+const MAX_SLOTS = 6; // owner raised the party cap 3 -> 6 (2026-07-08)
 
 // Tunables (env-overridable; createRelay() options win for tests).
 const DEFAULTS = {

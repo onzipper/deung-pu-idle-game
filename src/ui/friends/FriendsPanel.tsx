@@ -31,7 +31,7 @@ import { isZoneUnlockedUi } from "@/ui/world/zones";
 type Translator = ReturnType<typeof useTranslations>;
 
 /** Mirror of the server's MAX_PARTY_SIZE — the "have room" gate for the invite CTA. */
-const MAX_PARTY_SIZE = 3;
+const MAX_PARTY_SIZE = 6;
 
 /** Windows-10-safe leader marker (footgun #4: pre-2020 glyphs only). */
 const LEADER_GLYPH = "★"; // ★

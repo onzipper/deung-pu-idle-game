@@ -1077,6 +1077,15 @@
           "partyChip": "📶 The party status chip now tells the truth: it only shows while actually pairing up or playing together — green \"Playing with…\" means you're in",
           "connFix": "🔧 Fixed the first-live-test connection batch: joining a zone late made friends invisible, the \"connecting…\" label could stick forever, and the bot tried to equip wrong-class gear"
         }
+      },
+      "2026-07-08g": {
+        "items": {
+          "freezeFix": "🧊➡️🏃 Major fix: joining a party froze everyone in place (walking/bot/warp all dead) — the game now runs the moment you meet a friend in a zone",
+          "smooth": "✨ Party play is far smoother: characters move as fluidly as solo (no more choppy 100ms steps) and every tap registers",
+          "names": "🏷️ Friends' real names now show over their heads and on the party strip (no more long ID strings)",
+          "povFx": "🎇 A friend's ultimate no longer hijacks your screen — darkening/shaking only for YOUR casts, while their effects still play in the world",
+          "party6": "👥 Parties now hold up to 6 players! Bring the whole crew"
+        }
       }
     }
   },
@@ -1165,7 +1174,7 @@
     "partyLeaveConfirmPrompt": "Leave this party?",
     "partyLeaveConfirmButton": "Confirm leave",
     "partyLeaveCancelButton": "Cancel",
-    "errorPartyFull": "Party is full (max 3)",
+    "errorPartyFull": "Party is full (max 6)",
     "errorAlreadyMember": "Already in the same party",
     "errorAlreadyInvited": "Invite already sent — wait for a response",
     "errorAlreadyInParty": "Leave your current party first to join a new one",
