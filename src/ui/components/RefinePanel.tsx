@@ -131,6 +131,20 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
     return () => audio?.destroy();
   }, []);
 
+  // The outcome reveal is tap-to-skip (owner request): a tap during the reveal
+  // fast-forwards straight to the settled end state instead of forcing the
+  // player to wait out the full animation before the next hammer. `settleRef`
+  // holds the exact same settle closure the timer would have run, so skipping
+  // and letting it play out naturally produce an IDENTICAL end state.
+  const revealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleRef = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      if (revealTimeoutRef.current != null) clearTimeout(revealTimeoutRef.current);
+    },
+    [],
+  );
+
   const allStacks = useMemo(() => groupIntoStacks(inventory), [inventory]);
   const stacks = useMemo(
     () =>
@@ -148,7 +162,16 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const displayStack = frozenStack ?? liveStack;
   const template = displayStack ? ITEM_TEMPLATES[displayStack.templateId] : null;
 
-  const busy = phase === "charging";
+  // Non-idle covers BOTH the charging build-up and the outcome reveal window
+  // (success/degrade/safe/break) — a tap during the reveal must not race a
+  // second `handleRefine` against the still-frozen stale snapshot (that race
+  // is what corrupted the frozenStack/selectedKey handoff and forced a manual
+  // re-select). The button re-enables exactly when the reveal finishes and
+  // `revealOutcome`'s trailing `setSelectedKey` has already re-anchored
+  // selection to the item's new refine level.
+  const busy = phase !== "idle";
+  const isReveal =
+    phase === "success" || phase === "degrade" || phase === "safe" || phase === "break";
   const atMax = displayStack ? displayStack.refineLevel >= REFINE.maxRefine : false;
   const targetLevel = displayStack ? displayStack.refineLevel + 1 : 0;
   const cost = template && !atMax ? refineCost(template.tier, targetLevel) : null;
@@ -221,11 +244,25 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
       if (audio) playRefineDegrade(audio);
     }
 
-    setTimeout(() => {
+    const settle = () => {
+      revealTimeoutRef.current = null;
+      settleRef.current = null;
       setPhase("idle");
       setFrozenStack(null);
       setSelectedKey(result.destroyed ? null : `${snapshot.templateId}:${result.refineLevel}`);
-    }, OUTCOME_DISPLAY_MS);
+    };
+    settleRef.current = settle;
+    revealTimeoutRef.current = setTimeout(settle, OUTCOME_DISPLAY_MS);
+  }
+
+  /** Tap-to-skip: only meaningful during the reveal phases (never charging —
+   * that build-up always plays out in full). Never calls `handleRefine`
+   * itself, so a skip tap can never double-fire an attempt; it just retires
+   * the current reveal early so the NEXT tap is free to start a fresh one. */
+  function skipReveal(): void {
+    if (!isReveal) return;
+    if (revealTimeoutRef.current != null) clearTimeout(revealTimeoutRef.current);
+    settleRef.current?.();
   }
 
   return (
@@ -358,7 +395,13 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
           )}
 
           {displayStack && template && (
-            <div className="relative flex flex-col gap-2.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 p-3">
+            <div
+              className={`relative flex flex-col gap-2.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 p-3 ${
+                isReveal ? "cursor-pointer" : ""
+              }`}
+              onClick={isReveal ? skipReveal : undefined}
+              role={isReveal ? "button" : undefined}
+            >
               <div className="flex items-center gap-2">
                 <span
                   aria-hidden
@@ -482,10 +525,22 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
 
                   <button
                     type="button"
-                    disabled={!!disabledReason}
+                    // Only truly inert while charging or while genuinely
+                    // unable to act at idle — during the reveal the button
+                    // must stay clickable (native `disabled` blocks click
+                    // entirely) so a tap on it can skip straight to settle.
+                    disabled={phase === "charging" || (phase === "idle" && !!disabledReason)}
                     title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
-                    onClick={handleRefine}
-                    className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-gold/70 bg-ddp-gold/20 px-3 text-sm font-black text-ddp-gold-bright transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => {
+                      if (isReveal) {
+                        skipReveal();
+                        return;
+                      }
+                      void handleRefine();
+                    }}
+                    className={`min-h-11 rounded-(--ddp-radius-md) border border-ddp-gold/70 bg-ddp-gold/20 px-3 text-sm font-black text-ddp-gold-bright transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isReveal ? "opacity-70" : ""
+                    }`}
                   >
                     {busy ? t("refiningButton") : t("refineButton")}
                   </button>
