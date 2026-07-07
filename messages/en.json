@@ -726,6 +726,9 @@
   "shop": {
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
+    "tabBuy": "Buy",
+    "tabSell": "Sell & Salvage",
+    "sellEmptyHint": "Bag's empty — nothing to sell.",
     "owned": "{count}/{cap} held",
     "buyAria": "Buy {qty} {name}",
     "quickUseLabel": "Items",
@@ -946,7 +949,8 @@
       },
       "2026-07-08c": {
         "items": {
-          "townWalkFix": "🚶 Town bugfix: tap-to-walk works in town again, and tapping Pah Pu / Uncle Dueng actually walks you over — move orders used to vanish in town, making NPCs untalkable"
+          "townWalkFix": "🚶 Town bugfix: tap-to-walk works in town again, and tapping Pah Pu / Uncle Dueng actually walks you over — move orders used to vanish in town, making NPCs untalkable",
+          "shopSell": "💰 Pah Pu now buys back: sell and salvage gear right from her shop dialog, no need to open the inventory separately"
         }
       }
     }

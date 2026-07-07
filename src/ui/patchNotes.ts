@@ -112,7 +112,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
   {
     id: "2026-07-08c",
     date: "2026-07-08",
-    items: ["releases.2026-07-08c.items.townWalkFix"],
+    items: ["releases.2026-07-08c.items.townWalkFix", "releases.2026-07-08c.items.shopSell"],
   },
 ];
 
