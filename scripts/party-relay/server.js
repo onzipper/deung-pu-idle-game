@@ -451,11 +451,23 @@ function createRelay(opts = {}) {
   const server = http.createServer((req, res) => {
     const url = (req.url || "/").split("?")[0];
     if (url === "/health") {
+      // The game page pre-wakes a sleeping instance with a cross-origin GET here
+      // (protocol §10). Health is public read-only info, so a wildcard ACAO is
+      // safe — without it the browser hides the 200 and the client can't read it.
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+        });
+        res.end();
+        return;
+      }
       let sockets = 0;
       for (const room of rooms.values()) sockets += liveSocketCount(room);
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
       });
       res.end(
         JSON.stringify({

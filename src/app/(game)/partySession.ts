@@ -247,12 +247,13 @@ export class PartySession {
       this.setStatus("off");
       return;
     }
-    const healthy = await this.prewake(ticket.relayUrl, gen);
+    // Best-effort ONLY: prewake nudges a sleeping Render instance, but its result
+    // never gates the join — the websocket handshake below is exempt from CORS,
+    // wakes the instance just as well, and has its own retry path (ws close ->
+    // scheduleReconnect). Gating here once bricked party mode when a cross-origin
+    // /health response lacked CORS headers while the relay itself was healthy.
+    await this.prewake(ticket.relayUrl, gen);
     if (gen !== this.generation) return;
-    if (!healthy) {
-      this.scheduleReconnect(gen);
-      return;
-    }
     this.mySlot = ticket.slot;
     this.openSocket(ticket.relayUrl, ticket.ticket, gen);
   }
@@ -268,16 +269,19 @@ export class PartySession {
   }
 
   /** Pre-wake `GET <relayUrl>/health` (protocol §10) — Render free tier sleeps when
-   * idle, so the first join after a while can cold-start; poll tolerantly for up to
-   * `HEALTH_PREWAKE_TIMEOUT_MS` rather than failing the join outright. */
+   * idle, so the first join after a while can cold-start. Fired `no-cors` so a relay
+   * without CORS headers (or any future policy quirk) can never block it: the response
+   * comes back opaque (`res.ok` unreadable) but the REQUEST reaching the server is the
+   * whole point. "Resolved without throwing" = the instance answered = awake. The
+   * return value is diagnostic only — `connect()` proceeds to the websocket either way. */
   private async prewake(relayUrl: string, gen: number): Promise<boolean> {
     const healthUrl = `${relayUrl.replace(/^ws/, "http")}/health`;
     const deadline = Date.now() + HEALTH_PREWAKE_TIMEOUT_MS;
     while (Date.now() < deadline) {
       if (gen !== this.generation) return false;
       try {
-        const res = await fetch(healthUrl, { method: "GET" });
-        if (res.ok) return true;
+        await fetch(healthUrl, { method: "GET", mode: "no-cors" });
+        return true; // resolved (even opaque) = the server answered = awake
       } catch {
         /* cold start / transient network — keep retrying within the deadline */
       }
