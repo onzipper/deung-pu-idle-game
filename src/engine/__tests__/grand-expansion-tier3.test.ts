@@ -28,12 +28,13 @@ import {
   isZoneUnlocked,
   questGrantsZoneAccess,
   effectiveUnlockedZones,
+  isTier3BossObjectiveActive,
   worldNav,
   type GameState,
   type Hero,
   type HeroClass,
 } from "@/engine";
-import { soloSave, makeStubEnemy } from "./helpers";
+import { soloSave, makeStubEnemy, runUntil } from "./helpers";
 
 /**
  * M7.9 "Grand Expansion" — tier-3 CLASS ADVANCEMENT (engine).
@@ -81,16 +82,18 @@ describe("M7.9 tier-3 quest — offer / accept", () => {
     expect(evolutionQuestFor(h.cls, h.tier)!.id).not.toBe(tier3QuestId("mage"));
   });
 
-  it("accepting seats the tier-3 quest instance (single kill objective)", () => {
+  it("accepting seats the tier-3 quest instance (kill grind + map4 boss)", () => {
     const { s, h } = tierHero("archer", 2, 40);
     step(s, { acceptQuest: 0 });
     expect(h.quest!.id).toBe(tier3QuestId("archer"));
     expect(h.quest!.accepted).toBe(true);
-    // REDESIGN (owner "option ข"): ONE objective now — the map4-frontier kill grind.
-    expect(h.quest!.progress).toEqual([0]);
+    // M7.9b (owner "fight the MAP4 boss"): TWO objectives now — the map4-frontier kill
+    // grind THEN the young-Sovereign boss kill. Order is load-bearing (0=kill, 1=killBoss).
+    expect(h.quest!.progress).toEqual([0, 0]);
     const def = tier3QuestFor("archer");
-    expect(def.objectives).toHaveLength(1);
+    expect(def.objectives).toHaveLength(2);
     expect(def.objectives[0]).toMatchObject({ type: "kill", mapId: "map4" });
+    expect(def.objectives[1]).toMatchObject({ type: "killBoss", mapId: "map4" });
   });
 });
 
@@ -113,8 +116,10 @@ describe("M7.9 tier-3 quest — map4-frontier kill counting (REDESIGN)", () => {
     expect(h.quest!.progress[killIdx]).toBe(1);
   });
 
-  it("has NO boss objective (the old map2-boss backtrack is gone)", () => {
-    expect(tier3QuestFor("archer").objectives.some((o) => o.type === "killBoss")).toBe(false);
+  it("has a map4 BOSS objective (M7.9b) — but NOT the old map2-boss backtrack", () => {
+    const boss = tier3QuestFor("archer").objectives.find((o) => o.type === "killBoss");
+    expect(boss).toBeDefined();
+    expect(boss!.mapId).toBe("map4"); // the young Sovereign, not a map2 backtrack
   });
 });
 
@@ -238,7 +243,7 @@ describe("M7.9 SAVE v15 migration", () => {
     expect(migrate(save).hero.tier).toBe(3);
   });
 
-  it("preserves an in-progress NEW-shape tier-3 quest through migrate", () => {
+  it("preserves an in-progress NEW-shape (2-objective) tier-3 quest through migrate", () => {
     const id = tier3QuestId("archer");
     const v16 = {
       version: 16,
@@ -253,21 +258,24 @@ describe("M7.9 SAVE v15 migration", () => {
         stats: { ...CONFIG.stats.base.archer },
         mana: 60,
         autoSlots: [SIGNATURE_SKILL.archer, null, null],
-        // NEW single-objective shape (map4 kills only): progress length 1.
-        quest: { id, accepted: true, progress: [45] },
+        // M7.9b NEW 2-objective shape (map4 kills, map4 boss): kills banked, boss pending.
+        quest: { id, accepted: true, progress: [90, 0] },
       },
       lastSeen: 0,
     };
     const out = migrate(v16);
-    expect(out.hero.quest).toEqual({ id, accepted: true, progress: [45] });
+    expect(out.hero.quest).toEqual({ id, accepted: true, progress: [90, 0] });
     expect(migrate(out)).toEqual(out);
   });
 
-  it("RESETS an in-flight OLD-shape tier-3 quest (2 objectives) to un-accepted", () => {
-    // REDESIGN migration rule (owner "option ข"): a pre-redesign save mid-tier-3-quest
-    // carries the OLD 2-entry progress [map3 kills, map2-boss]. The id is unchanged, but
-    // the objective SHAPE differs (now 1 objective), so the stale instance must RESET to
-    // null (re-offered at L40) rather than mis-map the old count. No crash, no SAVE bump.
+  it("RESETS an in-flight 1-objective (pre-M7.9b) tier-3 quest to un-accepted", () => {
+    // Migration guard (M7.9b, owner "fight the MAP4 boss"): the option-B quest that just
+    // landed (commit 3c513b4) was a SINGLE kill objective — an in-flight save carries a
+    // length-1 progress [kills]. Adding the boss objective makes the def length 2, so the
+    // objective-length guard (state/version.normalizeQuest + state/index.normalizeHeroQuest)
+    // RESETS the stale length-1 instance to null (re-offered at L40) rather than mis-map the
+    // banked kills onto the wrong objective. Same crash-proof rule as the option-B redesign;
+    // no SAVE_VERSION bump (the HeroQuest {id,accepted,progress[]} SHAPE is unchanged).
     const id = tier3QuestId("archer");
     const v16old = {
       version: 16,
@@ -282,7 +290,7 @@ describe("M7.9 SAVE v15 migration", () => {
         stats: { ...CONFIG.stats.base.archer },
         mana: 60,
         autoSlots: [SIGNATURE_SKILL.archer, null, null],
-        quest: { id, accepted: true, progress: [30, 0] }, // OLD 2-objective shape
+        quest: { id, accepted: true, progress: [45] }, // OLD 1-objective (option-B) shape
       },
       lastSeen: 0,
     };
@@ -368,6 +376,108 @@ describe("M7.9 tier-3 quest — map4-z1 PREVIEW access (REDESIGN)", () => {
     // (h is the quest holder; sanity that the grant is still only z1.)
     expect(isZoneUnlocked(s, PREVIEW)).toBe(true);
     void h;
+  });
+});
+
+describe("M7.9b tier-3 quest BOSS objective (young Glacial Sovereign)", () => {
+  const BOSS_ROOM = { mapId: "map4", zoneIdx: 5 };
+  const PREVIEW = { mapId: "map4", zoneIdx: 0 };
+  const MAP4_Z2 = { mapId: "map4", zoneIdx: 1 };
+
+  /** A tier-2 quest holder standing in the map4 frontier with the KILL objective banked. */
+  function killsBanked(cls: HeroClass): { s: GameState; h: Hero } {
+    const { s, h } = tierHero(cls, 2, 40);
+    step(s, { acceptQuest: 0 });
+    s.location = { mapId: "map4", zoneIdx: 0 };
+    s.stage = 16;
+    h.quest!.progress[0] = tier3QuestFor(cls).objectives[0].count; // kills banked
+    return { s, h };
+  }
+
+  it("access grant EXTENDS to the boss room only AFTER the kill objective is banked", () => {
+    const { s, h } = tierHero("archer", 2, 40);
+    step(s, { acceptQuest: 0 });
+    // Kills NOT yet banked: boss room stays locked, only z1 is granted.
+    expect(isTier3BossObjectiveActive(s)).toBe(false);
+    expect(questGrantsZoneAccess(s, BOSS_ROOM)).toBe(false);
+    expect(isZoneUnlocked(s, BOSS_ROOM)).toBe(false);
+
+    // Bank the kill objective → boss-room grant opens; zones 2-5 stay locked.
+    h.quest!.progress[0] = tier3QuestFor("archer").objectives[0].count;
+    expect(isTier3BossObjectiveActive(s)).toBe(true);
+    expect(questGrantsZoneAccess(s, BOSS_ROOM)).toBe(true);
+    expect(isZoneUnlocked(s, BOSS_ROOM)).toBe(true);
+    expect(isZoneUnlocked(s, MAP4_Z2)).toBe(false); // zone 2 never granted
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(true); // z1 still granted
+
+    // Boss-room grant is NOT folded into the count map (can't express z1+boss but not 2-5).
+    expect(effectiveUnlockedZones(s).map4).toBe(1);
+  });
+
+  it("the boss-room grant REVOKES once the boss objective completes / quest is consumed", () => {
+    const { s, h } = killsBanked("swordsman");
+    expect(questGrantsZoneAccess(s, BOSS_ROOM)).toBe(true);
+    // Complete the boss objective → the "active reason" is gone → grant revokes.
+    h.quest!.progress[1] = tier3QuestFor("swordsman").objectives[1].count;
+    expect(isTier3BossObjectiveActive(s)).toBe(false);
+    expect(questGrantsZoneAccess(s, BOSS_ROOM)).toBe(false);
+    expect(isZoneUnlocked(s, BOSS_ROOM)).toBe(false);
+  });
+
+  it("challenging from the frontier spawns the QUEST-SCALED Sovereign (charge kept)", () => {
+    const { s } = killsBanked("archer");
+    // "Challenge" walks DIRECTLY into the map4 boss room (non-adjacent — z2-5 never traversed).
+    step(s, { challengeBoss: true });
+    expect(s.traveling).not.toBeNull();
+    expect(runUntil(s, (st) => st.phase === "boss", 300)).toBe(true);
+    expect(s.location).toEqual(BOSS_ROOM);
+    expect(s.boss).not.toBeNull();
+    // Quest-override scales (softer than the real bossVariety[20] 0.7/0.62), same base curve.
+    expect(s.boss!.maxHp).toBe(Math.round(CONFIG.bossHp(20) * CONFIG.quest.tier3.bossHpScale));
+    expect(s.boss!.atk).toBe(Math.round(CONFIG.bossAtk(20) * CONFIG.quest.tier3.bossAtkScale));
+    // Softer than the REAL s20 Sovereign (proves it's the young version).
+    expect(s.boss!.maxHp).toBeLessThan(Math.round(CONFIG.bossHp(20) * CONFIG.bossVariety[20].hpScale));
+    // CHARGE mechanic + telegraphs retained (teaches the s20 fight early).
+    expect(s.boss!.variety!.behaviors).toContain("charge");
+  });
+
+  it("the charge hit at quest scale is SURVIVABLE for the squishiest tier-2 Lv40 (archer)", () => {
+    const { s, h } = killsBanked("archer");
+    step(s, { challengeBoss: true });
+    expect(runUntil(s, (st) => st.phase === "boss", 300)).toBe(true);
+    const chargeHit = Math.round(s.boss!.atk * CONFIG.bossBehavior.charge.hitMult);
+    // A full-HP archer takes the telegraphed charge and lives with real margin (not a one-shot).
+    expect(chargeHit).toBeLessThan(h.maxHp);
+    expect(chargeHit).toBeLessThan(h.maxHp * 0.5);
+  });
+
+  it("a TIER-3 hero (post-quest) entering the map4 boss room gets the REAL s20 boss", () => {
+    const { s } = tierHero("swordsman", 3, 45); // tier 3, no quest (evolved)
+    expect(s.heroes[0].quest).toBeNull();
+    s.unlockedZones.map4 = 6; // map4 fully unlocked (real progression)
+    s.location = { mapId: "map4", zoneIdx: 4 }; // last farm, boss room next door
+    s.stage = 20;
+    s.kills = CONFIG.killGoal(20);
+    s.bossReady = true;
+    step(s, { challengeBoss: true });
+    expect(runUntil(s, (st) => st.phase === "boss", 300)).toBe(true);
+    // REAL bossVariety scale (no quest override) — the full-power Sovereign.
+    expect(s.boss!.maxHp).toBe(Math.round(CONFIG.bossHp(20) * CONFIG.bossVariety[20].hpScale));
+    expect(s.boss!.atk).toBe(Math.round(CONFIG.bossAtk(20) * CONFIG.bossVariety[20].atkScale));
+  });
+
+  it("beating the young Sovereign completes the quest but does NOT unlock map5 / map4", () => {
+    const { s, h } = killsBanked("mage");
+    step(s, { challengeBoss: true });
+    expect(runUntil(s, (st) => st.phase === "boss", 300)).toBe(true);
+    s.boss!.hp = 0; // force the kill
+    step(s, {}); // resolveDeaths → onBossKilled (quest boss)
+    expect(h.quest!.progress[1]).toBe(1); // killBoss objective advanced
+    expect(isQuestComplete(h)).toBe(true); // quest done → hero may now evolve
+    expect(s.phase).toBe("victory");
+    // The scaled practice boss must NOT progress the world: no map5 unlock, no persisted map4.
+    expect(s.unlockedZones.map5 ?? 0).toBe(0);
+    expect(s.unlockedZones.map4 ?? 0).toBe(0);
   });
 });
 

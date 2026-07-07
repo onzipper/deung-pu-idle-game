@@ -204,6 +204,9 @@ interface SeedResult {
   manaPotionsUsed: number;
   /** M7.6 ตีบวก refine emulation (REFINE_ON): the material-sink + wall metrics. */
   refine: RefineMetrics;
+  /** M7.9b tier-3 QUEST boss (young Sovereign) fight: attempts / deaths in the room /
+   * whether it was ever won / the winning fight's duration (seconds). */
+  questBoss: { attempts: number; deaths: number; won: boolean; winTime: number | null };
 }
 
 interface RefineMetrics {
@@ -336,7 +339,17 @@ function lastFarmIdx(mapId: string): number {
  * -> town -> auto-return loop farms the last zone, so a real "grind + retry" cadence
  * emerges without special-casing it here.
  */
-function navInput(s: GameState): Partial<FrameInput> {
+/** Per-seed mutable routing context (M7.9b): remembers the frontier kill count at the last
+ * quest-boss challenge so the sim FARMS a bit between failed attempts (a real player grinds
+ * gear/levels before retrying) instead of insta-re-challenging a boss it can't yet beat. */
+interface NavCtx {
+  lastQuestBossChallengeKills: number;
+}
+
+/** Frontier kills to bank between quest-boss attempts before re-challenging (gear/xp gain). */
+const QUEST_BOSS_FARM_BETWEEN = 70;
+
+function navInput(s: GameState, ctx: NavCtx): Partial<FrameInput> {
   if (s.traveling) return {};
   const nav = worldNav(s);
   const hero = s.heroes[0];
@@ -374,14 +387,32 @@ function navInput(s: GameState): Partial<FrameInput> {
       if (nav.current.kind === "town") return { fastTravel: preview };
       return walkLeft(); // funnel to town (safe fast-travel launchpad)
     }
-    return {}; // kills banked → evolveHero fires; hold in place until tier 3
+    // ---- M7.9b: kills banked → fight the QUEST BOSS (young Sovereign) in the map4 boss room.
+    if ((hero.quest.progress[1] ?? 0) < q3.bossKills) {
+      if (s.phase === "boss" || s.phase === "victory") return {}; // fighting / won — let it resolve
+      if (inPreview) {
+        // Farm the frontier a bit between attempts (gear/xp) so a marginal seed builds power
+        // and eventually wins, instead of insta-re-challenging a boss it can't yet beat.
+        if (s.kills - ctx.lastQuestBossChallengeKills < QUEST_BOSS_FARM_BETWEEN) return {};
+        ctx.lastQuestBossChallengeKills = s.kills;
+        return { challengeBoss: true }; // walk DIRECTLY into the map4 boss room
+      }
+      // Died / retreated out of the frontier → get back to the preview to retry.
+      if (nav.current.kind === "town") return { fastTravel: preview };
+      return walkLeft();
+    }
+    return {}; // both objectives done → evolveHero fires; hold until tier 3
   }
 
   if (hero.tier === 3 && !map4Unlocked) {
-    if (inPreview) {
-      // Stranded in the now-locked preview: instant scroll escape (works under threat),
-      // else retry a fast-travel to town until a standoff opens.
-      return s.consumables.returnScroll > 0 ? { useReturnScroll: true } : { fastTravel: townLoc };
+    // Post-win escape (M7.9b): a fresh tier-3 hero can be stranded in the now-locked map4
+    // frontier OR its boss room (the young-Sovereign victory). The grant is gone, so scroll
+    // out to town (instant, works in victory/under threat), else fast-travel when a standoff
+    // opens (a farm zone only — the victory phase can't tick a fast-travel channel).
+    const inMap4 = s.location.mapId === preview.mapId;
+    if (inMap4) {
+      if (s.consumables.returnScroll > 0) return { useReturnScroll: true };
+      return zoneAt(s.location).kind === "farm" ? { fastTravel: townLoc } : {};
     }
     if (nav.current.kind === "town") {
       const wm = wallBossMapId(q3.killMapId);
@@ -489,6 +520,9 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let tier3Stage: number | null = null;
   let totalDeaths = 0;
   let totalWipes = 0;
+  // M7.9b quest-boss (young Sovereign) tracking — a tier-2 fight in the map4 boss room.
+  const qBoss = { attempts: 0, deaths: 0, won: false, winTime: null as number | null };
+  let qBossFightStart: number | null = null;
   const bestOwned: OwnedBest = { weapon: null, armor: null };
   let drops = 0;
   let hpPotionsUsed = 0;
@@ -560,8 +594,9 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     pendingMat += salvageOf(templateId);
   };
 
+  const navCtx: NavCtx = { lastQuestBossChallengeKills: -QUEST_BOSS_FARM_BETWEEN };
   for (let i = 0; i < STEPS; i++) {
-    const input: FrameInput = { ...navInput(s), ...shopInput(s) };
+    const input: FrameInput = { ...navInput(s, navCtx), ...shopInput(s) };
     if (isEvolutionQuestOffered(s.heroes[0])) input.acceptQuest = 0;
     if (canEvolveHero(s, s.heroes[0])) input.evolveHero = 0;
     const slots = fillAutoSlots(s.heroes[0]);
@@ -634,19 +669,57 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
           byKey.set(k, zm);
           zones.push(zm);
         }
+        // M7.9b: the map4 boss ROOM is entered twice per run — first as the tier-2 QUEST
+        // boss (young Sovereign; tracked separately in qBoss), later as the REAL s20 boss
+        // (tier 3). Reset the shared metric on the tier-3 re-entry so the s20-boss agg
+        // measures ONLY the real fight, never blended with the earlier quest attempt.
+        if (
+          zm &&
+          e.kind === "boss" &&
+          e.mapId === CONFIG.quest.tier3.killMapId &&
+          s.heroes[0].tier >= 3
+        ) {
+          zm.enterTime = s.time;
+          zm.clearTime = null;
+          zm.deaths = 0;
+          zm.bossAttempts = 0;
+          zm.bossWipes = 0;
+        }
         if (zm && (e.kind === "farm" || e.kind === "boss")) cur = zm;
       }
+      if (
+        e.type === "bossDefeated" &&
+        s.location.mapId === CONFIG.quest.tier3.killMapId &&
+        s.heroes[0].tier === 2
+      ) {
+        // The young Sovereign fell (tier-2, pre-evolve) → the quest-boss win.
+        qBoss.won = true;
+        if (qBossFightStart !== null) qBoss.winTime = s.time - qBossFightStart;
+      }
     }
+
+    // M7.9b quest-boss context: a tier-2 fight in the map4 boss room = the young Sovereign.
+    const inQuestBossRoom =
+      s.location.mapId === CONFIG.quest.tier3.killMapId &&
+      zoneAt(s.location).kind === "boss" &&
+      s.heroes[0].tier === 2;
 
     // Death edge.
     const nowDead = s.heroes[0].dead;
     if (nowDead && !prevDead) {
       cur.deaths++;
       totalDeaths++;
+      if (inQuestBossRoom) qBoss.deaths++;
     }
     // Boss-room attempt / wipe edges.
     if (prevPhase !== s.phase) {
-      if (s.phase === "boss") cur.bossAttempts++;
+      if (s.phase === "boss") {
+        cur.bossAttempts++;
+        if (inQuestBossRoom) {
+          qBoss.attempts++;
+          qBossFightStart = s.time;
+        }
+      }
       if (prevPhase === "boss" && s.phase !== "victory") {
         cur.bossWipes++;
         totalWipes++;
@@ -715,6 +788,7 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     hpPotionsUsed,
     manaPotionsUsed,
     refine: rm,
+    questBoss: qBoss,
   };
 }
 
@@ -840,6 +914,14 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
       `final tier: ${results.map((r) => r.finalTier).join(",")} | ` +
       `deaths: ${results.reduce((a, r) => a + r.totalDeaths, 0)} | ` +
       `boss wipes: ${results.reduce((a, r) => a + r.totalWipes, 0)}`,
+  );
+  // M7.9b tier-3 QUEST boss (young Sovereign): per-seed attempts/deaths + win time.
+  const qb = results.map((r) => r.questBoss);
+  console.log(
+    `  - tier3 quest-boss (young Sovereign): attempts ${qb.map((q) => q.attempts).join(",")} | ` +
+      `deaths ${qb.map((q) => q.deaths).join(",")} | ` +
+      `won ${qb.map((q) => (q.won ? "Y" : "N")).join(",")} | ` +
+      `winT ${qb.map((q) => (q.winTime === null ? "-" : q.winTime.toFixed(1) + "s")).join(",")}`,
   );
   // M7.7 mana-sink check: total + per-seed potions consumed (auto-use).
   const hpTot = results.reduce((a, r) => a + r.hpPotionsUsed, 0);
@@ -1007,8 +1089,9 @@ function runBossIso(): void {
       let entered = false;
       let enterTime = 0;
       const cap = Math.round(240 / FIXED_DT);
+      const navCtx: NavCtx = { lastQuestBossChallengeKills: -QUEST_BOSS_FARM_BETWEEN };
       for (let i = 0; i < cap; i++) {
-        const input: FrameInput = { ...navInput(s) };
+        const input: FrameInput = { ...navInput(s, navCtx) };
         const slots = fillAutoSlots(s.heroes[0]);
         if (slots.length) input.setAutoSlots = slots;
         step(s, input);

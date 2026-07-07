@@ -287,3 +287,63 @@ checkZoneUnlock guard is a no-op for persist-unlocked zones) — HELD. class-2 ~
 tier-3 achieved without stall (s16, 5/5 all classes) — HELD. s15 boss breaks with tier-3 after
 (reaching map4-6 requires the s15 boss kill) — HELD. s16-30 + M7.9 frontier gates — HELD (only
 s30 boss walls). Mana sink intact — HELD.
+
+## Appendix — Tier-3 quest BOSS objective (owner "fight the MAP4 boss", 2026-07-08)
+
+The tier-3 quest gains a **SECOND objective** after the 90-kill grind: **defeat the map4 boss**,
+a quest-scaled "young" Glacial Sovereign. The real s20 Sovereign (`bossVariety[20]` hp×0.7/
+atk×0.62) is tier-3-tuned and provably unbeatable at tier 2, so while the quest is the ACTIVE
+reason for boss-room access the Sovereign spawns with softer **quest-override scales** instead.
+
+**Design as implemented.** `CONFIG.quest.tier3` gains `{ bossKills:1, bossHpScale:0.58,
+bossAtkScale:0.5 }`. `tier3QuestFor` now emits TWO objectives (0 = `kill×90 @map4`, 1 =
+`killBoss×1 @map4`; order load-bearing). The access grant EXTENDS to the map4 boss room once
+objective 0 is banked (`questGrantsZoneAccess` + `isTier3BossObjectiveActive`) — zones 2-5 stay
+locked (the boss-room grant is a per-loc boolean, deliberately NOT folded into
+`effectiveUnlockedZones`, which a count map can't express). "Challenge" from the frontier walks
+DIRECTLY into the boss room (non-adjacent, z2-5 never traversed). `startBossFight` picks the
+override via `tier3QuestBossScale` (keys off QUEST STATE, not tier — a post-quest tier-3 hero
+gets the REAL boss). The young Sovereign KEEPS the CHARGE mechanic + telegraphs (teaches the s20
+fight early); only hp/atk soften. Beating it completes the quest + rewards the fight but SKIPS
+the map unlock / HOF s20 record / guaranteed drop (`onBossKilled` guards on the captured
+`isTier3QuestBossFight` flag) — the hero still returns to beat the REAL s15 boss for the
+persisted map4 unlock. The grant revokes the instant objective 1 fills / the quest is consumed.
+
+**Scales = 0.58/0.5 (sim-tuned).** The real boss's 0.7/0.62 stalls sword/archer hard (0-1/5
+wins) while the mage facerolls — the CHARGE punishes the melee/archer who must close. Softening
+to 0.58/0.5 (a genuinely "young" version, ~83%/81% of the real hp/atk) makes it a real,
+multi-attempt-tolerant fight: **sword 2-3 attempts (1-2 deaths), archer 1-2 (0-1 deaths), mage 1
+(0 deaths)**, every class winning in **~20-26s** (well under the 60s target), **no seed where a
+class never wins**. The harness now FARMS ~70 frontier kills between failed attempts (a real
+player grinds gear/xp before retrying) — this smooths the sharp "faceroll-vs-never-win" cliff
+that immediate re-challenging created, so a marginal seed builds power to a guaranteed win.
+
+**Squishiest-class survivability (owner constraint).** Archer tier-2 Lv40 max-HP ≈ 1015 (+gear);
+the charge hit = `round(atk × charge.hitMult 1.6)` = `round(round(bossAtk(20)×0.5) × 1.6)` ≈ 275,
+**~27% of HP** — a scary telegraphed spike, never a one-shot. Verified in the engine suite
+(`grand-expansion-tier3.test.ts`: `chargeHit < maxHp*0.5`).
+
+**Sim evidence** (organic, GEAR, 5 seeds; quest-boss line from the balance-sim report):
+
+| class | quest-boss attempts | deaths | won | win time | tier-3 | reached (4600s) |
+|---|---|---|---|---|---|---|
+| swordsman | 2,3,1,2,1 | 1,2,0,1,0 | 5/5 | ~20s | s20 (5/5) | map6/s30 |
+| archer | 1,2,1,2,1 | 0,1,0,1,0 | 5/5 | ~26s | s20 (5/5) | map6/s30 |
+| mage | 1,1,1,1,1 | 0,0,0,0,0 | 5/5 | ~22s | s20 (5/5) | map6/s30 |
+
+**Migration.** Still NO `SAVE_VERSION` bump — the quest id + `HeroQuest` shape are unchanged.
+The 1→2 objective-count change rides the SAME objective-length guard (`normalizeQuest` +
+`normalizeHeroQuest`): an in-flight length-1 (option-B) quest resets to `null` (re-offered at
+L40) rather than mis-map the banked kills onto the wrong objective. Verified crash-proof in the
+suite (both a migrate() reset test and a live `initGameState` reset test).
+
+**Gate verdicts (re-verified):** s1-15 engine byte-identical (no curve/`bossVariety[5/10/15]`
+touched; every new branch is guarded off quest state) — HELD. tier-3 achieved without stall (now
+s20, after the boss fight — "may shift later than s16" per owner) — HELD. s15 breaks post-tier-3
+(mage 3.5s, 5/5) — HELD. s16-30 pacing monotonic to s30 — HELD. Mana sink intact (51-149 pot/run)
+— HELD. s30 boss soft-wall (0/5 clears, reached by all) — HELD.
+
+**Events / render.** No new events — the young Sovereign reuses the full boss lifecycle
+(`bossSlamTelegraph/Land`, `bossChargeTelegraph/Hit`, `bossEnraged`, `bossDefeated`, …). The
+render `bossVariety`/CHARGE fx key off `mapId` (map4 → ice-tundra + charge visuals), NOT boss
+stats, so the scaled boss draws identically. The render side needs NOTHING new.

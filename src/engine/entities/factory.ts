@@ -152,16 +152,25 @@ export function makeEnemy(
   };
 }
 
-/** Build the stage boss (Phase B wiring; factory ready now). */
-export function makeBoss(id: number, stage: number): Boss {
+/** Build the stage boss (Phase B wiring; factory ready now).
+ *
+ * `scaleOverride` (M7.9b tier-3 quest boss): when provided, its hp/atk scales REPLACE the
+ * bossVariety row's scales while the boss KEEPS the row's `behaviors` (mechanics + telegraphs
+ * unchanged). Used by `systems/boss.startBossFight` to spawn the quest-scaled "young" Glacial
+ * Sovereign for a tier-2 hero mid-tier-3-quest; the real s20 boss passes no override. */
+export function makeBoss(
+  id: number,
+  stage: number,
+  scaleOverride?: { hpScale: number; atkScale: number },
+): Boss {
   // M7.9 boss variety: stamp the per-stage behavior snapshot + init the mechanic
   // timers. `hpScale`/`atkScale` are identity (1) in this first pass, so a boss's
   // stats stay byte-identical to the parametric curve; a stage with no roster row
   // (e.g. a test forcing a boss at a non-boss stage) falls back to the classic kit.
   const bb = CONFIG.bossBehavior;
   const row = CONFIG.bossVariety[stage];
-  const hpScale = row?.hpScale ?? 1;
-  const atkScale = row?.atkScale ?? 1;
+  const hpScale = scaleOverride?.hpScale ?? row?.hpScale ?? 1;
+  const atkScale = scaleOverride?.atkScale ?? row?.atkScale ?? 1;
   const hp = Math.round(CONFIG.bossHp(stage) * hpScale);
   return {
     id,

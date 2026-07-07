@@ -985,10 +985,34 @@ export const CONFIG = {
     // `kills` is SIM-TUNED (docs/balance-m79.md "Tier-3 quest redesign"): map4 s16 mobs are
     // far tougher than map3's (the old count was 120 in map3), so the count scales DOWN to a
     // serious-but-fair frontier gate a tier-2 hero can bank without a permanent stall.
+    //
+    // ---- M7.9b tier-3 quest BOSS objective (owner 2026-07-08, "fight the MAP4 boss") ----
+    // A SECOND objective now follows the kill grind: defeat the map4 boss (a QUEST-SCALED
+    // "young" Glacial Sovereign). The real s20 Sovereign (bossVariety[20]: hp×0.7/atk×0.62)
+    // is tier-3-tuned and provably unbeatable at tier 2, so while the tier-3 quest is the
+    // ACTIVE reason for boss-room access (tier-2 hero, quest held, boss objective pending —
+    // systems/quests.isTier3QuestBossFight) the Sovereign spawns with these gentler scales
+    // instead (systems/boss.startBossFight → makeBoss override). It KEEPS the CHARGE mechanic
+    // + telegraphs (teaching the s20 fight early) — only its hp/atk soften. A tier-3 hero (or
+    // anyone post-quest) entering that room later gets the REAL s20 boss: the override keys off
+    // the QUEST STATE, never hero tier alone. Scales are on the SAME base-curve basis as the
+    // bossVariety row (× bossHp(20)/bossAtk(20)); SIM-TUNED (docs/balance-m79.md "Tier-3 quest
+    // boss") so every class needs a real, multi-attempt-tolerant fight the squishiest tier-2
+    // Lv40 (archer) survives (the charge hit = round(atk×charge.hitMult 1.6) stays well under
+    // the archer's ~1000 tier-2 HP). Access to the boss room EXTENDS the quest's derived,
+    // never-persisted grant (systems/world.questGrantsZoneAccess) once the kills are banked;
+    // zones 2-5 stay locked and beating the young Sovereign does NOT unlock map5 (the hero
+    // still returns to beat the REAL s15 boss for the persisted map4 unlock).
     tier3: {
-      // Kills to bank in the map4-zone-1 frontier field (the sole objective).
+      // Kills to bank in the map4-zone-1 frontier field (the FIRST objective).
       kills: 90,
+      // Boss defeats required in map4 — the young Glacial Sovereign (the SECOND objective).
+      bossKills: 1,
       killMapId: "map4",
+      // Quest-scaled young-Sovereign hp/atk (× the s20 base curve; softer than the real
+      // bossVariety[20] 0.7/0.62 so a tier-2 Lv40 hero can win it in a real fight).
+      bossHpScale: 0.58,
+      bossAtkScale: 0.5,
     },
   },
 

@@ -53,6 +53,9 @@ export {
   tier3QuestId,
   evolutionQuestFor,
   isEvolutionQuestOffered,
+  // M7.9b tier-3 quest BOSS objective: the UI surfaces the "challenge the young Sovereign"
+  // affordance from `isTier3BossObjectiveActive` (kill objective banked, boss pending).
+  isTier3BossObjectiveActive,
 } from "@/engine/systems/quests";
 
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
