@@ -702,10 +702,10 @@ describe("fast travel", () => {
     expect(ev && "reason" in ev && ev.reason).toBe("locked");
   });
 
-  it("rejects when a mob is engaging the hero (blocked: aggro)", () => {
+  it("STARTS the channel even while a mob is engaged (permissive — owner UX 2026-07-08)", () => {
     const s = initGameState(1, soloSave("swordsman", 3));
     unlockAll(s);
-    // Seat an engaged mob adjacent to the hero.
+    // Seat an engaged mob adjacent to the hero — no longer blocks the channel.
     s.enemies = [
       {
         id: 999,
@@ -729,25 +729,70 @@ describe("fast travel", () => {
     ];
     s.spawnPaused = true;
     step(s, { fastTravel: { mapId: "map1", zoneIdx: 5 } });
-    expect(s.fastTravelCast).toBeNull();
-    const ev = s.events.find((e) => e.type === "fastTravelBlocked");
-    expect(ev && "reason" in ev && ev.reason).toBe("aggro");
+    expect(s.fastTravelCast).not.toBeNull(); // channel began under threat
+    expect(s.events.some((e) => e.type === "fastTravelCastStart")).toBe(true);
+    expect(s.events.some((e) => e.type === "fastTravelBlocked")).toBe(false);
   });
 
-  it("cancels the channel when the hero takes damage (blocked: damaged)", () => {
+  it("does NOT cancel the channel when the hero takes damage — it plays out and warps", () => {
     const s = initGameState(1, soloSave("swordsman", 3));
     unlockAll(s);
     s.spawnPaused = true;
     s.enemies = [];
     step(s, { fastTravel: { mapId: "map1", zoneIdx: 5 } });
     expect(s.fastTravelCast).not.toBeNull();
-    // Damage the hero mid-channel.
-    s.heroes[0].hp -= 10;
+    // Chip the hero every step during the channel — must NOT interrupt the warp.
+    const done = runUntilInput(
+      s,
+      {},
+      (st) => {
+        st.heroes[0].hp = Math.max(1, st.heroes[0].hp - 3); // survive, keep taking hits
+        return st.fastTravelCast === null;
+      },
+      500,
+    );
+    expect(done).toBe(true);
+    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 5 }); // arrived despite damage
+    expect(s.events.some((e) => e.type === "fastTravelArrive")).toBe(true);
+    expect(s.events.some((e) => e.type === "fastTravelBlocked")).toBe(false);
+  });
+
+  it("cancels cleanly (blocked: dead, no stuck cast) if the hero DIES mid-channel", () => {
+    const s = initGameState(1, soloSave("swordsman", 3));
+    unlockAll(s);
+    s.spawnPaused = true;
+    s.enemies = [];
+    step(s, { fastTravel: { mapId: "map1", zoneIdx: 5 } });
+    expect(s.fastTravelCast).not.toBeNull();
+    // Seat a lethal engaged mob that lands its blow this step.
+    s.heroes[0].hp = 1;
+    s.enemies = [
+      {
+        id: 998,
+        kind: "normal",
+        x: s.heroes[0].x + 5,
+        y: 200,
+        hp: 100,
+        maxHp: 100,
+        atk: 9999,
+        speed: 0,
+        size: 1,
+        behavior: "melee",
+        range: 40,
+        cd: 0,
+        engageOffset: 0,
+        homeX: s.heroes[0].x + 5,
+        aggressive: false,
+        aggroRadius: 0,
+        engaged: true,
+      },
+    ];
     step(s, {});
-    expect(s.fastTravelCast).toBeNull();
-    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 3 }); // did NOT travel
+    expect(s.fastTravelCast).toBeNull(); // no stuck channel state
+    expect(s.heroes[0].dead).toBe(true);
+    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 3 }); // did NOT warp
     const ev = s.events.find((e) => e.type === "fastTravelBlocked");
-    expect(ev && "reason" in ev && ev.reason).toBe("damaged");
+    expect(ev && "reason" in ev && ev.reason).toBe("dead");
   });
 
   it("rejects a boss-room / same-zone / mid-transit target", () => {

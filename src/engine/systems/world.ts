@@ -756,42 +756,32 @@ export function onBossRoomCleared(state: GameState): void {
 }
 
 // ---------------------------------------------------------------------------
-// Fast travel (M7.5 "Fast travel") — a short damage-cancellable channel then an
-// instant, FREE hop to any UNLOCKED (non-boss) zone. The return scroll keeps its
-// value: it warps INSTANTLY even while swarmed, whereas fast travel demands a clear
-// standoff (no engaged/aggro mob) and can be interrupted by damage. Deterministic
-// (no RNG, no wall-clock) — the channel is a fixed-dt timer.
+// Fast travel (M7.5 "Fast travel") — a short channel then an instant, FREE hop to
+// any UNLOCKED (non-boss) zone. Owner UX (2026-07-08): the channel is permissive —
+// it may START while mobs are engaged/wailing on the hero and is NOT interrupted by
+// damage; it always plays out and warps unless the hero DIES mid-channel. The return
+// scroll keeps its edge: it warps INSTANTLY (no channel), whereas fast travel makes
+// you stand and eat hits for the cast time. Deterministic (no RNG, no wall-clock) —
+// the channel is a fixed-dt timer.
 // ---------------------------------------------------------------------------
 
 /** Reasons a fast-travel intent is rejected (mirrors the `fastTravelBlocked` event). */
 type FastTravelBlockedReason =
   | "locked"
-  | "aggro"
   | "dead"
   | "same"
   | "traveling"
   | "boss"
-  | "invalid"
-  | "damaged";
-
-/** Whether any mob is currently a threat to the hero (engaged, or an aggressive mob
- * inside its aggro radius) — the fast-travel standoff guard. */
-function heroUnderThreat(state: GameState): boolean {
-  const h = state.heroes[0];
-  if (!h) return false;
-  for (const e of state.enemies) {
-    if (e.hp <= 0) continue;
-    if (e.engaged) return true;
-    if (e.aggressive && Math.abs(e.x - h.x) <= e.aggroRadius) return true;
-  }
-  return false;
-}
+  | "invalid";
 
 /**
  * Begin a fast-travel channel to `target`. Rejected (emits `fastTravelBlocked` with
  * a reason, returns false) if a channel is already running, the hero is dead / mid
  * transit / in the boss phase, the target is invalid / a boss room / locked /
- * already-current, or a mob is engaging the hero. On success emits
+ * already-current. Owner UX (2026-07-08): fast travel is deliberately permissive —
+ * the channel may START while mobs are wailing on the hero (no under-threat guard)
+ * and it is NEVER interrupted by damage; it plays out and warps unless the hero
+ * DIES mid-channel (handled in `tickFastTravel`). On success emits
  * `fastTravelCastStart` and sets the channel; completion happens in `tickFastTravel`.
  */
 export function startFastTravel(state: GameState, target: WorldLocation): boolean {
@@ -811,12 +801,10 @@ export function startFastTravel(state: GameState, target: WorldLocation): boolea
   if (target.mapId === state.location.mapId && target.zoneIdx === state.location.zoneIdx) {
     return blocked("same");
   }
-  if (heroUnderThreat(state)) return blocked("aggro");
   state.fastTravelCast = {
     targetMapId: target.mapId,
     targetZoneIdx: target.zoneIdx,
     timer: CONFIG.travel.fastTravelCastSeconds,
-    lastHp: h.hp,
   };
   state.events.push({
     type: "fastTravelCastStart",
@@ -829,11 +817,13 @@ export function startFastTravel(state: GameState, target: WorldLocation): boolea
 }
 
 /**
- * Tick an in-flight fast-travel channel one fixed step. Cancels (emits
- * `fastTravelBlocked` "damaged") if the hero took damage since the last tick; on
- * completion performs the instant hop (arrives at the target's LEFT gate x — the
+ * Tick an in-flight fast-travel channel one fixed step. Owner UX (2026-07-08): the
+ * channel is NOT damage-cancellable — the hero keeps taking hits during it. The ONLY
+ * cancel is death: if the hero died mid-channel (resolveDeaths ran first this step)
+ * the channel is dropped and `fastTravelBlocked` "dead" fires, leaving no stuck cast.
+ * On completion performs the instant hop (arrives at the target's LEFT gate x — the
  * entrance side) and emits `fastTravelArrive`. A no-op with no channel. Called from
- * step() after combat so this step's damage is already reflected in the hero's HP.
+ * step() after combat so this step's death is already reflected in the hero.
  */
 export function tickFastTravel(state: GameState): void {
   const c = state.fastTravelCast;
@@ -844,12 +834,6 @@ export function tickFastTravel(state: GameState): void {
     state.events.push({ type: "fastTravelBlocked", reason: "dead" });
     return;
   }
-  if (h.hp < c.lastHp) {
-    state.fastTravelCast = null;
-    state.events.push({ type: "fastTravelBlocked", reason: "damaged" });
-    return;
-  }
-  c.lastHp = h.hp; // allow healing during the channel without spuriously cancelling
   c.timer -= FIXED_DT;
   if (c.timer > 0) return;
 

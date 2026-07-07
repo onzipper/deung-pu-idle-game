@@ -192,15 +192,15 @@ export interface GameState {
   sellTripWatermark: number | null;
   /**
    * An in-flight FAST-TRAVEL channel (M7.5), or null. The hero stands still while it
-   * counts down; damage cancels it, completion warps to the target's gate-side x.
-   * `lastHp` tracks the hero's HP to detect a mid-channel hit. Transient — NEVER
-   * persisted (a reload resumes standing in `location`).
+   * counts down. Owner UX (2026-07-08): the channel is NOT damage-cancellable — it
+   * plays out and warps unless the hero DIES mid-channel; completion warps to the
+   * target's gate-side x. Transient — NEVER persisted (a reload resumes standing in
+   * `location`).
    */
   fastTravelCast: {
     targetMapId: string;
     targetZoneIdx: number;
     timer: number;
-    lastHp: number;
   } | null;
   /**
    * Held NPC-consumable stack counts (M6 "เมืองหลัก"). Persisted (SAVE v9).
