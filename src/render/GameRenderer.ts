@@ -19,7 +19,7 @@
  */
 
 import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
-import { zoneAt } from "@/engine";
+import { isDailyComplete, mainQuestChapters, zoneAt } from "@/engine";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
@@ -319,8 +319,20 @@ export class GameRenderer {
     // lookup above already use.
     const inTown = zoneAt(state.location).kind === "town";
     if (this.npcViews) {
+      // M8 quest Wave C: ผู้ใหญ่บ้าน's "!" badge — any main-chapter reward
+      // claimable, or any daily quest complete-but-unclaimed. Pure engine
+      // reads (same one-way "render reads GameState" contract as `enemyMapId`
+      // above); cheap enough (<=6 chapters, <=3 dailies) to recompute every
+      // frame rather than caching.
+      const questBoardHasNotice =
+        mainQuestChapters(state).some((c) => c.claimable) ||
+        (state.heroes[0]?.dailies.quests.some((dq) => isDailyComplete(dq) && !dq.claimed) ?? false);
       for (const view of this.npcViews.values()) {
-        updateNpcView(view, { dt, visible: inTown });
+        updateNpcView(view, {
+          dt,
+          visible: inTown,
+          showIndicator: view.npcId === "npc:elder" ? questBoardHasNotice : false,
+        });
       }
     }
     this.npcSpeech?.update(dt);

@@ -201,8 +201,22 @@ export const PALETTE = {
    * deliberately distinct from every combat/order/travel accent so it never
    * reads as a quest marker or a hit cue, just a gentle invitation. */
   npcAffordance: 0xffd76b,
-  /** Shared warm skin tone for both town NPCs' head/hands. */
+  /** Shared warm skin tone for the town NPCs' head/hands. */
   npcSkin: 0xe0b48a,
+  /** ผู้ใหญ่บ้าน's (M8 quest Wave C, `npc:elder`) robe — a muted sage-brown so he
+   * reads as a THIRD distinct silhouette from the merchant's rust-orange and the
+   * smith's cool soot-grey, still inside the desaturated-scenery family. */
+  npcElderRobe: 0x7a6a4a,
+  npcElderRobeShade: 0x473c2b,
+  /** His conical hat + walking staff — a soft violet accent (village-head
+   * "authority" cue) distinct from every combat/order/travel color. */
+  npcElderHat: 0x6a5a8a,
+  npcElderStaff: 0x8a6a3f,
+  /** Quest-board signpost (his static prop, mirrors the stall/anvil). */
+  npcBoardWood: 0x6b4a2a,
+  npcBoardFace: 0xd9c9a0,
+  /** White beard accent (reuses no other NPC tone). */
+  npcElderBeard: 0xe8e0d0,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

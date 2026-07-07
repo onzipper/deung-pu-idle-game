@@ -289,6 +289,10 @@
       "townNpcTapHint": {
         "title": "Tap an NPC to talk",
         "body": "Tap an NPC to walk over and talk — buying/refining happens right there with them now. First tap walks over, tap again once you arrive to open the shop/refine station."
+      },
+      "questBoardHint": {
+        "title": "The village elder has quests!",
+        "body": "Tap the elder in town to open the Quest Board — a story-driven main quest and 3 daily quests to do each day (miss a day, lose nothing)."
       }
     }
   },
@@ -368,6 +372,10 @@
       "classTier3": {
         "title": "Tier-3 class change (Grand Expansion)",
         "body": "At Lv.40 a second class-change quest unlocks: the gate to the Frozen Tundra frontier (map 4, first zone) opens early — hunt 90 monsters there. Once you're done, the boss-room gate opens — walk in and defeat the young Glacial Sovereign, a weakened taste of the real stage-20 fight. Completing it advances your hero to its final class tier — a huge power spike, a 4th skill, and a 4th auto-cast slot — then come back and smash the stage-15 boss."
+      },
+      "questBoard": {
+        "title": "Main quest, dailies, and the Quest Board",
+        "body": "The village elder (the town's 3rd NPC) opens the Quest Board: a main quest line, one chapter per map (beat that map's boss to finish the chapter — gold/materials/potions, never gear), plus 3 daily quests each day (kill/refine/buy potions/spend gold/beat any boss — miss a day, lose nothing; resets on the server clock). Rewards are claimed at the Quest Board only. A \"!\" badge over the elder's head means something's ready to claim. You can also buy a Warp Scroll from Auntie Pu to teleport to a party member standing in a zone you've already climbed to yourself."
       },
       "boss-map4": {
         "title": "Glacial Sovereign (stage 20) — Charge",
@@ -881,6 +889,13 @@
     "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
     "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
+    "questRewardClaimed": "🎁 Quest reward: {summary}",
+    "rewardGold": "+{amount} gold",
+    "rewardMaterials": "+{amount} materials",
+    "rewardHpPotion": "+{amount} HP potions",
+    "rewardManaPotion": "+{amount} mana potions",
+    "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
+    "warpToFriendStarted": "🌀 Warping to your friend...",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -950,6 +965,14 @@
         "greeting3": "Materials ready — let's get to it"
       },
       "botFlavor": "Dropping some stuff off~"
+    },
+    "elder": {
+      "greetings": {
+        "greeting1": "Got a few quests for you — check the board",
+        "greeting2": "Three dailies waiting on you today",
+        "greeting3": "Safe travels — the village is counting on you"
+      },
+      "botFlavor": "Go see the elder later~"
     }
   },
   "patchNotes": {
@@ -1125,6 +1148,80 @@
     "errorPartyFull": "Party is full (max 3)",
     "errorAlreadyMember": "Already in the same party",
     "errorAlreadyInvited": "Invite already sent — wait for a response",
-    "errorAlreadyInParty": "Leave your current party first to join a new one"
+    "errorAlreadyInParty": "Leave your current party first to join a new one",
+    "warpToFriendButton": "Warp to them",
+    "warpToFriendButtonWithCount": "Warp to them ({count})",
+    "warpNoScrollHint": "Buy a Warp Scroll from Auntie Pu",
+    "warpNotClimbedHint": "You haven't climbed to that zone yet"
+  },
+  "questBoard": {
+    "title": "Quest Board",
+    "closeButton": "Close",
+    "dailySectionTitle": "Today's Dailies",
+    "dailyEmpty": "No dailies today — check back tomorrow",
+    "dailyInProgressHint": "Not there yet — keep going",
+    "dailyClaimButton": "Claim reward",
+    "dailyClaiming": "Claiming...",
+    "dailyClaimedLabel": "Claimed ✓",
+    "dailyClaimFailed": "Couldn't claim it — try again",
+    "mainSectionTitle": "Main Quest",
+    "mainAllDone": "You've finished every chapter! Thanks for the journey",
+    "mainChapterLabel": "Chapter {n}: {title}",
+    "mainProgressHere": "Farming this map already: {kills}/{killGoal}",
+    "mainProgressElsewhere": "Head to {map} to keep going on this chapter",
+    "mainInProgressHint": "In progress",
+    "mainClaimButton": "Claim reward",
+    "mainClaimedButton": "Reward claimed ✓",
+    "mainNextChapter": "Next chapter: {title}"
+  },
+  "quest": {
+    "main": {
+      "chapter_map1": {
+        "title": "First Steps in the Human World",
+        "desc": "Explore the Human World, hunt your way through every zone, and beat the map's boss to move on"
+      },
+      "chapter_map2": {
+        "title": "Into the Demon Realm",
+        "desc": "Push through the Demon Realm to its boss room and defeat it to open the way to the Wild Frontier"
+      },
+      "chapter_map3": {
+        "title": "Claim the Wild Frontier",
+        "desc": "Fight through the Wild Frontier to its boss gate and finish the chapter"
+      },
+      "chapter_map4": {
+        "title": "Conquer the Frozen Tundra",
+        "desc": "Push into the Frozen Tundra all the way to its boss — watch out for the charge attack"
+      },
+      "chapter_map5": {
+        "title": "Cross the Desert Ruins",
+        "desc": "Fight through the Desert Ruins to its Pharaoh boss — watch for the summoned reinforcements"
+      },
+      "chapter_map6": {
+        "title": "Storm the Infernal City",
+        "desc": "Close out the journey in the Infernal City and defeat its warlord"
+      }
+    },
+    "daily": {
+      "daily_kill": {
+        "title": "Hunt Monsters",
+        "desc": "Kill {count} monsters anywhere"
+      },
+      "daily_refine": {
+        "title": "Refine Once",
+        "desc": "Refine at Uncle Dueng's station at least {count} time"
+      },
+      "daily_potions": {
+        "title": "Buy Potions",
+        "desc": "Buy {count} potions from Auntie Pu"
+      },
+      "daily_spend": {
+        "title": "Spend Gold",
+        "desc": "Spend {count} gold in town"
+      },
+      "daily_boss": {
+        "title": "Beat a Boss",
+        "desc": "Defeat any boss {count} time(s)"
+      }
+    }
   }
 }

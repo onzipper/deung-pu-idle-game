@@ -30,12 +30,14 @@ import type {
   BossHint,
   BotSettings,
   ConsumableCounts,
+  DailyObjectiveType,
   EquippedGear,
   GearSlot,
   HeroClass,
   HeroStats,
   ItemRarity,
   Phase,
+  QuestReward,
   ShopItemId,
   StatKey,
   TownNpcId,
@@ -117,6 +119,48 @@ export interface HeroQuestSummary {
    * actions.
    */
   bossChallengeActive: boolean;
+}
+
+/**
+ * M8 quest Wave C — one MAIN-quest chapter's display state, precomputed by
+ * the snapshot builder from the engine's `mainQuestChapters(state)` read
+ * plus its static `reward` (looked up once from `mainChapterDefs()` by id —
+ * same one-way "engine computes/resolves, store just carries it" pattern as
+ * `HeroQuestSummary`). Drives both the Quest Board panel's main-line tracker
+ * and the goal card's compact "บทที่ N" line.
+ */
+export interface MainChapterSummary {
+  id: string;
+  mapId: string;
+  complete: boolean;
+  claimed: boolean;
+  claimable: boolean;
+  reward: QuestReward;
+}
+
+/**
+ * M8 quest Wave C — one DAILY-quest roster slot's display state, precomputed
+ * by the snapshot builder: `type`/`target`/`reward` resolved once from the
+ * engine's `dailyDef(id)` catalog read, `progress`/`claimed` straight off
+ * `hero.dailies.quests`, `complete` derived (`progress >= target`). Drives
+ * the Quest Board panel's daily rows.
+ */
+export interface DailyQuestSummary {
+  id: string;
+  type: DailyObjectiveType;
+  progress: number;
+  target: number;
+  claimed: boolean;
+  complete: boolean;
+  reward: QuestReward;
+}
+
+/** M8 quest Wave C — today's daily roster (server-day label + up to
+ * `CONFIG.dailyQuests.rosterSize` slots), the Quest Board panel's daily
+ * section source. */
+export interface DailyBoardSummary {
+  serverDay: number;
+  quests: DailyQuestSummary[];
 }
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
@@ -227,15 +271,16 @@ export interface ShopSummary {
 }
 
 /**
- * Town NPCs phase 3 (final): which of the two named town actors currently has
- * its dialog panel open (`ShopPanel` for pahpu / `RefinePanel` for lungdueng),
- * or `null`. Deliberately a single-panel field (only one NPC dialog can be
- * open at once — "one mental model per feature") owned by the store so BOTH
- * the tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
+ * Town NPCs phase 3 (final; extended M8 quest Wave C): which of the three
+ * named town actors currently has its dialog panel open (`ShopPanel` for
+ * pahpu / `RefinePanel` for lungdueng / `QuestBoardPanel` for elder), or
+ * `null`. Deliberately a single-panel field (only one NPC dialog can be open
+ * at once — "one mental model per feature") owned by the store so BOTH the
+ * tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
  * own) and the refine dock shortcut (`RefineButton.tsx`) can open it, and
  * `TownNpcPanelHost.tsx` can auto-close it the instant the live snapshot's
  * `npcInRange` says the hero has walked out of range. */
-export type TownPanelId = "pahpu" | "lungdueng";
+export type TownPanelId = "pahpu" | "lungdueng" | "board";
 
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
@@ -287,6 +332,15 @@ export interface EngineSnapshot {
    * (map4 z1 isn't actually walkable yet), same one-way "engine computes, store
    * just carries it" pattern as `npcInRange`. */
   deepestUnlockedFarm: WorldLocation;
+  /** M8 quest Wave C — the solo hero's main-quest chapter chain, precomputed
+   * off `mainQuestChapters(state)` + each chapter's static reward. Drives the
+   * Quest Board panel's main-line section + the goal card's "บทที่ N" line. */
+  mainChapters: MainChapterSummary[];
+  /** M8 quest Wave C — the solo hero's today daily-quest roster, precomputed
+   * off `hero.dailies` + the `dailyDef` catalog. Drives the Quest Board
+   * panel's daily section (the `!` badge on ผู้ใหญ่บ้าน is a render-only read,
+   * not this store slice — see `GameRenderer.ts`). */
+  dailies: DailyBoardSummary;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -364,6 +418,23 @@ export interface PendingInput {
   /** Manual play (M7.8): cancel the solo hero's active move/attack command,
    * once per frame. */
   cancelCommand: boolean;
+  /** M8 quest Wave C — install/refresh today's daily roster (from a save
+   * GET/POST response's `dailies` field), or `null` (last-wins per frame —
+   * every response carries the FULL current roster, so a same-frame refeed
+   * never needs to merge). Idempotent same-day on the engine side. */
+  setDailies: { serverDay: number; questIds: string[] } | null;
+  /** M8 quest Wave C — claim a completed daily's reward by catalog id (queued
+   * ONLY after the `/api/quest/daily/claim` POST confirms — refine-flow
+   * pattern), or `null` (last-wins per frame — a tap claims exactly one). */
+  claimDaily: string | null;
+  /** M8 quest Wave C — claim a completed main-chapter's reward by chapter id
+   * (a PURE engine intent, no server round trip — design doc §5), or `null`
+   * (last-wins per frame). */
+  claimMainReward: string | null;
+  /** M8 "วาปหาเพื่อน" warp scroll — consume one held scroll to fast-travel to
+   * `target` (queued from the Friends panel's per-member warp button), or
+   * `null` (last-wins per frame; the engine no-ops it if blocked/illegal). */
+  useWarpScroll: WorldLocation | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -388,6 +459,10 @@ function emptyPendingInput(): PendingInput {
     moveTo: null,
     attackTarget: null,
     cancelCommand: false,
+    setDailies: null,
+    claimDaily: null,
+    claimMainReward: null,
+    useWarpScroll: null,
   };
 }
 
@@ -888,6 +963,10 @@ export interface HudState {
   tier3FrontierLocked: boolean;
   /** The hero's real progression frontier — see `EngineSnapshot.deepestUnlockedFarm`'s doc. */
   deepestUnlockedFarm: WorldLocation;
+  /** M8 quest Wave C main-chapter tracker — see `EngineSnapshot.mainChapters`'s doc. */
+  mainChapters: MainChapterSummary[];
+  /** M8 quest Wave C daily roster — see `EngineSnapshot.dailies`'s doc. */
+  dailies: DailyBoardSummary;
 
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
@@ -1160,6 +1239,22 @@ export interface HudState {
   /** Queue a manual play (M7.8) cancel of the active move/attack command. */
   queueCancelCommand: () => void;
 
+  // ---- M8 quest Wave C ----
+  /** Install/refresh today's daily roster (from a save GET/POST response's
+   * `dailies` field) — see `PendingInput.setDailies`'s doc. Safe to call on
+   * every response (idempotent same-day reconcile, engine-side). */
+  queueSetDailies: (serverDay: number, questIds: string[]) => void;
+  /** Claim a completed daily's reward by catalog id — queued ONLY after the
+   * server confirms (`ui/quest/dailyClaimFlow.ts`), see
+   * `PendingInput.claimDaily`'s doc. */
+  queueClaimDaily: (questId: string) => void;
+  /** Claim a completed main-chapter's reward by chapter id — a pure engine
+   * intent, no server round trip (see `PendingInput.claimMainReward`'s doc). */
+  queueClaimMainReward: (chapterId: string) => void;
+  /** Consume a warp scroll to fast-travel to `target` (the Friends panel's
+   * per-member "🌀 วาปไปหา" button) — see `PendingInput.useWarpScroll`'s doc. */
+  queueWarpScroll: (target: WorldLocation) => void;
+
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Open `panel`'s dialog (last-wins — talking to the other NPC or the dock
    * shortcut always wins over whatever was open). */
@@ -1279,9 +1374,11 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoHunt: true,
   unlockedZones: {},
   materials: 0,
-  npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+  npcInRange: { "npc:pahpu": false, "npc:lungdueng": false, "npc:elder": false },
   tier3FrontierLocked: false,
   deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
+  mainChapters: [],
+  dailies: { serverDay: 0, quests: [] },
   activeTownPanel: null,
 
   inventory: [],
@@ -1510,6 +1607,18 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   queueCancelCommand: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
+
+  queueSetDailies: (serverDay, questIds) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, setDailies: { serverDay, questIds } } })),
+
+  queueClaimDaily: (questId) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, claimDaily: questId } })),
+
+  queueClaimMainReward: (chapterId) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, claimMainReward: chapterId } })),
+
+  queueWarpScroll: (target) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, useWarpScroll: target } })),
 
   openTownPanel: (panel) => set({ activeTownPanel: panel }),
   closeTownPanel: () => set({ activeTownPanel: null }),

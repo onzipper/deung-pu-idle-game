@@ -88,4 +88,26 @@ describe("npcView rig transform math (regression guard)", () => {
     }
     view.destroy({ children: true });
   });
+
+  // M8 quest Wave C: ผู้ใหญ่บ้าน's "!" claimable-notice badge.
+  it("ผู้ใหญ่บ้าน: indicator badge is null-safe and hidden by default, shown only via showIndicator", () => {
+    const view = createNpcView("npc:elder");
+    expect(view.indicator).not.toBeNull();
+    updateNpcView(view, { dt: 0, visible: true });
+    expect(view.indicator?.root.visible).toBe(false);
+    updateNpcView(view, { dt: 0.1, visible: true, showIndicator: true });
+    expect(view.indicator?.root.visible).toBe(true);
+    updateNpcView(view, { dt: 0.1, visible: true, showIndicator: false });
+    expect(view.indicator?.root.visible).toBe(false);
+    view.destroy({ children: true });
+  });
+
+  it("ป้าปุ๊/ลุงดึ๋ง: never build an indicator badge (elder-only feature)", () => {
+    for (const id of ["npc:pahpu", "npc:lungdueng"] as const) {
+      const view = createNpcView(id);
+      expect(view.indicator).toBeNull();
+      updateNpcView(view, { dt: 0.1, visible: true, showIndicator: true }); // ignored, must not throw
+      view.destroy({ children: true });
+    }
+  });
 });

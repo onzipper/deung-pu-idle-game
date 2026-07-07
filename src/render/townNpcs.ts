@@ -30,6 +30,7 @@ export interface TownNpcAnchor {
 const NPC_NAMES: Record<TownNpcId, string> = {
   "npc:pahpu": "ป้าปุ๊",
   "npc:lungdueng": "ลุงดึ๋ง",
+  "npc:elder": "ผู้ใหญ่บ้าน",
 };
 
 /** Render anchors DERIVED from the engine's `CONFIG.townNpcs` (x/radius) plus the

@@ -93,9 +93,11 @@ function makeSnapshot(
     autoHunt: true,
     unlockedZones: {},
     materials: 0,
-    npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+    npcInRange: { "npc:pahpu": false, "npc:lungdueng": false, "npc:elder": false },
     tier3FrontierLocked: false,
     deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
+    mainChapters: [],
+    dailies: { serverDay: 0, quests: [] },
   };
 }
 

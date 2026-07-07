@@ -89,13 +89,15 @@ export interface WorldLocation {
 }
 
 /**
- * The two named town actors (M6 town NPCs, phase 2 — the engine owns their geometry
+ * The named town actors (M6 town NPCs, phase 2 — the engine owns their geometry
  * so the layer rule holds: render/ui DERIVE their rigs from `CONFIG.townNpcs`, engine
  * never imports render). `npc:pahpu` = ป้าปุ๊ the merchant (buy/sell/salvage — the ONLY
  * NPC the idle bot transacts with); `npc:lungdueng` = ลุงดึ๋ง the refine smith
- * (player-only; never botted). Anchor x + interaction radius live in `CONFIG.townNpcs`.
+ * (player-only; never botted); `npc:elder` = ผู้ใหญ่บ้าน the village head (M8 quest
+ * Wave C — opens the Quest Board panel; player-only, never botted, same as the smith).
+ * Anchor x + interaction radius live in `CONFIG.townNpcs`.
  */
-export type TownNpcId = "npc:pahpu" | "npc:lungdueng";
+export type TownNpcId = "npc:pahpu" | "npc:lungdueng" | "npc:elder";
 
 /**
  * NPC-shop consumable ids (M6 "เมืองหลัก + NPC shops", ROADMAP task): bought with

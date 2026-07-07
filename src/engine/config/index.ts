@@ -408,9 +408,14 @@ export const CONFIG = {
   // (the idle bot's auto-walk target + the phase-3 tap gate). ป้าปุ๊ = merchant (buy/
   // sell/salvage — the ONLY NPC the bot transacts with); ลุงดึ๋ง = refine smith
   // (player-only; never botted). Same values render phase-1 shipped with (commit 20b3da3).
+  // `npc:elder` (M8 quest Wave C) = ผู้ใหญ่บ้าน the village head, opening the Quest Board
+  // panel (main/daily quest claims) — player-only, never botted, same as the smith. x=400
+  // sits clear of pahpu (230±42 -> 188-272) and lungdueng (560±42 -> 518-602), and clear
+  // of the ambient town-llama patch (~690).
   townNpcs: [
     { id: "npc:pahpu", x: 230, radius: 42 },
     { id: "npc:lungdueng", x: 560, radius: 42 },
+    { id: "npc:elder", x: 400, radius: 42 },
   ],
 
   // ---- party / hero base ----

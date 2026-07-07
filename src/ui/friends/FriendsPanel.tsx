@@ -14,6 +14,7 @@ import { useState } from "react";
 import type { HeroClass } from "@/engine";
 import { HERO_ICONS } from "@/ui/labels";
 import { ModalPortal } from "@/ui/components/ModalPortal";
+import { useGameStore } from "@/ui/store/gameStore";
 import { FRIEND_EMOJI_ALLOWLIST } from "@/ui/friends/types";
 import type {
   FriendCandidateWire,
@@ -25,6 +26,7 @@ import type {
 import { parseFriendZone, relativeTimeFrom } from "@/ui/friends/format";
 import type { UseFriendsPoll } from "@/ui/friends/useFriendsPoll";
 import { requestOpenAccountSettings } from "@/ui/openSettingsSignal";
+import { isZoneUnlockedUi } from "@/ui/world/zones";
 
 type Translator = ReturnType<typeof useTranslations>;
 
@@ -160,6 +162,7 @@ export function FriendsPanel({ onClose, poll }: FriendsPanelProps) {
                   tMaps={tMaps}
                   tContent={tContent}
                   tCommon={tCommon}
+                  onWarp={onClose}
                 />
               )}
 
@@ -529,6 +532,49 @@ function FriendRow({
 
 // ── Party section (top of the panel when I'm in a party) ────────────────────────
 
+/**
+ * M8 "วาปหาเพื่อน" warp button (closes the warp feature, owner spec): shown
+ * whenever the member is online AND their `lastZone` parses to a real zone
+ * (regardless of scroll count / climb state — those instead decide the
+ * DISABLED state + hint, per spec). Fires the `useWarpScroll` intent, then
+ * closes the WHOLE Friends panel (fast-travel-picker "close on select"
+ * convention — the player wants to SEE the channel start, not the menu).
+ */
+function WarpToMemberButton({ member, t, onWarp }: { member: PartyMemberWire; t: Translator; onWarp: () => void }) {
+  const parsedZone = parseFriendZone(member.lastZone);
+  const warpScrollCount = useGameStore((s) => s.shop.counts.warpScroll);
+  const unlockedZones = useGameStore((s) => s.unlockedZones);
+  const channeling = useGameStore((s) => s.fastTravelChannel !== null);
+  const queueWarpScroll = useGameStore((s) => s.queueWarpScroll);
+  const pushNotice = useGameStore((s) => s.pushNotice);
+
+  if (!member.online || !parsedZone) return null;
+
+  const hasScroll = warpScrollCount > 0;
+  const zoneUnlocked = isZoneUnlockedUi(parsedZone, unlockedZones);
+  const disabled = !hasScroll || !zoneUnlocked || channeling;
+  const hint = !hasScroll ? t("warpNoScrollHint") : !zoneUnlocked ? t("warpNotClimbedHint") : undefined;
+
+  function handleWarp(): void {
+    if (disabled || !parsedZone) return;
+    queueWarpScroll({ mapId: parsedZone.mapId, zoneIdx: parsedZone.zoneIdx });
+    pushNotice("warpToFriendStarted");
+    onWarp();
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={handleWarp}
+      title={hint}
+      className="min-h-9 shrink-0 rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 px-2.5 py-1.5 text-[11px] font-bold text-sky-200 transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      🌀 {hasScroll ? t("warpToFriendButtonWithCount", { count: warpScrollCount }) : t("warpToFriendButton")}
+    </button>
+  );
+}
+
 function PartyMemberRow({
   member,
   isLeader,
@@ -537,6 +583,7 @@ function PartyMemberRow({
   tMaps,
   tContent,
   tCommon,
+  onWarp,
 }: {
   member: PartyMemberWire;
   isLeader: boolean;
@@ -545,6 +592,7 @@ function PartyMemberRow({
   tMaps: Translator;
   tContent: Translator;
   tCommon: Translator;
+  onWarp: () => void;
 }) {
   const name = member.displayName ?? t("unknownPlayer");
   const cls = member.currentCharacter?.class as HeroClass | undefined;
@@ -568,8 +616,8 @@ function PartyMemberRow({
           </span>
         )}
       </div>
-      <div className="pl-4 text-[11px] text-ddp-ink-muted">
-        <span className="min-w-0 truncate">
+      <div className="flex items-center justify-between gap-2 pl-4">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-ddp-ink-muted">
           {member.currentCharacter ? (
             <>
               {member.currentCharacter.name}
@@ -582,6 +630,7 @@ function PartyMemberRow({
             t("noCharacter")
           )}
         </span>
+        <WarpToMemberButton member={member} t={t} onWarp={onWarp} />
       </div>
     </div>
   );
@@ -595,6 +644,7 @@ function PartySection({
   tMaps,
   tContent,
   tCommon,
+  onWarp,
 }: {
   party: PartyWire;
   poll: UseFriendsPoll;
@@ -603,6 +653,7 @@ function PartySection({
   tMaps: Translator;
   tContent: Translator;
   tCommon: Translator;
+  onWarp: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -634,6 +685,7 @@ function PartySection({
             tMaps={tMaps}
             tContent={tContent}
             tCommon={tCommon}
+            onWarp={onWarp}
           />
         ))}
       </div>

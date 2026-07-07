@@ -54,6 +54,7 @@ import {
   canUseConsumable,
   combatPower,
   createAccumulator,
+  dailyDef,
   deepestUnlockedFarm,
   drainAccumulator,
   evolutionQuestFor,
@@ -61,6 +62,8 @@ import {
   isEvolutionQuestOffered,
   isTier3BossObjectiveActive,
   learnedSkills,
+  mainChapterDefs,
+  mainQuestChapters,
   migrate,
   npcInRange,
   repairHeroClass,
@@ -109,9 +112,12 @@ import {
   readStoredUiConfig,
   selectUiConfig,
   writeUiConfig,
+  type DailyBoardSummary,
+  type DailyQuestSummary,
   type EngineSnapshot,
   type HeroQuestSummary,
   type HeroSummary,
+  type MainChapterSummary,
   type ShopSummary,
   type SkillSummary,
   type TownPanelId,
@@ -205,11 +211,24 @@ async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void
   }
 }
 
-/** Town NPCs phase 3 (final): maps the engine's `TownNpcId` union onto the
- * store's shorter `TownPanelId` (which panel a given NPC opens — pahpu ->
- * ShopPanel, lungdueng -> RefinePanel). */
+/** Town NPCs phase 3 (final; extended M8 quest Wave C): maps the engine's
+ * `TownNpcId` union onto the store's shorter `TownPanelId` (which panel a
+ * given NPC opens — pahpu -> ShopPanel, lungdueng -> RefinePanel, elder ->
+ * QuestBoardPanel). */
 function townPanelOf(id: TownNpcId): TownPanelId {
-  return id === "npc:pahpu" ? "pahpu" : "lungdueng";
+  if (id === "npc:pahpu") return "pahpu";
+  if (id === "npc:lungdueng") return "lungdueng";
+  return "board";
+}
+
+/** Town NPCs phase 3 (final; extended M8 quest Wave C): maps the engine's
+ * `TownNpcId` union onto the `townNpc.<key>` i18n namespace key (greetings +
+ * bot-flavor line) — shared by `talkToNpc`'s speech-bubble lookup and the
+ * `npcTrade` bot-flavor handler below. */
+function npcI18nKey(id: TownNpcId): "pahpu" | "lungdueng" | "elder" {
+  if (id === "npc:pahpu") return "pahpu";
+  if (id === "npc:lungdueng") return "lungdueng";
+  return "elder";
 }
 
 /** Precompute the learned-skill kit's display state (M5 skill framework v2). */
@@ -389,6 +408,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     npcInRange: {
       "npc:pahpu": npcInRange(state, "npc:pahpu"),
       "npc:lungdueng": npcInRange(state, "npc:lungdueng"),
+      "npc:elder": npcInRange(state, "npc:elder"),
     },
     // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — pure engine
     // reads, same one-way "engine computes, store just carries it" pattern as
@@ -396,6 +416,36 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // gated branch (`ui/questGuide.ts`).
     tier3FrontierLocked: tier3FrontierLocked(state),
     deepestUnlockedFarm: deepestUnlockedFarm(state),
+    // M8 quest Wave C — main-chapter tracker, precomputed here (the one place
+    // engine reads run — same rule `xpProgress` follows): each chapter's
+    // derived state zipped with its STATIC reward (a pure config lookup, safe
+    // to call every sync since `mainChapterDefs()` is a plain CONFIG read).
+    mainChapters: mainQuestChapters(state).map((c): MainChapterSummary => {
+      const def = mainChapterDefs().find((d) => d.id === c.id);
+      return { ...c, reward: def?.reward ?? {} };
+    }),
+    // M8 quest Wave C — today's daily roster, precomputed display-ready: each
+    // slot's `type`/`target`/`reward` resolved once from the `dailyDef`
+    // catalog (same "engine reads only happen in buildSnapshot" rule).
+    dailies: ((): DailyBoardSummary => {
+      const hd = state.heroes[0]?.dailies;
+      if (!hd) return { serverDay: 0, quests: [] };
+      return {
+        serverDay: hd.serverDay,
+        quests: hd.quests.map((dq): DailyQuestSummary => {
+          const def = dailyDef(dq.id);
+          return {
+            id: dq.id,
+            type: def?.type ?? "killAnywhere",
+            progress: dq.progress,
+            target: def?.target ?? 0,
+            claimed: dq.claimed,
+            complete: def !== null && dq.progress >= def.target,
+            reward: def?.reward ?? {},
+          };
+        }),
+      };
+    })(),
   };
 }
 
@@ -509,6 +559,12 @@ export function GameClient() {
   const tTownNpcRef = useRef(tTownNpc);
   tTownNpcRef.current = tTownNpc;
 
+  // M8 quest Wave C: the reward-toast/daily-complete notice copy — same
+  // ref-captured pattern as `tTownNpcRef` (mid-session locale switch safety).
+  const tNotices = useTranslations("notices");
+  const tNoticesRef = useRef(tNotices);
+  tNoticesRef.current = tNotices;
+
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
   // log but this never does, React never hydrated even though scripts ran.
@@ -593,6 +649,7 @@ export function GameClient() {
     const npcGreetingIndex: Record<TownNpcId, number> = {
       "npc:pahpu": 0,
       "npc:lungdueng": 0,
+      "npc:elder": 0,
     };
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
     // Mid-session "new patch deployed" banner: unsubscribe handle for the
@@ -795,6 +852,12 @@ export function GameClient() {
         moveTo: pending.moveTo ?? undefined,
         attackTarget: pending.attackTarget ?? undefined,
         cancelCommand: pending.cancelCommand || undefined,
+        // M8 quest Wave C: daily-roster install/reconcile, daily/main claim
+        // intents, and the "วาปหาเพื่อน" warp scroll — see `PendingInput`'s docs.
+        setDailies: pending.setDailies ?? undefined,
+        claimDaily: pending.claimDaily ?? undefined,
+        claimMainReward: pending.claimMainReward ?? undefined,
+        useWarpScroll: pending.useWarpScroll ?? undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -911,8 +974,26 @@ export function GameClient() {
           // Town NPCs phase 3 (final): flavor-only — the bot's transaction
           // itself is already engine-side (systems/bots.ts); this NEVER opens
           // `activeTownPanel` (the panel is a PLAYER dialog, not a ledger view).
-          const key = ev.npcId === "npc:pahpu" ? "pahpu" : "lungdueng";
-          renderer.showNpcSpeech(ev.npcId, tTownNpcRef.current(`${key}.botFlavor`));
+          renderer.showNpcSpeech(ev.npcId, tTownNpcRef.current(`${npcI18nKey(ev.npcId)}.botFlavor`));
+        } else if (ev.type === "questReward") {
+          // M8 quest Wave C: celebratory toast (reuses NoticeToast's existing
+          // look) — compose the reward summary from small localized unit
+          // labels rather than one giant ICU conditional, same inline-
+          // composition style `botRestocked` already uses.
+          const parts: string[] = [];
+          if (ev.gold > 0) parts.push(tNoticesRef.current("rewardGold", { amount: ev.gold }));
+          if (ev.materials > 0) {
+            parts.push(tNoticesRef.current("rewardMaterials", { amount: ev.materials }));
+          }
+          if (ev.hpPotion > 0) parts.push(tNoticesRef.current("rewardHpPotion", { amount: ev.hpPotion }));
+          if (ev.manaPotion > 0) {
+            parts.push(tNoticesRef.current("rewardManaPotion", { amount: ev.manaPotion }));
+          }
+          useGameStore.getState().pushNotice("questRewardClaimed", { summary: parts.join(" ") });
+        } else if (ev.type === "dailyProgress" && ev.complete) {
+          // M8 quest Wave C: throttled by the engine already (fires once, on
+          // the complete transition) — points the player at ผู้ใหญ่บ้าน to claim.
+          useGameStore.getState().pushNotice("dailyQuestComplete");
         }
       }
 
@@ -960,6 +1041,11 @@ export function GameClient() {
                 /** Mid-session "new patch deployed" banner — see the GET boot
                  * handler above / `@/server/buildId` / `@/ui/updateBanner`. */
                 buildId?: string | null;
+                /** M8 quest Wave B/C: today's daily roster (serverDay + up to
+                 * `rosterSize` quest ids), recomputed every request from the
+                 * SERVER clock — zero extra requests (see the GET boot
+                 * handler above / `@/server/dailyQuests`). */
+                dailies?: { serverDay: number; questIds: string[] };
               }>)
             : null,
         )
@@ -971,6 +1057,13 @@ export function GameClient() {
           }
           if (json?.buildId) {
             useGameStore.getState().setServerBuildId(json.buildId);
+          }
+          // M8 quest Wave C: refresh the engine's daily roster on every autosave
+          // tick too (idempotent same-day reconcile) — picks up a server-day
+          // rollover mid-session within one cadence, same "zero extra requests"
+          // piggyback as announcements/buildId above.
+          if (json?.dailies) {
+            useGameStore.getState().queueSetDailies(json.dailies.serverDay, json.dailies.questIds);
           }
         })
         .catch(() => {
@@ -1134,7 +1227,7 @@ export function GameClient() {
     // (`npcGreetingIndex` above) so repeat taps don't feel canned.
     function talkToNpc(id: TownNpcId): void {
       useGameStore.getState().openTownPanel(townPanelOf(id));
-      const key = id === "npc:pahpu" ? "pahpu" : "lungdueng";
+      const key = npcI18nKey(id);
       const idx = npcGreetingIndex[id];
       npcGreetingIndex[id] = (idx + 1) % NPC_GREETING_COUNT;
       renderer.showNpcSpeech(id, tTownNpcRef.current(`${key}.greetings.greeting${idx + 1}`));
@@ -1253,6 +1346,10 @@ export function GameClient() {
              * compared against this client's own inlined `CLIENT_BUILD_ID`
              * (`@/ui/updateBanner`). */
             buildId?: string | null;
+            /** M8 quest Wave B/C: today's daily roster (serverDay + up to
+             * `rosterSize` quest ids), present even pre-character (the roster
+             * is USER-scoped) — see `@/server/dailyQuests`. */
+            dailies?: { serverDay: number; questIds: string[] };
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -1274,6 +1371,12 @@ export function GameClient() {
           }
           if (json.buildId) {
             useGameStore.getState().setServerBuildId(json.buildId);
+          }
+          // M8 quest Wave C: queue the boot roster — the engine applies it on
+          // the very first real frame() tick (harmless even pre-character;
+          // `setHeroDailies` no-ops on an absent hero).
+          if (json.dailies) {
+            useGameStore.getState().queueSetDailies(json.dailies.serverDay, json.dailies.questIds);
           }
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
