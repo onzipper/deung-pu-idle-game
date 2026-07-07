@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>🦙 Sprite Sandbox — ทดลองอนิเมชันจากเฟรม PNG</title>
+<style>
+  /* Standalone sandbox — zero deps, works from file:// (no fetch, FileReader only). */
+  :root {
+    --bg: #1c1a24; --panel: #2a2735; --line: #423d55; --text: #efeaff;
+    --dim: #9b93b8; --accent: #ffb347; --accent2: #8f7bff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, "Segoe UI", sans-serif; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px;
+  }
+  h1 { font-size: 20px; margin: 0; }
+  .hint { color: var(--dim); font-size: 13px; margin: 0; text-align: center; max-width: 640px; line-height: 1.6; }
+  .drop {
+    border: 2px dashed var(--line); border-radius: 12px; padding: 26px 34px;
+    text-align: center; color: var(--dim); cursor: pointer; transition: border-color .15s, color .15s;
+    max-width: 640px;
+  }
+  .drop.armed { border-color: var(--accent); color: var(--accent); }
+  .drop b { color: var(--text); }
+  .stage-wrap { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; align-items: flex-start; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  canvas.stage {
+    /* checkerboard = transparency preview; pixelated = crisp pixel art at any zoom */
+    background:
+      repeating-conic-gradient(#3a3648 0% 25%, #2e2b3b 0% 50%) 0 0 / 16px 16px;
+    image-rendering: pixelated; border-radius: 8px; display: block;
+  }
+  .controls { display: flex; flex-direction: column; gap: 10px; min-width: 240px; }
+  .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .row label { width: 84px; color: var(--dim); }
+  .row output { width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type="range"] { flex: 1; accent-color: var(--accent); }
+  button {
+    background: var(--accent); color: #241a05; font-weight: 700; border: 0;
+    border-radius: 8px; padding: 9px 14px; cursor: pointer; font-size: 14px;
+  }
+  button.alt { background: var(--accent2); color: #17102e; }
+  button:disabled { opacity: .35; cursor: default; }
+  .strip { display: flex; gap: 6px; flex-wrap: wrap; max-width: 720px; justify-content: center; }
+  .strip .cell {
+    border: 2px solid var(--line); border-radius: 8px; padding: 4px; background: var(--panel);
+    display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+  }
+  .strip .cell.now { border-color: var(--accent); }
+  .strip img { image-rendering: pixelated; width: 48px; height: 48px; object-fit: contain; }
+  .strip .name { font-size: 10px; color: var(--dim); max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tips { font-size: 12.5px; color: var(--dim); line-height: 1.75; max-width: 640px; }
+  .tips b { color: var(--text); }
+  .dl { display: none; gap: 10px; }
+  .dl.show { display: flex; }
+  a.file {
+    color: var(--accent); font-size: 13px; background: #241f31; border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <h1>🦙 Sprite Sandbox</h1>
+  <p class="hint">ลาก <b>ไฟล์ PNG หลายเฟรม</b> (เช่น ลามะ 6 ภาพ) มาวางกล่องข้างล่าง → เรียงตามชื่อไฟล์ → กดเล่น
+    แล้วลองกด <b>สร้าง Sprite Sheet</b> เพื่อได้ PNG แผ่นรวม + JSON แบบเดียวกับที่เกม (PixiJS) ใช้จริง</p>
+
+  <div class="drop" id="drop" tabindex="0">
+    <b>วางไฟล์ PNG ที่นี่</b> หรือคลิกเพื่อเลือกไฟล์ (เลือกทีเดียวหลายไฟล์ได้)<br/>
+    <span style="font-size:12px">ตั้งชื่อแบบ walk_01.png, walk_02.png … จะเรียงลำดับให้อัตโนมัติ</span>
+    <input id="pick" type="file" accept="image/png,image/webp,image/gif" multiple hidden />
+  </div>
+
+  <div class="stage-wrap">
+    <div class="panel"><canvas class="stage" id="stage" width="320" height="320"></canvas></div>
+    <div class="panel controls">
+      <div class="row"><label>เฟรม/วินาที</label><input id="fps" type="range" min="1" max="24" value="8"/><output id="fpsOut">8</output></div>
+      <div class="row"><label>ซูม</label><input id="zoom" type="range" min="1" max="10" value="3"/><output id="zoomOut">3×</output></div>
+      <div class="row"><label>เฟรมปัจจุบัน</label><output id="frameOut" style="width:auto">–</output></div>
+      <div class="row"><button id="play" disabled>▶ เล่น</button><button id="step" class="alt" disabled>ทีละเฟรม</button></div>
+      <div class="row"><button id="sheet" class="alt" disabled>📦 สร้าง Sprite Sheet (PNG+JSON)</button></div>
+      <div class="row dl" id="dl"></div>
+      <div class="row" style="font-size:12px;color:var(--dim)">คลิกรูปย่อด้านล่างเพื่อลบเฟรมนั้นออก</div>
+    </div>
+  </div>
+
+  <div class="strip" id="strip"></div>
+
+  <div class="tips panel">
+    เคล็ดลับวาดเฟรมให้ประกอบแล้วสวย:
+    <br/>• <b>ทุกเฟรมต้องผืนผ้าใบขนาดเดียวกัน</b> (เช่น 100×100 ทุกภาพ) — ตัวละครขยับ "ในภาพ" ไม่ใช่ขยับขนาดภาพ
+    <br/>• <b>เท้ายืนบรรทัดเดียวกันทุกเฟรม</b> ไม่งั้นตัวจะเด้งขึ้นลงตอนเล่น (ลองกด "ทีละเฟรม" เช็กได้)
+    <br/>• พื้นหลัง<b>โปร่งใส</b> เสมอ · 1 ท่า = 1 ชุดไฟล์ เช่น เดิน 4-6 เฟรม, ยืนหายใจ 2-4 เฟรม, โจมตี 3-6 เฟรม
+    <br/>• ตั้งชื่อ <b>ชื่อตัว_ท่า_เลขสองหลัก.png</b> เช่น llama_walk_01.png — โฟลเดอร์ละท่ายิ่งเป็นระเบียบ
+  </div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const stage = $("stage"), ctx = stage.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+/** @type {{name:string,img:HTMLImageElement,url:string}[]} */
+let frames = [];
+let cur = 0, playing = false, lastTick = 0, acc = 0;
+
+const naturalSort = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+
+async function addFiles(fileList) {
+  const files = [...fileList].filter((f) => /image\/(png|webp|gif)/.test(f.type));
+  const loaded = await Promise.all(files.map((f) => new Promise((res) => {
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => res({ name: f.name, img, url });
+    img.onerror = () => res(null);
+    img.src = url;
+  })));
+  frames = frames.concat(loaded.filter(Boolean)).sort(naturalSort);
+  cur = 0;
+  rebuildStrip(); syncButtons(); draw();
+}
+
+function rebuildStrip() {
+  const strip = $("strip");
+  strip.innerHTML = "";
+  frames.forEach((f, i) => {
+    const cell = document.createElement("div");
+    cell.className = "cell" + (i === cur ? " now" : "");
+    cell.title = "คลิกเพื่อลบเฟรมนี้";
+    const im = document.createElement("img"); im.src = f.url;
+    const nm = document.createElement("div"); nm.className = "name"; nm.textContent = f.name;
+    cell.append(im, nm);
+    cell.onclick = () => { URL.revokeObjectURL(f.url); frames.splice(i, 1); cur = 0; rebuildStrip(); syncButtons(); draw(); };
+    strip.append(cell);
+  });
+}
+
+function syncButtons() {
+  const has = frames.length > 0;
+  $("play").disabled = !has; $("step").disabled = !has; $("sheet").disabled = !has;
+  $("frameOut").textContent = has ? `${cur + 1} / ${frames.length}` : "–";
+}
+
+function draw() {
+  ctx.clearRect(0, 0, stage.width, stage.height);
+  const f = frames[cur];
+  if (!f) return;
+  const z = +$("zoom").value;
+  const w = f.img.width * z, h = f.img.height * z;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(f.img, (stage.width - w) / 2, (stage.height - h) / 2, w, h);
+  $("frameOut").textContent = `${cur + 1} / ${frames.length}`;
+  [...$("strip").children].forEach((c, i) => c.classList.toggle("now", i === cur));
+}
+
+function loop(t) {
+  if (!playing) return;
+  if (!lastTick) lastTick = t;
+  acc += t - lastTick; lastTick = t;
+  const stepMs = 1000 / +$("fps").value;
+  while (acc >= stepMs) { acc -= stepMs; cur = (cur + 1) % frames.length; }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+$("play").onclick = () => {
+  playing = !playing;
+  $("play").textContent = playing ? "⏸ หยุด" : "▶ เล่น";
+  lastTick = 0; acc = 0;
+  if (playing) requestAnimationFrame(loop);
+};
+$("step").onclick = () => { playing = false; $("play").textContent = "▶ เล่น"; cur = (cur + 1) % frames.length; draw(); };
+$("fps").oninput = () => { $("fpsOut").textContent = $("fps").value; };
+$("zoom").oninput = () => { $("zoomOut").textContent = $("zoom").value + "×"; draw(); };
+
+/* --- Sprite sheet export: horizontal strip PNG + Pixi/TexturePacker-style JSON --- */
+$("sheet").onclick = () => {
+  const w = Math.max(...frames.map((f) => f.img.width));
+  const h = Math.max(...frames.map((f) => f.img.height));
+  const sheet = document.createElement("canvas");
+  sheet.width = w * frames.length; sheet.height = h;
+  const sctx = sheet.getContext("2d");
+  sctx.imageSmoothingEnabled = false;
+  const json = { frames: {}, meta: { app: "sprite-sandbox", image: "spritesheet.png", size: { w: sheet.width, h: sheet.height }, scale: "1" }, animations: { anim: [] } };
+  frames.forEach((f, i) => {
+    // bottom-aligned so differing heights keep a common ground line
+    sctx.drawImage(f.img, i * w + Math.floor((w - f.img.width) / 2), h - f.img.height);
+    json.frames[f.name] = {
+      frame: { x: i * w, y: 0, w, h },
+      sourceSize: { w, h },
+      spriteSourceSize: { x: 0, y: 0, w, h },
+    };
+    json.animations.anim.push(f.name);
+  });
+  const dl = $("dl");
+  dl.classList.add("show"); dl.innerHTML = "";
+  sheet.toBlob((blob) => {
+    const a = document.createElement("a");
+    a.className = "file"; a.download = "spritesheet.png"; a.href = URL.createObjectURL(blob);
+    a.textContent = "⬇ spritesheet.png";
+    dl.append(a);
+    const b = document.createElement("a");
+    b.className = "file"; b.download = "spritesheet.json";
+    b.href = URL.createObjectURL(new Blob([JSON.stringify(json, null, 2)], { type: "application/json" }));
+    b.textContent = "⬇ spritesheet.json";
+    dl.append(b);
+  }, "image/png");
+};
+
+const drop = $("drop");
+drop.onclick = () => $("pick").click();
+$("pick").onchange = (e) => addFiles(e.target.files);
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("armed"); };
+drop.ondragleave = () => drop.classList.remove("armed");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("armed"); addFiles(e.dataTransfer.files); };
+</script>
+</body>
+</html>
