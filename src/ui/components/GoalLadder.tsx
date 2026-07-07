@@ -31,7 +31,9 @@
  */
 
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { CONFIG } from "@/engine";
+import { HallOfFamePanel } from "@/ui/hof/HallOfFamePanel";
 import {
   buildGoalLadder,
   selectZoneBossDetail,
@@ -47,7 +49,12 @@ const RUNG_ICON: Record<GoalRungId, string> = {
   hallOfFame: "🏆",
 };
 
-function RungPill({ rung }: { rung: GoalRungState }) {
+/** The `hallOfFame` rung (M7.95): the breadcrumb tail is still narratively
+ * "locked" (dimmed styling — no season/end-game rung exists yet, see
+ * `goalLadder.ts`'s doc), but it's now a REAL clickable shortcut into the
+ * `HallOfFamePanel` leaderboard viewer rather than a pure teaser — `onClick`
+ * is only ever passed for this one rung id (`GoalLadder`'s render below). */
+function RungPill({ rung, onClick }: { rung: GoalRungState; onClick?: () => void }) {
   const t = useTranslations("ladder");
   const label = t(`rungs.${rung.id}`);
   const icon = rung.status === "done" ? "✓" : RUNG_ICON[rung.id];
@@ -60,10 +67,25 @@ function RungPill({ rung }: { rung: GoalRungState }) {
         : rung.status === "locked"
           ? "border-ddp-border-soft bg-black/20 text-ddp-ink-muted/50 grayscale"
           : "border-ddp-border-soft bg-black/20 text-ddp-ink-muted/70";
+  const title = rung.status === "locked" ? t("hallOfFameHint") : label;
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold whitespace-nowrap transition-transform duration-100 active:scale-95 ${styles}`}
+      >
+        <span aria-hidden>{icon}</span>
+        {label}
+      </button>
+    );
+  }
 
   return (
     <span
-      title={rung.status === "locked" ? t("hallOfFameHint") : label}
+      title={title}
       className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold whitespace-nowrap ${styles}`}
     >
       <span aria-hidden>{icon}</span>
@@ -264,6 +286,7 @@ export function GoalLadder() {
   const hero = useGameStore((s) => s.heroes[0]);
   const phase = useGameStore((s) => s.phase);
   const bossReady = useGameStore((s) => s.bossReady);
+  const [hofOpen, setHofOpen] = useState(false);
 
   const { current, rungs } = buildGoalLadder({
     hero: hero
@@ -277,13 +300,18 @@ export function GoalLadder() {
     <div className="flex flex-col gap-2.5 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)">
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
         {rungs.map((rung) => (
-          <RungPill key={rung.id} rung={rung} />
+          <RungPill
+            key={rung.id}
+            rung={rung}
+            onClick={rung.id === "hallOfFame" ? () => setHofOpen(true) : undefined}
+          />
         ))}
       </div>
       <MilestoneCard current={current} />
       <div data-onboarding-anchor="boss-panel">
         <CoreLoopCard />
       </div>
+      {hofOpen && <HallOfFamePanel onClose={() => setHofOpen(false)} />}
     </div>
   );
 }

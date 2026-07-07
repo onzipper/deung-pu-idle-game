@@ -35,7 +35,7 @@
       "zoneBoss": "ผ่านแมพ",
       "hallOfFame": "ทำเนียบเกียรติยศ"
     },
-    "hallOfFameHint": "เร็วๆ นี้",
+    "hallOfFameHint": "ดูทำเนียบเกียรติยศ",
     "levelUp": {
       "progress": "Lv.{level} → Lv.{gate} ปลดเควสเปลี่ยนคลาส"
     },
@@ -823,6 +823,33 @@
           "modalFix": "📱 แก้บักมือถือ: หน้าต่างกระเป๋า/ตีบวก/ตั้งค่าโดนปุ่มทับ — แสดงถูกชั้นแล้ว"
         }
       }
+    }
+  },
+  "hof": {
+    "openButton": "🏆 ทำเนียบเกียรติยศ",
+    "title": "ทำเนียบเกียรติยศ",
+    "closeButton": "ปิด",
+    "profileTitle": "โปรไฟล์",
+    "emptySlot": "ยังไม่ใส่ไอเทม",
+    "loading": "กำลังโหลด...",
+    "notOpenYet": "ทำเนียบยังไม่เปิด",
+    "empty": "ยังไม่มีใครติดอันดับ",
+    "myRank": "อันดับของคุณ: #{rank}",
+    "notRanked": "ยังไม่ติดอันดับ",
+    "onlineValue": "{hours} ชม. {minutes} นาที",
+    "stageChip": "ด่าน {stage}",
+    "boards": {
+      "level": "เลเวล",
+      "power": "พลังต่อสู้",
+      "gold": "ยอดเงินหาได้รวม",
+      "boss": "เวลาบอส",
+      "online": "เวลาออนไลน์"
+    },
+    "classFilter": {
+      "all": "ทั้งหมด",
+      "swordsman": "ดาบ",
+      "archer": "ธนู",
+      "mage": "เวท"
     }
   }
 }

@@ -30,6 +30,7 @@ import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { DropFeed } from "@/ui/components/DropFeed";
 import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
 import { GoalLadder } from "@/ui/components/GoalLadder";
+import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
 import { HudBar } from "@/ui/components/HudBar";
 import { InventoryButton } from "@/ui/components/InventoryButton";
 import { NoticeToast } from "@/ui/components/NoticeToast";
@@ -129,6 +130,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           <div className="flex flex-wrap items-center gap-2">
             <InventoryButton />
             <RefineButton />
+            <HallOfFameButton />
             <CodexButton />
             <SettingsButton />
           </div>

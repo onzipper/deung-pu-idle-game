@@ -35,7 +35,7 @@
       "zoneBoss": "Clear the map",
       "hallOfFame": "Hall of Fame"
     },
-    "hallOfFameHint": "Coming soon",
+    "hallOfFameHint": "View the Hall of Fame leaderboard",
     "levelUp": {
       "progress": "Lv.{level} → Lv.{gate} unlocks the class-change quest"
     },
@@ -823,6 +823,33 @@
           "modalFix": "📱 Mobile fix: inventory/refine/settings windows no longer get covered by HUD buttons"
         }
       }
+    }
+  },
+  "hof": {
+    "openButton": "🏆 Hall of Fame",
+    "title": "Hall of Fame",
+    "closeButton": "Close",
+    "profileTitle": "Profile",
+    "emptySlot": "No item equipped",
+    "loading": "Loading…",
+    "notOpenYet": "The Hall of Fame isn't open yet",
+    "empty": "No one has ranked yet",
+    "myRank": "Your rank: #{rank}",
+    "notRanked": "Not ranked yet",
+    "onlineValue": "{hours}h {minutes}m",
+    "stageChip": "S{stage}",
+    "boards": {
+      "level": "Level",
+      "power": "Combat Power",
+      "gold": "Total Gold Earned",
+      "boss": "Boss Clear Time",
+      "online": "Online Time"
+    },
+    "classFilter": {
+      "all": "All",
+      "swordsman": "Sword",
+      "archer": "Bow",
+      "mage": "Magic"
     }
   }
 }
