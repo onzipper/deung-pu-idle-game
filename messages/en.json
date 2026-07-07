@@ -1069,6 +1069,14 @@
           "manaCut": "🧪 Sword and bow mana burn cut nearly in half — go longer before running dry",
           "llama": "🦙 A new friend (with more on the way) has wandered into town — go tap it"
         }
+      },
+      "2026-07-08f": {
+        "items": {
+          "partyLive": "🤝 Party play is LIVE! Party members standing in the same hunting zone now see each other in the scene in real time, nameplates and all — go hunt together",
+          "partyBuff": "⚔️ Hunt in the same zone as a friend for an EXP bonus + a share of each other's kill EXP, with denser mob spawns per member — or split up and farm freely, no penalty",
+          "partyChip": "📶 The party status chip now tells the truth: it only shows while actually pairing up or playing together — green \"Playing with…\" means you're in",
+          "connFix": "🔧 Fixed the first-live-test connection batch: joining a zone late made friends invisible, the \"connecting…\" label could stick forever, and the bot tried to equip wrong-class gear"
+        }
       }
     }
   },

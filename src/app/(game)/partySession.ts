@@ -375,6 +375,12 @@ export class PartySession {
         if (slot !== null && typeof msg.userId === "string") {
           this.members.set(slot, { slot, userId: msg.userId, displayName: null });
           this.recomputeCohort();
+          // Re-announce MY zone to the newcomer: the relay never replays history, and
+          // beats are otherwise only sent on join + zone CHANGE — without this, a peer
+          // who joins while I'm already standing in a zone can never learn my zone, so
+          // its cohort derivation stays solo and it silently drops my reseed-offer
+          // (the "both connected, beats flowing, but never see each other" deadlock).
+          if (slot !== this.mySlot) this.broadcastZoneBeat();
         }
         break;
       case "member-left":
@@ -388,7 +394,13 @@ export class PartySession {
         if (slot !== null) this.handlers.onMemberShadowChanged(slot, true);
         break;
       case "member-unshadowed":
-        if (slot !== null) this.handlers.onMemberShadowChanged(slot, false);
+        if (slot !== null) {
+          this.handlers.onMemberShadowChanged(slot, false);
+          // Same-slot rejoin fans member-unshadowed (not member-joined) to peers, and
+          // the rejoiner missed any zone changes while its socket was dead — re-announce
+          // for the same reason as the member-joined case above.
+          if (slot !== this.mySlot) this.broadcastZoneBeat();
+        }
         break;
       default:
         break; // unknown t — forward-compat, ignored (protocol §3/§4)

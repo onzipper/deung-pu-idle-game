@@ -269,3 +269,125 @@ describe("PartySession prewake is best-effort", () => {
     session.setParty(null);
   });
 });
+
+// ── zone-beat re-announce on member-joined (late-joiner deadlock regression) ───────
+//
+// Real incident: beats are only broadcast on join + zone CHANGE, and the relay never
+// replays history — so a peer joining while I was already standing in a zone could
+// never learn MY zone. Its cohort derivation stayed solo, it dropped my reseed-offer,
+// and both clients sat "connected, beats flowing, never seeing each other" forever.
+// The fix: an existing member re-announces its zone when member-joined/-unshadowed
+// arrives for another slot.
+
+describe("PartySession re-announces its zone to late joiners", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  /** Full fake transport: resolves the ticket + prewake instantly and hands the test
+   * the live FakeWebSocket so it can inject server frames and inspect sent ones. */
+  function connectFakeSession(): {
+    session: PartySession;
+    socket: () => {
+      sent: string[];
+      emit: (frame: object) => void;
+      onopen: (() => void) | null;
+    };
+  } {
+    const sockets: FakeWs[] = [];
+    class FakeWs {
+      static OPEN = 1;
+      readyState = 1;
+      url: string;
+      sent: string[] = [];
+      onopen: (() => void) | null = null;
+      onmessage: ((e: { data: string }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+      }
+      send(data: string): void {
+        this.sent.push(data);
+      }
+      close(): void {}
+      emit(frame: object): void {
+        this.onmessage?.({ data: JSON.stringify(frame) });
+      }
+    }
+    vi.stubGlobal("WebSocket", FakeWs);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/party/ticket")) {
+          return {
+            ok: true,
+            json: async () => ({
+              relayUrl: "ws://relay.test",
+              ticket: "t",
+              slot: 0,
+              partyId: "p1",
+              exp: Date.now() + 60_000,
+            }),
+          } as Response;
+        }
+        return { ok: false, type: "opaque" } as unknown as Response; // prewake
+      }),
+    );
+    const session = new PartySession({
+      onCohortChanged: () => {},
+      onGameMessage: () => {},
+      onStatusChange: () => {},
+      onMemberShadowChanged: () => {},
+    });
+    return { session, socket: () => sockets[sockets.length - 1] };
+  }
+
+  async function connectedInZone(): Promise<ReturnType<typeof connectFakeSession>> {
+    const rig = connectFakeSession();
+    rig.session.setZone("map1", 2); // standing in a zone BEFORE the peer arrives
+    rig.session.setParty({ partyId: "p1" });
+    await vi.advanceTimersByTimeAsync(10); // ticket + prewake resolve
+    const ws = rig.socket();
+    ws.onopen?.();
+    ws.emit({ t: "welcome", seq: 5, slots: [{ slot: 0, userId: "me" }] });
+    ws.sent.length = 0; // discard the join frame + my welcome-time beat
+    return rig;
+  }
+
+  function zoneBeatsIn(sent: string[]): Array<{ mapId: string; zoneIdx: number }> {
+    return sent
+      .map((s) => JSON.parse(s) as { t: string; payload?: { kind?: string; mapId?: string; zoneIdx?: number } })
+      .filter((f) => f.t === "g" && f.payload?.kind === "zone")
+      .map((f) => ({ mapId: f.payload!.mapId!, zoneIdx: f.payload!.zoneIdx! }));
+  }
+
+  it("re-broadcasts my zone when ANOTHER member joins the room", async () => {
+    const rig = await connectedInZone();
+    const ws = rig.socket();
+    ws.emit({ t: "member-joined", seq: 5, slot: 1, userId: "friend" });
+    expect(zoneBeatsIn(ws.sent)).toEqual([{ mapId: "map1", zoneIdx: 2 }]);
+    rig.session.setParty(null);
+  });
+
+  it("re-broadcasts my zone when a member rejoins from grace (member-unshadowed)", async () => {
+    const rig = await connectedInZone();
+    const ws = rig.socket();
+    ws.emit({ t: "member-unshadowed", seq: 5, slot: 2 });
+    expect(zoneBeatsIn(ws.sent)).toEqual([{ mapId: "map1", zoneIdx: 2 }]);
+    rig.session.setParty(null);
+  });
+
+  it("does NOT re-broadcast on my OWN echoed member-joined", async () => {
+    const rig = await connectedInZone();
+    const ws = rig.socket();
+    ws.emit({ t: "member-joined", seq: 5, slot: 0, userId: "me" });
+    expect(zoneBeatsIn(ws.sent)).toEqual([]);
+    rig.session.setParty(null);
+  });
+});
