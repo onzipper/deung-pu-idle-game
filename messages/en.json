@@ -728,7 +728,20 @@
     "subtitle": "Stock up before you head out",
     "tabBuy": "Buy",
     "tabSell": "Sell & Salvage",
+    "tabBuyback": "Buy back",
     "sellEmptyHint": "Bag's empty — nothing to sell.",
+    "buybackEmptyHint": "Nothing to buy back — sold items stick around here for 3 days",
+    "buybackLoading": "Loading...",
+    "buybackLoadError": "Couldn't load — try again",
+    "buybackRetryButton": "Retry",
+    "buybackButton": "Buy back",
+    "buybackConfirm": "Confirm buy-back?",
+    "buybackAria": "Buy back {name} for {price} gold",
+    "buybackCountdown": {
+      "days": "{d}d {h}h left",
+      "hours": "{h}h {m}m left",
+      "minutes": "{m}m left"
+    },
     "owned": "{count}/{cap} held",
     "buyAria": "Buy {qty} {name}",
     "quickUseLabel": "Items",
@@ -821,6 +834,14 @@
       "boss": "Mid boss fight — can't warp",
       "invalid": "Can't warp there",
       "damaged": "You took damage — warp cancelled"
+    },
+    "buyback": {
+      "notFound": "That item's no longer available",
+      "expired": "Buy-back window expired",
+      "insufficientGold": "Not enough gold to buy that back",
+      "bagFull": "Bag's full — can't buy that back",
+      "network": "Network hiccup — try again",
+      "unknown": "Something went wrong — try again"
     }
   },
   "refine": {
@@ -951,6 +972,11 @@
         "items": {
           "townWalkFix": "🚶 Town bugfix: tap-to-walk works in town again, and tapping Pah Pu / Uncle Dueng actually walks you over — move orders used to vanish in town, making NPCs untalkable",
           "shopSell": "💰 Pah Pu now buys back: sell and salvage gear right from her shop dialog, no need to open the inventory separately"
+        }
+      },
+      "2026-07-08d": {
+        "items": {
+          "buyback": "🔁 Sold something by mistake? Buy it back from Pah Pu within 3 days, at the price you got for it — new \"Buy back\" tab in her shop"
         }
       }
     }

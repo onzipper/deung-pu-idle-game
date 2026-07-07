@@ -7,6 +7,8 @@
 
 import type { GearSlot } from "@/engine";
 import type {
+  BuybackApiResult,
+  BuybackListItemWire,
   ClaimItemResultWire,
   ItemInstanceWire,
   RefineApiResult,
@@ -161,6 +163,43 @@ export async function postRefine(itemId: string): Promise<RefineApiResult> {
       return { ok: false, reason };
     }
     return { ok: true, ...(json as Omit<Extract<RefineApiResult, { ok: true }>, "ok">) };
+  } catch {
+    return { ok: false, reason: "network" };
+  }
+}
+
+/** GET /api/items/buyback (UAT "ซื้อคืน" buy-back) — already filtered to
+ * this user, unexpired, unrestored, soonest-to-expire first. Returns `null`
+ * on a network/parse failure so the tab can tell "genuinely empty" apart
+ * from "couldn't load" (retry tap), same contract as `fetchInventory`. */
+export async function fetchBuybackList(): Promise<{ items: BuybackListItemWire[] } | null> {
+  try {
+    const res = await fetch("/api/items/buyback", { method: "GET" });
+    if (!res.ok) return null;
+    return (await res.json()) as { items: BuybackListItemWire[] };
+  } catch {
+    return null;
+  }
+}
+
+/** POST /api/items/buyback — re-purchase a sold item at the price it was
+ * sold for. Same "non-2xx resolves to {ok:false,reason}, never throws" shape
+ * as `postRefine`. */
+export async function postBuyback(soldItemId: string): Promise<BuybackApiResult> {
+  try {
+    const res = await fetch("/api/items/buyback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ soldItemId }),
+    });
+    const json = (await res.json()) as
+      | { ok: true; goldDelta: number; item: ItemInstanceWire }
+      | { ok?: false; reason?: string };
+    if (!res.ok || !("ok" in json) || !json.ok) {
+      const reason = "reason" in json && json.reason ? json.reason : "unknown";
+      return { ok: false, reason };
+    }
+    return json;
   } catch {
     return { ok: false, reason: "network" };
   }

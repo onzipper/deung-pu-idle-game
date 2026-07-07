@@ -22,6 +22,13 @@ const { mockPrisma } = vi.hoisted(() => ({
     },
     itemEvent: { create: vi.fn(), createMany: vi.fn() },
     refineAnnouncement: { create: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() },
+    soldItem: {
+      createMany: vi.fn(),
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      updateMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     $transaction: vi.fn(),
   },
 }));
@@ -45,6 +52,11 @@ import {
   refineItem,
   salvageSchema,
   refineSchema,
+  loadBuyback,
+  buybackItem,
+  buybackSchema,
+  BUYBACK_WINDOW_DAYS,
+  BUYBACK_WINDOW_MS,
   CLAIM_GRACE,
   KILLS_PER_SEC_CEILING,
   MAX_CLAIM_BATCH,
@@ -342,6 +354,7 @@ describe("claimBatch — inventory cap backstop (M7.5)", () => {
 describe("sellItems — NPC vendor (M7.5)", () => {
   beforeEach(() => {
     mockPrisma.itemEvent.createMany.mockResolvedValue({ count: 0 });
+    mockPrisma.soldItem.createMany.mockResolvedValue({ count: 0 });
   });
 
   /** The batched read now returns the rows for the whole request. */
@@ -378,6 +391,33 @@ describe("sellItems — NPC vendor (M7.5)", () => {
         ],
       }),
     );
+  });
+
+  it("records a SoldItem buy-back row (same tx) with credited price + server-stamped soldAt", async () => {
+    stockFindMany([{ templateId: "w_sword_t3_knight", equippedSlot: null, refineLevel: 4 }]);
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
+    const now = new Date("2026-07-06T00:00:00Z");
+    await sellItems(CHAR, ["item_1"], now);
+    const expectedPrice = vendorPriceForTemplate("w_sword_t3_knight");
+    expect(mockPrisma.soldItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          {
+            ownerId: CHAR,
+            templateId: "w_sword_t3_knight",
+            refineLevel: 4,
+            price: expectedPrice,
+            soldAt: now,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("does NOT record a SoldItem row when nothing sells", async () => {
+    stockFindMany([{ equippedSlot: "weapon" }]);
+    await sellItems(CHAR, ["item_1"]);
+    expect(mockPrisma.soldItem.createMany).not.toHaveBeenCalled();
   });
 
   it("rejects an equipped item (reason equipped) — never auto-unequips, no gold", async () => {
@@ -739,6 +779,179 @@ describe("recentAnnouncements — feed query shape + in-process cache (M7.9)", (
     mockPrisma.refineAnnouncement.findMany.mockClear();
     await recentAnnouncements(new Date(now.getTime() + 11_000)); // past the 10s TTL
     expect(mockPrisma.refineAnnouncement.findMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("buybackSchema", () => {
+  it("requires one non-empty soldItemId and rejects extras", () => {
+    expect(buybackSchema.safeParse({ soldItemId: "sold_1" }).success).toBe(true);
+    expect(buybackSchema.safeParse({ soldItemId: "" }).success).toBe(false);
+    expect(buybackSchema.safeParse({ soldItemId: "a", extra: 1 }).success).toBe(false);
+    expect(buybackSchema.safeParse({}).success).toBe(false);
+  });
+  it("exposes a 3-day window", () => {
+    expect(BUYBACK_WINDOW_DAYS).toBe(3);
+    expect(BUYBACK_WINDOW_MS).toBe(3 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe("loadBuyback — list read (M-buyback)", () => {
+  it("lists this owner's unrestored in-window rows soonest-to-expire first + purges expired", async () => {
+    mockPrisma.soldItem.deleteMany.mockResolvedValue({ count: 0 });
+    const soldAt = new Date("2026-07-06T00:00:00Z");
+    mockPrisma.soldItem.findMany.mockResolvedValue([
+      {
+        id: "sold_1",
+        templateId: "w_sword_t3_knight",
+        refineLevel: 2,
+        price: 500,
+        soldAt,
+      },
+    ]);
+    const now = new Date("2026-07-07T00:00:00Z");
+    const items = await loadBuyback(CHAR, now);
+    // purge past-window rows for this owner
+    expect(mockPrisma.soldItem.deleteMany).toHaveBeenCalledWith({
+      where: { ownerId: CHAR, soldAt: { lt: new Date(now.getTime() - BUYBACK_WINDOW_MS) } },
+    });
+    // window + owner filter, oldest sale first
+    expect(mockPrisma.soldItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          ownerId: CHAR,
+          restoredAt: null,
+          soldAt: { gte: new Date(now.getTime() - BUYBACK_WINDOW_MS) },
+        },
+        orderBy: { soldAt: "asc" },
+      }),
+    );
+    expect(items).toEqual([
+      {
+        soldItemId: "sold_1",
+        templateId: "w_sword_t3_knight",
+        refineLevel: 2,
+        price: 500,
+        soldAt: soldAt.toISOString(),
+        expiresAt: new Date(soldAt.getTime() + BUYBACK_WINDOW_MS).toISOString(),
+      },
+    ]);
+  });
+});
+
+describe("buybackItem — atomic re-mint (M-buyback)", () => {
+  const NOW = new Date("2026-07-07T00:00:00Z");
+
+  function soldRow(over: Record<string, unknown> = {}) {
+    return {
+      id: "sold_1",
+      templateId: "w_sword_t3_knight",
+      refineLevel: 3,
+      price: 500,
+      soldAt: new Date("2026-07-06T00:00:00Z"), // 1 day ago → in-window
+      restoredAt: null,
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+    mockPrisma.soldItem.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.itemInstance.count.mockResolvedValue(0);
+    mockPrisma.itemInstance.create.mockResolvedValue(
+      instanceRow({ id: "reborn", templateId: "w_sword_t3_knight", refineLevel: 3 }),
+    );
+  });
+
+  it("success: re-mints a fresh instance (templateId + refineLevel preserved), records boughtBack, returns -price", async () => {
+    mockPrisma.soldItem.findFirst.mockResolvedValue(soldRow());
+    const r = await buybackItem(CHAR, "sold_1", 1000, { now: NOW });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.goldDelta).toBe(-500);
+      expect(r.item.id).toBe("reborn");
+      expect(r.item.refineLevel).toBe(3);
+    }
+    // atomic redeem: guarded updateMany on restoredAt:null
+    expect(mockPrisma.soldItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "sold_1", ownerId: CHAR, restoredAt: null },
+        data: { restoredAt: NOW },
+      }),
+    );
+    // fresh instance minted with origin buyback (out of the drop-rate ceiling)
+    expect(mockPrisma.itemInstance.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          ownerId: CHAR,
+          templateId: "w_sword_t3_knight",
+          refineLevel: 3,
+          origin: "buyback",
+        }),
+      }),
+    );
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "boughtBack" }) }),
+    );
+  });
+
+  it("rejects a wrong-owner / missing row (notFound), mints nothing", async () => {
+    mockPrisma.soldItem.findFirst.mockResolvedValue(null); // ownerId filter excluded it
+    const r = await buybackItem(CHAR, "sold_x", 1000, { now: NOW });
+    expect(r).toEqual({ ok: false, reason: "notFound" });
+    expect(mockPrisma.soldItem.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an already-restored row (notFound)", async () => {
+    mockPrisma.soldItem.findFirst.mockResolvedValue(
+      soldRow({ restoredAt: new Date("2026-07-06T12:00:00Z") }),
+    );
+    const r = await buybackItem(CHAR, "sold_1", 1000, { now: NOW });
+    expect(r).toEqual({ ok: false, reason: "notFound" });
+    expect(mockPrisma.soldItem.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("window boundary: a sale exactly at the window edge is still valid; 1ms past is expired", async () => {
+    // edge = now - BUYBACK_WINDOW_MS: soldAt >= edge is in-window (>= comparison).
+    const edge = new Date(NOW.getTime() - BUYBACK_WINDOW_MS);
+    mockPrisma.soldItem.findFirst.mockResolvedValue(soldRow({ soldAt: edge }));
+    const ok = await buybackItem(CHAR, "sold_1", 1000, { now: NOW });
+    expect(ok.ok).toBe(true);
+
+    mockPrisma.itemInstance.create.mockClear(); // isolate the expired-call assertion below
+    mockPrisma.soldItem.findFirst.mockResolvedValue(
+      soldRow({ soldAt: new Date(edge.getTime() - 1) }), // 1ms past the window
+    );
+    const expired = await buybackItem(CHAR, "sold_1", 1000, { now: NOW });
+    expect(expired).toEqual({ ok: false, reason: "expired" });
+    // no server-clock trust: nothing is minted for an expired offer
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects insufficient gold (persisted balance < price) before minting", async () => {
+    mockPrisma.soldItem.findFirst.mockResolvedValue(soldRow({ price: 500 }));
+    const r = await buybackItem(CHAR, "sold_1", 499, { now: NOW });
+    expect(r).toEqual({ ok: false, reason: "insufficientGold" });
+    expect(mockPrisma.soldItem.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the bag is at the inventory cap (bagFull)", async () => {
+    mockPrisma.soldItem.findFirst.mockResolvedValue(soldRow());
+    mockPrisma.itemInstance.count.mockResolvedValue(INVENTORY_CAP);
+    const r = await buybackItem(CHAR, "sold_1", 1000, { now: NOW });
+    expect(r).toEqual({ ok: false, reason: "bagFull" });
+    expect(mockPrisma.soldItem.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("loses the redeem race (updateMany count 0) → notFound, no double re-mint", async () => {
+    mockPrisma.soldItem.findFirst.mockResolvedValue(soldRow());
+    mockPrisma.soldItem.updateMany.mockResolvedValue({ count: 0 }); // concurrent buy-back won
+    const r = await buybackItem(CHAR, "sold_1", 1000, { now: NOW });
+    expect(r).toEqual({ ok: false, reason: "notFound" });
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
   });
 });
 

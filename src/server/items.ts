@@ -691,12 +691,12 @@ export async function sellItems(
     async (tx) => {
       const rows = await tx.itemInstance.findMany({
         where: { id: { in: uniqueIds }, ownerId: characterId },
-        select: { id: true, templateId: true, deletedAt: true, equippedSlot: true },
+        select: { id: true, templateId: true, deletedAt: true, equippedSlot: true, refineLevel: true },
       });
       const byId = new Map(rows.map((r) => [r.id, r]));
 
       const results: SellItemResult[] = [];
-      const sold: { itemId: string; price: number }[] = [];
+      const sold: { itemId: string; price: number; templateId: string; refineLevel: number }[] = [];
       for (const itemId of uniqueIds) {
         const item = byId.get(itemId);
         if (!item) {
@@ -729,7 +729,7 @@ export async function sellItems(
           results.push({ itemId, status: "already", price: 0 });
           continue;
         }
-        sold.push({ itemId, price });
+        sold.push({ itemId, price, templateId: item.templateId, refineLevel: item.refineLevel });
         results.push({ itemId, status: "sold", price });
       }
 
@@ -740,6 +740,19 @@ export async function sellItems(
             type: "destroyed",
             fromCharacterId: characterId,
             meta: JSON.stringify({ sold: true, price: s.price, currency: "gold" }),
+          })),
+        });
+        // NPC buy-back window (owner-approved): record one SoldItem row per sold
+        // instance in the SAME tx, with its credited price + a SERVER-STAMPED
+        // soldAt, so the merchant can offer it back for BUYBACK_WINDOW_DAYS. Salvage
+        // does NOT do this (materials were granted → sold-only). See `buybackItem`.
+        await tx.soldItem.createMany({
+          data: sold.map((s) => ({
+            ownerId: characterId,
+            templateId: s.templateId,
+            refineLevel: s.refineLevel,
+            price: s.price,
+            soldAt: now,
           })),
         });
       }
@@ -1068,6 +1081,157 @@ export async function refineItem(
   } catch (err) {
     if (err instanceof RefineOpError) return { ok: false, reason: err.reason };
     throw err;
+  }
+}
+
+// ── NPC buy-back (owner-approved) ─────────────────────────────────────────────
+//
+// When a player SELLS an item, `sellItems` records a `SoldItem` row (above). For
+// BUYBACK_WINDOW_DAYS the merchant offers it BACK at exactly the credited price.
+// The clock is SERVER-AUTHORITATIVE: the window is measured from the server-stamped
+// `soldAt` vs the server's `now`, never a client timestamp. Salvaged items are never
+// recorded, so they can't be bought back. Manual-only — no bot/auto path calls this.
+
+/** Buy-back window: an item stays repurchasable for this many days after sale. */
+export const BUYBACK_WINDOW_DAYS = 3;
+/** Same window in milliseconds (server wall-clock math). */
+export const BUYBACK_WINDOW_MS = BUYBACK_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+export interface BuybackEntryDTO {
+  soldItemId: string;
+  templateId: string;
+  refineLevel: number;
+  price: number;
+  /** ISO server-stamped sale time. */
+  soldAt: string;
+  /** ISO soldAt + BUYBACK_WINDOW (when this offer lapses). */
+  expiresAt: string;
+}
+
+/**
+ * This character's still-repurchasable sold items — unrestored rows whose `soldAt`
+ * is within BUYBACK_WINDOW_DAYS of `now`, SOONEST-TO-EXPIRE FIRST (oldest sale first).
+ * Opportunistically purges this owner's already-expired rows on read (no cron — keeps
+ * the table tiny, same philosophy as the announcement prune).
+ */
+export async function loadBuyback(
+  characterId: string,
+  now: Date = new Date(),
+): Promise<BuybackEntryDTO[]> {
+  const windowStart = new Date(now.getTime() - BUYBACK_WINDOW_MS);
+  // Lazy purge: this owner's rows past the window are dead (restored or not) — drop
+  // them so the list query and the table stay small.
+  await prisma.soldItem.deleteMany({
+    where: { ownerId: characterId, soldAt: { lt: windowStart } },
+  });
+  const rows = await prisma.soldItem.findMany({
+    where: { ownerId: characterId, restoredAt: null, soldAt: { gte: windowStart } },
+    orderBy: { soldAt: "asc" }, // oldest sale = soonest to expire = first
+    select: { id: true, templateId: true, refineLevel: true, price: true, soldAt: true },
+  });
+  return rows.map((r) => ({
+    soldItemId: r.id,
+    templateId: r.templateId,
+    refineLevel: r.refineLevel,
+    price: r.price,
+    soldAt: r.soldAt.toISOString(),
+    expiresAt: new Date(r.soldAt.getTime() + BUYBACK_WINDOW_MS).toISOString(),
+  }));
+}
+
+/** Buy back ONE sold item. Single soldItemId — the server re-mints the instance. */
+export const buybackSchema = z.object({ soldItemId: z.string().min(1).max(64) }).strict();
+
+export type BuybackResult =
+  | { ok: true; goldDelta: number; item: ItemInstanceDTO }
+  | { ok: false; reason: "notFound" | "expired" | "insufficientGold" | "bagFull" };
+
+/**
+ * Repurchase ONE sold item (owner-approved). One `prisma.$transaction`:
+ *   1. read the SoldItem (must belong to THIS character) — missing OR wrong-owner OR
+ *      ALREADY restored → "notFound";
+ *   2. window check vs the SERVER clock (soldAt within BUYBACK_WINDOW_MS of `now`) →
+ *      "expired" (a client that forwards its clock can't extend this);
+ *   3. gold check against the PERSISTED save balance the route passes in (gold lives
+ *      in the save blob — MVP client-authoritative, SAME pattern as refine: checked
+ *      here, returned as `goldDelta`, never debited server-side) → "insufficientGold";
+ *   4. bag-cap backstop mirroring the claim mint path (server refuses to mint past
+ *      INVENTORY_CAP non-deleted instances) → "bagFull";
+ *   5. atomic check-and-set `restoredAt` (guarded updateMany, restoredAt:null) so a
+ *      row redeems AT MOST ONCE (a concurrent/retried buy-back matches 0 → notFound);
+ *   6. re-create a FRESH ItemInstance (new cuid, same templateId + refineLevel, origin
+ *      "buyback" so it never counts against the drop-rate ceiling) + a `boughtBack`
+ *      ItemEvent — all in the same tx.
+ *
+ * Returns `goldDelta: -price` for the client to apply via its gold intent.
+ */
+export async function buybackItem(
+  characterId: string,
+  soldItemId: string,
+  goldBalance: number,
+  opts: { now?: Date } = {},
+): Promise<BuybackResult> {
+  const now = opts.now ?? new Date();
+  const windowStart = new Date(now.getTime() - BUYBACK_WINDOW_MS);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const row = await tx.soldItem.findFirst({
+        where: { id: soldItemId, ownerId: characterId },
+        select: { id: true, templateId: true, refineLevel: true, price: true, soldAt: true, restoredAt: true },
+      });
+      // Missing, wrong-owner (ownerId filter), or already redeemed → not a valid target.
+      if (!row || row.restoredAt !== null) throw new BuybackOpError("notFound");
+      if (row.soldAt.getTime() < windowStart.getTime()) throw new BuybackOpError("expired");
+      if (goldBalance < row.price) throw new BuybackOpError("insufficientGold");
+
+      // Bag-cap backstop (mirrors the claim mint backstop) — refuse to mint past cap.
+      const inventoryCount = await tx.itemInstance.count({
+        where: { ownerId: characterId, deletedAt: null },
+      });
+      if (inventoryCount >= INVENTORY_CAP) throw new BuybackOpError("bagFull");
+
+      // Atomic check-and-set: redeem at most once (loses the race → notFound).
+      const claimed = await tx.soldItem.updateMany({
+        where: { id: soldItemId, ownerId: characterId, restoredAt: null },
+        data: { restoredAt: now },
+      });
+      if (claimed.count === 0) throw new BuybackOpError("notFound");
+
+      const created = await tx.itemInstance.create({
+        data: {
+          ownerId: characterId,
+          templateId: row.templateId,
+          origin: "buyback", // NOT drop/boss → excluded from the drop-rate plausibility ceiling
+          sourceDetail: `buyback:${soldItemId}`,
+          refineLevel: row.refineLevel,
+        },
+        select: INSTANCE_SELECT,
+      });
+      await tx.itemEvent.create({
+        data: {
+          itemId: created.id,
+          type: "boughtBack",
+          toCharacterId: characterId,
+          meta: JSON.stringify({ soldItemId, price: row.price, refineLevel: row.refineLevel }),
+        },
+      });
+
+      const dto = toItemDTO(created);
+      if (!dto) throw new BuybackOpError("notFound"); // retired template — defensive
+      return { ok: true as const, goldDelta: -row.price, item: dto };
+    });
+  } catch (err) {
+    if (err instanceof BuybackOpError) return { ok: false, reason: err.reason };
+    throw err;
+  }
+}
+
+/** Internal control-flow error for the buy-back tx. */
+class BuybackOpError extends Error {
+  constructor(
+    public readonly reason: "notFound" | "expired" | "insufficientGold" | "bagFull",
+  ) {
+    super(reason);
   }
 }
 
