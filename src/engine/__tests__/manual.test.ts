@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { CONFIG, initGameState, step, toSaveData, type Enemy, type GameState } from "@/engine";
+import {
+  CONFIG,
+  initGameState,
+  npcInRange,
+  step,
+  toSaveData,
+  townNpcConfig,
+  type Enemy,
+  type GameState,
+} from "@/engine";
 import { makeStubEnemy, forceBoss, soloSave } from "./helpers";
 
 /**
@@ -227,5 +236,93 @@ describe("manual play (M7.8)", () => {
       return JSON.stringify({ heroes: s.heroes, enemies: s.enemies });
     };
     expect(runOnce()).toBe(runOnce());
+  });
+});
+
+/**
+ * UAT round-3 REGRESSION: the town early-return in step() skipped applyManualCommand
+ * AND updateHeroes, so a moveTo in town was silently dropped — tap-the-ground did
+ * nothing, and the phase-3 tap-an-NPC-to-approach never walked, so the talk range
+ * was never reached (NPC panels unreachable). These run through step() IN TOWN —
+ * the path the original manual-play tests never exercised.
+ */
+describe("manual play in town (UAT round-3 regression)", () => {
+  const TOWN = { mapId: "map1", zoneIdx: 0 };
+
+  /** A state parked in town with the hero at the entry side. */
+  function townState(): GameState {
+    const s = initGameState(1);
+    s.location = { ...TOWN };
+    s.heroes[0].x = 100;
+    return s;
+  }
+
+  it("moveTo in town walks the hero to the commanded x and completes", () => {
+    const s = townState();
+    const hero = s.heroes[0];
+    const goal = 400;
+
+    step(s, { moveTo: { x: goal } });
+    expect(hero.command).toEqual({ kind: "move", x: goal });
+    const ev = s.events.find((e) => e.type === "moveOrdered");
+    expect(ev && ev.type === "moveOrdered" && ev.x).toBe(goal); // tap ping fires in town too
+
+    for (let i = 0; i < 400 && hero.command; i++) step(s, {});
+    expect(hero.command).toBeNull(); // arrival completed the command
+    expect(Math.abs(hero.x - goal)).toBeLessThanOrEqual(CONFIG.manual.arriveEps);
+  });
+
+  it("tap-an-NPC-to-approach: walking to ลุงดึ๋ง's anchor reaches talk range", () => {
+    const s = townState();
+    const smith = townNpcConfig("npc:lungdueng");
+    expect(npcInRange(s, "npc:lungdueng")).toBe(false); // entry side, out of range
+
+    // The GameClient out-of-range tap queues exactly this: moveTo the anchor x.
+    step(s, { moveTo: { x: smith.x } });
+    for (let i = 0; i < 400 && s.heroes[0].command; i++) step(s, {});
+    expect(npcInRange(s, "npc:lungdueng")).toBe(true); // tap-again-to-talk now gates open
+  });
+
+  it("cancelCommand works in town (walk stops where it is)", () => {
+    const s = townState();
+    step(s, { moveTo: { x: 500 } });
+    for (let i = 0; i < 30; i++) step(s, {});
+    const midX = s.heroes[0].x;
+    expect(midX).toBeGreaterThan(100); // genuinely underway
+    step(s, { cancelCommand: true });
+    expect(s.heroes[0].command).toBeNull();
+    expect(s.events.some((e) => e.type === "commandCancelled")).toBe(true);
+    for (let i = 0; i < 30; i++) step(s, {});
+    expect(s.heroes[0].x).toBe(midX); // stays put
+  });
+
+  it("the bot's town walk keeps priority — a manual move waits it out", () => {
+    const s = townState();
+    const merchant = townNpcConfig("npc:pahpu");
+    s.heroes[0].x = merchant.x + 200; // right of ป้าปุ๊, walk goes LEFT
+    s.botWalk = { restock: true, sell: false };
+
+    // Command a move further RIGHT while the bot walk owns the hero's feet.
+    step(s, { moveTo: { x: merchant.x + 400 } });
+    expect(s.heroes[0].command).toEqual({ kind: "move", x: merchant.x + 400 });
+    expect(s.heroes[0].x).toBeLessThan(merchant.x + 200); // botWalk moved him LEFT
+
+    // The command survives the walk (resumes once botWalk completes) — it is
+    // never fought over per-step ("a manual command can't wedge the trip").
+    for (let i = 0; i < 10 && s.botWalk; i++) step(s, {});
+    expect(s.heroes[0].command).toEqual({ kind: "move", x: merchant.x + 400 });
+  });
+
+  it("a fast-travel channel in town stands still — no manual walk mid-channel", () => {
+    const s = townState();
+    step(s, { fastTravel: { mapId: "map1", zoneIdx: 1 } });
+    expect(s.fastTravelCast).not.toBeNull();
+    const x0 = s.heroes[0].x;
+    step(s, { moveTo: { x: 500 } });
+    for (let i = 0; i < 20 && s.fastTravelCast; i++) step(s, {});
+    // Never moved while the channel ran (it either completed the warp or is
+    // still standing) — the town walk honours the channeling gate.
+    if (s.fastTravelCast) expect(s.heroes[0].x).toBe(x0);
+    else expect(s.location).toEqual({ mapId: "map1", zoneIdx: 1 });
   });
 });

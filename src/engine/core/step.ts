@@ -26,7 +26,7 @@ import {
   tickConsumableCds,
 } from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
-import { applyManualCommand } from "@/engine/systems/manual";
+import { applyManualCommand, tickTownManualWalk } from "@/engine/systems/manual";
 import { updateSpawns } from "@/engine/systems/hunt";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
@@ -318,6 +318,14 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // portal spinning forever). Town is damage-free, so it only counts down.
   if (zoneAt(state.location).kind === "town") {
     decayHeroTimers(state);
+    // Manual play in town (UAT round-3 bug): this early return used to skip the
+    // command intents entirely, so tap-to-move AND the phase-3 tap-an-NPC-to-
+    // approach were dead in town (the bot could walk — updateBots runs above and
+    // drives hero.x directly — but the player couldn't). Apply the intents, then
+    // the walk-only slice (no combat in the safe hub); botWalk/channeling keep
+    // priority inside tickTownManualWalk.
+    applyManualCommand(state, input);
+    tickTownManualWalk(state);
     tickFastTravel(state);
     state.time += FIXED_DT;
     state.rngState = rng.state();
