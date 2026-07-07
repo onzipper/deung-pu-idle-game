@@ -77,6 +77,26 @@ export type SalvageItemResultWire =
 /** M7.6 ตีบวก refine outcome (mirrors `server/items.ts`'s `RefineOutcome`). */
 export type RefineOutcome = "success" | "degrade" | "break" | "safe";
 
+/** UAT "ซื้อคืน" buy-back — one re-purchasable sold-item entry, mirroring
+ * `server/items.ts`'s buy-back record shape (GET /api/items/buyback): already
+ * filtered to this user, unexpired, unrestored, soonest-to-expire first. */
+export interface BuybackListItemWire {
+  soldItemId: string;
+  templateId: string;
+  refineLevel: number;
+  price: number;
+  soldAt: string;
+  expiresAt: string;
+}
+
+/** POST /api/items/buyback result (mirrors `postEquip`'s `EquipApiResult`
+ * shape) — `reason` is a generic string here; `ui/gear/buybackFlow.ts`'s
+ * `normalizeBuybackReason` narrows it to the known contract reasons
+ * ("notFound" | "expired" | "insufficientGold" | "bagFull") for i18n lookup. */
+export type BuybackApiResult =
+  | { ok: true; goldDelta: number; item: ItemInstanceWire }
+  | { ok: false; reason: string };
+
 /** POST /api/items/refine success shape (mirrors `server/items.ts`'s
  * `RefineResult`'s `ok: true` branch). */
 export interface RefineApiSuccess {

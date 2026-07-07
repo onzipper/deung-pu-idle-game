@@ -114,6 +114,13 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
     date: "2026-07-08",
     items: ["releases.2026-07-08c.items.townWalkFix", "releases.2026-07-08c.items.shopSell"],
   },
+  // UAT "ซื้อคืน" (buy-back): re-purchase an accidentally-sold item within 3
+  // days at its sold price — third tab on Pah Pu's shop dialog.
+  {
+    id: "2026-07-08d",
+    date: "2026-07-08",
+    items: ["releases.2026-07-08d.items.buyback"],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

@@ -22,19 +22,40 @@
  *
  * Icons are pre-2015 emoji (❤ / 💧 / 📜) so Windows 10 renders them (no Unicode-13+
  * glyphs — see CLAUDE.md footgun #4).
+ *
+ * UAT "ซื้อคืน" (buy-back) — a THIRD tab reusing the same flow-module
+ * convention (`ui/gear/buybackFlow.ts`'s `fetchBuybackList`/`executeBuyback`)
+ * and the same `useConfirmGuard` tap-again-to-confirm as the sell tab's rows.
+ * Unlike the sell tab, this one fetches from the server on tab open (and
+ * refetches after every buy-back, success or fail — the window can shrink
+ * server-side either way) rather than deriving from the local inventory slice.
  */
 
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
-import type { ShopItemId } from "@/engine";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ITEM_TEMPLATES, type ShopItemId } from "@/engine";
+import {
+  executeBuyback,
+  fetchBuybackList,
+  formatBuybackCountdown,
+  type BuybackListEntry,
+} from "@/ui/gear/buybackFlow";
 import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { compareInventoryItems, sellAllCommonIds, salvageJunkCommonIds } from "@/ui/gear/sortRank";
 import type { InventoryItem } from "@/ui/gear/types";
+import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { SellSalvageRow } from "@/ui/components/SellSalvageRow";
+import { GEAR_SLOT_ICONS, prestigeNameClass, RARITY_COLORS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
+
+/** Local re-render cadence for the buy-back countdown text — a plain
+ * component-local timer, NOT an engine/store sync (CLAUDE.md rule #3 is
+ * scoped to per-frame GAME state; this is a once-per-30s wall-clock label
+ * refresh on a small modal list). */
+const COUNTDOWN_REFRESH_MS = 30_000;
 
 const SHOP_ORDER: ShopItemId[] = ["hpPotion", "manaPotion", "returnScroll"];
 
@@ -210,6 +231,172 @@ function SellSalvageTab() {
   );
 }
 
+/** One buy-back row — same list-row layout + rarity/tier styling as
+ * `SellSalvageRow`, but sourced from the server buy-back list rather than the
+ * local inventory slice. Always requires the tap-again-to-confirm guard
+ * (unlike the sell tab, which only guards rare/epic) since every entry here
+ * costs gold. */
+function BuybackRow({
+  entry,
+  now,
+  busy,
+  onBuy,
+}: {
+  entry: BuybackListEntry;
+  now: number;
+  busy: boolean;
+  onBuy: (entry: BuybackListEntry) => void;
+}) {
+  const t = useTranslations("shop");
+  const tContent = useTranslations("content.items");
+  const tInv = useTranslations("inventory");
+  const gold = useGameStore((s) => s.gold);
+  const guard = useConfirmGuard();
+
+  const template = ITEM_TEMPLATES[entry.templateId];
+  if (!template) return null;
+
+  const colors = RARITY_COLORS[template.rarity];
+  const prestigeCls = prestigeNameClass(entry.refineLevel);
+  const countdown = formatBuybackCountdown(entry.expiresAt, now);
+  const canAfford = gold >= entry.price;
+  const disabled = busy || !canAfford;
+
+  return (
+    <div className="flex items-center gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 py-1.5">
+      <span aria-hidden className="text-lg leading-none">
+        {GEAR_SLOT_ICONS[template.slot]}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className={`truncate text-xs ${prestigeCls || `font-bold ${colors.text}`}`}>
+          {colors.icon} {tContent(`${entry.templateId}.name`)}
+          {entry.refineLevel > 0 && (
+            <span className={prestigeCls || "text-emerald-400"}>
+              {" "}
+              {tInv("refinePlus", { level: entry.refineLevel })}
+            </span>
+          )}
+        </span>
+        {countdown.unit !== "expired" && (
+          <span className="truncate text-[10px] text-ddp-ink-muted">
+            {t(`buybackCountdown.${countdown.unit}`, countdown.params)}
+          </span>
+        )}
+      </div>
+      <span
+        className={`flex shrink-0 items-center gap-1 text-xs font-bold tabular-nums ${
+          canAfford ? "text-ddp-gold-bright" : "text-rose-400"
+        }`}
+      >
+        <Coin />
+        {entry.price}
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => guard.trigger(true, () => onBuy(entry))}
+        aria-label={t("buybackAria", { name: tContent(`${entry.templateId}.name`), price: entry.price })}
+        className={`min-h-11 shrink-0 rounded-(--ddp-radius-md) border px-2.5 text-xs font-bold transition-all active:scale-95 ${
+          disabled
+            ? "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
+            : "border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:brightness-110"
+        }`}
+      >
+        {guard.confirming ? t("buybackConfirm") : t("buybackButton")}
+      </button>
+    </div>
+  );
+}
+
+/** The buy-back tab body — fetches from the server on mount (tab open) and
+ * refetches after every buy-back attempt (success shrinks the list; a
+ * failure like "expired" may have too). Loading/error/empty are distinct
+ * states (per spec): `entries === null` is "still loading", `loadError` is
+ * "the fetch itself failed" (retry tap), otherwise an empty filtered list is
+ * the genuine "nothing to buy back" state. */
+function BuybackTab() {
+  const t = useTranslations("shop");
+  const [entries, setEntries] = useState<BuybackListEntry[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  const load = useCallback(async () => {
+    const list = await fetchBuybackList();
+    if (list === null) {
+      setLoadError(true);
+      setEntries([]);
+    } else {
+      setLoadError(false);
+      setEntries(list);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Same "fetch once on mount" shape as `CharactersScreen.tsx`'s roster
+    // load (see its doc) — `load` eventually calls `setEntries` after its
+    // `await`, which the `set-state-in-effect` rule flags, but there's no
+    // reactive dependency to resync on: this effect only re-runs when the
+    // tab (re)mounts, i.e. exactly once per tab-open.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot tab-open fetch, see above
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), COUNTDOWN_REFRESH_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  async function handleBuy(entry: BuybackListEntry): Promise<void> {
+    setBusyId(entry.soldItemId);
+    await executeBuyback(entry.soldItemId);
+    await load();
+    setBusyId(null);
+  }
+
+  const visible = useMemo(
+    () => (entries ?? []).filter((e) => formatBuybackCountdown(e.expiresAt, now).unit !== "expired"),
+    [entries, now],
+  );
+
+  if (entries === null) {
+    return <p className="text-[11px] text-ddp-ink-muted/70">{t("buybackLoading")}</p>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-start gap-1.5">
+        <p className="text-[11px] text-rose-300">{t("buybackLoadError")}</p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 text-xs font-bold text-ddp-ink-muted"
+        >
+          {t("buybackRetryButton")}
+        </button>
+      </div>
+    );
+  }
+
+  if (visible.length === 0) {
+    return <p className="text-[11px] text-ddp-ink-muted/70">{t("buybackEmptyHint")}</p>;
+  }
+
+  return (
+    <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
+      {visible.map((entry) => (
+        <BuybackRow
+          key={entry.soldItemId}
+          entry={entry}
+          now={now}
+          busy={busyId === entry.soldItemId}
+          onBuy={handleBuy}
+        />
+      ))}
+    </div>
+  );
+}
+
 export interface ShopPanelProps {
   onClose: () => void;
 }
@@ -222,7 +409,7 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
   const inTown = useGameStore((s) => s.world.kind === "town");
   const t = useTranslations("shop");
   const tInv = useTranslations("inventory");
-  const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
+  const [activeTab, setActiveTab] = useState<"buy" | "sell" | "buyback">("buy");
 
   if (!inTown) return null;
 
@@ -279,6 +466,18 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
             >
               {t("tabSell")}
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("buyback")}
+              aria-pressed={activeTab === "buyback"}
+              className={`flex min-h-11 flex-1 items-center justify-center rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
+                activeTab === "buyback"
+                  ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
+                  : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
+              }`}
+            >
+              {t("tabBuyback")}
+            </button>
           </div>
 
           {activeTab === "buy" ? (
@@ -290,8 +489,10 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
                 ))}
               </div>
             </>
-          ) : (
+          ) : activeTab === "sell" ? (
             <SellSalvageTab />
+          ) : (
+            <BuybackTab />
           )}
         </div>
       </div>
