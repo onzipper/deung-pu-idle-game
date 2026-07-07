@@ -24,6 +24,7 @@ import {
 } from "@/engine/systems/stats";
 import { applyDamage, applyAoeDamage, damageInRadius, isHero } from "@/engine/systems/damage";
 import { rollEnemyDrop } from "@/engine/systems/gear";
+import { creditGold } from "@/engine/systems/economy";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossKilled } from "@/engine/systems/boss";
@@ -477,7 +478,7 @@ export function resolveDeaths(state: GameState): void {
       if (e.hp <= 0) {
         state.kills++;
         const goldGained = CONFIG.goldPerKill(state.stage);
-        state.gold += goldGained;
+        creditGold(state, goldGained);
         // Every alive hero banks kill XP (dead heroes earn nothing).
         grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
         state.events.push({
@@ -506,7 +507,7 @@ export function resolveDeaths(state: GameState): void {
           // NB: no `state.kills++` — that's the FARM-zone quota counter; a boss-room
           // kill must not touch it (checkZoneUnlock is a boss-phase no-op anyway).
           const goldGained = CONFIG.goldPerKill(state.stage);
-          state.gold += goldGained;
+          creditGold(state, goldGained);
           grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
           state.events.push({ type: "kill", kind: e.kind, x: e.x, y: e.y, goldGained });
           advanceQuestObjective(state, "kill");

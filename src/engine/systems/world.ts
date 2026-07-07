@@ -28,6 +28,7 @@
 import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { grantKillXp } from "@/engine/systems/leveling";
+import { creditGold } from "@/engine/systems/economy";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { WorldLocation, ZoneKind } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
@@ -429,7 +430,7 @@ export function checkZoneUnlock(state: GameState): void {
   state.events.push({ type: "zoneUnlocked", mapId: next.mapId, zoneIdx: next.zoneIdx });
 
   if (next.kind === "farm") {
-    state.gold += CONFIG.goldPerBoss(zone.stage);
+    creditGold(state, CONFIG.goldPerBoss(zone.stage));
     grantKillXp(state, CONFIG.leveling.xpPerBossKill(zone.stage));
   }
 }

@@ -17,6 +17,7 @@ import type { GameState } from "@/engine/state";
 import type { BotSettings, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
 import type { GearSlot } from "@/engine/config/items";
 import { equipItem } from "@/engine/systems/gear";
+import { creditGold } from "@/engine/systems/economy";
 import { onBotTownArrival, setBotSettings, updateBots } from "@/engine/systems/bots";
 import {
   applyReturnScroll,
@@ -271,7 +272,12 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // attempt's gold cost arrives as a negative delta; floored at 0 so a stale/
   // out-of-order client application can never drive gold negative.
   if (input.goldCredit !== undefined && Number.isFinite(input.goldCredit) && input.goldCredit !== 0) {
-    state.gold = Math.max(0, state.gold + Math.floor(input.goldCredit));
+    const delta = Math.floor(input.goldCredit);
+    // A POSITIVE credit (NPC sale) funnels through creditGold so it also banks the
+    // M7.95 lifetime `goldEarned` total; a NEGATIVE delta (refine cost) only debits
+    // spendable gold (floored at 0) and must NEVER decrease the earned total.
+    if (delta > 0) creditGold(state, delta);
+    else state.gold = Math.max(0, state.gold + delta);
   }
 
   // --- world navigation (M6 "World & Town") ---

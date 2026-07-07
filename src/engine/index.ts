@@ -59,6 +59,17 @@ export {
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";
 
+// M7.95 "Hall of Fame" read surface: the server ranks characters + the UI draws the
+// board from `hallOfFame(state)` (lifetime gold / best boss clears / level-cap
+// timestamp). The counters are engine-internal write-only observers, updated only
+// through `step()`; only the pure read + its types are public.
+export {
+  hallOfFame,
+  HOF_UNSTAMPED,
+  type HallOfFameStats,
+  type BossClearBest,
+} from "@/engine/systems/hallOfFame";
+
 // World / zone read helpers (M6 "World & Town"): the UI derives the current
 // map/zone label + walk-arrow (adjacent/locked) affordances from these pure
 // reads. Navigation itself happens ONLY through `step()` intents

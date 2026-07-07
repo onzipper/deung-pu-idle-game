@@ -181,8 +181,8 @@ describe("M7.9 tier-3 power spike (multipliers)", () => {
 });
 
 describe("M7.9 SAVE v15 migration", () => {
-  it("SAVE_VERSION is 15", () => {
-    expect(SAVE_VERSION).toBe(15);
+  it("SAVE_VERSION is at least the M7.9 tier-3 version (15)", () => {
+    expect(SAVE_VERSION).toBeGreaterThanOrEqual(15);
   });
 
   it("migrates a v14 tier-2 save byte-compatibly (tier 2, quest null, 3-slot, idempotent)", () => {
@@ -204,7 +204,7 @@ describe("M7.9 SAVE v15 migration", () => {
       lastSeen: 0,
     };
     const out = migrate(v14);
-    expect(out.version).toBe(15);
+    expect(out.version).toBe(SAVE_VERSION);
     expect(out.hero.tier).toBe(2);
     expect(out.hero.quest).toBeNull(); // re-offered at L40 on load (derived)
     expect(out.hero.autoSlots).toEqual([SIGNATURE_SKILL.mage, null, null]); // length 3 preserved
@@ -225,7 +225,7 @@ describe("M7.9 SAVE v15 migration", () => {
       lastSeen: 0,
     };
     const out = migrate(v2);
-    expect(out.version).toBe(15);
+    expect(out.version).toBe(SAVE_VERSION);
     expect([1, 2, 3]).toContain(out.hero.tier);
     expect(out.hero.autoSlots).toHaveLength(3); // adopted tier-1 hero => 3-slot loadout
     expect(migrate(out)).toEqual(out);
@@ -235,7 +235,7 @@ describe("M7.9 SAVE v15 migration", () => {
     const { s, h } = tierHero("swordsman", 3, 45);
     h.autoSlots[3] = "sword_skyfall";
     const save = toSaveData(s);
-    expect(save.version).toBe(15);
+    expect(save.version).toBe(SAVE_VERSION);
     expect(save.hero.tier).toBe(3);
     expect(save.hero.autoSlots).toHaveLength(4);
     expect(save.hero.autoSlots[3]).toBe("sword_skyfall");

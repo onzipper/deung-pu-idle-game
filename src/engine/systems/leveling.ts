@@ -16,6 +16,7 @@
 
 import { CONFIG } from "@/engine/config";
 import { heroMaxHpOf } from "@/engine/systems/stats";
+import { markLevelCap } from "@/engine/systems/hallOfFame";
 import { aliveHeroes } from "@/engine/systems/targeting";
 import type { Hero } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
@@ -49,7 +50,11 @@ export function grantHeroXp(state: GameState, hero: Hero, amount: number): void 
       level: hero.level,
     });
   }
-  if (hero.level >= LV.levelCap) hero.xp = 0;
+  if (hero.level >= LV.levelCap) {
+    hero.xp = 0;
+    // M7.95 HOF tiebreaker: stamp the FIRST time the hero hits the cap (once).
+    markLevelCap(state);
+  }
 }
 
 /** Award kill XP to every ALIVE hero (dead heroes earn nothing). */

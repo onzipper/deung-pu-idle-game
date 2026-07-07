@@ -118,7 +118,20 @@ import type {
 // v15 save's tier-3 quest + 4-slot loadout are preserved (validated against the tier's
 // quest def; idempotent for the server's migrate-on-every-save). Skill-4 is DERIVED
 // from tier/level (not persisted); the tier-3 mana bonus is re-derived on load.
-export const SAVE_VERSION = 15;
+// v15 -> v16 (M7.95 "Hall of Fame" — engine/SAVE wave): the save gains three
+// write-only HOF observers — `goldEarned` (lifetime gold ever earned, the "total
+// gold" board), `bossBest` (best/lowest clear time per boss stage {seconds, at}, keyed
+// by stage number), and `levelCapAt` (epoch-ms the hero first hit levelCap, the HOF
+// tiebreaker). A pre-v16 save backfills goldEarned to 0 (NOT current gold: retroactive
+// EARNED totals are genuinely unknowable — spending already happened — so we don't
+// fabricate a floor), bossBest to {} (no past fights were timed), and levelCapAt to
+// null (the crossing moment is unrecoverable). Durations (`seconds`) are deterministic
+// step counting; the `at`/`levelCapAt` epoch-ms are stamped at the save boundary
+// (0 = unstamped, exactly like the server-owned `lastSeen`; the engine has no
+// wall-clock). A v16 save's own values are preserved (goldEarned floored non-negative,
+// bossBest entries validated + kept fastest-per-stage, levelCapAt a non-negative number
+// or null — idempotent for the server's migrate-on-every-save).
+export const SAVE_VERSION = 16;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -128,6 +141,36 @@ type UnknownStats = { str?: number; dex?: number; int?: number; vit?: number };
 
 /** A world location from an unknown/older save (fields optional). */
 type UnknownLocation = { mapId?: unknown; zoneIdx?: unknown };
+
+/**
+ * v16 bossBest (M7.95): keep only entries keyed by a positive integer stage whose
+ * value is a `{seconds, at}` record with a finite, non-negative `seconds`. `at` is
+ * kept if a valid non-negative epoch-ms, else 0 (unstamped — the boundary stamps it).
+ */
+function normalizeBossBest(
+  raw: Record<string, unknown> | undefined,
+): Record<number, { seconds: number; at: number }> {
+  const out: Record<number, { seconds: number; at: number }> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw)) {
+    const stage = Number(k);
+    if (!Number.isInteger(stage) || stage <= 0) continue;
+    if (!v || typeof v !== "object") continue;
+    const seconds = (v as { seconds?: unknown }).seconds;
+    const at = (v as { at?: unknown }).at;
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) continue;
+    out[stage] = {
+      seconds,
+      at: typeof at === "number" && Number.isFinite(at) && at >= 0 ? at : 0,
+    };
+  }
+  return out;
+}
+
+/** v16 levelCapAt (M7.95): a non-negative epoch-ms (0 = reached-unstamped), else null. */
+function normalizeLevelCapAt(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
+}
 
 /** v13 zoneKills: keep only "map:idx" keys with non-negative integer counts. */
 function normalizeZoneKills(raw: Record<string, unknown> | undefined): Record<string, number> {
@@ -170,6 +213,11 @@ export interface UnknownSave {
   lootSalt?: unknown;
   // v14 material counter (M7.6). Optional; pre-v14 backfills to 0.
   materials?: unknown;
+  // v16 Hall of Fame observers (M7.95). All optional; a pre-v16 save backfills
+  // goldEarned -> 0, bossBest -> {}, levelCapAt -> null. Malformed entries drop.
+  goldEarned?: unknown;
+  bossBest?: Record<string, unknown> | undefined;
+  levelCapAt?: unknown;
   // v4/v5/v6/v7 single-character shape (v5 adds statPoints + stats; v6 adds mana +
   // autoSlots; v7 adds quest):
   hero?: Partial<CharacterSave> & {
@@ -458,6 +506,12 @@ export function migrate(save: UnknownSave): SaveData {
     version: SAVE_VERSION,
     stage: zoneAt(location).stage,
     gold: save.gold ?? 0,
+    // Hall of Fame observers (M7.95, v16): preserve a v16 save's values; a pre-v16
+    // save backfills goldEarned -> 0 (retroactive EARNED totals are unknowable —
+    // don't fabricate from current gold), bossBest -> {}, levelCapAt -> null.
+    goldEarned: asStat(numOrUndef(save.goldEarned), 0),
+    bossBest: normalizeBossBest(save.bossBest),
+    levelCapAt: normalizeLevelCapAt(save.levelCapAt),
     hero,
     location,
     unlockedZones,

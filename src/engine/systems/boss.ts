@@ -22,6 +22,8 @@ import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossRoomCleared } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
+import { creditGold } from "@/engine/systems/economy";
+import { recordBossClear } from "@/engine/systems/hallOfFame";
 import { rollBossDrop } from "@/engine/systems/gear";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
 import type { GameState } from "@/engine/state";
@@ -36,6 +38,9 @@ function has(v: BossVarietyState, name: BossBehavior): boolean {
 /** Begin the boss fight. Precondition (checked by caller): bossReady + battle. */
 export function startBossFight(state: GameState): void {
   state.phase = "boss";
+  // Stamp the fight-start sim-time (M7.95 HOF): the clear DURATION is `state.time`
+  // minus this at the boss's death — deterministic step counting, no wall-clock.
+  state.bossFightStart = state.time;
   state.boss = makeBoss(state.nextId++, state.stage);
   state.enemies = [];
   // Drop any in-flight enemy projectiles; keep the team's own shots.
@@ -244,8 +249,15 @@ function updateHazard(state: GameState, b: Boss, v: BossVarietyState): boolean {
 
 /** Boss defeated: pay out and flag victory (nextStage is a separate action). */
 export function onBossKilled(state: GameState): void {
+  // M7.95 HOF: record this boss stage's clear DURATION (fastest kept) before the
+  // phase flip. Deterministic — `state.time` less the fight-start stamp (steps ×
+  // FIXED_DT). A directly-invoked kill (no startBossFight) has no start -> skip.
+  if (state.bossFightStart !== null) {
+    recordBossClear(state, state.stage, Math.max(0, state.time - state.bossFightStart));
+    state.bossFightStart = null;
+  }
   const goldGained = CONFIG.goldPerBoss(state.stage);
-  state.gold += goldGained;
+  creditGold(state, goldGained);
   // Boss kills grant a larger XP milestone to every alive hero (before payout /
   // phase flip, while the winning team is still on the field).
   grantKillXp(state, CONFIG.leveling.xpPerBossKill(state.stage));
