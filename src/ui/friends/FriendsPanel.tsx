@@ -1,0 +1,458 @@
+"use client";
+
+/**
+ * M8 Phase 1 "Friends" — the panel modal. Presentational: ALL polling/mutation
+ * state lives in `useFriendsPoll` (owned by `FriendsButton.tsx`, the hub) and
+ * is threaded down as props so the badge/toasts/panel never run three
+ * independent pollers. Same `ModalPortal` shell convention as every other HUD
+ * modal (`HallOfFamePanel.tsx`, `SettingsPanel.tsx`, mandatory per-project
+ * rule — iOS Safari's backdrop-filter containing-block trap).
+ */
+
+import { useTranslations } from "next-intl";
+import { useState } from "react";
+import type { HeroClass } from "@/engine";
+import { HERO_ICONS } from "@/ui/labels";
+import { ModalPortal } from "@/ui/components/ModalPortal";
+import { FRIEND_EMOJI_ALLOWLIST } from "@/ui/friends/types";
+import type { FriendCandidateWire, FriendWire } from "@/ui/friends/types";
+import { parseFriendZone, relativeTimeFrom } from "@/ui/friends/format";
+import type { UseFriendsPoll } from "@/ui/friends/useFriendsPoll";
+import { requestOpenAccountSettings } from "@/ui/openSettingsSignal";
+
+type Translator = ReturnType<typeof useTranslations>;
+
+const ERROR_KEY_BY_CODE: Record<string, string> = {
+  account_required: "errorAccountRequired",
+  not_found: "errorNotFound",
+  self: "errorSelf",
+  already_friends: "errorAlreadyFriends",
+  already_pending: "errorAlreadyPending",
+  too_many_pending: "errorTooManyPending",
+  bad_emoji: "errorBadEmoji",
+  not_friends: "errorNotFriends",
+  rate_limited: "errorRateLimited",
+};
+
+function errorMessage(code: string, t: Translator): string {
+  return t(ERROR_KEY_BY_CODE[code] ?? "errorGeneric");
+}
+
+function zoneLabelFor(composite: string | null, tFriends: Translator, tWorld: Translator, tMaps: Translator): string {
+  const parsed = parseFriendZone(composite);
+  if (!parsed) return composite ?? tFriends("unknownZone");
+  const mapName = tMaps(`${parsed.mapId}.name`);
+  const zoneLabel =
+    parsed.kind === "town"
+      ? tWorld("zoneTown")
+      : parsed.kind === "boss"
+        ? tWorld("zoneBoss")
+        : tWorld("zoneFarm", { stage: parsed.stage });
+  return `${mapName} · ${zoneLabel}`;
+}
+
+function lastSeenLabel(lastSeenAt: string | null, t: Translator): string {
+  if (!lastSeenAt) return t("neverSeen");
+  const rt = relativeTimeFrom(Date.now(), lastSeenAt);
+  if (rt.unit === "justNow") return t("lastSeenJustNow");
+  if (rt.unit === "minutes") return t("lastSeenMinutes", { m: rt.value });
+  if (rt.unit === "hours") return t("lastSeenHours", { h: rt.value });
+  return t("lastSeenDays", { d: rt.value });
+}
+
+export interface FriendsPanelProps {
+  onClose: () => void;
+  poll: UseFriendsPoll;
+}
+
+export function FriendsPanel({ onClose, poll }: FriendsPanelProps) {
+  const t = useTranslations("friends");
+  const tWorld = useTranslations("world");
+  const tMaps = useTranslations("content.maps");
+  const tContent = useTranslations("content.classes");
+  const tCommon = useTranslations("common");
+
+  const { status, panel } = poll;
+
+  return (
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-70 flex items-center justify-center p-3"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("title")}
+      >
+        <button
+          type="button"
+          aria-label={t("closeButton")}
+          onClick={onClose}
+          className="absolute inset-0 bg-black/70"
+        />
+        <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-lg flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
+            >
+              ✕ {t("closeButton")}
+            </button>
+          </div>
+
+          {status === "loading" && (
+            <p className="py-6 text-center text-xs text-ddp-ink-muted">{t("loading")}</p>
+          )}
+
+          {status === "error" && (
+            <div className="flex flex-col items-center gap-2 py-6">
+              <p className="text-xs text-ddp-ink-muted">{t("loadError")}</p>
+              <button
+                type="button"
+                onClick={poll.refresh}
+                className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-border bg-black/30 px-3 py-2 text-xs font-bold text-ddp-ink"
+              >
+                {t("retryButton")}
+              </button>
+            </div>
+          )}
+
+          {status === "guest" && (
+            <div className="flex flex-col gap-3 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-3">
+              <p className="text-[12px] leading-snug text-ddp-ink-muted">{t("guestPitch")}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  requestOpenAccountSettings();
+                }}
+                className="min-h-11 rounded-(--ddp-radius-md) border border-emerald-400 bg-emerald-400 px-3 py-2.5 text-sm font-extrabold text-emerald-950 shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.98]"
+              >
+                {t("guestCta")}
+              </button>
+            </div>
+          )}
+
+          {status === "ready" && panel && (
+            <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+              <AddFriendSection poll={poll} t={t} />
+
+              {panel.incomingRequests.length > 0 && (
+                <section className="flex flex-col gap-2">
+                  <h3 className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+                    {t("incomingGroupTitle")}
+                  </h3>
+                  <div className="flex flex-col gap-1.5">
+                    {panel.incomingRequests.map((r) => (
+                      <div
+                        key={r.requestId}
+                        className="flex items-center justify-between gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-2"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">
+                          {r.fromDisplayName ?? r.fromFriendCode ?? t("unknownPlayer")}
+                        </span>
+                        <div className="flex shrink-0 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => void poll.respond(r.requestId, true)}
+                            className="min-h-9 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300"
+                          >
+                            {t("acceptButton")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void poll.respond(r.requestId, false)}
+                            className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad/50 bg-ddp-bad/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-bad"
+                          >
+                            {t("declineButton")}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="flex flex-col gap-2">
+                <h3 className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+                  {t("friendsGroupTitle")}
+                </h3>
+                {panel.friends.length === 0 ? (
+                  <p className="rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 px-3 py-4 text-center text-[12px] text-ddp-ink-muted">
+                    {t("emptyFriends")}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {panel.friends.map((f) => (
+                      <FriendRow
+                        key={f.userId}
+                        friend={f}
+                        poll={poll}
+                        t={t}
+                        tWorld={tWorld}
+                        tMaps={tMaps}
+                        tContent={tContent}
+                        tCommon={tCommon}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function AddFriendSection({ poll, t }: { poll: UseFriendsPoll; t: Translator }) {
+  const [friendCode, setFriendCode] = useState("");
+  const [characterName, setCharacterName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<FriendCandidateWire[] | null>(null);
+
+  async function submit(input: { friendCode: string } | { characterName: string }) {
+    setError(null);
+    setNotice(null);
+    setSubmitting(true);
+    const res = await poll.sendRequest(input);
+    setSubmitting(false);
+    if (res.ok) {
+      setCandidates(null);
+      setFriendCode("");
+      setCharacterName("");
+      setNotice(res.autoAccepted ? t("autoAccepted") : t("requestSent"));
+      return;
+    }
+    if (res.code === "multiple_matches") {
+      setCandidates(res.candidates);
+      return;
+    }
+    setCandidates(null);
+    setError(errorMessage(res.code, t));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (friendCode.trim()) void submit({ friendCode: friendCode.trim() });
+    else if (characterName.trim()) void submit({ characterName: characterName.trim() });
+  }
+
+  const canSubmit = (friendCode.trim().length > 0 || characterName.trim().length > 0) && !submitting;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+        {t("addFriendGroupTitle")}
+      </h3>
+      <form
+        onSubmit={handleSubmit}
+        className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-3"
+      >
+        <label className="flex flex-col gap-1 text-[11px] font-semibold text-ddp-ink-muted">
+          {t("byCodeLabel")}
+          <input
+            type="text"
+            value={friendCode}
+            onChange={(e) => {
+              setFriendCode(e.target.value.toUpperCase());
+              setCharacterName("");
+            }}
+            maxLength={16}
+            placeholder={t("byCodePlaceholder")}
+            className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 px-3 py-2 text-sm font-mono font-bold tracking-wider text-ddp-ink outline-none focus:border-emerald-400"
+          />
+        </label>
+        <div className="flex items-center gap-2 text-[10px] font-semibold text-ddp-ink-muted">
+          <div className="h-px flex-1 bg-ddp-border-soft" />
+          {t("orDivider")}
+          <div className="h-px flex-1 bg-ddp-border-soft" />
+        </div>
+        <label className="flex flex-col gap-1 text-[11px] font-semibold text-ddp-ink-muted">
+          {t("byNameLabel")}
+          <input
+            type="text"
+            value={characterName}
+            onChange={(e) => {
+              setCharacterName(e.target.value);
+              setFriendCode("");
+            }}
+            maxLength={24}
+            placeholder={t("byNamePlaceholder")}
+            className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 px-3 py-2 text-sm font-medium text-ddp-ink outline-none focus:border-emerald-400"
+          />
+        </label>
+
+        {error && (
+          <span className="rounded-(--ddp-radius-md) border border-ddp-bad/50 bg-ddp-bad/10 px-3 py-2 text-[12px] font-semibold text-ddp-bad">
+            {error}
+          </span>
+        )}
+        {notice && (
+          <span className="rounded-(--ddp-radius-md) border border-emerald-400/50 bg-emerald-400/10 px-3 py-2 text-[12px] font-semibold text-emerald-300">
+            {notice}
+          </span>
+        )}
+
+        {candidates && candidates.length > 0 && (
+          <div className="flex flex-col gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 p-2">
+            <span className="text-[11px] font-semibold text-ddp-ink-muted">{t("multipleMatchesPrompt")}</span>
+            {candidates.map((c) => (
+              <button
+                key={c.friendCode}
+                type="button"
+                onClick={() => void submit({ friendCode: c.friendCode })}
+                className="flex items-center justify-between gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2.5 py-2 text-left text-xs"
+              >
+                <span aria-hidden>{HERO_ICONS[c.class as HeroClass] ?? ""}</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-ddp-ink">{c.characterName}</span>
+                <span className="shrink-0 text-[10px] text-ddp-ink-muted">Lv.{c.level}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className={`min-h-11 rounded-(--ddp-radius-md) border px-3 py-2 text-sm font-extrabold transition-all duration-100 active:translate-y-0.5 active:scale-[0.98] ${
+            canSubmit
+              ? "border-emerald-400 bg-emerald-400 text-emerald-950"
+              : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted"
+          }`}
+        >
+          {submitting ? t("sending") : t("sendButton")}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function FriendRow({
+  friend,
+  poll,
+  t,
+  tWorld,
+  tMaps,
+  tContent,
+  tCommon,
+}: {
+  friend: FriendWire;
+  poll: UseFriendsPoll;
+  t: Translator;
+  tWorld: Translator;
+  tMaps: Translator;
+  tContent: Translator;
+  tCommon: Translator;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function handleSendEmoji(emoji: string) {
+    setPickerOpen(false);
+    const res = await poll.sendEmoji(friend.userId, emoji);
+    if (!res.ok) {
+      setActionError(errorMessage(res.code, t));
+      window.setTimeout(() => setActionError(null), 3000);
+    }
+  }
+
+  async function handleRemove() {
+    setConfirmingRemove(false);
+    await poll.remove(friend.userId);
+  }
+
+  const name = friend.displayName ?? friend.friendCode ?? t("unknownPlayer");
+  const cls = friend.currentCharacter?.class as HeroClass | undefined;
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden
+          className={`h-2 w-2 shrink-0 rounded-full ${friend.online ? "bg-emerald-400" : "bg-ddp-ink-muted/50"}`}
+        />
+        {cls && <span aria-hidden className="shrink-0 text-sm">{HERO_ICONS[cls] ?? ""}</span>}
+        <span className="min-w-0 flex-1 truncate text-xs font-bold text-ddp-ink">{name}</span>
+        {friend.currentCharacter && (
+          <span className="shrink-0 text-[10px] text-ddp-ink-muted tabular-nums">
+            {tCommon("levelBadge", { level: friend.currentCharacter.level })}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2 pl-4 text-[11px] text-ddp-ink-muted">
+        <span className="min-w-0 flex-1 truncate">
+          {friend.currentCharacter ? (
+            <>
+              {friend.currentCharacter.name}
+              {cls && <> · {tContent(`${cls}.name`)}</>}
+              {friend.online && friend.lastZone && <> · {zoneLabelFor(friend.lastZone, t, tWorld, tMaps)}</>}
+            </>
+          ) : (
+            t("noCharacter")
+          )}
+        </span>
+        {!friend.online && <span className="shrink-0">{lastSeenLabel(friend.lastSeenAt, t)}</span>}
+      </div>
+
+      {actionError && <span className="pl-4 text-[11px] font-semibold text-ddp-bad">{actionError}</span>}
+
+      <div className="flex items-center justify-end gap-1.5 pt-0.5">
+        <button
+          type="button"
+          onClick={() => setPickerOpen((v) => !v)}
+          aria-label={t("emojiButton")}
+          className="flex min-h-9 min-w-9 items-center justify-center rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 text-sm text-ddp-ink"
+        >
+          <span aria-hidden>{"\u{1F44B}"}</span>
+        </button>
+        {!confirmingRemove ? (
+          <button
+            type="button"
+            onClick={() => setConfirmingRemove(true)}
+            className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad/40 bg-ddp-bad/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-bad"
+          >
+            {t("removeButton")}
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-ddp-bad">{t("removeConfirmPrompt")}</span>
+            <button
+              type="button"
+              onClick={() => void handleRemove()}
+              className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad bg-ddp-bad px-2.5 py-1.5 text-[11px] font-bold text-white"
+            >
+              {t("removeConfirmButton")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingRemove(false)}
+              className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-border bg-black/30 px-2.5 py-1.5 text-[11px] font-bold text-ddp-ink-muted"
+            >
+              {t("removeCancelButton")}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {pickerOpen && (
+        <div className="grid grid-cols-6 gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 p-2">
+          {FRIEND_EMOJI_ALLOWLIST.map((e) => (
+            <button
+              key={e}
+              type="button"
+              onClick={() => void handleSendEmoji(e)}
+              className="flex min-h-9 items-center justify-center rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 text-base"
+            >
+              <span aria-hidden>{e}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
