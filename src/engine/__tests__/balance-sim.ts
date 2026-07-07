@@ -32,6 +32,8 @@ import {
   unlockedAutoSlotCount,
   worldNav,
   zoneAt,
+  WORLD_BOSS,
+  worldBossLocationFor,
   SIGNATURE_SKILL,
   ITEM_TEMPLATES,
   REFINE,
@@ -1417,7 +1419,348 @@ function runBossIso(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// WORLD BOSS mode (WORLDBOSS=1) — "เสี่ยจ๋อง" gate verifier (this wave).
+// Seats a hero/party in the world-boss farm zone (map1), isolates the mob field,
+// injects the spawnWorldBoss intent, and runs the 15-min window on full autopilot
+// (auto-cast full kit + auto-slots + auto-potion). Measures time-to-kill, whether
+// the 15-min window suffices, and hero deaths. Because the isolated boss fight draws
+// NO RNG (fixed mechanic timing + fixed skill-offset tables, mobs frozen) it is fully
+// DETERMINISTIC — one seed is canonical. Two hero profiles:
+//   - SOLO MAXED: L90 tier-3 t10+10 (ISO_STATS/ISO_GEAR) — the party-gate ceiling.
+//   - PARTY member: Lv-parametric (default 60) tier-3 t8 gear +6 — the 2-6p target.
+// ---------------------------------------------------------------------------
+
+type Stats = { str: number; dex: number; int: number; vit: number };
+
+/** Dev-harness world-boss knob override (sim-only sweep, mutates the live CONFIG.worldBoss
+ *  like applyPartyTune/applyRefineCombo). Env: WB_HP, WB_ATK, WB_SLAM, WB_CHARGE, WB_HAZTICK,
+ *  WB_SLAMCD, WB_ENRAGE. */
+function applyWorldBossTune(): void {
+  const W = WORLD_BOSS as unknown as {
+    hp: number; atk: number;
+    boss: { slamMult: number; slamCdNormal: number; slamCdEnraged: number; enrageThreshold: number };
+    bossBehavior: { charge: { hitMult: number }; hazard: { tickMult: number } };
+  };
+  const num = (k: string): number | undefined =>
+    process.env[k] === undefined ? undefined : Number(process.env[k]);
+  const hp = num("WB_HP"); if (hp !== undefined) W.hp = hp;
+  const atk = num("WB_ATK"); if (atk !== undefined) W.atk = atk;
+  const slam = num("WB_SLAM"); if (slam !== undefined) W.boss.slamMult = slam;
+  const charge = num("WB_CHARGE"); if (charge !== undefined) W.bossBehavior.charge.hitMult = charge;
+  const haz = num("WB_HAZTICK"); if (haz !== undefined) W.bossBehavior.hazard.tickMult = haz;
+  const scd = num("WB_SLAMCD"); if (scd !== undefined) W.boss.slamCdNormal = scd;
+  const enr = num("WB_ENRAGE"); if (enr !== undefined) W.boss.enrageThreshold = enr;
+}
+
+const WB_SEED = 1;
+const WB_WINDOW = 0;
+const WB_LOC = worldBossLocationFor(WB_WINDOW)!;
+const WB_LIFETIME_S = WORLD_BOSS.lifetimeMs / 1000;
+
+// Env knobs for the party profile (owner said ~Lv50-70 / era gear): tune the sweep
+// without recompiling. WB_LEVEL = party member level, WB_REFINE = gear +N.
+const WB_LEVEL = Math.round(Number(process.env.WB_LEVEL ?? 60));
+const WB_REFINE = Math.round(Number(process.env.WB_REFINE ?? 6));
+
+const T8_WEAPON: Record<HeroClass, string> = {
+  swordsman: "w_sword_t8_dune",
+  archer: "w_bow_t8_dune",
+  mage: "w_staff_t8_dune",
+};
+const T8_ARMOR: Record<HeroClass, string> = {
+  swordsman: "a_sword_t8_bulwark",
+  archer: "a_archer_t8_stalker",
+  mage: "a_mage_t8_seer",
+};
+
+/** Class auto-allocate ratio (auto-alloc v2, docs/balance-m7): sword 4STR:1VIT,
+ *  archer PURE DEX, mage 3INT:1VIT — applied to (level-1)*pointsPerLevel points. */
+function allocStats(cls: HeroClass, level: number): Stats {
+  const pts = Math.max(0, (level - 1) * CONFIG.stats.pointsPerLevel);
+  const b = baseStatsOf(cls);
+  if (cls === "swordsman") {
+    const v = Math.round(pts / 5);
+    return { str: b.str + (pts - v), dex: b.dex, int: b.int, vit: b.vit + v };
+  }
+  if (cls === "archer") return { str: b.str, dex: b.dex + pts, int: b.int, vit: b.vit };
+  const v = Math.round(pts / 4);
+  return { str: b.str, dex: b.dex, int: b.int + (pts - v), vit: b.vit + v };
+}
+
+interface WbSpec {
+  cls: HeroClass;
+  level: number;
+  tier: 1 | 2 | 3;
+  stats: Stats;
+  weapon: string;
+  armor: string;
+  refine: number;
+}
+
+const TIER_WEAPON: Record<number, Record<HeroClass, string>> = {
+  7: { swordsman: "w_sword_t7_frost", archer: "w_bow_t7_frost", mage: "w_staff_t7_frost" },
+  8: T8_WEAPON,
+  9: { swordsman: "w_sword_t9_obsidian", archer: "w_bow_t9_obsidian", mage: "w_staff_t9_obsidian" },
+  10: { swordsman: "w_sword_t10_apocalypse", archer: "w_bow_t10_apocalypse", mage: "w_staff_t10_apocalypse" },
+};
+const TIER_ARMOR: Record<number, Record<HeroClass, string> | string> = {
+  7: "a_frost_t7_mail",
+  8: T8_ARMOR,
+  9: "a_obsidian_t9_scale",
+  10: "a_infernal_t10_aegis",
+};
+/** Era-appropriate gear tier for a party member's level (t7 s16-20 → t10 endgame). */
+function eraGearTier(level: number): number {
+  return level >= 80 ? 10 : level >= 70 ? 9 : level >= 60 ? 8 : 7;
+}
+function partySpec(cls: HeroClass, level = WB_LEVEL, refine = WB_REFINE): WbSpec {
+  const gt = eraGearTier(level);
+  const arm = TIER_ARMOR[gt];
+  return {
+    cls,
+    level,
+    tier: level >= 40 ? 3 : level >= 5 ? 2 : 1,
+    stats: allocStats(cls, level),
+    weapon: TIER_WEAPON[gt][cls],
+    armor: typeof arm === "string" ? arm : arm[cls],
+    refine,
+  };
+}
+
+function maxedSpec(cls: HeroClass): WbSpec {
+  return {
+    cls,
+    level: 90,
+    tier: 3,
+    stats: ISO_STATS[cls],
+    weapon: ISO_GEAR[cls].weapon,
+    armor: ISO_GEAR[cls].armor,
+    refine: 10,
+  };
+}
+
+function makeWbHero(id: number, sp: WbSpec): Hero {
+  return makeHero(
+    id,
+    sp.cls,
+    sp.level,
+    0,
+    sp.tier,
+    (sp.level - 1) * CONFIG.stats.pointsPerLevel,
+    sp.stats,
+    undefined,
+    undefined,
+    null,
+    { weapon: sp.weapon, armor: sp.armor, refine: { weapon: sp.refine, armor: sp.refine } },
+  );
+}
+
+interface WbResult {
+  killed: boolean;
+  killTimeS: number | null;
+  deaths: number;
+  firstDeathS: number | null;
+  /** Boss HP fraction remaining when the run ended (0 = killed, 1 = untouched). */
+  hpFracLeft: number;
+  /** The run ended because the SOLO hero total-wiped (boss despawned on zone-leave). */
+  soloWiped: boolean;
+}
+
+/**
+ * Run the world-boss fight for a party of specs. `immortal` makes every hero
+ * un-killable (huge HP) to measure the raw DPS CEILING (uptime not the bottleneck);
+ * otherwise it's the realistic auto-potion run (a solo total-wipe despawns the boss).
+ */
+function runWorldBoss(specs: WbSpec[], immortal: boolean): WbResult {
+  const s = initGameState(WB_SEED, makeSave(specs[0].cls, WB_SEED));
+  s.location = { mapId: WB_LOC.mapId, zoneIdx: WB_LOC.zoneIdx };
+  s.stage = zoneAt(s.location).stage;
+  s.phase = "battle";
+  s.unlockedZones = { ...s.unlockedZones, map1: 7 };
+  s.lastFarmZone = { mapId: WB_LOC.mapId, zoneIdx: WB_LOC.zoneIdx };
+  s.heroes = specs.map((sp, i) => makeWbHero(i + 1, sp));
+  s.nextId = specs.length + 1;
+  for (const h of s.heroes) {
+    configCohortHero(h);
+    if (immortal) {
+      h.maxHp = 1e9;
+      h.hp = 1e9;
+    }
+  }
+  s.autoCast = true;
+  s.autoAllocate = true;
+  s.autoReturn = true;
+  s.consumables = { hpPotion: 999999, manaPotion: 999999, returnScroll: 0, warpScroll: 0 };
+  // Freeze the normal mob field so the fight is isolated (matches the engine test's
+  // `isolate`): no farm mobs, no burst, no seeded spawn draw.
+  s.spawnPaused = true;
+  s.spawnBurst = false;
+  s.enemies = [];
+
+  const size = specs.length;
+  const perDead = s.heroes.map((h) => h.dead);
+  let deaths = 0;
+  let firstDeathS: number | null = null;
+  let killed = false;
+  let killTimeS: number | null = null;
+  let soloWiped = false;
+  const maxSteps = Math.round(WB_LIFETIME_S / FIXED_DT);
+
+  for (let i = 0; i < maxSteps; i++) {
+    const lanes: FrameInput[] = s.heroes.map((h) => {
+      const lane: FrameInput = {};
+      const slots = fillAutoSlots(h);
+      if (slots.length) lane.setAutoSlots = slots;
+      return lane;
+    });
+    if (i === 0) lanes[0].spawnWorldBoss = { windowId: WB_WINDOW, remainingSeconds: WB_LIFETIME_S };
+    s.spawnPaused = true; // keep the field frozen every step (isolate the boss)
+    s.enemies = [];
+
+    step(s, lanes);
+
+    for (const e of s.events) if (e.type === "worldBossDefeated") { killed = true; killTimeS = s.time; }
+    for (let k = 0; k < size; k++) {
+      const nd = s.heroes[k].dead;
+      if (nd && !perDead[k]) {
+        deaths++;
+        if (firstDeathS === null) firstDeathS = s.time;
+      }
+      perDead[k] = nd;
+    }
+    if (killed) break;
+    // Boss gone (solo total-wipe despawn, or lifetime expiry) → the run is over.
+    if (!s.worldBoss || !s.worldBoss.active || !s.worldBoss.entity) {
+      soloWiped = size === 1 && !killed;
+      break;
+    }
+  }
+
+  const wb = s.worldBoss?.entity;
+  const hpFracLeft = killed ? 0 : wb ? wb.hp / wb.maxHp : 1;
+  return { killed, killTimeS, deaths, firstDeathS, hpFracLeft, soloWiped };
+}
+
+const fmtT = (v: number | null): string => (v === null ? "-" : `${(v / 60).toFixed(2)}min (${v.toFixed(0)}s)`);
+
+// ---- Reward-inflation income probe: normal farm gold/hr + stones/hr at a stage. ----
+function farmLocForStage(stage: number): WorldLocation {
+  for (const m of CONFIG.world.maps) {
+    const idx = (m.zoneStageIds as readonly number[]).indexOf(stage);
+    if (idx >= 0) {
+      const townShift = m.id === CONFIG.world.townMapId ? 1 : 0;
+      return { mapId: m.id, zoneIdx: townShift + idx };
+    }
+  }
+  throw new Error(`no farm zone for stage ${stage}`);
+}
+
+function measureIncome(sp: WbSpec, stage: number, seconds: number): { goldPerHr: number; stonesPerHr: number } {
+  const s = initGameState(WB_SEED, makeSave(sp.cls, WB_SEED));
+  const loc = farmLocForStage(stage);
+  s.location = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+  s.stage = stage;
+  s.phase = "battle";
+  s.unlockedZones = { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6 };
+  s.lastFarmZone = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+  s.heroes = [makeWbHero(1, sp)];
+  s.nextId = 2;
+  configCohortHero(s.heroes[0]);
+  s.autoCast = true;
+  s.autoAllocate = true;
+  s.autoReturn = true;
+  s.consumables = { hpPotion: 999999, manaPotion: 999999, returnScroll: 0, warpScroll: 0 };
+  const gold0 = s.gold;
+  let stones = 0;
+  const steps = Math.round(seconds / FIXED_DT);
+  for (let i = 0; i < steps; i++) {
+    const input: FrameInput = {};
+    const slots = fillAutoSlots(s.heroes[0]);
+    if (slots.length) input.setAutoSlots = slots;
+    step(s, input);
+    for (const e of s.events) if (e.type === "stoneDrop") stones += e.qty;
+  }
+  const gold = s.gold - gold0;
+  return { goldPerHr: (gold / seconds) * 3600, stonesPerHr: (stones / seconds) * 3600 };
+}
+
+const REWARD_GOLD = 5000; // owner-FIXED reward per member per hour
+const REWARD_STONES = 350;
+
+function runWorldBossMode(): void {
+  applyWorldBossTune();
+  console.log(
+    `[world-boss "เสี่ยจ๋อง"] lifetime ${WB_LIFETIME_S / 60}min · hp ${WORLD_BOSS.hp.toLocaleString()} · ` +
+      `atk ${WORLD_BOSS.atk} · behaviors [${WORLD_BOSS.behaviors.join(",")}] · zone ${WB_LOC.mapId}/z${WB_LOC.zoneIdx} (s${zoneAt(WB_LOC).stage})\n` +
+      `party profile: Lv${WB_LEVEL} tier${WB_LEVEL >= 40 ? 3 : 2} t8+${WB_REFINE}\n`,
+  );
+
+  // ---- Target 1: SOLO must NOT kill it in the window (even maxed L90 t10+10). ----
+  console.log("=== TARGET 1 — SOLO maxed L90 tier-3 t10+10 (must NOT kill in 15min; must SURVIVE) ===");
+  console.log("  " + pad("class", 10) + pad("DPS-ceiling(immortal)", 24) + pad("realistic", 34) + "verdict");
+  for (const cls of CLASSES) {
+    const ceil = runWorldBoss([maxedSpec(cls)], true);
+    const real = runWorldBoss([maxedSpec(cls)], false);
+    const ceilStr = ceil.killed ? fmtT(ceil.killTimeS) : `SURVIVES (${(100 * (1 - ceil.hpFracLeft)).toFixed(0)}% chunked)`;
+    const realStr = real.killed
+      ? `KILLED ${fmtT(real.killTimeS)} deaths ${real.deaths}`
+      : real.soloWiped
+        ? `WIPED @${fmtT(real.firstDeathS)} (${(100 * (1 - real.hpFracLeft)).toFixed(0)}% chunked, ${real.deaths} deaths)`
+        : `survived, ${(100 * (1 - real.hpFracLeft)).toFixed(0)}% chunked, ${real.deaths} deaths`;
+    const gateHeld = !real.killed;
+    console.log("  " + pad(cls, 10) + pad(ceilStr, 24) + pad(realStr, 34) + (gateHeld ? "GATE HELD" : "*** GATE FAIL ***"));
+  }
+
+  // ---- Target 2: 2-3p (mixed, Lv50-70) kills in ~3-6min; 6p quantified. ----
+  console.log(`\n=== TARGET 2 — party (Lv${WB_LEVEL} tier3, t8+${WB_REFINE}) time-to-kill ===`);
+  console.log("  " + pad("comp", 26) + pad("result", 30) + "deaths");
+  const comps: { label: string; specs: WbSpec[] }[] = [
+    { label: "2p [sword,mage]", specs: [partySpec("swordsman"), partySpec("mage")] },
+    { label: "3p [sword,archer,mage]", specs: MIX_CLASSES.map((c) => partySpec(c)) },
+    { label: "6p [2×each]", specs: [...MIX_CLASSES, ...MIX_CLASSES].map((c) => partySpec(c)) },
+  ];
+  for (const comp of comps) {
+    const r = runWorldBoss(comp.specs, false);
+    const res = r.killed
+      ? `KILLED ${fmtT(r.killTimeS)}`
+      : r.soloWiped
+        ? `WIPED (${(100 * (1 - r.hpFracLeft)).toFixed(0)}% chunked)`
+        : `NOT KILLED (${(100 * (1 - r.hpFracLeft)).toFixed(0)}% chunked in 15min)`;
+    console.log("  " + pad(comp.label, 26) + pad(res, 30) + String(r.deaths));
+  }
+
+  // ---- Target 3: reward-inflation report (rewards owner-FIXED — just quantify). ----
+  console.log(`\n=== TARGET 3 — reward inflation: ${REWARD_GOLD} gold + ${REWARD_STONES} stones per member per WINDOW ===`);
+  console.log("  (normal farm income measured 600s in-zone at each progression point)");
+  console.log("  " + pad("point", 24) + pad("gold/hr", 12) + pad("stones/hr", 12) + pad("gold boost", 14) + "stone boost");
+  const points: { label: string; sp: WbSpec; stage: number }[] = [
+    { label: "NEWBIE Lv10/map1 s3", sp: { cls: "swordsman", level: 10, tier: 1, stats: allocStats("swordsman", 10), weapon: "w_sword_t2_iron", armor: "a_leather_t2_vest", refine: 0 }, stage: 3 },
+    { label: "early Lv20/map2 s8", sp: { cls: "swordsman", level: 20, tier: 2, stats: allocStats("swordsman", 20), weapon: "w_sword_t3_knight", armor: "a_chain_t3_mail", refine: 2 }, stage: 8 },
+    { label: "mid Lv50/map4 s18", sp: { cls: "swordsman", level: 50, tier: 3, stats: allocStats("swordsman", 50), weapon: "w_sword_t7_frost", armor: "a_frost_t7_mail", refine: 5 }, stage: 18 },
+    { label: "end Lv80/map6 s28", sp: { cls: "swordsman", level: 80, tier: 3, stats: allocStats("swordsman", 80), weapon: "w_sword_t9_obsidian", armor: "a_obsidian_t9_scale", refine: 8 }, stage: 28 },
+  ];
+  for (const p of points) {
+    const inc = measureIncome(p.sp, p.stage, 600);
+    const goldBoost = (100 * REWARD_GOLD) / Math.max(1, inc.goldPerHr);
+    const stoneBoost = (100 * REWARD_STONES) / Math.max(1, inc.stonesPerHr);
+    const flag = goldBoost > 300 ? "  <== LOUD FLAG (>3x)" : "";
+    console.log(
+      "  " +
+        pad(p.label, 24) +
+        pad(inc.goldPerHr.toFixed(0), 12) +
+        pad(inc.stonesPerHr.toFixed(0), 12) +
+        pad(`+${goldBoost.toFixed(0)}%`, 14) +
+        `+${stoneBoost.toFixed(0)}%${flag}`,
+    );
+  }
+}
+
 function main(): void {
+  if (process.env.WORLDBOSS === "1") {
+    runWorldBossMode();
+    return;
+  }
   if (process.env.BOSSISO === "1") {
     runBossIso();
     return;

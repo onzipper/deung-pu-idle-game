@@ -1371,17 +1371,28 @@ export const CONFIG = {
   // until a hero has DAMAGED it (hp < maxHp). A cautious/idle player is never farmed; an
   // auto-hunting hero that swings at it engages it (that is on the player).
   //
-  // TUNING — FIRST PASS (the balance-sim wave refines these; DOCUMENTED reasoning):
-  //  - `hp` is set DIRECTLY (not off the tiny s5 `bossHp` curve) for independent control.
-  //    Target band: ~15 min × a generous solo endgame DPS must NOT finish it, while a
-  //    2-3 member Lv50-70 cohort clears in ~3-6 min. Because the AOE mechanics (slam +
-  //    hazard) repeatedly DROP a solo hero (death → walk-home → return kills its uptime)
-  //    while a party tanks/revives-in-place, the "requires a party" gate comes mostly from
-  //    SURVIVABILITY, not raw HP: at a strong 3-body ~1000-1500 group DPS, 400k HP ≈
-  //    4.5-6.5 min; a solo hero eating AOE can't sustain the uptime to reach it in 15 min.
-  //  - `atk` (350) is dangerous but survivable for a Lv40+ hero WITH potions; slam ×1.7 ≈
-  //    595, charge ×1.6 ≈ 560, hazard tick ×0.3 ≈ 105 (multi-tick). The balance wave tunes
-  //    hp/atk against real per-class DPS/HP tables.
+  // TUNING — BALANCE-WAVE (docs/balance-worldboss.md; WORLDBOSS=1 sim mode, DETERMINISTIC —
+  // the isolated boss fight draws no RNG). Set DIRECTLY (not off the s5 `bossHp` curve).
+  //  - `hp` (1.9M) is the SOLO GATE. A key sim finding overturned the first-pass "solo dies →
+  //    boss despawns" plan: `updateWorldBossAI` is SKIPPED while `traveling`, so a solo hero's
+  //    death → auto-return round-trip (town is map1 too) keeps it continuously traveling and
+  //    the boss NEVER despawns — a solo just loses ~4.7 s/death and grinds on. So the gate is
+  //    a pure HP/uptime wall: a maxed L90 t10+10 SWORD and ARCHER can't out-DPS 1.9M in 15 min
+  //    (they chunk ~77-99% and survive with potions — a wall, not an instakill, ~16-46 deaths).
+  //  - IRREDUCIBLE LEAK (owner-flagged): a maxed L90 MAGE (high-DPS ranged, evades slam and
+  //    kites charge) still finishes at ~13 min. NO hp keeps a 2p party viable AND stops the
+  //    mage — party total DPS is only ~1.75× a maxed solo's, so the two targets are partly
+  //    mutually exclusive. Fully gating the mage needs a STRUCTURAL fix (min-2-heroes-to-damage,
+  //    a game-engine-specialist change), not a knob. Accepted + documented.
+  //  - `atk` (800) + slam ×2.2 / charge ×2.2 are the SINGLE-TARGET gate: they concentrate on the
+  //    lone solo hero but a party ROTATES the aggro (front hero tanks/dies/revives-in-place while
+  //    the backline DPSes untouched) — the structural party advantage. `hazard` ×0.10 is kept LOW
+  //    on purpose: it's ARENA-WIDE (hits every hero at once) so a high tick would wipe a whole
+  //    party during a channel; the gate rides slam/charge, not hazard.
+  //  - Party pacing (Lv60 t8+6): 2p ~12.5 min, 3p ~9.8 min, 6p ~4.6 min; it MELTS with power —
+  //    endgame parties (Lv80-90) 3p ~6 min / 6p ~3 min. The "~3-6 min for 2-3p" aspiration only
+  //    holds for endgame parties; a Lv50-70 2-3p runs 8-12 min (still a one-window clear). This
+  //    is the flip side of the HP wall that gates the solo — see the doc's tradeoff table.
   //
   // MECHANICS (3, telegraphed): base `slam`+`enrage` + `charge` (dodgeable dash — drift off
   // the marked x) + `hazard` (arena-wide channel — a party out-heals/out-DPSes it). SUMMON
@@ -1396,8 +1407,8 @@ export const CONFIG = {
     preAnnounceMs: 300_000, // 5-min pre-announce window before the hour
     lifetimeMs: 900_000, // lives 15 min from spawn, then despawns
     mapId: "map1", // one of map1's farm zones (chosen per-window by worldBossZoneFor)
-    hp: 400_000, // first-pass; see the block comment's DPS reasoning
-    atk: 350, // dangerous-but-survivable for Lv40+ w/ potions (map1 passive-until-hit)
+    hp: 1_900_000, // balance-tuned (docs/balance-worldboss.md); see the block comment
+    atk: 800, // dangerous-but-survivable for a maxed hero w/ potions (map1 passive-until-hit)
     // The 3 telegraphed mechanics (reuse the M7.9 machinery). NO "summon" (adds would
     // pollute the farm kill-quota). Cast to BossBehavior[] in makeWorldBoss.
     behaviors: ["slam", "enrage", "charge", "hazard"] as string[],
@@ -1410,7 +1421,7 @@ export const CONFIG = {
       moveSpeed: 40,
       engageExtra: 20, // engageX = frontHeroX + clash + this
       enrageThreshold: 0.25, // enrage below this HP fraction
-      slamMult: 1.7,
+      slamMult: 2.2, // balance-tuned up from 1.7: the single-target gate that a party rotates but a solo can't escape
       slamCdEnraged: 4.5,
       slamCdNormal: 7,
       telegraphEnraged: 0.9,
@@ -1427,7 +1438,7 @@ export const CONFIG = {
         dashSpeed: 460,
         stopGap: 40,
         hitRange: 78,
-        hitMult: 1.6, // charge damage = round(atk × this)
+        hitMult: 2.2, // balance-tuned up from 1.6: reaches the ranged solo (dashes to target); single-target so a party rotates it
       },
       hazard: {
         cd: 10.0,
@@ -1435,7 +1446,7 @@ export const CONFIG = {
         telegraph: 1.6, // longer warn window than the s30 boss (1.3)
         duration: 1.2,
         tickInterval: 0.3,
-        tickMult: 0.3, // per-tick damage to every alive hero = round(atk × this)
+        tickMult: 0.10, // balance-tuned DOWN from 0.3: arena-wide, so kept low to not simultaneously wipe a party (the gate is single-target slam/charge, NOT the shared hazard)
       },
     },
   },
