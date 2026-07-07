@@ -120,6 +120,12 @@ export function castSkill(state: GameState, hero: Hero, def: SkillType): boolean
   if (!targetInRange(targets, hero, guardRange)) return false;
 
   // --- commit ---
+  // NB (render facing): the hero's combat AIM (`hero.aimX`) is NOT set here.
+  // `processSkills` runs immediately before `combat.updateHeroes` every step, and
+  // the cast guard above guarantees a target in range — that same target is still
+  // in `state.enemies` when `updateHeroes` runs (deaths are reaped later), so its
+  // aim pass points the hero at this cast's cluster. Keeping aim in one place
+  // (updateHeroes) avoids a redundant/conflicting write for the same-direction foe.
   hero.mana -= def.cost;
   hero.skillCds[def.id] = def.cd;
   state.events.push({

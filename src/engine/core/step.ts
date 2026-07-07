@@ -227,6 +227,13 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // buffer). Clear-in-place keeps the array identity stable and allocation-light.
   state.events.length = 0;
 
+  // Reset each hero's transient COMBAT AIM (render-only facing observer). The
+  // combat/skill pass re-derives it deterministically this step; clearing it
+  // here means town/travel/victory steps (which never reach that pass) leave it
+  // `null`, so the renderer falls back to velocity-based facing while merely
+  // walking. Pure state derivation — no effect on the sim (byte-identical).
+  for (const h of state.heroes) h.aimX = null;
+
   // Tick per-type consumable-use cooldowns (M6) — unconditional so a cooldown
   // counts down in every phase (town / travel / battle).
   tickConsumableCds(state);

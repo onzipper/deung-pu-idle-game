@@ -259,6 +259,12 @@ export function updateHeroes(state: GameState): void {
     // `atkTgt` (set only by an in-range attack command) drives the swing below.
     let goalX = h.x;
     let atkTgt: CombatTarget | null = null;
+    // aimTarget: what the hero FACES this step (render observer, `hero.aimX`).
+    // Set to whatever it is ENGAGING — the attack target, else the target it is
+    // walking to close on — so facing tracks the foe even while a ranged hero
+    // KITES the other way. A `move` command (merely walking) leaves it null so
+    // the renderer faces the movement direction instead. See `Hero.aimX`.
+    let aimTarget: CombatTarget | null = null;
     let manualActive = false;
     if (!bossPhase && h.command) {
       const cmd: ManualCommand = h.command;
@@ -282,6 +288,8 @@ export function updateHeroes(state: GameState): void {
         } else {
           goalX = approachGoalX(h, t, ct);
           if (Math.abs(ct.x - h.x) <= t.range) atkTgt = ct;
+          // Face the commanded target throughout (even while still approaching).
+          aimTarget = ct;
           manualActive = true;
         }
       }
@@ -314,7 +322,15 @@ export function updateHeroes(state: GameState): void {
             // balance pacing — is unchanged.
             (nearestTarget(targets, h.x, 0, t.range) ??
             nearestWithin(targets, h.x, t.range));
+      // Face the foe being fired at, else the one being approached — so a kiting
+      // ranged hero faces (and shoots) its target while retreating. Boss phase
+      // routes here too (the boss is in `targets`), so boss fights are covered.
+      aimTarget = atkTgt ?? hntTgt;
     }
+
+    // Publish this step's combat aim (render-only facing). Null when not engaging
+    // anything (idle / walking a move order) -> renderer holds/uses velocity.
+    h.aimX = aimTarget ? aimTarget.x : null;
 
     goalX = clamp(goalX, minX, maxX);
     h.x += clamp(goalX - h.x, -hunt.huntSpeed * FIXED_DT, hunt.huntSpeed * FIXED_DT);

@@ -77,6 +77,15 @@ const LEAN_SMOOTH = 8; // per-second lerp rate toward the lean target
 /** Below this normalized speed, a facing re-derive is skipped (holds the last
  * value) — mirrors `enemyView.ts`'s `AIM_SPEED_THRESHOLD` convention. */
 const FACING_SPEED_THRESHOLD = 0.08;
+/** Combat-aim deadband (world-px): when the target sits within this of the
+ * hero's x (a foe right on top of it), hold facing instead of flipping — stops
+ * the rig jittering when |aimX − hero.x| ≈ 0. */
+const AIM_FACING_DEADBAND = 8;
+/** Minimum seconds between two VELOCITY-driven flips (the no-target walk case).
+ * A live combat aim (`hero.aimX`) bypasses this — target facing is authoritative
+ * and should stay responsive; this only debounces movement-direction strobing
+ * (e.g. an alternating kite servo when the hero has no target to face). */
+const FACING_MIN_FLIP_INTERVAL = 0.35;
 
 // ---------------------------------------------------------------------------
 // Per-class resting weapon-arm / off-arm angles (radians).
@@ -238,12 +247,18 @@ interface HeroAnimState {
    * Rig-flip state (open hunting field, 86d3jv7m3 follow-up): the whole rig
    * is drawn facing +x (bow/blade/staff all built on the +x side — see
    * `buildRig`). `1` = default/unflipped (facing +x); `-1` = mirrored (facing
-   * -x). Derived from the hero's OWN recent movement delta (this view has no
-   * reference to its current target's position) and HELD through stationary
-   * beats (holding position to swing/shoot/cast) rather than re-derived every
-   * frame off a near-zero velocity.
+   * -x). PRIMARY driver is now the engine's per-step combat aim (`hero.aimX`) —
+   * face the target being fought (so a kiting ranged hero faces + fires at its
+   * foe while retreating); it falls back to the hero's OWN movement delta only
+   * when NOT in combat (walking a move order / idle). HELD through stationary
+   * beats and when a target vanishes (aim goes null, velocity ~0), rather than
+   * re-derived every frame off a near-zero velocity.
    */
   facing: 1 | -1;
+  /** Seconds since the last VELOCITY-driven facing flip — gates the no-target
+   * walk case to `FACING_MIN_FLIP_INTERVAL` so an alternating walk direction
+   * can't strobe the rig. A live combat-aim flip resets it (but isn't gated). */
+  sinceFlip: number;
   /** M7 gear paper-doll: the LAST-BUILT `hero.equipped.{weapon,armor}`
    * templateId (or `null` for "nothing equipped") — `updateHeroView` rebuilds
    * `gearWeapon`/`gearArmor` only when these no longer match, never per
@@ -432,6 +447,7 @@ export function createHeroView(): HeroView {
     attackSeq: 0,
     tierBuilt: 1,
     facing: 1,
+    sinceFlip: FACING_MIN_FLIP_INTERVAL,
     gearWeaponId: null,
     gearArmorId: null,
     gearInitialized: false,
@@ -1238,12 +1254,36 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   anim.lastX = hero.x;
   const speedFrac = clamp01(Math.abs(velocity) / CONFIG.heroMove);
 
-  // Rig flip: only re-derive while actually moving with intent — holds its
-  // last value while stationary (in range, holding station to attack/cast),
-  // frozen while dead (see `EnemyAnimState.facing`'s sibling doc comment for
-  // why this can't just key off a live target reference instead).
-  if (!hero.dead && speedFrac >= FACING_SPEED_THRESHOLD) {
-    anim.facing = velocity > 0 ? 1 : -1;
+  // Rig flip — "face the target while fighting, movement direction while merely
+  // walking" (owner-approved Option A). Priority:
+  //  1. In COMBAT (`hero.aimX` set): face the engine's per-step combat aim, so a
+  //     ranged hero KITING away still faces (and fires at) its foe instead of
+  //     flipping to its retreat velocity ("spin when surrounded" + "shoots
+  //     backwards" bugs). A small deadband holds facing when a foe is right on
+  //     top of the hero (|aimX − x| ≈ 0) so it doesn't jitter.
+  //  2. WALKING (aim null): the velocity rule, but debounced by a flip-interval
+  //     hysteresis so an alternating walk direction can't strobe the rig.
+  // When a target dies and nothing replaces it, `aimX` goes null and velocity is
+  // ~0 (holding station), so NEITHER rule re-derives — the last facing is HELD
+  // (the documented reason the view keeps no live target reference).
+  anim.sinceFlip += dt;
+  if (!hero.dead) {
+    if (hero.aimX !== null) {
+      const dx = hero.aimX - hero.x;
+      if (Math.abs(dx) > AIM_FACING_DEADBAND) {
+        const want: 1 | -1 = dx > 0 ? 1 : -1;
+        if (want !== anim.facing) {
+          anim.facing = want;
+          anim.sinceFlip = 0;
+        }
+      }
+    } else if (speedFrac >= FACING_SPEED_THRESHOLD) {
+      const want: 1 | -1 = velocity > 0 ? 1 : -1;
+      if (want !== anim.facing && anim.sinceFlip >= FACING_MIN_FLIP_INTERVAL) {
+        anim.facing = want;
+        anim.sinceFlip = 0;
+      }
+    }
   }
   view.bodyRoot.scale.x = anim.facing;
 

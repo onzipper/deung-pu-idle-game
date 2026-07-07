@@ -105,6 +105,8 @@ export function makeHero(
     },
     // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
     command: null,
+    // Combat aim (render-only facing observer) — re-derived each step. Transient.
+    aimX: null,
   };
 }
 
