@@ -1084,7 +1084,8 @@
           "smooth": "✨ Party play is far smoother: characters move as fluidly as solo (no more choppy 100ms steps) and every tap registers",
           "names": "🏷️ Friends' real names now show over their heads and on the party strip (no more long ID strings)",
           "povFx": "🎇 A friend's ultimate no longer hijacks your screen — darkening/shaking only for YOUR casts, while their effects still play in the world",
-          "party6": "👥 Parties now hold up to 6 players! Bring the whole crew"
+          "party6": "👥 Parties now hold up to 6 players! Bring the whole crew",
+          "social": "📨 Party invites and friend requests now pop up on screen the moment they arrive — tap the toast to respond, no more waiting with the menu open — and friend info refreshes much faster"
         }
       }
     }
@@ -1118,6 +1119,8 @@
   },
   "friends": {
     "openButton": "Friends",
+    "toastPartyInvite": "invited you to a party! (tap to respond)",
+    "toastFriendRequest": "sent a friend request (tap to respond)",
     "title": "Friends",
     "closeButton": "Close",
     "loading": "Loading...",

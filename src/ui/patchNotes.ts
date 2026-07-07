@@ -160,6 +160,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08g.items.names",
       "releases.2026-07-08g.items.povFx",
       "releases.2026-07-08g.items.party6",
+      "releases.2026-07-08g.items.social",
     ],
   },
 ];
