@@ -137,6 +137,18 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08e.items.llama",
     ],
   },
+  // M8 party goes LIVE: real-time same-zone co-op (lockstep over the Render
+  // relay) + the connection-fix wave from the owner's first live party test.
+  {
+    id: "2026-07-08f",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08f.items.partyLive",
+      "releases.2026-07-08f.items.partyBuff",
+      "releases.2026-07-08f.items.partyChip",
+      "releases.2026-07-08f.items.connFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
