@@ -712,6 +712,10 @@ export function GameClient() {
      * membership (design §4). */
     function beginHandshake(cohortSlots: number[]): void {
       handshake?.abort();
+      // The one honest use of the "connecting" chip: a same-zone cohort exists and
+      // the re-seed handshake is actually in flight (relay-connected states without
+      // a cohort show nothing — see `onPartyStatusChange`).
+      useGameStore.getState().setCohortStatus({ kind: "connecting" });
       myTicketSlot = partySession.slot;
       // Pre-handshake, "my own hero" is `heroes[0]` while solo, or `heroes[myCohortIndex]`
       // if this is a re-seed of an ALREADY-active cohort (e.g. a 3rd member joins).
@@ -761,6 +765,12 @@ export function GameClient() {
         useGameStore.getState().setCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
       } else if (status === "connecting" && !cohortActive) {
         useGameStore.getState().setCohortStatus({ kind: "connecting" });
+      } else if (status === "connected" && !cohortActive) {
+        // Connected to the relay but no same-zone cohort (yet) — the chip's "solo"
+        // (hidden) state, per its design. Without this branch the "connecting" label
+        // from the previous status sticks forever while alone in a zone, reading as
+        // a stuck connection when the session is actually live and waiting.
+        useGameStore.getState().setCohortStatus({ kind: "solo" });
       } else if (status === "off" && !cohortActive) {
         useGameStore.getState().setCohortStatus({ kind: "solo" });
       }
@@ -783,7 +793,13 @@ export function GameClient() {
       }
       if (cohortSlots.length <= 1) {
         lastCohortSlots = cohortSlots;
+        // Discard an in-flight handshake explicitly: `collapseToSolo()` is a no-op
+        // when the cohort never ACTIVATED, which would otherwise strand a stale
+        // handshake (and its "connecting" chip) after the peer walked away mid-offer.
+        handshake?.abort();
+        handshake = null;
         collapseToSolo();
+        useGameStore.getState().setCohortStatus({ kind: "solo" });
         return;
       }
       const changed = !sameSlots(cohortSlots, lastCohortSlots);
@@ -1324,7 +1340,22 @@ export function GameClient() {
       uiSyncAccum += elapsed;
       if (uiSyncAccum >= UI_SYNC_INTERVAL) {
         uiSyncAccum -= UI_SYNC_INTERVAL;
-        store.syncFromEngine(buildSnapshot(state));
+        // The store contract everywhere (HUD hero panel, quest card, dailies,
+        // auto-equip's class scope) is "heroes[0] = MY hero". In an active cohort
+        // `state.heroes` is in SLOT order, so my hero can sit at index 1-2 — hand
+        // the snapshot a my-hero-first view (engine state itself is untouched;
+        // same object refs, so identity reads like `h === heroes[0]` stay true).
+        const snapState =
+          cohortActive && myCohortIndex > 0
+            ? {
+                ...state,
+                heroes: [
+                  state.heroes[myCohortIndex],
+                  ...state.heroes.filter((_, i) => i !== myCohortIndex),
+                ],
+              }
+            : state;
+        store.syncFromEngine(buildSnapshot(snapState));
       }
 
       // Feeds TimeDirector's trigger scan on the NEXT rAF frame (one-frame

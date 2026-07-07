@@ -31,7 +31,10 @@ function statSum(stats: SellableTemplate["stats"]): number {
 
 function equippableBy(t: SellableTemplate, cls: HeroClass | undefined): boolean {
   if (t.classReq === undefined || t.classReq === null) return true;
-  return cls === undefined || t.classReq === cls;
+  // Unknown hero class (boot race: inventory can hydrate before the first engine
+  // snapshot) — be conservative and DON'T touch class-restricted gear, or we POST
+  // equips the server correctly 409s (`class_req`) on every wrong-class drop.
+  return cls !== undefined && t.classReq === cls;
 }
 
 /** Best strict-upgrade (or empty-slot fill) per gear slot; 0-2 picks. */

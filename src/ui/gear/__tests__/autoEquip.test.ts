@@ -79,6 +79,19 @@ describe("selectAutoEquip", () => {
     expect(picks.map((p) => p.instanceId)).toEqual(["a"]);
   });
 
+  it("with an UNKNOWN hero class, never touches class-restricted gear (boot race guard)", () => {
+    // Inventory can hydrate before the first engine snapshot fills the store's
+    // heroes — an undefined class must not pick classReq gear (the server would
+    // 409 `class_req` every wrong-class drop), but unrestricted gear is still fine.
+    const items = [
+      item({ instanceId: "bow", templateId: "archer_bow" }),
+      item({ instanceId: "a1", templateId: "common_armor", slot: "armor" }),
+    ];
+    expect(selectAutoEquip(items, TEMPLATES, undefined)).toEqual([
+      { instanceId: "a1", templateId: "common_armor", slot: "armor" },
+    ]);
+  });
+
   it("skips instances whose template is unknown (retired) without crashing", () => {
     const items = [
       item({ instanceId: "ghost", templateId: "gone_from_catalog" }),
