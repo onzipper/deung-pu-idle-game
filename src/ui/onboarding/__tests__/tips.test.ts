@@ -19,6 +19,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     autoCast: false,
     autoAllocate: false,
     autoHunt: true,
+    inTown: false,
     // Non-zero cooldown so a bare `snapshot()` is a true "nothing to report"
     // baseline (autoCastAvailable's trigger checks "any hero ready", which a
     // bare `skillCd: 0` would satisfy by default).
@@ -203,6 +204,16 @@ describe("individual tip triggers", () => {
     const fourUnlocked = snapshot({ heroes: [hero({ unlockedSlots: 4 })] });
     expect(tip.trigger(prev, stillThree)).toBe(false);
     expect(tip.trigger(prev, fourUnlocked)).toBe(true);
+  });
+
+  it("townNpcTapHint fires only on the not-in-town -> in-town edge, not at boot", () => {
+    const tip = idOf("townNpcTapHint");
+    const bootPrev = snapshot({ inTown: false });
+    const bootNext = snapshot({ inTown: false });
+    const arrivePrev = snapshot({ inTown: false });
+    const arriveNext = snapshot({ inTown: true });
+    expect(tip.trigger(bootPrev, bootNext)).toBe(false);
+    expect(tip.trigger(arrivePrev, arriveNext)).toBe(true);
   });
 });
 

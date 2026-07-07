@@ -92,6 +92,7 @@ function makeSnapshot(
     autoHunt: true,
     unlockedZones: {},
     materials: 0,
+    npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
   };
 }
 

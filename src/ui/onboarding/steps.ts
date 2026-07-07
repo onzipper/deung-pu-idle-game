@@ -64,6 +64,10 @@ export interface OnboardingSnapshot {
   /** Engine-persisted auto-hunt toggle (M6.6/M7.5, SAVE v12) — drives the
    * M7.8 "Manual Play" contextual tip (fires the first time it flips off). */
   autoHunt: boolean;
+  /** Standing in the town zone right now (`world.kind === "town"`) — drives
+   * the Town NPCs phase 3 (final) "tap NPCs to talk" contextual tip (fires on
+   * the first battle/boss -> town edge, not at boot). */
+  inTown: boolean;
   heroes: OnboardingHeroSnapshot[];
 }
 
@@ -82,6 +86,7 @@ export function toOnboardingSnapshot(s: {
   autoCast: boolean;
   autoAllocate: boolean;
   autoHunt: boolean;
+  inTown: boolean;
   heroes: {
     skillCd: number;
     dead: boolean;
@@ -101,6 +106,7 @@ export function toOnboardingSnapshot(s: {
     autoCast: s.autoCast,
     autoAllocate: s.autoAllocate,
     autoHunt: s.autoHunt,
+    inTown: s.inTown,
     heroes: s.heroes.map((h) => ({
       skillCd: h.skillCd,
       dead: h.dead,

@@ -38,6 +38,7 @@ import type {
   Phase,
   ShopItemId,
   StatKey,
+  TownNpcId,
   WorldLocation,
   ZoneKind,
 } from "@/engine";
@@ -231,6 +232,17 @@ export interface ShopSummary {
   ready: { hpPotion: boolean; manaPotion: boolean };
 }
 
+/**
+ * Town NPCs phase 3 (final): which of the two named town actors currently has
+ * its dialog panel open (`ShopPanel` for pahpu / `RefinePanel` for lungdueng),
+ * or `null`. Deliberately a single-panel field (only one NPC dialog can be
+ * open at once — "one mental model per feature") owned by the store so BOTH
+ * the tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
+ * own) and the refine dock shortcut (`RefineButton.tsx`) can open it, and
+ * `TownNpcPanelHost.tsx` can auto-close it the instant the live snapshot's
+ * `npcInRange` says the hero has walked out of range. */
+export type TownPanelId = "pahpu" | "lungdueng";
+
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
   gold: number;
@@ -261,6 +273,13 @@ export interface EngineSnapshot {
    * transactions; the engine just carries the count, see `HudState.materials`'s
    * doc). */
   materials: number;
+  /** Town NPCs phase 3 (final): per-NPC "is the solo hero within talk range"
+   * read, straight off the engine's pure `npcInRange(state, id)` — see
+   * `GameClient.tsx`'s `buildSnapshot`. Drives the tap-to-talk pointer flow's
+   * approach-vs-talk branch is decided LIVE off engine state (not this
+   * throttled copy), but this is what the HUD (`TownNpcPanelHost.tsx`'s
+   * auto-close watch, `RefineButton.tsx`'s dock shortcut) reads every sync. */
+  npcInRange: Record<TownNpcId, boolean>;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -832,6 +851,16 @@ export interface HudState {
   unlockedZones: Record<string, number>;
   /** M7.6 ตีบวก material counter — see `EngineSnapshot.materials`'s doc. */
   materials: number;
+  /** Town NPCs phase 3 (final) — see `EngineSnapshot.npcInRange`'s doc. */
+  npcInRange: Record<TownNpcId, boolean>;
+
+  // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
+  /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
+   * doc. Set by the tap-to-talk pointer flow (`GameClient.tsx`) or the refine
+   * dock shortcut (`RefineButton.tsx`); auto-cleared by `TownNpcPanelHost.tsx`
+   * the instant the throttled snapshot says the hero left that NPC's range
+   * (or left town outright). */
+  activeTownPanel: TownPanelId | null;
 
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
@@ -1093,6 +1122,14 @@ export interface HudState {
   /** Queue a manual play (M7.8) cancel of the active move/attack command. */
   queueCancelCommand: () => void;
 
+  // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
+  /** Open `panel`'s dialog (last-wins — talking to the other NPC or the dock
+   * shortcut always wins over whatever was open). */
+  openTownPanel: (panel: TownPanelId) => void;
+  /** Close whichever NPC dialog is open (✕ button, or `TownNpcPanelHost.tsx`'s
+   * auto-close-on-walk-away watch). No-op if already `null`. */
+  closeTownPanel: () => void;
+
   // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
   // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
   // above) ----
@@ -1202,6 +1239,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoHunt: true,
   unlockedZones: {},
   materials: 0,
+  npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+  activeTownPanel: null,
 
   inventory: [],
   dropFeed: [],
@@ -1428,6 +1467,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   queueCancelCommand: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
+
+  openTownPanel: (panel) => set({ activeTownPanel: panel }),
+  closeTownPanel: () => set({ activeTownPanel: null }),
 
   setInventory: (items) => set({ inventory: items }),
   mergeInventory: (claimed) =>

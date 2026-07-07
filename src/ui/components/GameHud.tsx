@@ -36,11 +36,11 @@ import { HudBar } from "@/ui/components/HudBar";
 import { InventoryButton } from "@/ui/components/InventoryButton";
 import { NoticeToast } from "@/ui/components/NoticeToast";
 import { RefineButton } from "@/ui/components/RefineButton";
-import { ShopPanel } from "@/ui/components/ShopPanel";
 import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
 import { StatPanel } from "@/ui/components/StatPanel";
 import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
+import { TownNpcPanelHost } from "@/ui/components/TownNpcPanelHost";
 import { UpdateBanner } from "@/ui/components/UpdateBanner";
 import { WalkControls } from "@/ui/components/WalkControls";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
@@ -107,8 +107,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           polish is a later task). */}
       <WalkControls />
 
-      {/* NPC shop (M6): only rendered while standing in town. */}
-      <ShopPanel />
+      {/* Town NPCs phase 3 (final): pahpu's shop / lungdueng's refine dialog —
+          tap-again-to-talk gated (see `TownNpcPanelHost.tsx`), not an always-on
+          panel anymore. */}
+      <TownNpcPanelHost />
 
       <GoalLadder />
 
