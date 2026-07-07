@@ -284,15 +284,29 @@ const ANNOUNCEMENT_CACHE_MS = 10_000;
 
 export interface RefineAnnouncementDTO {
   id: string;
+  /** Feed kind — the client picks copy/accent by this ("refine" | "levelCap" | "rankOne"). */
+  kind: string;
   characterId: string;
   charName: string;
-  templateId: string;
-  refineLevel: number;
+  /** refine kind only (localized client-side); null for levelCap/rankOne. */
+  templateId: string | null;
+  /** refine kind: +level landed; levelCap kind: the cap level reached; null for rankOne. */
+  refineLevel: number | null;
   /** ISO timestamp. */
   at: string;
 }
 
 let announcementsCache: { at: number; data: RefineAnnouncementDTO[] } | null = null;
+
+/**
+ * Drop the short in-process feed cache so the very next poll sees a just-written
+ * announcement immediately (instead of waiting out the TTL). Called by the refine
+ * path in-file, and by `src/server/leaderboard.ts` when it writes a levelCap /
+ * rankOne row (it can't touch this module-private cache directly).
+ */
+export function invalidateAnnouncementsCache(): void {
+  announcementsCache = null;
+}
 
 /**
  * The last `ANNOUNCEMENT_FEED_WINDOW_MS` worth of high-refine landings,
@@ -315,6 +329,7 @@ export async function recentAnnouncements(now: Date = new Date()): Promise<Refin
   });
   const data: RefineAnnouncementDTO[] = rows.map((r) => ({
     id: r.id,
+    kind: r.kind,
     characterId: r.characterId,
     charName: r.charName,
     templateId: r.templateId,

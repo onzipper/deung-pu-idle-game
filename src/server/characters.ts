@@ -230,12 +230,23 @@ export type DeleteResult = { ok: true } | { ok: false; error: string };
  * pointing at the now-soft-deleted row — load/persist only ever resolve through a
  * LIVE active character, so an orphaned save is never served. We deliberately do
  * NOT null the link or delete the save.
+ *
+ * Hall of Fame: the character's board projection (LeaderboardEntry + every
+ * BossRecord) IS purged in the SAME tx — a soft delete never fires an FK cascade,
+ * so leaving them would keep a deleted character occupying rank space. Announcement
+ * history (RefineAnnouncement, incl. a first-to-cap singleton) is LEFT intact: it is
+ * an immutable record of an event that genuinely happened, not a live board row.
  */
 export async function deleteCharacter(userId: string, characterId: string): Promise<DeleteResult> {
-  const res = await prisma.character.updateMany({
-    where: { id: characterId, userId, deletedAt: null },
-    data: { deletedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const res = await tx.character.updateMany({
+      where: { id: characterId, userId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    if (res.count === 0) return { ok: false, error: "character not found" };
+    // Remove the deleted character from every ranked board (soft delete ≠ cascade).
+    await tx.leaderboardEntry.deleteMany({ where: { characterId } });
+    await tx.bossRecord.deleteMany({ where: { characterId } });
+    return { ok: true };
   });
-  if (res.count === 0) return { ok: false, error: "character not found" };
-  return { ok: true };
 }

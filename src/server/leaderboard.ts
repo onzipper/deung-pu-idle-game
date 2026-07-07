@@ -23,8 +23,28 @@ import { Prisma } from "@prisma/client";
 import { CONFIG, type SaveData, type BossClearBest, type HeroClass } from "@/engine";
 import { prisma } from "@/lib/db";
 import { powerFromSaveAndGear } from "@/server/characters";
-import { loadInventory, equippedLoadoutFrom } from "@/server/items";
+import { loadInventory, equippedLoadoutFrom, invalidateAnnouncementsCache } from "@/server/items";
 import { judgePlausibility } from "@/server/plausibility";
+
+// ── Server-wide announcement emission (M7.95) ────────────────────────────────
+//
+// The leaderboard ingest is the ONE place where fresh rank/level data lives, so
+// the two HOF announcements are fired here (reusing the M7.9 `RefineAnnouncement`
+// feed via its generalized `kind` column — see prisma/schema.prisma). Both writes
+// happen AFTER the main projection tx commits, as best-effort standalone inserts:
+// a singleton P2002 collision (levelCap) or any feed error must never roll back
+// (or fail) the player's leaderboard projection.
+
+/** Re-announce cooldown for a character re-taking #1 on the power board. */
+const RANK_ONE_THROTTLE_MS = 24 * 60 * 60 * 1000; // 24h
+
+/** The deterministic order that resolves the single #1 on the power board (mirror
+ *  of the board read's DESC power; `powerAt` ASC breaks a tie so an equal-power
+ *  challenger does NOT count as an overtake unless it strictly passes the leader). */
+const POWER_TOP_ORDER: Prisma.LeaderboardEntryOrderByWithRelationInput[] = [
+  { power: "desc" },
+  { powerAt: "asc" },
+];
 
 // ── Boss-time plausibility floor ─────────────────────────────────────────────
 //
@@ -128,6 +148,103 @@ export function mergeBossBest(
   return out;
 }
 
+/**
+ * Fire the SINGLETON "first non-suspect character to reach the level cap"
+ * announcement. Exactly-once is enforced by the DB: `singletonKey="levelCap"` is
+ * @unique, so a concurrent second-to-cap save collides on P2002 → swallowed. All
+ * other errors are swallowed too (the feed is best-effort). Standalone insert (NOT
+ * in the projection tx) so a collision never rolls the projection back.
+ */
+async function emitLevelCapAnnouncement(
+  characterId: string,
+  charName: string,
+  capLevel: number,
+  now: Date,
+): Promise<void> {
+  try {
+    await prisma.refineAnnouncement.create({
+      data: {
+        kind: "levelCap",
+        characterId,
+        charName,
+        refineLevel: capLevel, // carried into the client copy ("Lv.{level}")
+        singletonKey: "levelCap", // @unique → exactly-once globally
+        createdAt: now,
+      },
+    });
+    invalidateAnnouncementsCache();
+  } catch {
+    // P2002 (singleton already claimed) or any feed error → ignore; best-effort.
+  }
+}
+
+/**
+ * Fire the "NEWLY took #1 on the power board" announcement, throttled to at most
+ * one per character per `RANK_ONE_THROTTLE_MS` (dedupe by kind+characterId+window,
+ * served by the `@@index([kind, characterId, createdAt])`). Best-effort standalone
+ * insert. The overtake decision itself is made inside the projection tx (see below).
+ */
+async function emitRankOneAnnouncement(
+  characterId: string,
+  charName: string,
+  now: Date,
+): Promise<void> {
+  try {
+    const since = new Date(now.getTime() - RANK_ONE_THROTTLE_MS);
+    const recent = await prisma.refineAnnouncement.findFirst({
+      where: { kind: "rankOne", characterId, createdAt: { gte: since } },
+      select: { id: true },
+    });
+    if (recent) return; // throttled — same character already announced this window
+    await prisma.refineAnnouncement.create({
+      data: { kind: "rankOne", characterId, charName, createdAt: now },
+    });
+    invalidateAnnouncementsCache();
+  } catch {
+    // Best-effort — an announcement failure must never affect the save.
+  }
+}
+
+// ── Orphan cleanup (deleted characters must leave the boards) ─────────────────
+//
+// Characters are SOFT-deleted (`Character.deletedAt`, see src/server/characters.ts),
+// so a FK ON DELETE CASCADE never fires — the row still exists. New deletions purge
+// their board rows inline (in the delete tx). This one-shot sweep clears the BACKLOG
+// of characters soft-deleted BEFORE that inline cleanup existed: it removes every
+// LeaderboardEntry/BossRecord whose character is no longer LIVE. Idempotent + cheap
+// after the first run (finds nothing). Announcement history is intentionally NOT
+// touched (immutable event record, not a live board row).
+
+let orphanSweepDone: Promise<void> | null = null;
+
+/** Delete every leaderboard/boss row whose character is not currently LIVE
+ *  (soft-deleted or gone). Directly callable (tests); production goes through the
+ *  memoized `ensureOrphanSweep`. */
+export async function sweepOrphanedLeaderboardRows(): Promise<void> {
+  const live = await prisma.character.findMany({
+    where: { deletedAt: null },
+    select: { id: true },
+  });
+  const liveIds = live.map((c) => c.id);
+  await prisma.$transaction(async (tx) => {
+    await tx.leaderboardEntry.deleteMany({ where: { characterId: { notIn: liveIds } } });
+    await tx.bossRecord.deleteMany({ where: { characterId: { notIn: liveIds } } });
+  });
+}
+
+/** Run the orphan sweep AT MOST ONCE per process (best-effort; a failure clears the
+ *  latch so a later call retries). Awaited by the ingest so the backlog self-heals on
+ *  the first save after a deploy — no cron, no module-init top-level await. */
+function ensureOrphanSweep(): Promise<void> {
+  if (!orphanSweepDone) {
+    orphanSweepDone = sweepOrphanedLeaderboardRows().catch((err) => {
+      console.warn("[hof] orphan sweep failed:", err);
+      orphanSweepDone = null; // allow a retry next call
+    });
+  }
+  return orphanSweepDone;
+}
+
 // ── Ingest (called from persistSave) ─────────────────────────────────────────
 
 /**
@@ -142,6 +259,9 @@ export async function upsertLeaderboardEntry(
   data: SaveData,
   now: Date = new Date(),
 ): Promise<void> {
+  // Self-heal the boards' backlog of soft-deleted characters, once per process.
+  await ensureOrphanSweep();
+
   // Authoritative identity (name/class immutable at creation).
   const character = await prisma.character.findUnique({
     where: { id: characterId },
@@ -166,7 +286,7 @@ export async function upsertLeaderboardEntry(
   };
   const goldEarned = BigInt(Math.max(0, Math.floor(data.goldEarned)));
 
-  await prisma.$transaction(async (tx) => {
+  const { firstToCap, newlyRankOne } = await prisma.$transaction(async (tx) => {
     const existing = await tx.leaderboardEntry.findUnique({
       where: { characterId },
       select: {
@@ -176,6 +296,15 @@ export async function upsertLeaderboardEntry(
         bossBest: true,
         suspect: true,
       },
+    });
+
+    // rank-1 overtake (M7.95): capture who leads the POWER board BEFORE this write
+    // (non-suspect only, matching the board reads). Compared against the post-write
+    // leader below to detect a genuine overtake. One indexed query.
+    const prevTop = await tx.leaderboardEntry.findFirst({
+      where: { suspect: false },
+      orderBy: POWER_TOP_ORDER,
+      select: { characterId: true },
     });
 
     // onlineSeconds AFK accumulator — only plausible in-session gaps count.
@@ -189,7 +318,8 @@ export async function upsertLeaderboardEntry(
 
     // levelCapAt — stamp once, on the first save at/above the cap.
     let levelCapAt = existing?.levelCapAt ?? null;
-    if (levelCapAt === null && level >= CONFIG.leveling.levelCap) {
+    const capJustStamped = levelCapAt === null && level >= CONFIG.leveling.levelCap;
+    if (capJustStamped) {
       levelCapAt = now;
     }
 
@@ -298,7 +428,31 @@ export async function upsertLeaderboardEntry(
         },
       });
     }
+
+    // rank-1 overtake decision (M7.95): who leads the POWER board AFTER this write?
+    // (this tx sees its own upsert). A NEWLY-#1 = I am now top AND I was NOT top
+    // before (prevTop), AND there WAS a prior different leader (a genuine overtake,
+    // not the first-ever entry on an empty board), AND I am not suspect.
+    const newTop = await tx.leaderboardEntry.findFirst({
+      where: { suspect: false },
+      orderBy: POWER_TOP_ORDER,
+      select: { characterId: true },
+    });
+    const wasTop = prevTop?.characterId === characterId;
+    const newlyRankOne =
+      !suspect && newTop?.characterId === characterId && prevTop != null && !wasTop;
+
+    return { firstToCap: capJustStamped && !suspect, newlyRankOne };
   });
+
+  // Best-effort server-wide announcements — AFTER the projection commits, so a
+  // singleton collision / feed error can never roll the projection back.
+  if (firstToCap) {
+    await emitLevelCapAnnouncement(characterId, character.name, CONFIG.leveling.levelCap, now);
+  }
+  if (newlyRankOne) {
+    await emitRankOneAnnouncement(characterId, character.name, now);
+  }
 }
 
 // ── Read (GET /api/hof) ──────────────────────────────────────────────────────

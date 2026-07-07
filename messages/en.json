@@ -99,7 +99,8 @@
       "guideButton": "Guide me",
       "ariaGuide": "{heroName}: guide me to the next quest objective"
     },
-    "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})"
+    "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})",
+    "atkBuffTooltip": "+{percent}% ATK"
   },
   "stats": {
     "title": "Stats",
@@ -769,7 +770,9 @@
   },
   "announcements": {
     "landed": "🔥 {charName} landed a +{level} on {itemName}!",
-    "landedMax": "🔥 {charName} landed a +{level} on {itemName}! The whole server bows down!"
+    "landedMax": "🔥 {charName} landed a +{level} on {itemName}! The whole server bows down!",
+    "firstToCap": "🏆 {charName} is the first player to reach Lv.{level}!",
+    "rankOne": "👑 {charName} has claimed the #1 Combat Power throne!"
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",

@@ -159,12 +159,18 @@ model ItemEvent {
   @@index([itemId]) // read an item's full history (ordered by createdAt in-memory)
 }
 
-// M7.9 server-wide high-refine announcement feed (owner-approved design; NO
+// M7.9/M7.95 server-wide announcement feed (owner-approved design; NO
 // websockets this phase — polling piggybacked on the existing autosave cycle,
-// see `src/server/items.ts`'s `recentAnnouncements`). A row is written ONLY
-// when a refine attempt SUCCEEDS and lands the item at +8/+9/+10, in the SAME
-// tx as the refine mutation itself (`refineItem`) — a row can therefore never
-// exist without the refine having actually landed.
+// see `src/server/items.ts`'s `recentAnnouncements`). Originally refine-only
+// (name kept to avoid a table rename / data-loss push); now a GENERALIZED feed
+// via the additive `kind` column (default "refine" preserves every old row):
+//   - "refine"   — a refine attempt SUCCEEDED at +8/+9/+10, written in the SAME
+//                  tx as the refine mutation (`refineItem`, src/server/items.ts).
+//   - "levelCap" — the FIRST non-suspect character to reach the level cap (M7.95,
+//                  src/server/leaderboard.ts). SINGLETON: exactly-once globally.
+//   - "rankOne"  — a character NEWLY took #1 on the power board (M7.95). Throttled
+//                  to at most one per character per 24h.
+// A row can never exist without the underlying event having actually landed.
 //
 // Deliberately NOT a relation to Character (raw denormalized fields, mirrors
 // `ItemEvent.fromCharacterId`'s "immutable ledger, no FK" convention): this is
@@ -173,18 +179,28 @@ model ItemEvent {
 // tiny, so a cascading FK buys nothing and would only complicate a
 // soft-deleted character's row.
 //
-// `templateId` (NOT a display name) — the client localizes it client-side via
-// its own item-catalog i18n (`content.items.<templateId>.name`), so this
-// table never bakes in a server-side locale.
+// `templateId`/`refineLevel` are NULLABLE (refine kind only). For "levelCap",
+// `refineLevel` carries the cap level reached (client copy interpolation); for
+// "rankOne" both are null. The client localizes item names from `templateId`
+// (`content.items.<templateId>.name`) and picks copy by `kind` — this table
+// never bakes in a server-side locale.
+//
+// `singletonKey` is the EXACTLY-ONCE guard for singleton kinds: "levelCap" sets
+// it to "levelCap" so the @unique index rejects any second insert (a concurrent
+// second-to-cap save collides on P2002 → swallowed). Every non-singleton row
+// leaves it NULL (MySQL treats NULLs as DISTINCT, so unlimited rows allowed).
 model RefineAnnouncement {
-  id          String   @id @default(cuid())
-  characterId String
-  charName    String   @db.VarChar(24)
-  templateId  String   @db.VarChar(64)
-  refineLevel Int
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  kind         String   @default("refine") @db.VarChar(16) // refine | levelCap | rankOne
+  characterId  String
+  charName     String   @db.VarChar(24)
+  templateId   String?  @db.VarChar(64) // refine kind only (localized client-side)
+  refineLevel  Int? // refine kind: +level landed; levelCap kind: cap level reached
+  singletonKey String?  @unique @db.VarChar(32) // exactly-once guard for singleton kinds (NULL = non-singleton)
+  createdAt    DateTime @default(now())
 
   @@index([createdAt]) // feed reads ("last 5 minutes") + the opportunistic prune sweep
+  @@index([kind, characterId, createdAt]) // rankOne 24h per-character throttle lookup
 }
 
 // M7.95 "Hall of Fame" — the ranked-boards read model. ONE row per character, a

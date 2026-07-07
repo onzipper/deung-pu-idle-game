@@ -41,8 +41,26 @@ export function AnnouncementBanner() {
 
   if (!current) return null;
 
-  const itemName = tContent(`${current.templateId}.name`);
-  const isMax = current.refineLevel >= 10;
+  // Copy is keyed by kind. Refine localizes the item name client-side from its
+  // templateId; the HOF kinds (levelCap/rankOne) need only charName (+ the cap
+  // level for levelCap). Each kind's own emoji lives inside its message string.
+  let message: string;
+  if (current.kind === "levelCap") {
+    message = t("firstToCap", {
+      charName: current.charName,
+      level: current.refineLevel ?? 0,
+    });
+  } else if (current.kind === "rankOne") {
+    message = t("rankOne", { charName: current.charName });
+  } else {
+    const itemName = tContent(`${current.templateId}.name`);
+    const isMax = (current.refineLevel ?? 0) >= 10;
+    message = t(isMax ? "landedMax" : "landed", {
+      charName: current.charName,
+      itemName,
+      level: current.refineLevel ?? 0,
+    });
+  }
 
   return (
     <div
@@ -57,11 +75,7 @@ export function AnnouncementBanner() {
           className="animate-ddp-announce-shimmer pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/35 to-transparent"
         />
         <span className="relative text-sm font-black text-ddp-gold-bright sm:text-base">
-          {t(isMax ? "landedMax" : "landed", {
-            charName: current.charName,
-            itemName,
-            level: current.refineLevel,
-          })}
+          {message}
         </span>
       </div>
     </div>

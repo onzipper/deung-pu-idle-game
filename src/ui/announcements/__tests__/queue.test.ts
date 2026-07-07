@@ -5,6 +5,7 @@ import type { AnnouncementWire } from "../types";
 function wire(over: Partial<AnnouncementWire> = {}): AnnouncementWire {
   return {
     id: "ann_1",
+    kind: "refine",
     characterId: "char_other",
     charName: "แต้ม",
     templateId: "w_sword_t3_epic",
@@ -18,9 +19,29 @@ describe("ingestAnnouncements", () => {
   it("queues a fresh, not-mine entry and marks it seen", () => {
     const { toQueue, seenIds } = ingestAnnouncements([wire()], new Set(), "char_me");
     expect(toQueue).toEqual([
-      { id: "ann_1", charName: "แต้ม", templateId: "w_sword_t3_epic", refineLevel: 8 },
+      { id: "ann_1", kind: "refine", charName: "แต้ม", templateId: "w_sword_t3_epic", refineLevel: 8 },
     ]);
     expect(seenIds.has("ann_1")).toBe(true);
+  });
+
+  it("carries the HOF kinds (levelCap / rankOne) through with their payload", () => {
+    const cap = wire({ id: "ann_cap", kind: "levelCap", templateId: null, refineLevel: 90 });
+    const rank = wire({ id: "ann_rank", kind: "rankOne", templateId: null, refineLevel: null });
+    const { toQueue } = ingestAnnouncements([rank, cap], new Set(), "char_me");
+    expect(toQueue).toEqual([
+      { id: "ann_cap", kind: "levelCap", charName: "แต้ม", templateId: null, refineLevel: 90 },
+      { id: "ann_rank", kind: "rankOne", charName: "แต้ม", templateId: null, refineLevel: null },
+    ]);
+  });
+
+  it("marks an unknown/future kind seen but never queues it (forward-compatible)", () => {
+    const { toQueue, seenIds } = ingestAnnouncements(
+      [wire({ id: "ann_x", kind: "someFutureKind" })],
+      new Set(),
+      "char_me",
+    );
+    expect(toQueue).toEqual([]);
+    expect(seenIds.has("ann_x")).toBe(true);
   });
 
   it("excludes the viewer's own characterId from the display queue", () => {

@@ -10,19 +10,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
-    character: { findUnique: vi.fn() },
+    character: { findUnique: vi.fn(), findMany: vi.fn() },
     itemInstance: { findMany: vi.fn() },
     leaderboardEntry: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
       upsert: vi.fn(),
       count: vi.fn(),
+      deleteMany: vi.fn(),
     },
     bossRecord: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
       upsert: vi.fn(),
       count: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    refineAnnouncement: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
     },
     $transaction: vi.fn(),
   },
@@ -36,6 +43,7 @@ import {
   mergeBossBest,
   hofQuerySchema,
   upsertLeaderboardEntry,
+  sweepOrphanedLeaderboardRows,
   readBoard,
   ONLINE_TICK_MAX_SECONDS,
 } from "@/server/leaderboard";
@@ -50,6 +58,14 @@ beforeEach(() => {
   mockPrisma.$transaction.mockImplementation(async (fn: (tx: typeof mockPrisma) => unknown) =>
     fn(mockPrisma),
   );
+  // Announcement + overtake defaults: no prior board leader, no throttle hit, no
+  // orphan backlog (these are exercised explicitly in their own describe blocks).
+  mockPrisma.leaderboardEntry.findFirst.mockResolvedValue(null);
+  mockPrisma.leaderboardEntry.deleteMany.mockResolvedValue({ count: 0 });
+  mockPrisma.bossRecord.deleteMany.mockResolvedValue({ count: 0 });
+  mockPrisma.character.findMany.mockResolvedValue([]);
+  mockPrisma.refineAnnouncement.findFirst.mockResolvedValue(null);
+  mockPrisma.refineAnnouncement.create.mockResolvedValue({});
 });
 
 // A minimal migrated SaveData (only the fields the ingest reads matter here).
@@ -271,6 +287,144 @@ describe("upsertLeaderboardEntry — server-derived, server-stamped", () => {
     await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW);
     expect(mockPrisma.leaderboardEntry.upsert.mock.calls[0][0].update.suspect).toBe(false);
     warn.mockRestore();
+  });
+});
+
+describe("upsertLeaderboardEntry — server-wide announcements (M7.95)", () => {
+  beforeEach(() => {
+    mockPrisma.character.findUnique.mockResolvedValue({
+      name: "Alice",
+      baseClass: "mage",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"), // generous playtime → non-suspect
+    });
+    mockPrisma.itemInstance.findMany.mockResolvedValue([]);
+    mockPrisma.leaderboardEntry.upsert.mockResolvedValue({});
+    mockPrisma.bossRecord.upsert.mockResolvedValue({});
+    mockPrisma.leaderboardEntry.findUnique.mockResolvedValue(null); // first save
+  });
+
+  const capHero = () => ({ ...saveData().hero, level: CONFIG.leveling.levelCap });
+
+  // ── first-to-cap (levelCap singleton) ──────────────────────────────────────
+  it("emits a levelCap singleton the first time a non-suspect char hits the cap", async () => {
+    await upsertLeaderboardEntry(CHAR, USER, saveData({ hero: capHero() }), NOW);
+    const create = mockPrisma.refineAnnouncement.create.mock.calls.find(
+      (c) => c[0].data.kind === "levelCap",
+    );
+    expect(create).toBeDefined();
+    expect(create![0].data).toMatchObject({
+      kind: "levelCap",
+      characterId: CHAR,
+      charName: "Alice",
+      refineLevel: CONFIG.leveling.levelCap, // carried into the "Lv.{level}" copy
+      singletonKey: "levelCap", // @unique → exactly-once globally
+    });
+  });
+
+  it("is exactly-once: a singleton P2002 collision is swallowed (save never throws)", async () => {
+    mockPrisma.refineAnnouncement.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint"), { code: "P2002" }),
+    );
+    await expect(
+      upsertLeaderboardEntry(CHAR, USER, saveData({ hero: capHero() }), NOW),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does NOT emit levelCap below the cap", async () => {
+    await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW); // level 50
+    expect(
+      mockPrisma.refineAnnouncement.create.mock.calls.some((c) => c[0].data.kind === "levelCap"),
+    ).toBe(false);
+  });
+
+  it("does NOT emit levelCap for a suspect character at the cap", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPrisma.character.findUnique.mockResolvedValue({
+      name: "Cheater",
+      baseClass: "mage",
+      createdAt: new Date(NOW.getTime() - 3600 * 1000), // 1h old but at cap → impossible
+    });
+    await upsertLeaderboardEntry(CHAR, USER, saveData({ hero: capHero() }), NOW);
+    expect(
+      mockPrisma.refineAnnouncement.create.mock.calls.some((c) => c[0].data.kind === "levelCap"),
+    ).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("does NOT re-emit levelCap when the cap was already stamped earlier", async () => {
+    mockPrisma.leaderboardEntry.findUnique.mockResolvedValue({
+      levelCapAt: new Date("2026-02-01T00:00:00.000Z"), // already at cap before
+      lastTickAt: null,
+      onlineSeconds: 0,
+      bossBest: {},
+      suspect: false,
+    });
+    await upsertLeaderboardEntry(CHAR, USER, saveData({ hero: capHero() }), NOW);
+    expect(
+      mockPrisma.refineAnnouncement.create.mock.calls.some((c) => c[0].data.kind === "levelCap"),
+    ).toBe(false);
+  });
+
+  // ── rank-1 overtake (rankOne) ──────────────────────────────────────────────
+  it("emits rankOne when a char NEWLY takes #1 on the power board", async () => {
+    // prevTop = someone else, newTop (post-write) = me → genuine overtake.
+    mockPrisma.leaderboardEntry.findFirst
+      .mockResolvedValueOnce({ characterId: "other" }) // prevTop (before upsert)
+      .mockResolvedValueOnce({ characterId: CHAR }); // newTop (after upsert)
+    await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW);
+    const create = mockPrisma.refineAnnouncement.create.mock.calls.find(
+      (c) => c[0].data.kind === "rankOne",
+    );
+    expect(create).toBeDefined();
+    expect(create![0].data).toMatchObject({ kind: "rankOne", characterId: CHAR, charName: "Alice" });
+  });
+
+  it("throttles a rankOne re-take within the 24h window", async () => {
+    mockPrisma.leaderboardEntry.findFirst
+      .mockResolvedValueOnce({ characterId: "other" })
+      .mockResolvedValueOnce({ characterId: CHAR });
+    mockPrisma.refineAnnouncement.findFirst.mockResolvedValue({ id: "recent_rankone" }); // within 24h
+    await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW);
+    expect(
+      mockPrisma.refineAnnouncement.create.mock.calls.some((c) => c[0].data.kind === "rankOne"),
+    ).toBe(false);
+  });
+
+  it("does NOT emit rankOne when the char was ALREADY #1 (no overtake)", async () => {
+    mockPrisma.leaderboardEntry.findFirst
+      .mockResolvedValueOnce({ characterId: CHAR }) // prevTop = me
+      .mockResolvedValueOnce({ characterId: CHAR }); // newTop = me
+    await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW);
+    expect(
+      mockPrisma.refineAnnouncement.create.mock.calls.some((c) => c[0].data.kind === "rankOne"),
+    ).toBe(false);
+  });
+
+  it("does NOT emit rankOne when the char did not reach #1", async () => {
+    mockPrisma.leaderboardEntry.findFirst
+      .mockResolvedValueOnce({ characterId: "other" }) // prevTop
+      .mockResolvedValueOnce({ characterId: "other" }); // newTop still someone else
+    await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW);
+    expect(
+      mockPrisma.refineAnnouncement.create.mock.calls.some((c) => c[0].data.kind === "rankOne"),
+    ).toBe(false);
+  });
+});
+
+describe("sweepOrphanedLeaderboardRows (deleted characters leave the boards)", () => {
+  it("deletes leaderboard + boss rows whose character is not LIVE", async () => {
+    mockPrisma.character.findMany.mockResolvedValue([{ id: "live_1" }, { id: "live_2" }]);
+    mockPrisma.leaderboardEntry.deleteMany.mockResolvedValue({ count: 3 });
+    mockPrisma.bossRecord.deleteMany.mockResolvedValue({ count: 5 });
+
+    await sweepOrphanedLeaderboardRows();
+
+    expect(mockPrisma.leaderboardEntry.deleteMany).toHaveBeenCalledWith({
+      where: { characterId: { notIn: ["live_1", "live_2"] } },
+    });
+    expect(mockPrisma.bossRecord.deleteMany).toHaveBeenCalledWith({
+      where: { characterId: { notIn: ["live_1", "live_2"] } },
+    });
   });
 });
 
