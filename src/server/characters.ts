@@ -16,7 +16,9 @@ import {
   SLOT_ORDER,
   combatPower,
   makeHero,
+  emptyEquipped,
   type CharacterSave,
+  type EquippedGear,
   type HeroClass,
 } from "@/engine";
 import { prisma } from "@/lib/db";
@@ -90,6 +92,31 @@ function toDTO(c: {
  */
 export function powerFromSave(hero: CharacterSave): number {
   const h = makeHero(0, hero.cls, hero.level, hero.xp, hero.tier, hero.statPoints, hero.stats);
+  return combatPower(h);
+}
+
+/**
+ * Re-derive combat power INCLUDING equipped gear + refine (the Hall-of-Fame board
+ * metric). Same one authority (`combatPower`), but the hero is rebuilt with the
+ * AUTHORITATIVE equipped loadout resolved from the DB item ledger (never the
+ * client's `equipped` save cache) — so the ranked power is server-derived from
+ * stats + gear + refine and cannot be inflated by a tampered save. `makeHero`
+ * folds refined weapon/armor ATK/HP/DEF into the derived stats combatPower reads.
+ */
+export function powerFromSaveAndGear(hero: CharacterSave, equipped: EquippedGear): number {
+  const h = makeHero(
+    0,
+    hero.cls,
+    hero.level,
+    hero.xp,
+    hero.tier,
+    hero.statPoints,
+    hero.stats,
+    undefined, // mana → derived full pool (irrelevant to combatPower)
+    undefined, // autoSlots → class default (irrelevant to combatPower)
+    null, // quest (irrelevant)
+    equipped ?? emptyEquipped(),
+  );
   return combatPower(h);
 }
 

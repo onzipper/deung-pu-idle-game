@@ -174,6 +174,92 @@ model RefineAnnouncement {
   @@index([createdAt]) // feed reads ("last 5 minutes") + the opportunistic prune sweep
 }
 
+// M7.95 "Hall of Fame" — the ranked-boards read model. ONE row per character, a
+// DENORMALIZED PROJECTION of the save blob (like Character.level/power): the
+// SaveState.data JSON stays the source of truth; this row is rebuilt server-side
+// on every `persistSave` (see src/server/leaderboard.ts `upsertLeaderboardEntry`)
+// so a board read never touches/parses a save blob and never trusts a client
+// number. Everything ranked here is derived SERVER-SIDE from the validated save:
+//   - `power` is recomputed via the engine's `combatPower` over the hero rebuilt
+//     WITH the AUTHORITATIVE equipped loadout (ItemInstance ledger + refine), never
+//     a client-supplied power.
+//   - `goldEarned`/`bossBest` are copied from the validated (migrated) save.
+//   - `levelCapAt` + each `bossBest[stage].at` are SERVER-STAMPED (server wall-clock,
+//     same trust model as `SaveState.lastSeen`): the engine emits 0/null, the server
+//     writes the epoch. A client cannot forge an achievement time.
+//   - `onlineSeconds` is an AFK accumulator: each save adds (now − lastTickAt) only
+//     when that delta is a plausible in-session gap (0 < Δ < 300s), so a client
+//     clock jump or a long offline gap grants nothing.
+//
+// `suspect` is the anti-cheat kill-switch the re-derive wave (M-later) fills:
+// suspect=true rows are EXCLUDED from every board read. Default false for now.
+//
+// Per-stat `*At` timestamps are kept for FUTURE SEASONS (a season reset needs to
+// know when each value was set). `levelCapAt` doubles as the level-board tiebreak
+// (first-to-cap wins → ordered ASC). goldEarned is BigInt (lifetime idle gold can
+// pass 2^31); onlineSeconds is Int (2^31 s ≈ 68y).
+model LeaderboardEntry {
+  id            String    @id @default(cuid())
+  characterId   String    @unique // 1:1 with Character (opaque cuid)
+  userId        String // owning account (my-rank + account-scoped queries)
+  charName      String    @db.VarChar(24) // denormalized for a board render without a join
+  cls           String    @db.VarChar(16) // Character.baseClass (immutable) — the cls board filter
+  tier          Int       @default(1) // class-advancement tier (1..3), display only
+  level         Int       @default(1) // level board metric
+  levelCapAt    DateTime? // server-stamped when level>=levelCap first seen; level-board tiebreak (ASC = first-to-cap wins)
+  power         Int       @default(0) // power board metric (engine combatPower over stats+gear+refine)
+  goldEarned    BigInt    @default(0) // gold board metric (lifetime, never decremented)
+  onlineSeconds Int       @default(0) // online board metric (AFK accumulator)
+  bossBest      Json // Record<stage, {seconds, at(ISO)}> — full snapshot (boss board is projected to BossRecord for indexed reads)
+  profile       Json // paper-doll snapshot: {loadout:{weapon,armor}, refineLevels:{weapon,armor}} — the profile view
+  suspect       Boolean   @default(false) // anti-cheat: true = hidden from all boards (re-derive wave fills)
+  lastTickAt    DateTime? // INTERNAL: previous save's server time — the onlineSeconds delta reference
+  levelAt       DateTime? // future-seasons: when `level` was last written
+  powerAt       DateTime? // future-seasons: when `power` was last written
+  goldAt        DateTime? // future-seasons: when `goldEarned` was last written
+  onlineAt      DateTime? // future-seasons: when `onlineSeconds` was last written
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([suspect, level, levelCapAt]) // level board (DESC level, ASC levelCapAt) + suspect exclusion
+  @@index([suspect, cls, level, levelCapAt]) // cls-filtered level board
+  @@index([suspect, power]) // power board
+  @@index([suspect, cls, power]) // cls-filtered power board
+  @@index([suspect, goldEarned]) // gold board
+  @@index([suspect, cls, goldEarned]) // cls-filtered gold board
+  @@index([suspect, onlineSeconds]) // online board
+  @@index([suspect, cls, onlineSeconds]) // cls-filtered online board
+  @@index([userId]) // account-scoped queries
+}
+
+// M7.95 boss-board projection — ONE row per (character, boss stage). The boss
+// board ranks by clear time, which lives inside LeaderboardEntry.bossBest JSON;
+// MySQL can't index a JSON path, so this side-table is the INDEXED projection
+// (mirrors the "denormalized cache" pattern above). Written in the SAME tx as the
+// LeaderboardEntry upsert (no skew). Render fields (charName/cls/tier/level) are
+// denormalized so the board renders without a join; `profile` is fetched from the
+// LeaderboardEntry for just the top-N ids. `at` is the SERVER-STAMPED achievement
+// time carried from bossBest[stage].at. A `seconds` below the plausibility floor
+// (src/server/leaderboard.ts BOSS_TIME_FLOOR) is never written (ingest drops it).
+model BossRecord {
+  id          String   @id @default(cuid())
+  characterId String
+  userId      String
+  charName    String   @db.VarChar(24)
+  cls         String   @db.VarChar(16)
+  tier        Int      @default(1)
+  level       Int      @default(1)
+  stage       Int // boss stage (5/10/15/20/25/30)
+  seconds     Float // clear time (lower = better); Float ordering is indexable
+  at          DateTime // server-stamped achievement time
+  suspect     Boolean  @default(false) // mirror of the character's suspect flag (board exclusion)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([characterId, stage]) // one best per character per stage (upsert key)
+  @@index([stage, suspect, seconds]) // boss board (ASC seconds) + my-rank count
+  @@index([stage, cls, suspect, seconds]) // cls-filtered boss board
+}
+
 // One row per player save slot. `data` holds the versioned SaveData JSON blob
 // (see src/engine/state). `lastSeen` drives capped offline-idle earnings.
 // `version` mirrors SaveData.version so migrations can target rows by schema age.

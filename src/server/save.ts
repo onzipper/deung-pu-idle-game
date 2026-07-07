@@ -27,6 +27,7 @@ import {
 import { prisma } from "@/lib/db";
 import { computeOfflineTime, type OfflineResult } from "@/server/offline";
 import { powerFromSave } from "@/server/characters";
+import { upsertLeaderboardEntry } from "@/server/leaderboard";
 
 // HANDOFF: the incoming-save payload zod (`saveDataSchema`) now lives in the
 // engine (`src/engine/state/saveSchema.ts`, colocated with the SAVE_VERSION shape)
@@ -137,6 +138,17 @@ export async function persistSave(
       data: { level: data.hero.level, power },
     }),
   ]);
+
+  // M7.95 Hall of Fame: rebuild the character's leaderboard projection from the
+  // just-persisted (validated) save. BEST-EFFORT — a leaderboard-cache failure
+  // must never fail the player's save (the blob is already committed above); it
+  // self-heals on the next autosave. Everything ranked is re-derived server-side
+  // (power over stats+gear+refine, server-stamped times) — see @/server/leaderboard.
+  try {
+    await upsertLeaderboardEntry(characterId, userId, data, now);
+  } catch (err) {
+    console.error("[persistSave] leaderboard upsert failed (non-fatal):", err);
+  }
 
   return { ok: true, lastSeen: now.toISOString() };
 }
