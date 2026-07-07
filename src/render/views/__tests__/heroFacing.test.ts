@@ -47,6 +47,7 @@ function hero(x: number, aimX: number | null): Hero {
     quest: null,
     equipped: { weapon: null, armor: null },
     command: null,
+    shadowed: false,
     config: defaultHeroConfig(),
     aimX,
   };

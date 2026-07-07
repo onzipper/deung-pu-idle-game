@@ -214,4 +214,11 @@ export type GameEvent =
   // CLAMPED walkable x actually commanded.
   | { type: "moveOrdered"; x: number }
   | { type: "targetLocked"; id: number }
-  | { type: "commandCancelled" };
+  | { type: "commandCancelled" }
+  // Shadow-body transition (M8 party P2 — "ร่างเงา", design §9). Fires on the STEP a
+  // cohort hero's shadow flag flips (owner dropped past grace → `value:true`; reconnected
+  // → `value:false`), so render (P6) can dim + tag the offline body / restore it. One-way
+  // like every event; the engine never reads it back (the flag lives on `Hero.shadowed`).
+  // `heroIdx` = the party slot (=== hero index). Emitted only on a real transition (no
+  // re-emit when set to the value it already holds), solo-guarded (never fires at 1 hero).
+  | { type: "heroShadowed"; heroIdx: number; value: boolean };

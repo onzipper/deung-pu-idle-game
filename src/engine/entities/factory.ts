@@ -138,6 +138,9 @@ export function makeHero(
     },
     // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
     command: null,
+    // Shadow-body flag (M8 party P2) — a fresh/loaded hero is LIVE, never a shadow.
+    // Flipped only by the replicated setShadowed intent in a cohort. Transient.
+    shadowed: false,
     // Per-hero automation config (M8 party P1b) — solo mirrors the globals each step;
     // cohort sets it via setHeroConfig. Transient.
     config,

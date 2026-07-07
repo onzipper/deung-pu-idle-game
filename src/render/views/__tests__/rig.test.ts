@@ -55,6 +55,7 @@ function makeHero(cls: Hero["cls"]): Hero {
     quest: null,
     equipped: { weapon: null, armor: null },
     command: null,
+    shadowed: false,
     config: defaultHeroConfig(),
     aimX: null,
   };

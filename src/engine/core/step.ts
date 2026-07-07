@@ -18,6 +18,7 @@ import type { BotSettings, HeroConfig, ShopItemId, StatKey, WorldLocation } from
 import type { GearSlot } from "@/engine/config/items";
 import { equipItem } from "@/engine/systems/gear";
 import { applyHeroConfig, syncPrimaryHeroConfig } from "@/engine/systems/heroConfig";
+import { setShadowed } from "@/engine/systems/shadow";
 import { creditGold } from "@/engine/systems/economy";
 import { onBotTownArrival, setBotSettings, updateBots } from "@/engine/systems/bots";
 import {
@@ -276,6 +277,17 @@ export interface FrameInput {
    * per drained input.
    */
   setHeroConfig?: Partial<HeroConfig>;
+  /**
+   * M8 party P2 — the REPLICATED shadow-body toggle for THIS lane's hero ("ร่างเงา",
+   * design §9). The ROOM (relay), NOT a player, emits this on the slot's own lane: it
+   * synthesizes `{ value: true }` when the owner disconnects past grace (or was offline
+   * at cohort formation) and `{ value: false }` on reconnect; every client applies it
+   * identically so `Hero.shadowed` is deterministic shared state. Applied FIRST each
+   * step (before the lane policy reads the flags) and, uniquely, NOT gated by the
+   * shadow policy — otherwise a shadow could never be lifted. Solo-guarded (no-op at one
+   * hero). Applied once per drained input.
+   */
+  setShadowed?: { value: boolean };
 }
 
 /**
@@ -293,6 +305,9 @@ export interface FrameInput {
  *    `equip` / `setHeroConfig` (and `setAutoHunt` for i≥1). Intents that already
  *    embed an explicit hero index (`castSkills[].slot`, `acceptQuest`, `evolveHero`)
  *    are applied from every lane by that embedded index.
+ *  - `setShadowed` (M8 P2) is a PER-HERO lane intent too, but ROOM-synthesized (not
+ *    player-issued) and applied BEFORE the shadow lane policy — a shadowed lane has all
+ *    its OTHER intents dropped, but `setShadowed` still lands so the room can unshadow.
  *  - SHARED-ZONE intents are read from LANE 0 only (the navigation/economy "lead" —
  *    design §3 makes zone travel a cohort-level action): `walkToZone` /
  *    `challengeBoss` / `advanceStage` / `fastTravel` / `buyShopItem` /
@@ -307,10 +322,7 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   // M8 party P1b — normalise to per-hero input lanes. A single `FrameInput` is the
   // SOLO / lane-0 fast path (`lanes = [input]`), so every existing call site is
   // byte-identical; an array is the cohort's per-slot lanes (`lanes[i]` → `heroes[i]`).
-  const lanes: PartyInput = Array.isArray(input) ? input : [input];
-  const primary: FrameInput = lanes[0] ?? {};
-  /** This step's lane for hero `i` (idle `{}` when the array is short). */
-  const laneFor = (i: number): FrameInput => lanes[i] ?? {};
+  const rawLanes: PartyInput = Array.isArray(input) ? input : [input];
 
   // Drop last step's events before this step fills them (one-way render/audio
   // buffer). Clear-in-place keeps the array identity stable and allocation-light.
@@ -322,6 +334,27 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   // `null`, so the renderer falls back to velocity-based facing while merely
   // walking. Pure state derivation — no effect on the sim (byte-identical).
   for (const h of state.heroes) h.aimX = null;
+
+  // M8 party P2 — SHADOW-BODY lane policy ("ร่างเงา", design §9). Apply the room-
+  // replicated `setShadowed` transitions FIRST (solo-guarded, and NOT itself gated by
+  // the policy so a shadow can always be lifted), so the lane policy below reads the
+  // up-to-date flags — the `heroShadowed` render event is emitted here.
+  for (let i = 0; i < state.heroes.length; i++) {
+    const sh = (rawLanes[i] ?? {}).setShadowed;
+    if (sh !== undefined) setShadowed(state, i, sh.value);
+  }
+  // Then NEUTRALIZE each shadowed hero's lane: replace it with an idle `{}` so a stale
+  // or haunted client cannot inject manual/lead intents (moveTo / attackTarget / cancel
+  // / castSkills / useConsumable / allocateStat / claims / equip / setHeroConfig / …)
+  // onto a taken-over body — it plays on purely through the autonomous systems with its
+  // FROZEN config. No shadow anywhere (always true for solo) ⇒ `lanes === rawLanes`, so
+  // the solo + normal-cohort paths stay byte-identical (no per-lane reallocation).
+  const lanes: PartyInput = state.heroes.some((h) => h.shadowed)
+    ? rawLanes.map((l, i) => (state.heroes[i]?.shadowed ? {} : l))
+    : rawLanes;
+  const primary: FrameInput = lanes[0] ?? {};
+  /** This step's lane for hero `i` (idle `{}` when the array is short). */
+  const laneFor = (i: number): FrameInput => lanes[i] ?? {};
 
   // M8 party P1b — establish each hero's automation config BEFORE any system reads it
   // (auto-allocate below, then auto-potion/auto-cast/auto-hunt in the battle pass).

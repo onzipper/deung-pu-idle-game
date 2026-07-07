@@ -425,6 +425,25 @@ export interface Hero {
    */
   config: HeroConfig;
   /**
+   * SHADOW-BODY flag (M8 party P2 — "ร่างเงา", design §9). `true` while this hero's
+   * owning player is DISCONNECTED past grace / was offline when the cohort formed: the
+   * hero keeps fighting via the SAME autonomous systems (auto-hunt / auto-cast / auto-
+   * potion) on its FROZEN `config`, but MANUAL intents on its lane are ignored
+   * deterministically (`step()` neutralizes a shadowed lane — defense against a stale/
+   * haunted client injecting inputs). Flipped ONLY by the replicated `setShadowed`
+   * intent, which the ROOM (relay) synthesizes on the slot's lane when the owner drops
+   * (→ true) and again on reconnect (→ false); every client applies it identically, so
+   * the flag is part of the shared sim (it IS in `stateHash`). SOLO-GUARDED: a 1-hero
+   * zone can never be shadowed (the intent no-ops at `heroes.length === 1`).
+   *
+   * TRANSIENT — NOT persisted (no SAVE bump; rebuilt `false` on load). Income needs NO
+   * special handling: each player persists their OWN hero from their OWN client, so an
+   * offline owner's earnings remain their normal offline-idle pool on return; the shadow
+   * exists socially/visually in the cohort, its on-field gold/xp is the peers' co-op
+   * credit, never cross-credited back to the absent owner.
+   */
+  shadowed: boolean;
+  /**
    * This step's COMBAT AIM — the world-x of whatever the hero is engaging this
    * step (the basic-attack / hunt target, a manual attack-command target, the
    * boss, or a skill's primary target/centroid), or `null` when the hero is not

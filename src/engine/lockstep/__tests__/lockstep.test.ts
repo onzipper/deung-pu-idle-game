@@ -257,6 +257,43 @@ describe("M8 lockstep — divergence canary (the hash is not blind)", () => {
   });
 });
 
+describe("M8 lockstep — a slot shadowed mid-run stays hash-identical across clients", () => {
+  it("3 clients: slot 1 shadowed at turn 40; its later manual intents are dropped identically", () => {
+    const clients = makeClients(3, 24680, PARTY3);
+    // Script: at turn 40 the ROOM shadows slot 1 (issued on slot 1's own lane, replicated
+    // to peers). Afterwards slot 1's client keeps trying to steer (moveTo) — every client
+    // must DROP those identically; slots 0 + 2 keep playing normally. runRelay asserts the
+    // per-turn hashes agree on every client (the whole determinism proof).
+    const script = (slot: number, turn: number): FrameInput | null => {
+      if (slot === 1 && turn === 40) return { setShadowed: { value: true } };
+      if (slot === 1 && turn > 40 && turn % 10 === 0) return { moveTo: { x: 300 + (turn % 200) } }; // dropped
+      if (slot === 0 && turn % 12 === 0) return { moveTo: { x: 260 + (turn % 240) } };
+      if (slot === 2 && turn % 15 === 0) return { setHeroConfig: { autoCast: (turn >> 4) % 2 === 0 } };
+      return null;
+    };
+    const traj = runRelay(clients, script, 400, 0xd00d);
+    // The shadow flag actually took, identically, on every client.
+    for (const c of clients) expect(c.state.heroes[1].shadowed).toBe(true);
+    // All three agree every turn (runRelay asserts equality; re-assert the full arrays).
+    expect(clients[1].hashes).toEqual(clients[0].hashes);
+    expect(clients[2].hashes).toEqual(clients[0].hashes);
+    expect(new Set(traj).size).toBeGreaterThan(20); // the sim really moved (not frozen)
+  });
+
+  it("shadowing a slot never diverges from a run that reissues the same setShadowed each turn (idempotent flip)", () => {
+    // Re-asserting setShadowed(true) every turn must be inert after the first flip — so a
+    // room that keeps re-sending it (belt-and-suspenders) produces the SAME trajectory as
+    // one that sends it once.
+    const once = (slot: number, turn: number): FrameInput | null =>
+      slot === 1 && turn === 20 ? { setShadowed: { value: true } } : null;
+    const repeat = (slot: number, turn: number): FrameInput | null =>
+      slot === 1 && turn >= 20 ? { setShadowed: { value: true } } : null;
+    const a = runRelay(makeClients(2, 135, PARTY2), once, 200, 0x11);
+    const b = runRelay(makeClients(2, 135, PARTY2), repeat, 200, 0x22);
+    expect(b).toEqual(a);
+  });
+});
+
 describe("M8 lockstep — stateHash excludes render transients (events + aimX)", () => {
   it("mutating state.events / hero.aimX does NOT change the hash", () => {
     const s = buildCohort(101, PARTY2);

@@ -26,7 +26,7 @@
  *   consumables (counts) · consumableCds (sorted)
  *   PER HERO (slot order): id/cls/x/y/hp/maxHp/cd/dead/reviveTimer/mana/maxMana/
  *     atkBuff(mult,timer)/level/xp/tier/statPoints/stats(str,dex,int,vit)/skillCds/
- *     autoSlots/equipped(weapon,armor,refine)/command/config(all 7 fields)
+ *     autoSlots/equipped(weapon,armor,refine)/command/config(all 7 fields)/shadowed
  *   enemies (array order): id/kind/hp/maxHp/x/y/atk/speed/size/behavior/range/cd/
  *     engageOffset/homeX/aggressive/aggroRadius/engaged
  *   boss (+variety mechanic timers) · projectiles (array order, all fields)
@@ -148,6 +148,9 @@ function hashHero(h: number, hero: Hero): number {
   h = bool(h, c.autoManaPotion);
   h = num(h, c.autoHpThreshold);
   h = num(h, c.autoManaThreshold);
+  // Shadow-body flag (M8 P2) — sim-relevant LANE POLICY (a shadowed hero's manual/lead
+  // intents are dropped in `step()`), replicated shared state, so it MUST fold in.
+  h = bool(h, hero.shadowed);
   // hero.aimX EXCLUDED — render-only facing observer, never read by the sim.
   return h;
 }
