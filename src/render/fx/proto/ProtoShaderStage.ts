@@ -21,14 +21,36 @@
  * FILTER COMPOSITION NOTE: a Pixi `Container` has exactly ONE `.filters` array
  * + ONE `.filterArea`. Heat haze needs a band-clipped `filterArea`; the ember
  * grade + generic color grade need the FULL scene area. So they live on two
- * different containers: `sceneLayer` (holds the live `BiomeScene.view`, and is
- * the one heat haze clips) vs `stageRoot` (wraps `sceneLayer`, and is where
- * ember-grade/color-grade compose together, unclipped). Aurora is not a
- * filter at all — a `Container` of its own ribbons, added as a sibling on top
- * of the scene.
+ * different containers per side: `sceneLayerRight` (holds the live NEW
+ * `BiomeScene.view`, and is the one heat haze clips) vs `rightRoot` (wraps
+ * `sceneLayerRight` + the aurora overlay, and is where ember-grade/color-grade
+ * compose together, unclipped).
+ *
+ * OLD-vs-NEW COMPARE MODE: two FULLY SEPARATE `BiomeScene` instances
+ * (`sceneLeft`/`sceneRight`), both built from the exact same resolved biome +
+ * zone + fake state and ticked with the IDENTICAL `dt` every frame — so their
+ * deterministic geometry (parallax offsets, gate props, sine-wave-driven
+ * silhouettes) stays pixel-identical between the two; only cosmetic
+ * ambient-particle spawn timing can drift a little (each `AmbientField` owns
+ * its own `Math.random()` stream — acceptable, it's dust/motes, not the
+ * effect being compared). `sceneLeft` NEVER receives a filter/aurora — it's
+ * the permanent "เดิม" (raw) baseline. `sceneRight` is where every toggle
+ * above actually applies — the "ใหม่" (new) side. Avoids the alternative of
+ * rendering the world once and re-rendering a `RenderTexture` snapshot through
+ * a second filter pass every frame (an extra full-screen GPU readback per
+ * frame); duplicating the (cheap, ambient-only) scene update is far less work
+ * than that would be.
+ *
+ * The right side is clipped to "right of the divider" via a plain `Graphics`
+ * mask (`dividerMask`) redrawn (never re-transformed) in absolute SCREEN
+ * pixels whenever the divider moves or the canvas resizes — since it's never
+ * added to the display list, its own transform stays identity, so screen-px
+ * geometry IS its global geometry, no extra bookkeeping needed. In full-screen
+ * mode the mask simply covers the whole canvas (new-only, matching the
+ * pre-compare-mode behavior byte-for-byte).
  */
 
-import { Application, Container, Rectangle, type Renderer } from "pixi.js";
+import { Application, Container, Graphics, Rectangle, type Renderer } from "pixi.js";
 import { zoneAt, initGameState, type GameState, type Zone } from "@/engine";
 import { biomeForZone } from "@/render/environment/biomes";
 import { BiomeScene } from "@/render/environment/BiomeScene";
@@ -68,13 +90,22 @@ const DEFAULT_STRENGTHS: ProtoStrengths = { primary: 0.6, colorGrade: 0.6 };
 
 export class ProtoShaderStage {
   private app: Application | null = null;
-  /** Full-area container: ember-grade + generic color-grade compose here. */
-  private stageRoot: Container | null = null;
-  /** Band-clippable container: heat haze's `filterArea` lives here, and it's
-   * the direct parent of the live `BiomeScene.view`. */
-  private sceneLayer: Container | null = null;
+
+  /** Left ("เดิม") side — permanently raw, never filtered/decorated. */
+  private leftRoot: Container | null = null;
+  private sceneLayerLeft: Container | null = null;
+  private sceneLeft: BiomeScene | null = null;
+
+  /** Right ("ใหม่") side — every toggle in `ProtoToggles` applies here. */
+  private rightRoot: Container | null = null;
+  private sceneLayerRight: Container | null = null;
   private auroraLayer: Container | null = null;
-  private scene: BiomeScene | null = null;
+  private sceneRight: BiomeScene | null = null;
+
+  /** Screen-space rect mask clipping `rightRoot` to "right of the divider"
+   * (or the whole canvas in full-screen mode) — see class doc comment. */
+  private dividerMask: Graphics | null = null;
+
   private zone: Zone | null = null;
   private state: GameState | null = null;
   private sceneId: ProtoSceneId = "map5";
@@ -86,6 +117,12 @@ export class ProtoShaderStage {
 
   private toggles: ProtoToggles = { ...DEFAULT_TOGGLES };
   private strengths: ProtoStrengths = { ...DEFAULT_STRENGTHS };
+
+  /** Compare-mode state: split (default) shows both halves; full-screen shows
+   * only the "ใหม่" side (the pre-compare-mode look). `dividerFrac` is the
+   * split position, 0..1 of the canvas width. */
+  private compareMode = true;
+  private dividerFrac = 0.5;
 
   private resizeObserver: ResizeObserver | null = null;
   private baseTransform = { scale: 1, x: 0, y: 0 };
@@ -107,25 +144,40 @@ export class ProtoShaderStage {
     this.app = app;
     canvasParent.appendChild(app.canvas);
 
-    const stageRoot = new Container();
-    stageRoot.filterArea = new Rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    app.stage.addChild(stageRoot);
-    this.stageRoot = stageRoot;
+    // ---- Left ("เดิม", raw) --------------------------------------------
+    const leftRoot = new Container();
+    app.stage.addChild(leftRoot);
+    this.leftRoot = leftRoot;
+    const sceneLayerLeft = new Container();
+    leftRoot.addChild(sceneLayerLeft);
+    this.sceneLayerLeft = sceneLayerLeft;
 
-    const sceneLayer = new Container();
-    sceneLayer.filterArea = new Rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    stageRoot.addChild(sceneLayer);
-    this.sceneLayer = sceneLayer;
+    // ---- Right ("ใหม่", every toggle applies) ---------------------------
+    const rightRoot = new Container();
+    rightRoot.filterArea = new Rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    app.stage.addChild(rightRoot);
+    this.rightRoot = rightRoot;
+
+    const sceneLayerRight = new Container();
+    sceneLayerRight.filterArea = new Rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    rightRoot.addChild(sceneLayerRight);
+    this.sceneLayerRight = sceneLayerRight;
 
     const auroraLayer = new Container();
-    stageRoot.addChild(auroraLayer);
+    rightRoot.addChild(auroraLayer);
     this.auroraLayer = auroraLayer;
+
+    // Standalone (never added to the display list) — a mask object doesn't
+    // need to be a scene child, and staying detached is exactly what keeps
+    // its own transform at identity (see class doc comment).
+    this.dividerMask = new Graphics();
+    rightRoot.mask = this.dividerMask;
 
     this.heatHaze = new HeatHazeEffect(
       app.renderer as Renderer,
       new Rectangle(0, GROUND_Y - 70, WORLD_WIDTH, 90),
     );
-    this.heatHaze.attachTo(sceneLayer);
+    this.heatHaze.attachTo(sceneLayerRight);
     this.aurora = new AuroraEffect(WORLD_WIDTH, 0, GROUND_Y * 0.55);
     auroraLayer.addChild(this.aurora.view);
     this.emberGrade = new EmberGlowGradeEffect();
@@ -143,7 +195,7 @@ export class ProtoShaderStage {
   }
 
   setScene(id: ProtoSceneId): void {
-    if (!this.sceneLayer) return;
+    if (!this.sceneLayerLeft || !this.sceneLayerRight) return;
     this.sceneId = id;
     const loc = SCENE_LOCATION[id];
     this.state = initGameState(1);
@@ -151,9 +203,15 @@ export class ProtoShaderStage {
     this.zone = zoneAt(this.state.location);
     const resolved = biomeForZone(this.zone);
 
-    this.scene?.destroy();
-    this.scene = new BiomeScene(resolved, this.zone, this.state);
-    this.sceneLayer.addChild(this.scene.view);
+    this.sceneLeft?.destroy();
+    this.sceneRight?.destroy();
+    // Two independent instances from the SAME resolved biome/zone/state —
+    // ticked identically every frame (see `tick()`), never sharing a
+    // container (a Pixi display object can only have one parent).
+    this.sceneLeft = new BiomeScene(resolved, this.zone, this.state);
+    this.sceneRight = new BiomeScene(resolved, this.zone, this.state);
+    this.sceneLayerLeft.addChild(this.sceneLeft.view);
+    this.sceneLayerRight.addChild(this.sceneRight.view);
     if (this.auroraLayer) this.auroraLayer.visible = id === "map4";
     this.colorGrade?.setScene(id);
     this.composeFilters();
@@ -178,6 +236,20 @@ export class ProtoShaderStage {
     }
   }
 
+  /** [เทียบครึ่งจอ | เต็มจอ] — full-screen shows ONLY the "ใหม่" (right/new)
+   * side across the whole canvas, matching the pre-compare-mode look. */
+  setCompareMode(enabled: boolean): void {
+    this.compareMode = enabled;
+    this.redrawDividerMask();
+  }
+
+  /** 0..1 fraction of canvas width where the divider sits (drag or the
+   * accessible range-input fallback both funnel through here). */
+  setDividerFraction(frac: number): void {
+    this.dividerFrac = Math.max(0, Math.min(1, frac));
+    this.redrawDividerMask();
+  }
+
   getToggles(): ProtoToggles {
     return { ...this.toggles };
   }
@@ -187,21 +259,40 @@ export class ProtoShaderStage {
   }
 
   /** Recompute which filters live on which container from the current
-   * scene + toggle state (see the class doc comment's composition note). */
+   * scene + toggle state (see the class doc comment's composition note).
+   * ONLY ever touches the right ("ใหม่") side — left stays permanently raw. */
   private composeFilters(): void {
-    if (!this.sceneLayer || !this.stageRoot || !this.heatHaze || !this.emberGrade || !this.colorGrade) {
+    if (
+      !this.sceneLayerRight ||
+      !this.rightRoot ||
+      !this.heatHaze ||
+      !this.emberGrade ||
+      !this.colorGrade
+    ) {
       return;
     }
-    // Heat haze OWNS sceneLayer.filters/filterArea outright — only meaningful
-    // on the desert scene.
-    this.heatHaze.apply(this.sceneLayer, this.sceneId === "map5" && this.toggles.primary);
+    // Heat haze OWNS sceneLayerRight.filters/filterArea outright — only
+    // meaningful on the desert scene.
+    this.heatHaze.apply(this.sceneLayerRight, this.sceneId === "map5" && this.toggles.primary);
 
-    // stageRoot composes ember-glow-grade (map6 only, effect #3) + the
+    // rightRoot composes ember-glow-grade (map6 only, effect #3) + the
     // generic per-biome color grade (effect #4, any scene) together.
     const emberOn = this.sceneId === "map6" && this.toggles.primary;
     const gradeOn = this.toggles.colorGrade;
     const filters = [...this.emberGrade.filters(emberOn), ...(gradeOn ? [this.colorGrade.filter] : [])];
-    this.stageRoot.filters = filters.length ? filters : null;
+    this.rightRoot.filters = filters.length ? filters : null;
+  }
+
+  /** Redraw the screen-space divider mask (see class doc comment for why
+   * this Graphics is never added to the display list). Cheap (one rect) —
+   * safe to call on every drag/resize/mode-toggle event. */
+  private redrawDividerMask(): void {
+    if (!this.app || !this.dividerMask) return;
+    const w = this.app.screen.width;
+    const h = this.app.screen.height;
+    const splitX = this.compareMode ? w * this.dividerFrac : 0;
+    this.dividerMask.clear();
+    this.dividerMask.rect(splitX, 0, Math.max(0, w - splitX), h).fill({ color: 0xffffff, alpha: 1 });
   }
 
   private tick(): void {
@@ -213,21 +304,28 @@ export class ProtoShaderStage {
       this.fps = this.fps + (instFps - this.fps) * 0.1;
     }
 
-    if (this.scene && this.state && this.zone) {
-      this.scene.update(dt, 0.35, this.state);
+    // Same dt fed to both sides in the same tick — deterministic geometry
+    // (parallax/gate/sine-wave silhouettes) stays synchronized between
+    // "เดิม" and "ใหม่" (see class doc comment on ambient-particle drift).
+    if (this.sceneLeft && this.sceneRight && this.state) {
+      this.sceneLeft.update(dt, 0.35, this.state);
+      this.sceneRight.update(dt, 0.35, this.state);
     }
     this.heatHaze?.update(dt);
     if (this.sceneId === "map4") this.aurora?.update(dt);
   }
 
   private handleResize(canvasParent: HTMLElement): void {
-    if (!this.app || !this.stageRoot) return;
+    if (!this.app || !this.leftRoot || !this.rightRoot) return;
     const w = canvasParent.clientWidth;
     const h = canvasParent.clientHeight;
     if (w > 0 && h > 0) this.app.renderer.resize(w, h);
     this.baseTransform = computeWorldTransform(this.app.screen.width, this.app.screen.height);
-    this.stageRoot.scale.set(this.baseTransform.scale);
-    this.stageRoot.position.set(this.baseTransform.x, this.baseTransform.y);
+    for (const root of [this.leftRoot, this.rightRoot]) {
+      root.scale.set(this.baseTransform.scale);
+      root.position.set(this.baseTransform.x, this.baseTransform.y);
+    }
+    this.redrawDividerMask();
   }
 
   destroy(): void {
@@ -236,8 +334,10 @@ export class ProtoShaderStage {
     if (this.app && this.tickerCb) this.app.ticker.remove(this.tickerCb);
     this.tickerCb = null;
 
-    this.scene?.destroy();
-    this.scene = null;
+    this.sceneLeft?.destroy();
+    this.sceneLeft = null;
+    this.sceneRight?.destroy();
+    this.sceneRight = null;
     this.heatHaze?.destroy();
     this.heatHaze = null;
     this.aurora?.destroy();
@@ -246,9 +346,13 @@ export class ProtoShaderStage {
     this.emberGrade = null;
     this.colorGrade?.destroy();
     this.colorGrade = null;
+    this.dividerMask?.destroy();
+    this.dividerMask = null;
 
-    this.stageRoot = null;
-    this.sceneLayer = null;
+    this.leftRoot = null;
+    this.sceneLayerLeft = null;
+    this.rightRoot = null;
+    this.sceneLayerRight = null;
     this.auroraLayer = null;
 
     if (this.app) {
