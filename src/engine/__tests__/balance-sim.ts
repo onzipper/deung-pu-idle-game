@@ -46,6 +46,7 @@ import {
   type SaveData,
   type ItemTemplate,
   type GearSlot,
+  type WorldLocation,
 } from "@/engine";
 
 const SIM_SECONDS = Number(process.env.SIM_SECONDS ?? 1800);
@@ -313,6 +314,21 @@ function fillAutoSlots(hero: Hero): { slot: number; skillId: string | null }[] {
   return out;
 }
 
+/** The map whose BOSS is the s15-style wall immediately before the tier-3 kill map
+ * (map4 → map3). Its boss is what a fresh tier-3 hero returns to break. */
+function wallBossMapId(killMapId: string): string {
+  const maps = CONFIG.world.maps;
+  const idx = maps.findIndex((m) => m.id === killMapId);
+  return idx > 0 ? maps[idx - 1].id : maps[0].id;
+}
+/** The LAST farm zoneIdx of `mapId` (town map shifts farms by +1 for the town zone). */
+function lastFarmIdx(mapId: string): number {
+  const m = CONFIG.world.maps.find((mm) => mm.id === mapId);
+  if (!m) return 0;
+  const townShift = mapId === CONFIG.world.townMapId ? 1 : 0;
+  return townShift + m.zoneStageIds.length - 1;
+}
+
 /**
  * World navigation autopilot: walk forward once the current farm zone's quota is
  * met (bossReady) and the next zone is unlocked, enter the boss room, and walk to
@@ -333,31 +349,47 @@ function navInput(s: GameState): Partial<FrameInput> {
       ? { walkToZone: { mapId: nav.left.zone.mapId, zoneIdx: nav.left.zone.zoneIdx } }
       : {};
 
-  // ---- M7.9 "Grand Expansion" tier-3 quest routing ----
-  // The tier-3 quest (offered at Lv40 while tier 2) has a MAP-SCOPED objective pair:
-  // bank kills in MAP3, THEN re-kill the MAP2 boss. The forward-only autopilot would
-  // (a) never bank the map2-boss objective and (b) blow past the s15 boss into map4 as
-  // a still-tier-2 hero (leaving s16+ un-survivable and the s15-wall gate meaningless).
-  // So while the tier-3 quest is ACCEPTED + INCOMPLETE: stay in map3 to bank kills,
-  // then backtrack LEFT to the map2 boss room (which is directly left-adjacent to
-  // map3's first farm zone in the global zone order) to finish it. The evolveHero
-  // intent (driven every step from canEvolveHero) then fires the power spike, after
-  // which the tier-3 hero resumes the normal forward march and breaks the s15 boss.
+  // ---- M7.9 tier-3 quest routing (REDESIGN, owner "option ข" 2026-07-08) ----
+  // The tier-3 quest (offered Lv40 while tier 2) is now a SINGLE kill objective in the
+  // map4-zone-1 FRONTIER (s16), reachable ONLY by fast-travel via the quest PREVIEW grant
+  // (systems/world `questGrantsZoneAccess`). No more map2 backtrack. Flow:
+  //   Phase A/B (tier 2, quest held): funnel LEFT to town — a guaranteed fast-travel
+  //     standoff (+ shopInput keeps a return scroll there) — then fast-travel into the
+  //     map4-z1 preview and FARM to bank the kills (death auto-returns to the preview,
+  //     which stays the last farm zone while the grant holds). Kills banked → hold while
+  //     canEvolveHero fires evolveHero (the tier-3 atk×1.6/hp×1.7 spike).
+  //   Phase C (fresh tier 3, map4 NOT yet really unlocked): the grant is gone, so the
+  //     preview is now locked — RETURN-SCROLL out to town, then fast-travel to the deepest
+  //     unlocked wall-map (map3) farm; the normal forward march below clears s11-15 as the
+  //     strong tier-3 hero and ENTERS/BEATS the s15 boss, which does the real map4 unlock.
+  const q3 = CONFIG.quest.tier3;
+  const preview: WorldLocation = { mapId: q3.killMapId, zoneIdx: 0 };
+  const inPreview = s.location.mapId === preview.mapId && s.location.zoneIdx === preview.zoneIdx;
+  const map4Unlocked = 0 < (s.unlockedZones[preview.mapId] ?? 0);
+  const townLoc: WorldLocation = { mapId: CONFIG.world.townMapId, zoneIdx: 0 };
+
   if (hero.tier === 2 && hero.quest?.accepted && hero.quest.id === tier3QuestId(hero.cls)) {
-    const q = CONFIG.quest.tier3;
-    const killsDone = (hero.quest.progress[0] ?? 0) >= q.kills;
-    const bossDone = (hero.quest.progress[1] ?? 0) >= q.bossKills;
-    if (!bossDone) {
-      const kind = nav.current.kind;
-      if (killsDone) {
-        // Map3 kills banked → walk LEFT to the map2 boss room; fight it on arrival.
-        if (kind === "boss") return {};
-        return walkLeft();
-      }
-      // Still banking map3 kills: farm forward INSIDE map3, but never step into the
-      // s15 boss room (a win there advances to map4 and strands the kill objective).
-      if (nav.right?.zone.kind === "boss") return {};
+    if ((hero.quest.progress[0] ?? 0) < q3.kills) {
+      if (inPreview) return {}; // farm the frontier to bank quest kills
+      if (nav.current.kind === "town") return { fastTravel: preview };
+      return walkLeft(); // funnel to town (safe fast-travel launchpad)
     }
+    return {}; // kills banked → evolveHero fires; hold in place until tier 3
+  }
+
+  if (hero.tier === 3 && !map4Unlocked) {
+    if (inPreview) {
+      // Stranded in the now-locked preview: instant scroll escape (works under threat),
+      // else retry a fast-travel to town until a standoff opens.
+      return s.consumables.returnScroll > 0 ? { useReturnScroll: true } : { fastTravel: townLoc };
+    }
+    if (nav.current.kind === "town") {
+      const wm = wallBossMapId(q3.killMapId);
+      const wc = s.unlockedZones[wm] ?? 0;
+      if (wc > 0) return { fastTravel: { mapId: wm, zoneIdx: Math.min(wc - 1, lastFarmIdx(wm)) } };
+      // no wall-map progress yet → fall through to the forward march from town.
+    }
+    // On the wall map (or crossing back) → the normal forward march enters the s15 boss.
   }
 
   if (s.phase === "victory") return walkRight();
@@ -405,6 +437,10 @@ function considerDrop(best: OwnedBest, templateId: string, cls: HeroClass): void
 const RESTOCK_TARGET = 15;
 function shopInput(s: GameState): Partial<FrameInput> {
   if (zoneAt(s.location).kind !== "town") return {};
+  // Keep a single return scroll in stock — the tier-3 preview-escape (navInput Phase C)
+  // uses it, and a real frontier player always carries one. Bought once (cheap), so the
+  // baseline gold/refine metrics are ~unchanged.
+  if (s.consumables.returnScroll < 1) return { buyShopItem: { item: "returnScroll", qty: 1 } };
   const hp = s.consumables.hpPotion;
   const mana = s.consumables.manaPotion;
   // Restock the LOWER-stock potion first (one intent/step, short town dwell). Over

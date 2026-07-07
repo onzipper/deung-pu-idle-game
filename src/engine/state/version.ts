@@ -131,6 +131,15 @@ import type {
 // wall-clock). A v16 save's own values are preserved (goldEarned floored non-negative,
 // bossBest entries validated + kept fastest-per-stage, levelCapAt a non-negative number
 // or null — idempotent for the server's migrate-on-every-save).
+// ---- M7.9 tier-3 quest REDESIGN (owner "option ข", 2026-07-08) — NO version bump ----
+// The tier-3 quest's OBJECTIVES changed (2 → 1: map4-z1 kills only; the map2-boss backtrack
+// is gone) but its id (`tier3_<cls>`) and the persisted HeroQuest SHAPE
+// ({id,accepted,progress[]}) are UNCHANGED, so this is NOT a save-shape change. An in-flight
+// v16 save mid-OLD-tier-3-quest is handled gracefully by the objective-shape guard in
+// `normalizeQuest` (+ its twin in state/index.ts `normalizeHeroQuest`): a saved accepted
+// tier-3 quest whose progress length ≠ the new def's objective count is RESET to un-accepted
+// (null → re-offered at L40), so an old 2-entry progress can never crash or mis-map onto the
+// new single objective. No migrate() branch + no SAVE_VERSION bump required.
 export const SAVE_VERSION = 16;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
@@ -279,10 +288,18 @@ function normalizeQuest(
   const def = evolutionQuestFor(cls, tier); // null at tier 3 (fully evolved, no quest)
   if (!def || !saved || saved.accepted !== true) return null;
   if (saved.id !== def.id) return null;
-  const progress = def.objectives.map((_, i) => {
-    const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
-    return asStat(v, 0);
-  });
+  // Objective-SHAPE guard (M7.9 tier-3 REDESIGN, owner "option ข" 2026-07-08): the id
+  // `tier3_<cls>` is UNCHANGED but the OBJECTIVE shape changed (old = 2 objectives: map3
+  // kills + a map2-boss rekill; new = 1 objective: map4-z1 kills). A pre-redesign save
+  // mid-tier-3-quest therefore has a progress array whose length no longer matches the
+  // def. Rather than silently mis-map the old map3-kill count onto the new map4 objective,
+  // RESET the stale instance to un-accepted (null → the quest is simply re-offered at
+  // L40). No SAVE_VERSION bump is needed — the HeroQuest SHAPE ({id,accepted,progress[]})
+  // is unchanged; this is a data-content guard that any objective-shape change rides on.
+  if (!Array.isArray(saved.progress) || saved.progress.length !== def.objectives.length) {
+    return null;
+  }
+  const progress = def.objectives.map((_, i) => asStat(saved.progress[i], 0));
   return { id: def.id, accepted: true, progress };
 }
 

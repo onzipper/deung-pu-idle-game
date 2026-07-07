@@ -78,6 +78,13 @@ export {
   zoneAt,
   worldNav,
   isZoneUnlocked,
+  // M7.9 tier-3 quest preview (owner "option ข"): `questGrantsZoneAccess` is the pure
+  // derived grant (map4 z1 while the tier-3 quest is held); `effectiveUnlockedZones` is
+  // the count map with the grant folded in — the UI builds its zone/fast-travel snapshot
+  // off THIS (a clean extension of the `unlockedZones` read path) so the preview zone
+  // surfaces without a persisted unlock.
+  questGrantsZoneAccess,
+  effectiveUnlockedZones,
   firstFarmLocation,
   type Zone,
   type WorldNav,

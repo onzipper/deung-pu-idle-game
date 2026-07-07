@@ -66,6 +66,7 @@ import {
   toSaveData,
   unlockedAutoSlotCount,
   worldNav,
+  effectiveUnlockedZones,
   type FrameInput,
   type GameEvent,
   type GameState,
@@ -336,7 +337,11 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // fast-travel picker's lock read).
     bot: { ...state.bot },
     autoHunt: state.autoHunt,
-    unlockedZones: { ...state.unlockedZones },
+    // M7.9 tier-3 preview (owner "option ข"): surface the EFFECTIVE unlocked counts —
+    // the persisted map + any active tier-3 quest grant (map4 z1) folded in — so the
+    // fast-travel picker + walk arrows offer the preview zone. Derived, never persisted
+    // (effectiveUnlockedZones returns a copy; toSaveData still writes state.unlockedZones).
+    unlockedZones: effectiveUnlockedZones(state),
     // M7.6 ตีบวก material counter — same one-way "engine carries it, store just
     // reflects it" pattern as `gold`.
     materials: state.materials,

@@ -228,3 +228,62 @@ Boss-iso (maxed L90 t10+10, harness fixed): s30 **sword 13.4s / archer 14.9s / m
 - **The harness fix re-baselines the whole M7.9 frontier** (sword 522→672, mage 58→122 as
   REPORTED — their config is byte-unchanged). The pre-fix balance-m79 tables above measured a
   phantom no-ultimate hero; the corrected model is the accurate one going forward.
+
+---
+
+## Appendix — Tier-3 quest REDESIGN (owner "option ข", 2026-07-08)
+
+The tier-3 quest no longer backtracks to the map2 boss. It now ties into the NEW M7.9
+frontier: a **single kill objective, scoped to the map4-zone-1 ice-tundra field (s16,
+"ทุ่งหน้าด่านทุนดรา")** — no boss objective, no refine condition.
+
+**Design as implemented.** `CONFIG.quest.tier3` = `{ kills: 90, killMapId: "map4" }` (was
+`kills:120/killMapId:map3` + a map2-boss objective). `tier3QuestFor` emits ONE
+`{type:"kill", count:90, mapId:"map4"}` objective. Accepting the quest (Lv40, tier 2) grants
+**deterministic preview access to map4 zone 1 ONLY** (`systems/world.questGrantsZoneAccess`,
+derived from `hero.quest` — NOT a persisted unlock); zones 2+ and the boss room stay gated
+behind the s15 boss kill. The map-scope on `killMapId` is effectively "zone 1 only" because a
+tier-2 hero can't reach the deeper map4 zones during the quest. Flow: tier-2 Lv40 hero
+fast-travels into the frontier, banks 90 kills as a dangerous expedition, evolves (atk×1.6 /
+hp×1.7), then returns and beats the s15 boss — after which the NORMAL unlock takes over.
+
+**Kill count = 90 (sim-tuned).** Start point 120 (the old map3 count) scaled DOWN for map4's
+much tougher mobs. 90 ≈ 42% of `killGoal(16)` (216) — a serious-but-fair frontier grind that
+all three classes bank without a permanent stall; a higher count only deepens the squishy
+archer's tier-2 exposure for no design gain.
+
+**Sim evidence** (organic, GEAR+REFINE, 5 seeds × 5400s, all 3 classes):
+
+| class | class-2 | tier-3 | reached | frontier stall? | mana pot/run |
+|---|---|---|---|---|---|
+| swordsman | s5 (5/5) | **s16 (5/5)** | map6/s30 (5/5) | none | 192 |
+| archer | s5 (5/5) | **s16 (5/5)** | map6/s30 (5/5) | none | 200 |
+| mage | s5 (5/5) | **s16 (5/5)** | map6/s30 (5/5) | none | 93 |
+
+Tier-2-on-s16 viability CONFIRMED: every seed banks the 90 kills as tier-2 and evolves at
+s16, then breaks the s15 boss as tier-3 and clears the whole s16-30 frontier (only the s30
+boss walls — the intended soft-wall). Archer (the binding squishy constraint) survives the
+tier-2 frontier expedition (deaths are frequent but never a permanent stall). No s16 enemy
+curve was touched (tier-3 fresh-spike pacing byte-identical); the aggro belt in map4 z1 was
+left as-is (0.07 — already trimmed) since no class stalled.
+
+**Access-grant mechanism.** `isZoneUnlocked = isZonePersistUnlocked OR questGrantsZoneAccess`
+(used for entering / walk arrows / fast travel). `checkZoneUnlock` guards on
+`isZonePersistUnlocked` ONLY, so the quest-granted preview zone NEVER cascades a real unlock
+to map4 z2 (the core invariant: no map4 progression without the s15 boss). `effectiveUnlockedZones(state)`
+folds the grant into a COPY of the count map (never mutates/persists it) — the UI zone /
+fast-travel surface reads this (GameClient snapshot) so the preview zone shows through the
+same `unlockedZones` read path.
+
+**Migration.** The quest id (`tier3_<cls>`) and persisted `HeroQuest` shape are unchanged, so
+NO `SAVE_VERSION` bump. An in-flight OLD-shape quest (2-entry progress: map3 kills + map2 boss)
+is caught by an objective-length guard in `normalizeQuest` (version.ts) + its twin
+`normalizeHeroQuest` (state/index.ts): a saved accepted tier-3 quest whose `progress.length` ≠
+the new def's objective count (1) is RESET to `null` (re-offered at L40) — never crashes, never
+mis-maps the old count.
+
+**Gate verdicts (re-verified):** s1-15 engine byte-identical (no curve touched; the
+checkZoneUnlock guard is a no-op for persist-unlocked zones) — HELD. class-2 ~s5 — HELD.
+tier-3 achieved without stall (s16, 5/5 all classes) — HELD. s15 boss breaks with tier-3 after
+(reaching map4-6 requires the s15 boss kill) — HELD. s16-30 + M7.9 frontier gates — HELD (only
+s30 boss walls). Mana sink intact — HELD.

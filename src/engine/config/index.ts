@@ -966,22 +966,29 @@ export const CONFIG = {
       // Boss defeats required (a stage-clear milestone — proves real progress).
       bossKills: 1,
     },
-    // ---- M7.9 "Grand Expansion" tier-3 (class-3) quest ----
+    // ---- M7.9 "Grand Expansion" tier-3 (class-3) quest — REDESIGN (owner "option ข", 2026-07-08) ----
     // The tier-2 -> tier-3 evolution key (offered at level >= evolution.tier3.
-    // levelRequired while tier 2). Objectives are MAP-SCOPED (systems/quests +
-    // QuestObjective.mapId): grind kills in MAP3, then defeat the MAP2 boss AGAIN —
-    // a REPEAT boss kill (the boss room stays unlocked, so walking back re-fights it;
-    // no new mechanic needed — see systems/world). NO refine-level condition by design
-    // (owner). Completing it enables the tier-3 class change (systems/evolution), the
-    // power spike that breaks the s15 wall. Same numbers per class in this pass;
+    // levelRequired while tier 2). REDESIGNED to tie into the NEW M7.9 frontier instead
+    // of backtracking to the map2 boss: a SINGLE kill objective, MAP-SCOPED to the
+    // ICE-TUNDRA FRONTIER field map4 zone 1 (s16, "ทุ่งหน้าด่านทุนดรา"). NO boss objective
+    // (removes the confusing map2 backtrack) + NO refine-level condition (owner).
+    //
+    // Accepting the quest PREVIEWS map4 zone 1 (ONLY zone 1 — the world-unlock system
+    // grants deterministic quest-derived access there, systems/world `questGrantsZoneAccess`;
+    // zones 2+ and the boss room stay gated behind the s15 boss kill). A tier-2 Lv40 hero
+    // fast-travels into the frontier, banks the kills as a genuine (dangerous) expedition,
+    // then evolves — the atk×1.6/hp×1.7 spike that breaks the s15 wall. After tier-3 the
+    // hero returns, beats the s15 boss, and the NORMAL unlock takes over (the grant is not
+    // a persisted unlock — see systems/world). Same numbers per class in this pass;
     // per-class quest IDS (`tier3QuestId`) let a later pass diverge them.
+    //
+    // `kills` is SIM-TUNED (docs/balance-m79.md "Tier-3 quest redesign"): map4 s16 mobs are
+    // far tougher than map3's (the old count was 120 in map3), so the count scales DOWN to a
+    // serious-but-fair frontier gate a tier-2 hero can bank without a permanent stall.
     tier3: {
-      // Kills to bank in map3 (the grind portion — bigger than the tier-2 grind).
-      kills: 120,
-      killMapId: "map3",
-      // Repeat map2-boss defeats required (proves the player can re-clear it).
-      bossKills: 1,
-      bossMapId: "map2",
+      // Kills to bank in the map4-zone-1 frontier field (the sole objective).
+      kills: 90,
+      killMapId: "map4",
     },
   },
 

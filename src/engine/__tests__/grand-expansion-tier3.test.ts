@@ -25,11 +25,15 @@ import {
   tierHpMult,
   unlockedAutoSlotCount,
   autoSlotCapacity,
+  isZoneUnlocked,
+  questGrantsZoneAccess,
+  effectiveUnlockedZones,
+  worldNav,
   type GameState,
   type Hero,
   type HeroClass,
 } from "@/engine";
-import { soloSave, makeStubEnemy, forceBoss } from "./helpers";
+import { soloSave, makeStubEnemy } from "./helpers";
 
 /**
  * M7.9 "Grand Expansion" — tier-3 CLASS ADVANCEMENT (engine).
@@ -77,55 +81,40 @@ describe("M7.9 tier-3 quest — offer / accept", () => {
     expect(evolutionQuestFor(h.cls, h.tier)!.id).not.toBe(tier3QuestId("mage"));
   });
 
-  it("accepting seats the tier-3 quest instance", () => {
+  it("accepting seats the tier-3 quest instance (single kill objective)", () => {
     const { s, h } = tierHero("archer", 2, 40);
     step(s, { acceptQuest: 0 });
     expect(h.quest!.id).toBe(tier3QuestId("archer"));
     expect(h.quest!.accepted).toBe(true);
-    expect(h.quest!.progress).toEqual([0, 0]);
+    // REDESIGN (owner "option ข"): ONE objective now — the map4-frontier kill grind.
+    expect(h.quest!.progress).toEqual([0]);
+    const def = tier3QuestFor("archer");
+    expect(def.objectives).toHaveLength(1);
+    expect(def.objectives[0]).toMatchObject({ type: "kill", mapId: "map4" });
   });
 });
 
-describe("M7.9 tier-3 quest — map-scoped objective counting", () => {
-  it("counts hunt kills ONLY while in map3", () => {
+describe("M7.9 tier-3 quest — map4-frontier kill counting (REDESIGN)", () => {
+  it("counts hunt kills ONLY while in map4 (the frontier), not map3/map2", () => {
     const { s, h } = tierHero("swordsman", 2, 40);
     step(s, { acceptQuest: 0 });
     const killIdx = tier3QuestFor("swordsman").objectives.findIndex((o) => o.type === "kill");
 
-    // In map3 (tierHero placed us here): a kill counts.
+    // In map3 (tierHero placed us here): a kill does NOT count (objective is map4-scoped).
+    s.enemies.push(makeStubEnemy(s.nextId++, 400, 0));
+    step(s, {});
+    expect(h.quest!.progress[killIdx]).toBe(0);
+
+    // In the map4 frontier (the preview zone): a kill counts.
+    s.location = { mapId: "map4", zoneIdx: 0 };
+    s.stage = 16;
     s.enemies.push(makeStubEnemy(s.nextId++, 400, 0));
     step(s, {});
     expect(h.quest!.progress[killIdx]).toBe(1);
-
-    // Same kill in map2: does NOT count (objective is map3-scoped).
-    s.location = { mapId: "map2", zoneIdx: 1 };
-    s.stage = 7;
-    s.enemies.push(makeStubEnemy(s.nextId++, 400, 0));
-    step(s, {});
-    expect(h.quest!.progress[killIdx]).toBe(1); // unchanged
   });
 
-  it("counts a REPEAT map2-boss defeat, but not a map3-boss defeat", () => {
-    const { s, h } = tierHero("archer", 2, 40);
-    step(s, { acceptQuest: 0 });
-    const bossIdx = tier3QuestFor("archer").objectives.findIndex((o) => o.type === "killBoss");
-
-    // A map3 boss defeat does NOT count (objective wants the MAP2 boss).
-    s.location = { mapId: "map3", zoneIdx: 5 };
-    s.stage = 15;
-    forceBoss(s);
-    s.boss!.hp = 0;
-    step(s, {});
-    expect(h.quest!.progress[bossIdx]).toBe(0);
-
-    // Re-fight the map2 boss: THIS counts.
-    s.phase = "battle";
-    s.location = { mapId: "map2", zoneIdx: 5 };
-    s.stage = 10;
-    forceBoss(s);
-    s.boss!.hp = 0;
-    step(s, {});
-    expect(h.quest!.progress[bossIdx]).toBe(1);
+  it("has NO boss objective (the old map2-boss backtrack is gone)", () => {
+    expect(tier3QuestFor("archer").objectives.some((o) => o.type === "killBoss")).toBe(false);
   });
 });
 
@@ -249,10 +238,10 @@ describe("M7.9 SAVE v15 migration", () => {
     expect(migrate(save).hero.tier).toBe(3);
   });
 
-  it("preserves an in-progress tier-3 quest through migrate", () => {
+  it("preserves an in-progress NEW-shape tier-3 quest through migrate", () => {
     const id = tier3QuestId("archer");
-    const v15 = {
-      version: 15,
+    const v16 = {
+      version: 16,
       stage: 12,
       gold: 0,
       hero: {
@@ -264,13 +253,121 @@ describe("M7.9 SAVE v15 migration", () => {
         stats: { ...CONFIG.stats.base.archer },
         mana: 60,
         autoSlots: [SIGNATURE_SKILL.archer, null, null],
-        quest: { id, accepted: true, progress: [30, 0] },
+        // NEW single-objective shape (map4 kills only): progress length 1.
+        quest: { id, accepted: true, progress: [45] },
       },
       lastSeen: 0,
     };
-    const out = migrate(v15);
-    expect(out.hero.quest).toEqual({ id, accepted: true, progress: [30, 0] });
+    const out = migrate(v16);
+    expect(out.hero.quest).toEqual({ id, accepted: true, progress: [45] });
     expect(migrate(out)).toEqual(out);
+  });
+
+  it("RESETS an in-flight OLD-shape tier-3 quest (2 objectives) to un-accepted", () => {
+    // REDESIGN migration rule (owner "option ข"): a pre-redesign save mid-tier-3-quest
+    // carries the OLD 2-entry progress [map3 kills, map2-boss]. The id is unchanged, but
+    // the objective SHAPE differs (now 1 objective), so the stale instance must RESET to
+    // null (re-offered at L40) rather than mis-map the old count. No crash, no SAVE bump.
+    const id = tier3QuestId("archer");
+    const v16old = {
+      version: 16,
+      stage: 12,
+      gold: 0,
+      hero: {
+        cls: "archer" as const,
+        level: 42,
+        xp: 0,
+        tier: 2 as const,
+        statPoints: 0,
+        stats: { ...CONFIG.stats.base.archer },
+        mana: 60,
+        autoSlots: [SIGNATURE_SKILL.archer, null, null],
+        quest: { id, accepted: true, progress: [30, 0] }, // OLD 2-objective shape
+      },
+      lastSeen: 0,
+    };
+    const out = migrate(v16old);
+    expect(out.hero.quest).toBeNull(); // reset → re-offered on load (derived, L40)
+    expect(migrate(out)).toEqual(out);
+    // initGameState's live-load normaliser applies the SAME reset (no crash).
+    const live = initGameState(3, out);
+    expect(live.heroes[0].quest).toBeNull();
+  });
+});
+
+describe("M7.9 tier-3 quest — map4-z1 PREVIEW access (REDESIGN)", () => {
+  const PREVIEW = { mapId: "map4", zoneIdx: 0 };
+  const MAP4_Z2 = { mapId: "map4", zoneIdx: 1 };
+
+  it("grants access to ONLY map4 z1 while the tier-3 quest is accepted", () => {
+    const { s, h } = tierHero("mage", 2, 40);
+    // Before accepting: no grant, map4 fully locked.
+    expect(questGrantsZoneAccess(s, PREVIEW)).toBe(false);
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(false);
+
+    step(s, { acceptQuest: 0 });
+    expect(h.quest!.accepted).toBe(true);
+    // Grant is exactly map4 z1 — zone 2 stays locked (gated behind the s15 boss).
+    expect(questGrantsZoneAccess(s, PREVIEW)).toBe(true);
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(true);
+    expect(questGrantsZoneAccess(s, MAP4_Z2)).toBe(false);
+    expect(isZoneUnlocked(s, MAP4_Z2)).toBe(false);
+  });
+
+  it("the grant is DERIVED (evaporates when the quest is dropped) — not persisted", () => {
+    const { s, h } = tierHero("swordsman", 2, 40);
+    step(s, { acceptQuest: 0 });
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(true);
+    // Dropping the quest (here: simulate a consume) removes access — nothing persisted.
+    h.quest = null;
+    expect(questGrantsZoneAccess(s, PREVIEW)).toBe(false);
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(false);
+    expect(s.unlockedZones.map4 ?? 0).toBe(0); // never written to the persisted count
+  });
+
+  it("effectiveUnlockedZones folds the grant into the count map (never mutates state)", () => {
+    const { s } = tierHero("archer", 2, 40);
+    expect(effectiveUnlockedZones(s).map4 ?? 0).toBe(0);
+    step(s, { acceptQuest: 0 });
+    const eff = effectiveUnlockedZones(s);
+    expect(eff.map4).toBe(1); // count bumped to include map4 z1 (idx 0)
+    expect(s.unlockedZones.map4 ?? 0).toBe(0); // the real state is untouched
+  });
+
+  it("fast travel INTO the preview is allowed; a WALK arrow reflects the grant", () => {
+    const { s } = tierHero("mage", 2, 40);
+    step(s, { acceptQuest: 0 });
+    // Fast-travel from town (guaranteed standoff) starts a channel to the preview.
+    s.location = { mapId: CONFIG.world.townMapId, zoneIdx: 0 };
+    s.enemies = [];
+    step(s, { fastTravel: PREVIEW });
+    expect(s.fastTravelCast).not.toBeNull();
+    expect(s.fastTravelCast!.targetMapId).toBe("map4");
+
+    // A hero standing at the map3 boss room sees map4 z1 as an unlocked right-neighbour.
+    const { s: s2 } = tierHero("mage", 2, 40);
+    step(s2, { acceptQuest: 0 });
+    s2.unlockedZones.map3 = 6; // boss room reachable
+    s2.location = { mapId: "map3", zoneIdx: 5 };
+    const nav = worldNav(s2);
+    expect(nav.right?.zone.mapId).toBe("map4");
+    expect(nav.right?.unlocked).toBe(true);
+  });
+
+  it("farming the granted preview to quota does NOT cascade-unlock map4 z2 (invariant)", () => {
+    const { s, h } = tierHero("swordsman", 2, 40);
+    step(s, { acceptQuest: 0 });
+    s.location = { mapId: "map4", zoneIdx: 0 };
+    s.stage = 16;
+    s.spawnPaused = true;
+    // Force the zone quota met — a persist-unlocked zone would unlock its neighbour here.
+    s.kills = CONFIG.killGoal(16) + 5;
+    step(s, {});
+    expect(s.unlockedZones.map4 ?? 0).toBe(0); // preview never cascades a real unlock
+    expect(isZoneUnlocked(s, MAP4_Z2)).toBe(false);
+    // (h is the quest holder; sanity that the grant is still only z1.)
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(true);
+    void h;
   });
 });
 

@@ -603,8 +603,16 @@ function normalizeHeroQuest(
   const def = evolutionQuestFor(cls, tier); // null at tier 3 (fully evolved, no quest)
   if (!def || !saved || saved.accepted !== true) return null;
   if (saved.id !== def.id) return null;
+  // Objective-SHAPE guard (M7.9 tier-3 REDESIGN, owner "option ข"): a pre-redesign
+  // in-flight tier-3 quest (old 2-objective map3+map2-boss shape) has a progress array
+  // whose length no longer matches the new 1-objective (map4-z1 kills) def — reset it to
+  // un-accepted (re-offered) rather than mis-map the count. See the twin guard +
+  // rationale in state/version.ts `normalizeQuest` (no SAVE_VERSION bump needed).
+  if (!Array.isArray(saved.progress) || saved.progress.length !== def.objectives.length) {
+    return null;
+  }
   const progress = def.objectives.map((_, i) => {
-    const v = Array.isArray(saved.progress) ? saved.progress[i] : undefined;
+    const v = saved.progress[i];
     return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
   });
   return { id: def.id, accepted: true, progress };

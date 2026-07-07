@@ -48,21 +48,19 @@ export function classChangeQuestFor(cls: HeroClass): QuestDef {
 }
 
 /**
- * The tier-3 quest DEF for `cls` (M7.9): grind kills in MAP3 + defeat the MAP2 boss
- * AGAIN. Both objectives are MAP-SCOPED (`QuestObjective.mapId`) — see
- * `advanceQuestObjective`. NO refine-level condition (owner). The MAP2-boss objective
- * is a REPEAT kill: the boss room stays unlocked after the first clear, so walking
- * back re-fights it (no new mechanic — `advanceToNextMap`/`enterBossRoom` already
- * re-spawn a fresh boss on every boss-room arrival, systems/world + boss).
+ * The tier-3 quest DEF for `cls` (M7.9 REDESIGN, owner "option ข" 2026-07-08): a SINGLE
+ * MAP-SCOPED kill objective in the ICE-TUNDRA FRONTIER (map4 zone 1, s16) — NO boss
+ * objective (the old map2-boss backtrack is gone) and NO refine condition. The objective
+ * is scoped to `killMapId` (map4); because accepting the quest grants preview access to
+ * ONLY map4 zone 1 (`systems/world.questGrantsZoneAccess` — zones 2+ stay gated behind
+ * the s15 boss), a map-scope on `killMapId` is effectively "map4 zone 1 only": a tier-2
+ * hero cannot reach the deeper map4 zones during the quest, so no zoneIdx scope is needed.
  */
 export function tier3QuestFor(cls: HeroClass): QuestDef {
   const q = CONFIG.quest.tier3;
   return {
     id: tier3QuestId(cls),
-    objectives: [
-      { type: "kill", count: q.kills, mapId: q.killMapId },
-      { type: "killBoss", count: q.bossKills, mapId: q.bossMapId },
-    ],
+    objectives: [{ type: "kill", count: q.kills, mapId: q.killMapId }],
   };
 }
 

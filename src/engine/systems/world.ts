@@ -30,6 +30,7 @@ import { FIXED_DT } from "@/engine/core/loop";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { creditGold } from "@/engine/systems/economy";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
+import { tier3QuestId } from "@/engine/systems/quests";
 import type { WorldLocation, ZoneKind } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -151,8 +152,72 @@ export function farmLocationForStage(stage: number): WorldLocation {
 // map; a zone is unlocked iff `zoneIdx < count`.
 // ---------------------------------------------------------------------------
 
-export function isZoneUnlocked(state: GameState, loc: WorldLocation): boolean {
+/** Persisted (real) unlock: a zone is normally unlocked iff its idx is below the
+ * map's saved unlocked count. This is the ONLY unlock that cascades / persists —
+ * the quest preview grant below is deliberately kept OUT of it (see `checkZoneUnlock`). */
+function isZonePersistUnlocked(state: GameState, loc: WorldLocation): boolean {
   return loc.zoneIdx < (state.unlockedZones[loc.mapId] ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Tier-3 quest PREVIEW access (M7.9 redesign, owner "option ข" 2026-07-08).
+// While the solo hero holds the ACCEPTED tier-3 quest, the quest's frontier field —
+// map4 zone 1 (s16), the FIRST farm zone of `CONFIG.quest.tier3.killMapId` — becomes
+// enterable/travelable even though the s15 boss hasn't unlocked it. This is a DERIVED
+// grant (read from `hero.quest` each call), NOT a persisted unlock: dropping the quest
+// or evolving (which consumes it) removes the grant, so map4 stays locked unless the
+// s15 boss has since done the REAL unlock. ONLY zone 1 is granted — zones 2+ and the
+// boss room stay gated behind the s15 boss kill (see the redesign note in config).
+// Deterministic (no RNG, no wall-clock).
+// ---------------------------------------------------------------------------
+
+/** The single frontier zone the ACTIVE tier-3 quest previews (map4 zone 1, s16), or
+ * null if the quest's kill-map has no farm zone. Derived from CONFIG, not hard-coded. */
+function tier3PreviewZone(): WorldLocation | null {
+  const mapId = CONFIG.quest.tier3.killMapId;
+  const z = WORLD_ZONES.find((zn) => zn.mapId === mapId && zn.kind === "farm");
+  return z ? { mapId: z.mapId, zoneIdx: z.zoneIdx } : null;
+}
+
+/** Whether the solo hero's ACTIVE tier-3 quest grants preview access to `loc` (the
+ * map4-zone-1 frontier). False unless the hero holds the accepted tier-3 quest AND
+ * `loc` is exactly that preview zone. */
+export function questGrantsZoneAccess(state: GameState, loc: WorldLocation): boolean {
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return false;
+  const preview = tier3PreviewZone();
+  return preview !== null && preview.mapId === loc.mapId && preview.zoneIdx === loc.zoneIdx;
+}
+
+/**
+ * Zone access = the persisted unlock OR the derived tier-3 quest preview grant. This is
+ * the read used for ENTERING a zone (walk arrows, fast travel, auto-return), so the
+ * preview zone is travelable while the quest is active. It is NOT used by
+ * `checkZoneUnlock` (a preview zone must never cascade a persisted unlock).
+ */
+export function isZoneUnlocked(state: GameState, loc: WorldLocation): boolean {
+  return isZonePersistUnlocked(state, loc) || questGrantsZoneAccess(state, loc);
+}
+
+/**
+ * The per-map unlocked-zone counts with any ACTIVE tier-3 quest preview grant folded in
+ * — a clean extension of the `state.unlockedZones` read path so the UI's zone/fast-travel
+ * surface (which reads a plain count map, `ui/world/zones.isZoneUnlockedUi`) sees the
+ * granted preview zone WITHOUT reaching into engine internals. Returns a COPY (never
+ * mutates `state.unlockedZones`, so the grant is never persisted): the granted map's
+ * count is bumped just far enough to include the preview zone. Identity-safe to call
+ * every snapshot — with no active quest it equals `{...state.unlockedZones}`.
+ */
+export function effectiveUnlockedZones(state: GameState): Record<string, number> {
+  const out: Record<string, number> = { ...state.unlockedZones };
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (q && q.accepted && q.id === tier3QuestId(hero!.cls)) {
+    const preview = tier3PreviewZone();
+    if (preview) out[preview.mapId] = Math.max(out[preview.mapId] ?? 0, preview.zoneIdx + 1);
+  }
+  return out;
 }
 
 /** Per-map unlocked counts covering every global zone up to (and incl.) `loc`. */
@@ -414,6 +479,11 @@ export function checkZoneUnlock(state: GameState): void {
   if (state.traveling || state.phase !== "battle") return;
   const zone = zoneAt(state.location);
   if (zone.kind !== "farm") return;
+  // A tier-3 quest PREVIEW zone (map4 z1, only quest-GRANTED, not persist-unlocked)
+  // must NEVER cascade a real unlock to its neighbour — that would permanently open
+  // map4 without the s15 boss kill (the redesign's core invariant). Only a
+  // persist-unlocked farm zone advances the frontier.
+  if (!isZonePersistUnlocked(state, state.location)) return;
   if (state.kills < CONFIG.killGoal(zone.stage)) return;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
