@@ -191,6 +191,8 @@ describe("migrate pre-v5 team/single -> v5 base stats", () => {
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.archer, null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     });
   });
 
@@ -220,6 +222,9 @@ describe("migrate pre-v5 team/single -> v5 base stats", () => {
       autoSlots: [SIGNATURE_SKILL.mage, null, null] as (string | null)[],
       // v7: tier-2 hero -> no class-change quest.
       quest: null,
+      // v17: an already-v17 hero carries an (empty) claim log + daily roster.
+      mainClaimed: [] as string[],
+      dailies: { serverDay: 0, quests: [] as { id: string; progress: number; claimed: boolean }[] },
     };
     const once = migrate({ version: SAVE_VERSION, hero });
     expect(migrate(once)).toEqual(once);

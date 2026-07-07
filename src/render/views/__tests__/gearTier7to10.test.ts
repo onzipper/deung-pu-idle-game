@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Hero } from "@/engine/entities";
-import { defaultHeroConfig } from "@/engine/entities";
+import { defaultHeroConfig, emptyDailies } from "@/engine/entities";
 import { GROUND_Y } from "@/render/layout";
 import { createHeroView, updateHeroView } from "@/render/views/heroView";
 
@@ -34,6 +34,8 @@ function makeHero(cls: Hero["cls"]): Hero {
     level: 1,
     xp: 0,
     tier: 1,
+    mainClaimed: [],
+    dailies: emptyDailies(),
     statPoints: 0,
     stats: { str: 8, dex: 4, int: 3, vit: 6 },
     autoSlots: ["sword_whirl", null, null],

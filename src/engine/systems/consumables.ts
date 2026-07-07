@@ -17,23 +17,25 @@
 import { CONFIG } from "@/engine/config";
 import { dpow } from "@/engine/core/dmath";
 import { FIXED_DT } from "@/engine/core/loop";
-import { arriveAtZone, townLocation, zoneAt } from "@/engine/systems/world";
-import type { ConsumableCounts, Hero, ShopItemId } from "@/engine/entities";
+import { arriveAtZone, startFastTravel, townLocation, zoneAt } from "@/engine/systems/world";
+import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
+import type { ConsumableCounts, Hero, ShopItemId, WorldLocation } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 import type { FrameInput } from "@/engine/core/step";
 
 const SHOP = CONFIG.shop;
 
-/** Catalog order (extensible — an M8 warp/party-summon item appends here). */
+/** Catalog order (M8 "วาปหาเพื่อน" warpScroll appended — SAVE v17). */
 export const SHOP_ITEMS: readonly ShopItemId[] = [
   "hpPotion",
   "manaPotion",
   "returnScroll",
+  "warpScroll",
 ];
 
 /** All-zero consumable stacks (fresh start / reset). */
 export function emptyConsumables(): ConsumableCounts {
-  return { hpPotion: 0, manaPotion: 0, returnScroll: 0 };
+  return { hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 };
 }
 
 /** Gold price of `item` at content `stage` (stage-scaled — see CONFIG.shop). */
@@ -100,6 +102,30 @@ export function buyShopItem(state: GameState, item: ShopItemId, qty = 1): boolea
   state.gold -= cost;
   state.consumables[item] = have + n;
   state.events.push({ type: "shopPurchase", item, qty: n, cost });
+  // M8 Wave A daily counting (inert until a roster exists): a POTION buy counts toward
+  // "buyPotions" (scrolls don't — the objective is "ซื้อยา"); any NPC purchase counts the
+  // gold spent toward "spendGold". Same-frame with the purchase, at the emission site.
+  if (item === "hpPotion" || item === "manaPotion") advanceDailyProgress(state, "buyPotions", n);
+  advanceDailyProgress(state, "spendGold", cost);
+  return true;
+}
+
+/**
+ * Use one "วาปหาเพื่อน" warp scroll (M8, SAVE v17): consume it + begin the fast-travel
+ * channel to `target`. The engine only enforces ZONE LEGALITY (the party/social "is my
+ * friend really there" check is UI/server's concern): the target must be an ALREADY-
+ * unlocked, non-boss zone — warp NEVER grants access (owner's climb-first law). Reuses
+ * `startFastTravel` verbatim (same cast time + death-cancel + all its guards: locked /
+ * dead / boss phase / mid-transit / already-there / invalid → `fastTravelBlocked`), so
+ * a warp is literally a fast-travel that costs a scroll. The scroll is consumed ONLY when
+ * the channel actually starts (a rejected target keeps the scroll). No-op (false) with no
+ * scroll held. NEVER called by the idle bot (dumb-automation law).
+ */
+export function applyWarpScroll(state: GameState, target: WorldLocation): boolean {
+  if ((state.consumables.warpScroll ?? 0) <= 0) return false;
+  if (!startFastTravel(state, target)) return false; // emits fastTravelBlocked on reject
+  state.consumables.warpScroll -= 1;
+  state.events.push({ type: "consumableUsed", item: "warpScroll" });
   return true;
 }
 

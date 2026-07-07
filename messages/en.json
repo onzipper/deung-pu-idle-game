@@ -477,6 +477,10 @@
         "name": "Return Scroll",
         "desc": "Teleports you back to town"
       },
+      "warpScroll": {
+        "name": "Friend Warp Scroll",
+        "desc": "Warp to a zone you've already unlocked — handy for catching up with your party"
+      },
       "w_sword_t1_rusty": {
         "name": "Rusty Sword"
       },

@@ -95,6 +95,31 @@ export type GameEvent =
       count: number;
     }
   | { type: "questCompleted"; id: number; questId: string }
+  // M8 Wave A quest rewards (main-chapter + daily). One-way like every event; the UI
+  // pops a reward toast. `source` distinguishes the main line from a daily; `questId`
+  // is the chapter/daily id; the amounts are what ACTUALLY landed (potions clamped to
+  // the stack cap). Fires ONCE per claim (the claim intent guards double-claims).
+  | {
+      type: "questReward";
+      source: "main" | "daily";
+      id: number;
+      questId: string;
+      gold: number;
+      materials: number;
+      hpPotion: number;
+      manaPotion: number;
+    }
+  // M8 Wave A daily progress (THROTTLED — NOT per kill). Emitted only on a daily's
+  // COMPLETE transition (progress crossing its target) so the UI can toast "เควสรายวัน
+  // เสร็จ!" without a per-increment flood. One-way; the engine never reads it back.
+  | {
+      type: "dailyProgress";
+      id: number;
+      questId: string;
+      progress: number;
+      target: number;
+      complete: boolean;
+    }
   // World navigation lifecycle (M6 "World & Town" — for UI + future render juice).
   // One-way like every event; the engine never reads them back.
   | { type: "zoneEntered"; mapId: string; zoneIdx: number; kind: ZoneKind; stage: number }

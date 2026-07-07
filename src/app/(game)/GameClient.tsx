@@ -343,6 +343,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       hpPotion: shopPriceAt("hpPotion", shopStage),
       manaPotion: shopPriceAt("manaPotion", shopStage),
       returnScroll: shopPriceAt("returnScroll", shopStage),
+      warpScroll: shopPriceAt("warpScroll", shopStage),
     },
     stackCap: CONFIG.shop.stackCap,
     ready: {

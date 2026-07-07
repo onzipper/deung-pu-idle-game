@@ -23,7 +23,7 @@
  * `TownNpcPanelHost.tsx` for the open/auto-close wiring. `onClose` is called both
  * by the ✕ button and by that host's walk-away watch.
  *
- * Icons are pre-2015 emoji (❤ / 💧 / 📜) so Windows 10 renders them (no Unicode-13+
+ * Icons are pre-2015 emoji (❤ / 💧 / 📜 / 🌀) so Windows 10 renders them (no Unicode-13+
  * glyphs — see CLAUDE.md footgun #4).
  *
  * UAT "ซื้อคืน" (buy-back) — a THIRD tab reusing the same flow-module
@@ -58,12 +58,13 @@ import { useGameStore } from "@/ui/store/gameStore";
  * refresh on a small modal list). */
 const COUNTDOWN_REFRESH_MS = 30_000;
 
-const SHOP_ORDER: ShopItemId[] = ["hpPotion", "manaPotion", "returnScroll"];
+const SHOP_ORDER: ShopItemId[] = ["hpPotion", "manaPotion", "returnScroll", "warpScroll"];
 
 const ITEM_ICON: Record<ShopItemId, string> = {
   hpPotion: "❤",
   manaPotion: "💧",
   returnScroll: "📜",
+  warpScroll: "🌀",
 };
 
 /** CSS-drawn coin (the 🪙 emoji has no glyph on Windows 10 — CLAUDE.md footgun #4;

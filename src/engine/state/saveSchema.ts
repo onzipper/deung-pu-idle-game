@@ -45,6 +45,9 @@ export const consumablesSchema = z
     hpPotion: z.number().int().min(0),
     manaPotion: z.number().int().min(0),
     returnScroll: z.number().int().min(0),
+    // "วาปหาเพื่อน" warp scroll (M8, SAVE v17). Optional so a pre-v17 (or trimmed)
+    // payload passes; `migrate` backfills 0 and clamps to the stack cap.
+    warpScroll: z.number().int().min(0).optional(),
   })
   .strict();
 
@@ -112,6 +115,26 @@ export const saveDataSchema = z
           })
           .strict()
           .nullable()
+          .optional(),
+        // M8 Wave A (SAVE v17). Both OPTIONAL so a pre-v17 payload is backfilled by
+        // `migrate()` (mainClaimed -> completed-no-backpay, dailies -> empty). Loose
+        // shapes — `normalizeMainClaimedIds` / `normalizeDailiesBlock` on load drop
+        // unknown ids + clamp counters, so a stale/foreign entry never needlessly 400s.
+        mainClaimed: z.array(z.string()).optional(),
+        dailies: z
+          .object({
+            serverDay: z.number().int().min(0),
+            quests: z.array(
+              z
+                .object({
+                  id: z.string(),
+                  progress: z.number().int().min(0),
+                  claimed: z.boolean(),
+                })
+                .strict(),
+            ),
+          })
+          .strict()
           .optional(),
       })
       .strict(),

@@ -215,6 +215,8 @@ describe("migrate pre-v4 tier handling", () => {
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.archer, null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     });
   });
 
@@ -235,6 +237,8 @@ describe("migrate pre-v4 tier handling", () => {
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.swordsman, null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     });
     expect(migrate(v7)).toEqual(v7);
   });

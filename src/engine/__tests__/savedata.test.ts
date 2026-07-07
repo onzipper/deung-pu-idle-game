@@ -34,6 +34,8 @@ describe("toSaveData (v4 single character)", () => {
       mana: heroMaxMana("swordsman", CONFIG.stats.base.swordsman.int),
       autoSlots: ["sword_whirl", null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     });
   });
 
@@ -52,6 +54,8 @@ describe("toSaveData (v4 single character)", () => {
       autoSlots: ["mage_meteor", "mage_frostnova", null],
       // Tier 2 -> no active quest (consumed by the class change); must round-trip.
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     };
 
     const restored = toSaveData(initGameState(9, original));

@@ -786,11 +786,12 @@ const emptyBossHint: BossHint = {
 };
 
 const emptyShop: ShopSummary = {
-  counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+  counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 },
   prices: {
     hpPotion: CONFIG.shop.items.hpPotion.basePrice,
     manaPotion: CONFIG.shop.items.manaPotion.basePrice,
     returnScroll: CONFIG.shop.items.returnScroll.basePrice,
+    warpScroll: CONFIG.shop.items.warpScroll.basePrice,
   },
   stackCap: CONFIG.shop.stackCap,
   ready: { hpPotion: false, manaPotion: false },

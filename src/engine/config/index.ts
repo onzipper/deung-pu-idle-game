@@ -293,11 +293,15 @@ export const CONFIG = {
       /** Auto mana-potion fires below this fraction of MAX MANA. */
       manaThreshold: 0.25,
     },
-    /** The catalog. `restoreFrac` / `cooldown` are 0 for the non-potion scroll. */
+    /** The catalog. `restoreFrac` / `cooldown` are 0 for the non-potion scrolls. */
     items: {
       hpPotion: { basePrice: 60, restoreFrac: 0.5, cooldown: 8 },
       manaPotion: { basePrice: 45, restoreFrac: 0.45, cooldown: 10 },
       returnScroll: { basePrice: 150, restoreFrac: 0, cooldown: 0 },
+      // "วาปหาเพื่อน" warp scroll (M8, SAVE v17): a party "warp to a friend" hop. Priced
+      // ABOVE the return scroll (150) on the SAME stage-scaling rule (priceStageBase) —
+      // warping to an arbitrary unlocked zone is worth more than a one-way trip home.
+      warpScroll: { basePrice: 200, restoreFrac: 0, cooldown: 0 },
     },
   },
 
@@ -1099,6 +1103,47 @@ export const CONFIG = {
       // bossVariety[20] 0.7/0.62 so a tier-2 Lv40 hero can win it in a real fight).
       bossHpScale: 0.58,
       bossAtkScale: 0.5,
+    },
+  },
+
+  // ---- M8 MAIN quest line (Wave A, design doc §1 "ห่อ goal-ladder เดิม") ----
+  // The main line is a CHAPTER CHAIN, one chapter per world map. A chapter is a PURE
+  // DERIVATION of existing progression (`systems/mainQuest.isChapterComplete`) — it is
+  // "complete" once that map's boss is cleared (the NEXT map's first zone is persist-
+  // unlocked; the LAST map keys off `bossBest[bossStageId]`). So there is NO second
+  // progression source of truth (the game's worst bug class): only the CLAIMED-reward
+  // set persists (`hero.mainClaimed`). Rewards are gold / refine stones / potions ONLY —
+  // NEVER power items (owner taste). `id` is the i18n + claim key (quest.main.<id>).
+  // ORDER MUST match `world.maps` (chapter i ↔ map i). First-pass numbers; sim-tunable.
+  mainQuest: {
+    chapters: [
+      { id: "chapter_map1", mapId: "map1", reward: { gold: 400, materials: 15 } },
+      { id: "chapter_map2", mapId: "map2", reward: { gold: 900, materials: 30, hpPotion: 5 } },
+      { id: "chapter_map3", mapId: "map3", reward: { gold: 1800, materials: 60, manaPotion: 5 } },
+      { id: "chapter_map4", mapId: "map4", reward: { gold: 3200, materials: 100, hpPotion: 8 } },
+      { id: "chapter_map5", mapId: "map5", reward: { gold: 5200, materials: 150, manaPotion: 8 } },
+      { id: "chapter_map6", mapId: "map6", reward: { gold: 8000, materials: 220, hpPotion: 10, manaPotion: 10 } },
+    ],
+  },
+
+  // ---- M8 DAILY quests (Wave A, design doc §2 "presence ไม่ใช่ optimal-play") ----
+  // A per-hero roster of `rosterSize` daily quests, CHOSEN SERVER-SIDE (seeded from the
+  // serverDay + user material — the engine never reads calendar time, keeping purity) and
+  // fed in via the `setDailies` intent. Each catalog entry is a "presence" objective: it
+  // gives a reason to come back WITHOUT FOMO (no streak-punish, no power/gate reward — all
+  // rewards are gold / stones / potions ONLY, owner taste). The engine COUNTS progress at
+  // the emission choke points + validates claims client-side (server re-validates). `id` is
+  // the i18n + claim key (quest.daily.<id>). Content scales by adding a catalog entry + i18n
+  // key — no logic change. First-pass numbers; sim-tunable.
+  dailyQuests: {
+    /** How many dailies a hero holds at once (echoes the 3 auto-cast slots — design §2). */
+    rosterSize: 3,
+    catalog: {
+      daily_kill: { type: "killAnywhere", target: 120, reward: { gold: 350 } },
+      daily_refine: { type: "refineOnce", target: 1, reward: { materials: 40 } },
+      daily_potions: { type: "buyPotions", target: 10, reward: { gold: 250 } },
+      daily_spend: { type: "spendGold", target: 2500, reward: { materials: 30 } },
+      daily_boss: { type: "clearAnyBoss", target: 1, reward: { gold: 600, hpPotion: 3 } },
     },
   },
 

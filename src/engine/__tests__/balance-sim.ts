@@ -257,7 +257,7 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
     location: { mapId: "map1", zoneIdx: 1 },
     unlockedZones: { map1: 2 },
     lastFarmZone: { mapId: "map1", zoneIdx: 1 },
-    consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+    consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 },
     // M7.5: idle bots OFF by default (baseline parity — the sim never trips them).
     bot: {
       enabled: false,
@@ -285,6 +285,8 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
       mana: 60,
       autoSlots: [SIGNATURE_SKILL[cls], null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     },
     lastSeen: 0,
   };
@@ -1091,7 +1093,7 @@ function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: 
     // Unlock every zone of every map so the boss room (idx 5) is walkable.
     unlockedZones: { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6 },
     lastFarmZone: { mapId, zoneIdx: lastFarmIdx },
-    consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3 },
+    consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3, warpScroll: 0 },
     bot: { enabled: false, sellTripEnabled: false, hpPotionTarget: 15, mpPotionTarget: 15, scrollReserve: 3, goldReserve: 0 },
     autoHunt: true,
     equipped: { weapon: g.weapon, armor: g.armor, refine: { weapon: 10, armor: 10 } },
@@ -1108,6 +1110,8 @@ function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: 
       mana: 300,
       autoSlots: [SIGNATURE_SKILL[cls], null, null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     },
     lastSeen: 0,
   };

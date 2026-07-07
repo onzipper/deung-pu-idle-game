@@ -106,15 +106,22 @@ export type TownNpcId = "npc:pahpu" | "npc:lungdueng";
  * item-instance model (unique id + ownerId + audit, server-authoritative) is for
  * TRADABLE GEAR only; NPC potions are fungible, non-tradable, and cheap, so they
  * live as plain counts in the save (SAVE v9) — no per-item identity to dupe. A
- * future warp/party-summon item (M8) can join this union without a schema change.
+ * The M8 warp scroll ("วาปหาเพื่อน") joins this union (SAVE v17) exactly as designed.
  */
-export type ShopItemId = "hpPotion" | "manaPotion" | "returnScroll";
+export type ShopItemId = "hpPotion" | "manaPotion" | "returnScroll" | "warpScroll";
 
-/** Held stack counts of each NPC consumable (M6, SAVE v9). Persisted. */
+/** Held stack counts of each NPC consumable (M6, SAVE v9; `warpScroll` SAVE v17). Persisted. */
 export interface ConsumableCounts {
   hpPotion: number;
   manaPotion: number;
   returnScroll: number;
+  /**
+   * "วาปหาเพื่อน" warp scroll (M8, SAVE v17): consumed to fast-travel to ANY already-
+   * unlocked, non-boss zone (a party "warp to a friend" fantasy — the social/party
+   * validation is a UI/server concern; the engine only enforces zone legality). Reuses
+   * the fast-travel channel (same cast time + death-cancel). NEVER used by the idle bot.
+   */
+  warpScroll: number;
 }
 
 /**
@@ -155,7 +162,31 @@ export interface BotSettings {
  * rather than the single `Hero.quest` slot v1 uses. The `{id, objectives}` def +
  * `{id, accepted, progress[]}` instance split already anticipates all of that.
  */
-export type QuestObjectiveType = "kill" | "killBoss";
+export type QuestObjectiveType =
+  | "kill"
+  | "killBoss"
+  // ---- M8 DAILY-quest objective types (Wave A) ----
+  // Counted at the SAME deterministic emission choke points as kill/killBoss, but on
+  // the per-hero `dailies` roster (below) instead of an evolution quest. Each is a
+  // "presence" objective (design doc §2 — reward being AROUND, never optimal-play):
+  //  - killAnywhere : any mob kill in any unlocked zone (combat resolve).
+  //  - refineOnce   : a server-confirmed refine attempt (the `refined` FrameInput).
+  //  - buyPotions   : hp/mana potions bought at the NPC (buyShopItem).
+  //  - spendGold    : gold spent at the NPC (shop purchase + refine cost).
+  //  - clearAnyBoss : any boss room cleared (onBossKilled).
+  | "killAnywhere"
+  | "refineOnce"
+  | "buyPotions"
+  | "spendGold"
+  | "clearAnyBoss";
+
+/** The subset of `QuestObjectiveType` a DAILY-quest template may use (M8, Wave A). */
+export type DailyObjectiveType =
+  | "killAnywhere"
+  | "refineOnce"
+  | "buyPotions"
+  | "spendGold"
+  | "clearAnyBoss";
 
 /** One objective line of a quest def: reach `count` of the counted event `type`. */
 export interface QuestObjective {
@@ -186,6 +217,33 @@ export interface HeroQuest {
   id: string;
   accepted: boolean;
   progress: number[];
+}
+
+/**
+ * One DAILY-quest instance on a hero's roster (M8 Wave A). The objective TYPE, TARGET
+ * count and REWARD are NOT stored here — they resolve from the `CONFIG.dailyQuests`
+ * catalog by `id` (so daily content scales with a config+i18n entry, never a logic/
+ * SAVE change; design doc §5). Only the mutable per-hero counters persist:
+ *  - `progress` : deterministic count toward the catalog target (capped at it).
+ *  - `claimed`  : whether the reward has been granted (survives the save).
+ */
+export interface DailyQuest {
+  id: string;
+  progress: number;
+  claimed: boolean;
+}
+
+/**
+ * A hero's DAILY-quest block (M8 Wave A, SAVE v17). The roster of 3 is chosen SERVER-
+ * side (seeded from serverDay + user material — the engine never computes calendar
+ * time, keeping purity) and fed in via the `setDailies` intent; the engine only COUNTS
+ * progress at the emission choke points + validates claims client-side (server re-
+ * validates at claim). `serverDay` is an opaque integer day-epoch: when a `setDailies`
+ * carries a NEW `serverDay` the roster resets (fresh progress/claims). Persisted per hero.
+ */
+export interface HeroDailies {
+  serverDay: number;
+  quests: DailyQuest[];
 }
 
 /**
@@ -312,6 +370,23 @@ export interface Hero {
    * systems/quests `isClassChangeQuestOffered` — so a fresh offer needs no stored
    * object). Set to the accepted instance by the `acceptQuest` intent. Persisted. */
   quest: HeroQuest | null;
+  /**
+   * MAIN-quest chapters whose reward has been CLAIMED (M8 Wave A, SAVE v17) — chapter
+   * ids from `CONFIG.mainQuest.chapters`. The main line itself is DERIVED (a chapter is
+   * "complete" purely from progression — `systems/mainQuest`), so this is the ONLY main-
+   * quest state that persists: it guards against double-claiming the reward across the
+   * server's migrate-on-every-save. The v16→v17 migration prefills this with every
+   * ALREADY-COMPLETED chapter (mark-done, NO backpay — mirrors v16 `goldEarned=0`), so an
+   * existing deep character starts claiming from its NEXT chapter only. Persisted per hero.
+   */
+  mainClaimed: string[];
+  /**
+   * DAILY-quest roster + progress (M8 Wave A, SAVE v17) — see `HeroDailies`. Empty
+   * `{serverDay:0, quests:[]}` until the server feeds a roster via `setDailies`; all
+   * new-path mutations are inert until then (so the balance sim, which never sets
+   * dailies, is byte-identical). Persisted per hero.
+   */
+  dailies: HeroDailies;
   /**
    * Unspent base-stat points (M5 "Base stats"). Each level-up grants
    * `CONFIG.stats.pointsPerLevel`; the player allocates them via the

@@ -253,7 +253,7 @@ describe("SAVE v8 -> v9 migration + round-trip", () => {
       hero: { cls: "mage", level: 20, tier: 1 },
     });
     expect(m.version).toBe(SAVE_VERSION);
-    expect(m.consumables).toEqual({ hpPotion: 0, manaPotion: 0, returnScroll: 0 });
+    expect(m.consumables).toEqual({ hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 });
   });
 
   it("preserves + clamps a v9 save's counts", () => {
@@ -282,6 +282,7 @@ describe("SAVE v8 -> v9 migration + round-trip", () => {
       hpPotion: 12,
       manaPotion: 4,
       returnScroll: 1,
+      warpScroll: 0,
     });
   });
 });

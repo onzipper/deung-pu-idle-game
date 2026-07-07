@@ -28,6 +28,7 @@ import { rollEnemyDrop } from "@/engine/systems/gear";
 import { creditKillGold } from "@/engine/systems/economy";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
+import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
 import { onBossKilled } from "@/engine/systems/boss";
 import { respawnToTown } from "@/engine/systems/world";
 import {
@@ -512,6 +513,8 @@ export function resolveDeaths(state: GameState): void {
         });
         // Count the kill toward the solo hero's class-change quest (M5 task 5).
         advanceQuestObjective(state, "kill");
+        // M8 Wave A: count toward the "killAnywhere" daily (inert until a roster exists).
+        advanceDailyProgress(state, "killAnywhere", 1);
         // M7: roll a farm drop for this kill (stateless hash; NEVER the wave RNG).
         rollEnemyDrop(state, e);
         return false;
@@ -533,6 +536,7 @@ export function resolveDeaths(state: GameState): void {
           grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
           state.events.push({ type: "kill", kind: e.kind, x: e.x, y: e.y, goldGained });
           advanceQuestObjective(state, "kill");
+          advanceDailyProgress(state, "killAnywhere", 1);
           return false;
         }
         return true;

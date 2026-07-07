@@ -59,6 +59,29 @@ export {
   isTier3BossObjectiveActive,
 } from "@/engine/systems/quests";
 
+// M8 Wave A — MAIN quest line reads (the UI's chapter tracker derives from these; the
+// claim itself goes through `step()` via the `claimMainReward` intent). `mainQuestChapters`
+// is the per-chapter view; `isMainChapterComplete` / `completedChapterIds` are the pure
+// progression derivations the v17 migration + UI share. NOTE (handoff): `ui/goalLadder.ts`
+// should later re-export the chapter derivation from HERE to avoid a second source of truth.
+export {
+  mainQuestChapters,
+  mainChapterDefs,
+  isMainChapterComplete,
+  completedChapterIds,
+  type MainChapterView,
+  type MainChapterDef,
+} from "@/engine/systems/mainQuest";
+
+// M8 Wave A — DAILY quest reads (the UI's daily panel derives from these; setDailies /
+// claimDaily go through `step()` intents). `dailyDef` resolves a catalog entry; `isDailyComplete`
+// is the pure claim-affordance read. The roster lives on `hero.dailies` (entities `HeroDailies`).
+export { dailyDef, isDailyComplete, type DailyDef } from "@/engine/systems/dailyQuests";
+
+// M8 Wave A — the shared quest-reward shape (main + daily rewards). The grant itself is
+// engine-internal (choke point `grantQuestReward`), applied only through claim intents.
+export { type QuestReward } from "@/engine/systems/questRewards";
+
 // Read-only boss-hint data for the UI panel. The sim itself is driven only
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";

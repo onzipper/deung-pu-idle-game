@@ -24,6 +24,7 @@ import {
   isTier3QuestBossFight,
   tier3QuestBossScale,
 } from "@/engine/systems/quests";
+import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
 import { onBossRoomCleared, returnToQuestFrontier } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
 import { creditKillGold } from "@/engine/systems/economy";
@@ -282,6 +283,10 @@ export function onBossKilled(state: GameState): void {
   // Count the boss defeat toward the solo hero's class-change quest (M5 task 5),
   // while the winning hero is still on the field (before the phase flip).
   advanceQuestObjective(state, "killBoss");
+  // M8 Wave A: count toward the "clearAnyBoss" daily (inert until a roster exists). Any
+  // boss room cleared counts — a presence objective, so the quest-scaled young Sovereign
+  // counts as a boss clear too (no special-case; matches "เคลียร์บอสโซนไหนก็ได้").
+  advanceDailyProgress(state, "clearAnyBoss", 1);
   // M7: a boss is a GUARANTEED drop (stateless hash; never the wave RNG). Rolled
   // while the boss is still on the field so the drop position/id are real. The tier-3
   // QUEST boss (young Sovereign) drops nothing — the real s20 gear is earned by the real

@@ -114,6 +114,8 @@ describe("save round-trip", () => {
         mana: CONFIG.mana.base,
         autoSlots: [SIGNATURE_SKILL.mage, null, null],
         quest: null,
+        mainClaimed: [],
+        dailies: { serverDay: 0, quests: [] },
       },
       lastSeen: 123456,
     };
@@ -202,6 +204,10 @@ describe("save round-trip", () => {
       mana: CONFIG.mana.base,
       autoSlots: [SIGNATURE_SKILL.archer, null, null],
       quest: null,
+      // v17 (M8 Wave A): placed at map2 (stage 6) means map1's boss was beaten, so the
+      // main-quest chapter_map1 is prefilled CLAIMED (mark-done, no backpay); no dailies.
+      mainClaimed: ["chapter_map1"],
+      dailies: { serverDay: 0, quests: [] },
     });
     expect(migrated.stage).toBe(6);
     expect(migrated.gold).toBe(999);

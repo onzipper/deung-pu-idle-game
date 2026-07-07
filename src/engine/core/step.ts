@@ -22,10 +22,17 @@ import { creditGold } from "@/engine/systems/economy";
 import { onBotTownArrival, setBotSettings, updateBots } from "@/engine/systems/bots";
 import {
   applyReturnScroll,
+  applyWarpScroll,
   buyShopItem,
   processConsumables,
   tickConsumableCds,
 } from "@/engine/systems/consumables";
+import {
+  advanceDailyProgress,
+  claimDaily,
+  setHeroDailies,
+} from "@/engine/systems/dailyQuests";
+import { claimMainReward } from "@/engine/systems/mainQuest";
 import { updateAnchor } from "@/engine/systems/movement";
 import { applyManualCommand, tickTownManualWalk } from "@/engine/systems/manual";
 import { updateSpawns } from "@/engine/systems/hunt";
@@ -220,6 +227,45 @@ export interface FrameInput {
    */
   cancelCommand?: boolean;
   /**
+   * M8 Wave A — install / refresh this hero's DAILY-quest roster (server-chosen, seeded
+   * from serverDay + user material). A NEW `serverDay` resets the roster; the same day is
+   * an idempotent reconcile (matching quests keep progress). Per-hero (lane i → heroes[i]).
+   * The engine never computes calendar time — the server owns the day. Applied once per
+   * drained input.
+   */
+  setDailies?: { serverDay: number; questIds: string[] };
+  /**
+   * M8 Wave A — claim a COMPLETED daily quest's reward by its catalog id. No-op unless the
+   * hero holds that daily, it's met, and it isn't already claimed. Grants gold/stones/
+   * potions + emits `questReward`. Server re-validates (day + unique constraint). Per-hero
+   * (lane i → heroes[i]). Applied once per drained input.
+   */
+  claimDaily?: string;
+  /**
+   * M8 Wave A — claim a COMPLETED main-quest chapter's reward by its chapter id. No-op
+   * unless the chapter is derived-complete (its map's boss beaten) and not already in
+   * `hero.mainClaimed`. Grants gold/stones/potions + emits `questReward`. Per-hero (lane
+   * i → heroes[i]). Applied once per drained input.
+   */
+  claimMainReward?: string;
+  /**
+   * M8 Wave A — a SERVER-CONFIRMED refine attempt just completed (the "refine result"
+   * signal). Advances the "refineOnce" daily. The engine never rolls/prices a refine
+   * (server-authoritative), so this is the only clean signal that a refine happened; the
+   * gold + material costs still arrive via `goldCredit` / `materialsDelta`. Lead economy
+   * (lane 0). Applied once per drained input.
+   */
+  refined?: boolean;
+  /**
+   * M8 "วาปหาเพื่อน" warp scroll (SAVE v17) — consume one held scroll to begin a fast-travel
+   * channel to `target`. The engine enforces ZONE LEGALITY only (target must be an already-
+   * unlocked, non-boss zone — warp NEVER grants access; the party "is my friend there" check
+   * is UI/server's job). Same guards/semantics as `fastTravel` (rejected → `fastTravelBlocked`;
+   * NOT damage-cancellable; death cancels). The scroll is spent only when the channel starts.
+   * NEVER used by the bot. Lead navigation (lane 0). Applied once per drained input.
+   */
+  useWarpScroll?: WorldLocation;
+  /**
    * M8 party P1b — the REPLICATED per-hero config change. In a cohort every client
    * replays the same `setHeroConfig` intent so each member's automation
    * (`autoCast` / `autoAllocate` / `autoHunt` / auto-potions + thresholds) is part
@@ -298,6 +344,17 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     if (lane.acceptQuest !== undefined) acceptQuest(state, lane.acceptQuest);
     if (lane.evolveHero !== undefined) evolveHero(state, lane.evolveHero);
   }
+  // M8 Wave A quest intents — PER-HERO (lane i → heroes[i], like setAutoSlots). setDailies
+  // runs first so a fresh roster this frame can start counting; then the two claims.
+  for (let i = 0; i < state.heroes.length; i++) {
+    const lane = laneFor(i);
+    if (lane.setDailies) setHeroDailies(state.heroes[i], lane.setDailies.serverDay, lane.setDailies.questIds);
+    if (lane.claimDaily !== undefined) claimDaily(state, i, lane.claimDaily);
+    if (lane.claimMainReward !== undefined) claimMainReward(state, i, lane.claimMainReward);
+  }
+  // M8 Wave A — a server-confirmed refine completed this frame (lead economy, lane 0):
+  // advance the "refineOnce" daily (inert until a roster exists).
+  if (primary.refined) advanceDailyProgress(state, "refineOnce", 1);
   // Idle-bot settings update (M7.5) — merged + clamped onto the persisted state.bot.
   // Bot is the LEAD/local player's automation (lane 0).
   if (primary.setBotSettings) setBotSettings(state, primary.setBotSettings);
@@ -344,7 +401,13 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     // M7.95 lifetime `goldEarned` total; a NEGATIVE delta (refine cost) only debits
     // spendable gold (floored at 0) and must NEVER decrease the earned total.
     if (delta > 0) creditGold(state, delta);
-    else state.gold = Math.max(0, state.gold + delta);
+    else {
+      state.gold = Math.max(0, state.gold + delta);
+      // M8 Wave A: a NEGATIVE goldCredit is gold SPENT at the NPC (a refine cost) — count
+      // it toward the "spendGold" daily (inert until a roster exists). Shop-purchase spends
+      // are counted at their own site (buyShopItem).
+      advanceDailyProgress(state, "spendGold", -delta);
+    }
   }
 
   // --- world navigation (M6 "World & Town") --- cohort-level (lead, lane 0; design §3).
@@ -352,6 +415,9 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   // after combat) if the hero isn't hit. A bot trip may also START here (updateBots,
   // farm-zone only) and set `traveling` before the walk intents below run.
   if (primary.fastTravel) startFastTravel(state, primary.fastTravel);
+  // M8 "วาปหาเพื่อน" warp scroll (SAVE v17): consume a scroll + start the same fast-travel
+  // channel to an already-unlocked zone (lead navigation, lane 0). NEVER a bot path.
+  if (primary.useWarpScroll) applyWarpScroll(state, primary.useWarpScroll);
   updateBots(state, primary.inventoryCount);
   if (primary.walkToZone) walkToZone(state, primary.walkToZone);
   if (primary.challengeBoss) enterBossRoom(state);

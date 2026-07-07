@@ -12,6 +12,7 @@ import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
 import type {
   Hero,
   HeroConfig,
+  HeroDailies,
   Enemy,
   Boss,
   BossBehavior,
@@ -21,6 +22,11 @@ import type {
   EnemyKind,
   SkillId,
 } from "@/engine/entities";
+
+/** A fresh (empty) daily-quest block (M8 Wave A) — no roster until the server feeds one. */
+export function emptyDailies(): HeroDailies {
+  return { serverDay: 0, quests: [] };
+}
 
 /**
  * A fresh per-hero automation config (M8 party P1b), seeded to the SAME defaults the
@@ -79,6 +85,8 @@ export function makeHero(
   quest: HeroQuest | null = null,
   equipped: EquippedGear = emptyEquipped(),
   config: HeroConfig = defaultHeroConfig(),
+  mainClaimed: string[] = [],
+  dailies: HeroDailies = emptyDailies(),
 ): Hero {
   const t = HERO_TYPES[cls];
   // Max HP folds in equipped armor's flat HP (0 for an unarmored hero, so a fresh
@@ -119,6 +127,10 @@ export function makeHero(
     stats,
     autoSlots,
     quest,
+    // M8 Wave A: main-quest claim log + daily roster carry forward across battlefield
+    // resets/loads (like `quest`). Fresh hero = no claims, empty roster.
+    mainClaimed: [...mainClaimed],
+    dailies: { serverDay: dailies.serverDay, quests: dailies.quests.map((q) => ({ ...q })) },
     equipped: {
       weapon: equipped.weapon,
       armor: equipped.armor,
