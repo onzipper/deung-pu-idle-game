@@ -9,7 +9,10 @@
  * per-frame-state-in-React rule). Each rAF tick:
  *   1. copies the UI-owned `autoCast`/`autoAllocate`/`autoReturn`/auto-potion/
  *      `soundMuted` flags off the Zustand store onto the engine state /
- *      `AudioController`,
+ *      `AudioController` — every automation flag here (all but `soundMuted`)
+ *      is ALSO ANDed against the bot MASTER switch (`store.autoHunt` — see
+ *      `gameStore.ts`'s `toggleBotMaster` doc) so a single switch silences
+ *      every sub-behavior at once,
  *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
  *      once and hands it to the FIRST fixed sub-step of the frame,
  *   2b. shapes this frame's real elapsed seconds through `TimeDirector`
@@ -372,7 +375,10 @@ let autoEquipInFlight = false;
 async function performAutoEquip(): Promise<void> {
   if (autoEquipInFlight) return;
   const store = useGameStore.getState();
-  if (!store.autoEquip) return;
+  // Bot MASTER switch gate (owner UX consolidation, 2026-07-07): `autoHunt`
+  // doubles as the master's on/off value — see `gameStore.ts`'s
+  // `toggleBotMaster` doc. OFF must mean zero auto-equip too.
+  if (!store.autoHunt || !store.autoEquip) return;
   const picks = selectAutoEquip(store.inventory, ITEM_TEMPLATES, store.heroes[0]?.cls);
   if (picks.length === 0) return;
   autoEquipInFlight = true;
@@ -396,6 +402,11 @@ async function performAutoEquip(): Promise<void> {
 
 async function performAutoSell(suppressNothingNotice = false): Promise<void> {
   const store = useGameStore.getState();
+  // Bot MASTER switch gate (owner UX consolidation, 2026-07-07): belt-and-
+  // suspenders — the engine's own bot sub-flags are already force-disabled
+  // while the master is off (see `toggleBotMaster`'s doc), so this event
+  // should never fire in that state, but never auto-dispose regardless.
+  if (!store.autoHunt) return;
   const { sellIds, salvageIds } = selectAutoSellSalvageIds(
     store.inventory,
     ITEM_TEMPLATES,
@@ -661,14 +672,23 @@ export function GameClient() {
         scroll: state.consumables.returnScroll,
       };
 
+      // Bot MASTER switch (owner UX consolidation, 2026-07-07) — `state.autoHunt`
+      // doubles as the master's own on/off value (see `gameStore.ts`'s
+      // `toggleBotMaster` doc). Every OTHER UI-owned automation flag below is
+      // NOT persisted (unlike `autoHunt`/`state.bot`), so ANDing them against it
+      // every frame is a safe, reversible gate: turning the master back on just
+      // resumes reading whatever the player already had each sub-toggle set to
+      // — nothing here needs its own snapshot/restore.
+      const botOn = store.autoHunt;
+
       // UI-owned flags the engine reads directly (not part of FrameInput).
-      state.autoCast = store.autoCast;
-      state.autoAllocate = store.autoAllocate;
-      state.autoReturn = store.autoReturn;
-      state.autoAdvance = store.autoAdvance;
+      state.autoCast = botOn && store.autoCast;
+      state.autoAllocate = botOn && store.autoAllocate;
+      state.autoReturn = botOn && store.autoReturn;
+      state.autoAdvance = botOn && store.autoAdvance;
       // Auto-use potion toggles + thresholds (M6), same UI-owned pattern.
-      state.autoHpPotion = store.autoHpPotion;
-      state.autoManaPotion = store.autoManaPotion;
+      state.autoHpPotion = botOn && store.autoHpPotion;
+      state.autoManaPotion = botOn && store.autoManaPotion;
       state.autoHpThreshold = store.autoHpThreshold;
       state.autoManaThreshold = store.autoManaThreshold;
       // UI-owned sound preference — applied to the audio module every frame,

@@ -467,8 +467,6 @@ function HeroSkills({ hero, slot }: { hero: HeroSummary; slot: number }) {
 
 export function SkillBar() {
   const heroes = useGameStore((s) => s.heroes);
-  const autoCast = useGameStore((s) => s.autoCast);
-  const toggleAutoCast = useGameStore((s) => s.toggleAutoCast);
   const t = useTranslations("panels");
 
   return (
@@ -481,24 +479,10 @@ export function SkillBar() {
           <HeroSkills key={i} hero={hero} slot={i} />
         ))}
       </div>
-      <div className="flex-1" />
-      <button
-        type="button"
-        onClick={toggleAutoCast}
-        aria-pressed={autoCast}
-        className={`inline-flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-bold shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.97] ${
-          autoCast
-            ? "border-emerald-400 bg-emerald-400 text-emerald-950"
-            : "border-ddp-border bg-ddp-panel-strong text-ddp-ink-muted"
-        }`}
-      >
-        <span
-          aria-hidden
-          className={`h-1.5 w-1.5 rounded-full ${autoCast ? "bg-emerald-950" : "bg-ddp-ink-muted"}`}
-        />
-        {/* ✨ not 🪄: the magic-wand emoji (Unicode 13) has no glyph on Windows 10 */}
-        {t("autoSkillToggle", { state: autoCast ? "on" : "off" })}
-      </button>
+      {/* The "Auto สกิล" master toggle moved into the consolidated bot-settings
+          modal (owner UX pass, 2026-07-07 — see `BotSettingsModal.tsx`); this
+          bar keeps only the per-skill "+ อัตโนมัติ" slot badges (an owner-
+          approved shortcut that mirrors the same store state). */}
     </div>
   );
 }

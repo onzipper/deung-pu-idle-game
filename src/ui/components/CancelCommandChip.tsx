@@ -6,7 +6,7 @@
  * of the engine's `hero.command`). Tapping the ground while a command is
  * active just issues a new `moveTo` (the engine replaces the command — no
  * special UI for that case); this chip is for the "stop entirely, go back to
- * AUTO/idle" case. Lives next to `AutoHuntToggle` (same combat-control tier,
+ * AUTO/idle" case. Lives next to `BotMasterSwitch` (same combat-control tier,
  * not a buried preference) — same chip styling/sizing convention (≥44px
  * touch target), so it reads as part of the same control cluster.
  */

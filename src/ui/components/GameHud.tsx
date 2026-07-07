@@ -15,12 +15,13 @@
  * `BossPanel`'s raw-stat row AND `HudBar`'s zone-unlock bar, see
  * `GoalLadder.tsx`) > TERTIARY (stat panel, settings drawer). The 1x/2x/3x
  * speed selector was removed player-facing (M6.7) — `GameClient`'s loop always
- * drains 1 fixed sub-step per real frame now. Scattered auto-* toggles
- * (autoAllocate/autoReturn/auto-potion thresholds/soundMuted/locale) now live
- * inside the `SettingsButton` drawer (M6 settings-panel task) rather than
- * scattered across this file's own rows — `autoCast`'s per-skill slotting
- * stays in `SkillBar.tsx` since it's genuinely part of the skill block, not a
- * generic setting.
+ * drains 1 fixed sub-step per real frame now. EVERY automation sub-behavior
+ * (autoCast/autoAllocate/autoReturn/autoAdvance/auto-potion/bot town-trips/
+ * auto-dispose rules) is consolidated behind the single `BotMasterSwitch` in
+ * `WalkControls` (owner UX consolidation, 2026-07-07 — "one mental model per
+ * feature") — `SettingsButton`'s drawer now holds only sound/language/generic
+ * prefs. `autoCast`'s per-skill "+ อัตโนมัติ" slot badges stay in
+ * `SkillBar.tsx` as a shortcut (mirrors the same store state).
  */
 
 import { forwardRef, type ReactNode } from "react";

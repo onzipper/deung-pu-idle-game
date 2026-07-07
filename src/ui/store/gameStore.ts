@@ -573,6 +573,49 @@ function writeAutoEquip(on: boolean): void {
   }
 }
 
+/** One-shot snapshot of the two ENGINE-PERSISTED bot sub-flags
+ * (`bot.enabled`/`bot.sellTripEnabled`) captured at the moment the master
+ * switch (`toggleBotMaster`) turns OFF, so they can be restored exactly when
+ * it turns back ON — see that action's doc for why this can't be a per-frame
+ * mirror like `autoCast`/etc (those aren't persisted; these two ARE, via
+ * `state.bot`/SAVE v11). Persisted to localStorage (not just in-memory) so a
+ * reload while the master is off doesn't lose the "what to restore" memory —
+ * same client-preference tier as `soundMuted`. */
+const BOT_MASTER_SNAPSHOT_KEY = "ddp-bot-master-snapshot";
+
+interface BotMasterSnapshot {
+  enabled: boolean;
+  sellTripEnabled: boolean;
+}
+
+function readBotMasterSnapshot(): BotMasterSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(BOT_MASTER_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const p = parsed as { enabled?: unknown; sellTripEnabled?: unknown };
+    if (typeof p.enabled !== "boolean" || typeof p.sellTripEnabled !== "boolean") {
+      return null;
+    }
+    return { enabled: p.enabled, sellTripEnabled: p.sellTripEnabled };
+  } catch {
+    return null; // storage blocked/corrupt — restore is a no-op, safe default
+  }
+}
+
+/** `null` clears the snapshot (consumed by a successful restore). */
+function writeBotMasterSnapshot(snap: BotMasterSnapshot | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (snap) window.localStorage.setItem(BOT_MASTER_SNAPSHOT_KEY, JSON.stringify(snap));
+    else window.localStorage.removeItem(BOT_MASTER_SNAPSHOT_KEY);
+  } catch {
+    /* storage blocked — the snapshot just won't survive a reload */
+  }
+}
+
 function writeAutoSellRules(rules: StoredAutoSellRules): void {
   if (typeof window === "undefined") return;
   try {
@@ -869,6 +912,28 @@ export interface HudState {
   setBotSettings: (patch: Partial<BotSettings>) => void;
   /** Queue the auto-hunt toggle intent (M7.5; last-wins per frame). */
   queueSetAutoHunt: (on: boolean) => void;
+  /** Bot MASTER switch (owner UX consolidation, 2026-07-07) — ONE toggle that
+   * gates every automation sub-behavior at once. Deliberately reuses `autoHunt`
+   * as the switch's own on/off value (no new persisted field: `autoHunt` IS
+   * "is the bot on") — `GameClient.tsx` gates every OTHER transient auto-*
+   * flag (autoCast/autoAllocate/autoReturn/autoAdvance/auto-potion) against
+   * this same field every frame, which is safe because those aren't
+   * persisted (turning the master back on just resumes reading whatever the
+   * player already had those sub-toggles set to).
+   *
+   * The two ENGINE-PERSISTED bot sub-flags (`bot.enabled`/`bot.sellTripEnabled`,
+   * SAVE v11) can't use that per-frame trick (they'd permanently overwrite the
+   * player's real preference the instant the master goes off — there's no
+   * second copy of "what the player actually wants" once the mirrored field
+   * itself is zeroed every frame). So this action instead: on OFF, snapshots
+   * their CURRENT values (`writeBotMasterSnapshot`) then queues a real
+   * `setBotSettings` patch forcing them both false (a genuine committed
+   * change, exactly like a manual toggle click); on ON, reads the snapshot
+   * back and queues it as the restore patch. Also queues the matching
+   * `setAutoHunt`. This guarantees "OFF = zero automation" covers bot town
+   * trips too, while "ON = each sub-behavior runs per its own setting"
+   * restores exactly what the player had. */
+  toggleBotMaster: () => void;
   /** Queue a fast-travel channel start (M7.5, last-wins per frame) — the
    * engine no-ops/rejects (`fastTravelBlocked`) an invalid/locked/aggro'd
    * attempt. */
@@ -1138,6 +1203,43 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   queueSetAutoHunt: (on) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, setAutoHunt: on } })),
+
+  toggleBotMaster: () =>
+    set((s) => {
+      const turningOff = s.autoHunt; // currently ON -> this call turns it off
+      if (turningOff) {
+        writeBotMasterSnapshot({
+          enabled: s.bot.enabled,
+          sellTripEnabled: s.bot.sellTripEnabled,
+        });
+        return {
+          pendingInput: {
+            ...s.pendingInput,
+            setAutoHunt: false,
+            setBotSettings: {
+              ...(s.pendingInput.setBotSettings ?? {}),
+              enabled: false,
+              sellTripEnabled: false,
+            },
+          },
+        };
+      }
+      const snap = readBotMasterSnapshot();
+      writeBotMasterSnapshot(null);
+      return {
+        pendingInput: {
+          ...s.pendingInput,
+          setAutoHunt: true,
+          setBotSettings: snap
+            ? {
+                ...(s.pendingInput.setBotSettings ?? {}),
+                enabled: snap.enabled,
+                sellTripEnabled: snap.sellTripEnabled,
+              }
+            : s.pendingInput.setBotSettings,
+        },
+      };
+    }),
 
   creditGold: (amount) =>
     set((s) => ({

@@ -5,9 +5,9 @@
  * and the combat-power ("พลังต่อสู้") readout for the solo hero. All numbers come
  * from the throttled `HeroSummary` snapshot; a +tap queues an `allocateStat`
  * intent (drained once per real frame, like evolve). The auto-allocate ON/OFF
- * toggle itself moved into the settings drawer (M6 settings-panel task,
- * `SettingsPanel.tsx`) — this panel still READS `autoAllocate` (below) to
- * disable manual +taps while it's on, since auto owns the primary stat then.
+ * toggle itself lives in the consolidated `BotSettingsModal.tsx` (owner UX
+ * consolidation, 2026-07-07) — this panel still READS `autoAllocate` (below)
+ * to disable manual +taps while it's on, since auto owns the primary stat then.
  *
  * M7.9 stat-tap-fix (UAT "กดไม่ค่อยติด"): the store now ACCUMULATES same-frame
  * taps instead of last-wins (see `PendingInput.allocateStat`'s doc), so no tap

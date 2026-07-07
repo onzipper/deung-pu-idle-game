@@ -4,15 +4,18 @@
     "appDescription": "A solo-character idle MMORPG-lite — level up, allocate stats, cast skills, challenge bosses, and change classes to keep growing stronger.",
     "levelBadge": "Lv.{level}",
     "maxLabel": "MAX",
-    "fatalError": "Could not start the game: {reason}"
+    "fatalError": "Could not start the game: {reason}",
+    "infoTipAria": "More info"
   },
   "hud": {
     "stageLabel": "Stage",
     "waveLabel": "Wave",
-    "autoHuntOn": "AUTO",
-    "autoHuntOff": "MANUAL",
-    "autoHuntAriaOn": "Turn auto-hunt off",
-    "autoHuntAriaOff": "Turn auto-hunt on",
+    "botMasterOn": "Bot: ON",
+    "botMasterOff": "Bot: OFF",
+    "botMasterAriaOn": "Turn the bot off (disables all automation)",
+    "botMasterAriaOff": "Turn the bot on (enables all automation)",
+    "botSettingsButtonAria": "Bot settings",
+    "botMasterHint": "One switch for all automation: hunting, casting skills, stat points, potions, town trips, advancing zones — turn it off anytime to play manually; manual play (tap to move/attack) always works.",
     "cancelCommandButton": "✕ Cancel Command",
     "cancelCommandAria": "Cancel the current move/attack command",
     "zoneUnlockLabel": "Unlock next zone",
@@ -131,9 +134,24 @@
     "openButton": "⚙ Settings",
     "title": "Settings",
     "closeButton": "Close",
-    "autoBehaviorGroup": "Auto-behavior",
     "audioLanguageGroup": "Audio & language",
-    "deathBehaviorLabel": "When your hero dies",
+    "botModal": {
+      "title": "Bot settings",
+      "closeButton": "Close",
+      "masterOffHint": "The bot switch is off — you can still adjust these settings, but they won't run until you turn the bot switch back on.",
+      "combatGroup": "Combat",
+      "combatGroupHint": "Let the hero cast skills and allocate stat points on its own.",
+      "potionGroup": "Potions",
+      "potionGroupHint": "Auto-use HP/mana potions once a pool drops below its threshold.",
+      "townGroup": "Town trips",
+      "townGroupHint": "The bot warps to town to buy potions / sell / equip its best gear on its own.",
+      "dropGroup": "Drops",
+      "dropGroupHint": "Rules for what the bot sells/salvages/keeps per drop rarity on its town trips.",
+      "walkGroup": "Walking",
+      "walkGroupHint": "Behavior after your hero dies, and auto-advancing to the next zone.",
+      "autoReturnHint": "After your hero respawns in town, walk back to farming automatically.",
+      "autoAdvanceHint": "Once a zone's quota is cleared, walk into the next unlocked zone automatically (never a boss room)."
+    },
     "bot": {
       "title": "Helper bots",
       "hint": "The bot warps to town on its own when your bags fill up or potions run low, then walks back to farming automatically.",
@@ -144,7 +162,13 @@
       "mpTarget": "Mana potion target",
       "scrollReserve": "Return scroll target",
       "goldReserve": "Minimum gold reserve",
-      "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)"
+      "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)",
+      "restockHint": "Warps to town on its own once HP/mana potions run out, then buys back up to target.",
+      "sellTripHint": "Warps to town on its own once the bag is full, then sells/salvages per the drop rules.",
+      "masterOffDisabledHint": "Turn the main bot switch on first to enable this.",
+      "autoSlotsTitle": "Auto-cast slots",
+      "autoSlotEmpty": "Empty",
+      "autoSlotClearAria": "Remove {skill} from its auto-cast slot"
     },
     "autoSell": {
       "title": "Auto-dispose drops",
@@ -185,13 +209,17 @@
         "title": "Slot a skill into auto-cast",
         "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (up to 3, unlocked by level). Skills outside a slot still need a manual tap."
       },
+      "botSwitchIntro": {
+        "title": "This is the bot switch",
+        "body": "This is the bot switch — you can turn it off if you want to play manually. Turning it off stops ALL automation (skills, stats, potions, town trips, advancing zones); manual play (tap to move/attack) always keeps working. Tap ⚙ next to it to fine-tune each behavior."
+      },
       "bossChallenge": {
         "title": "Challenge the map boss",
         "body": "Fill each zone's hunt quota to unlock the next zone. At the last zone the boss-room door opens — walk in to duel the boss and unlock the next map!"
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Tap \"⚙ Settings\" to mute/unmute sound, switch languages, or tune auto-behavior, and tap \"📖 Guide\" to reopen the game guide anytime from this row."
+        "body": "Tap \"⚙ Settings\" to mute/unmute sound or switch languages, and tap \"📖 Guide\" to reopen the game guide anytime from this row. All automation now lives under the 🤖 Bot switch up top instead."
       },
       "outro": {
         "title": "You're ready!",
@@ -233,7 +261,7 @@
       },
       "manualPlayHint": {
         "title": "You can play manually now!",
-        "body": "Tap the ground to walk, tap a monster to attack. Tap \"✕ Cancel Command\" to stop, or turn AUTO back on to let your hero hunt on its own again."
+        "body": "Tap the ground to walk, tap a monster to attack. Tap \"✕ Cancel Command\" to stop, or flip the 🤖 Bot switch back on to let your hero hunt on its own again."
       },
       "tier3QuestOffered": {
         "title": "Tier-3 class quest available!",

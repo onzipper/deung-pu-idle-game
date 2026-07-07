@@ -15,7 +15,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
-import { AutoHuntToggle } from "@/ui/components/AutoHuntToggle";
+import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
 import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
 import { useGameStore, type NavNeighborSummary } from "@/ui/store/gameStore";
@@ -58,7 +58,7 @@ export function WalkControls() {
           <span className="text-xs font-medium text-ddp-ink-muted">{zoneLabel}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <AutoHuntToggle />
+          <BotMasterSwitch />
           <button
             type="button"
             disabled={world.traveling || channeling}
