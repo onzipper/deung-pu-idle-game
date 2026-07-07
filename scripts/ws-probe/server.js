@@ -55,7 +55,7 @@ function getClientHtml() {
   // to read (e.g. mid-deploy file swap on some hosts).
   try {
     clientHtmlCache = fs.readFileSync(CLIENT_HTML_PATH, 'utf8');
-  } catch (err) {
+  } catch (_err) {
     if (!clientHtmlCache) {
       return '<!doctype html><html><body><h1>client.html not found</h1></body></html>';
     }

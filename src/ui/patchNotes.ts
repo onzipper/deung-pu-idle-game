@@ -121,6 +121,22 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
     date: "2026-07-08",
     items: ["releases.2026-07-08d.items.buyback"],
   },
+  // M8 close-out: accounts + friends + party phase 1 + quest overhaul +
+  // friend-warp scroll + materials-from-drop + mana-burn pass + town llama.
+  {
+    id: "2026-07-08e",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08e.items.account",
+      "releases.2026-07-08e.items.friends",
+      "releases.2026-07-08e.items.party",
+      "releases.2026-07-08e.items.quest",
+      "releases.2026-07-08e.items.warpFriend",
+      "releases.2026-07-08e.items.materials",
+      "releases.2026-07-08e.items.manaCut",
+      "releases.2026-07-08e.items.llama",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

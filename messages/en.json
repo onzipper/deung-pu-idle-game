@@ -1057,6 +1057,18 @@
         "items": {
           "buyback": "🔁 Sold something by mistake? Buy it back from Pah Pu within 3 days, at the price you got for it — new \"Buy back\" tab in her shop"
         }
+      },
+      "2026-07-08e": {
+        "items": {
+          "account": "👤 Accounts are here! Keep playing as a guest like before, or register later in Settings > My Account — log in and pick up on any device",
+          "friends": "👥 Friends are here! Tap the 👥 button, add by friend code or character name, see who's online / what they're playing / which zone, and send emoji greetings",
+          "party": "🎉 Party phase 1: invite up to 3 friends into a party and see teammate status live — playing together for real is coming next",
+          "quest": "📜 A whole new quest lineup! Story quests by chapter plus 3 dailies a day, claimed at the new village elder NPC in town (miss a day, lose nothing)",
+          "warpFriend": "🌀 The friend-warp scroll is now on sale at Pah Pu's shop — teleport straight to a party member, limited to zones you've personally reached",
+          "materials": "💎 Enhancement stones now drop straight from monsters — no more salvaging. Anything you already stockpiled stays put; the salvage tab is gone and the bot only sells for gold now",
+          "manaCut": "🧪 Sword and bow mana burn cut nearly in half — go longer before running dry",
+          "llama": "🦙 A new friend (with more on the way) has wandered into town — go tap it"
+        }
       }
     }
   },

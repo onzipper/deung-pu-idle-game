@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { initGameState, step, migrate, SAVE_VERSION, type Enemy, type GameState } from "@/engine";
+import { initGameState, step, migrate, SAVE_VERSION, type Enemy } from "@/engine";
 import { makeStubEnemy, forceBoss, soloSave } from "./helpers";
 
 /**
