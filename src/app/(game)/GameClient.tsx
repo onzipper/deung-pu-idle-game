@@ -1794,12 +1794,24 @@ export function GameClient() {
     }
 
     // Browsers block audio output until a real user gesture — resume() is
-    // idempotent/cheap, so just call it on every pointerdown inside the arena
-    // rather than trying to detect "the first one" ourselves.
+    // idempotent/cheap, so just call it on every gesture rather than trying to
+    // detect "the first one" ourselves. Owner hotfix 2026-07-08: the listener
+    // used to sit on the ARENA canvas only, so a player who only touched HUD
+    // buttons/menus never unlocked sound and felt they had to "keep tapping the
+    // game screen". Document-level capture (pointerdown + keydown) makes ANY
+    // interaction anywhere on the page count. The autoplay policy itself can't
+    // be bypassed — some first gesture is still required — and after a tab
+    // switch the visibility retry below picks sound back up without a tap on
+    // desktop browsers (mobile re-unlocks on the next touch, wherever it lands).
     function onPointerDown(): void {
       audio.resume();
     }
-    arenaEl.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("pointerdown", onPointerDown, { capture: true });
+    document.addEventListener("keydown", onPointerDown, { capture: true });
+    function onVisibleResumeAudio(): void {
+      if (document.visibilityState === "visible") audio.resume();
+    }
+    document.addEventListener("visibilitychange", onVisibleResumeAudio);
 
     // ---- Town NPCs phase 3 (final): tap-again-to-talk ------------------------
     // A greeting-line bubble + opens that NPC's dialog panel (pahpu -> shop,
@@ -2091,7 +2103,9 @@ export function GameClient() {
       partySession.teardown();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
-      arenaEl.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      document.removeEventListener("keydown", onPointerDown, { capture: true });
+      document.removeEventListener("visibilitychange", onVisibleResumeAudio);
       arenaEl.removeEventListener("click", onArenaClick);
       arenaEl.removeEventListener("pointermove", onArenaPointerMove);
       errorEl?.remove();
