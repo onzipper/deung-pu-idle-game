@@ -175,6 +175,20 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08h.items.townWalk",
     ],
   },
+  // Live-test round 4: per-member wallets in a party (gold/potions/stones no longer
+  // shared-pot corrupted), rotating drop assignment (no N× duplication), mid-party
+  // bot toggles, reconnect re-handshake (no more stuck "connecting"), multi-select sell.
+  {
+    id: "2026-07-08i",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08i.items.wallet",
+      "releases.2026-07-08i.items.drops",
+      "releases.2026-07-08i.items.botToggle",
+      "releases.2026-07-08i.items.reconnect",
+      "releases.2026-07-08i.items.multiSell",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

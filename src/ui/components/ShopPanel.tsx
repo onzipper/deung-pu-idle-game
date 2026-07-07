@@ -44,6 +44,7 @@ import {
   type BuybackListEntry,
 } from "@/ui/gear/buybackFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
+import { sellPriceOf, sumSellPrices, toggleSelected } from "@/ui/gear/multiSelect";
 import { compareInventoryItems, sellAllCommonIds } from "@/ui/gear/sortRank";
 import type { InventoryItem } from "@/ui/gear/types";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
@@ -148,14 +149,99 @@ function BuyRow({ item }: { item: ShopItemId }) {
   );
 }
 
+/** Action bar shown while `selectMode` is on, anchored at the bottom of the
+ * sell tab (below the scrollable item list, which is the only scrolling
+ * region in this tab — so the bar always stays visible/thumb-reachable
+ * without extra CSS positioning). Own `useConfirmGuard` so its confirming
+ * state resets for free on every mount, i.e. every time the parent re-enters
+ * select mode (conditional render == fresh hook state, no manual reset API
+ * needed). One confirm for the WHOLE batch (count + total), same guard
+ * convention as every other sell affordance in this file. */
+function SellSelectionBar({
+  count,
+  total,
+  busy,
+  onSelectAll,
+  onClear,
+  onCancel,
+  onConfirmSell,
+}: {
+  count: number;
+  total: number;
+  busy: boolean;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onCancel: () => void;
+  onConfirmSell: () => void;
+}) {
+  const t = useTranslations("shop");
+  const guard = useConfirmGuard();
+  const disabled = busy || count === 0;
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-ddp-border-soft pt-2">
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onSelectAll}
+          className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 text-[11px] font-bold text-ddp-ink-muted"
+        >
+          {t("selectAllButton")}
+        </button>
+        <button
+          type="button"
+          disabled={count === 0}
+          onClick={onClear}
+          className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 text-[11px] font-bold text-ddp-ink-muted disabled:opacity-40"
+        >
+          {t("clearSelectionButton")}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 text-[11px] font-bold text-ddp-ink-muted"
+        >
+          {t("cancelSelectionButton")}
+        </button>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => guard.trigger(count > 0, onConfirmSell)}
+        className={`min-h-11 w-full rounded-(--ddp-radius-md) border px-3 text-sm font-bold transition-all active:scale-95 ${
+          disabled
+            ? "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
+            : "border-amber-400/60 bg-amber-500/20 text-amber-200 hover:brightness-110"
+        }`}
+      >
+        {guard.confirming
+          ? t("sellSelectedConfirm", { count, total })
+          : t("sellSelectedButton", { count, total })}
+      </button>
+    </div>
+  );
+}
+
 /** The sell tab body — a flat, best-first-sorted scan of every UNEQUIPPED
  * instance (see `ui/gear/sortRank.ts`), reusing the exact same `executeSell`
  * flow and bulk id-picker `InventoryPanel.tsx` uses. Deliberately HAMMERABLE:
  * no close-on-action, the list just re-anchors itself as items disappear
- * (plain `.map`, no local selection state to stale-point at a gone instance). */
+ * (plain `.map`, no local selection state to stale-point at a gone instance
+ * outside select mode).
+ *
+ * Owner request "ขาย item แบบเลือกหลายอัน" (multi-select sell): a
+ * "เลือกหลายชิ้น" toggle enters selection mode — rows flip to
+ * checkmark-toggle buttons (`SellRow`'s `selectMode`) and a sticky
+ * `SellSelectionBar` appears with the summed total. Selling still goes
+ * through `executeSell`, which already CHUNKS at `MAX_SELL_BATCH`
+ * sequentially (see `sellFlow.ts`) — so no extra cap/chunk logic is needed
+ * here even for a huge selection; "เลือกทั้งหมด" just selects every eligible
+ * id and the existing flow handles the rest. */
 function SellTab() {
   const inventory = useGameStore((s) => s.inventory);
   const [busy, setBusy] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const t = useTranslations("inventory");
   const tShop = useTranslations("shop");
 
@@ -163,6 +249,21 @@ function SellTab() {
     () => inventory.filter((i) => i.equippedSlot === null).sort(compareInventoryItems),
     [inventory],
   );
+
+  const selectedItems = useMemo(
+    () => items.filter((i) => selectedIds.includes(i.instanceId)),
+    [items, selectedIds],
+  );
+  const selectedTotal = useMemo(() => sumSellPrices(selectedItems), [selectedItems]);
+
+  function toggleSelectMode(): void {
+    setSelectMode((v) => !v);
+    setSelectedIds([]);
+  }
+
+  function handleToggleOne(target: InventoryItem): void {
+    setSelectedIds((cur) => toggleSelected(cur, target.instanceId));
+  }
 
   async function handleSell(target: InventoryItem): Promise<void> {
     setBusy(true);
@@ -178,6 +279,14 @@ function SellTab() {
     setBusy(false);
   }
 
+  async function handleSellSelected(): Promise<void> {
+    if (selectedIds.length === 0) return;
+    setBusy(true);
+    await executeSell(selectedIds);
+    setSelectedIds([]); // clear selection, stay open/in select mode (hammerable)
+    setBusy(false);
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-2 overflow-hidden">
       <div className="flex flex-wrap items-center gap-2">
@@ -189,16 +298,49 @@ function SellTab() {
         >
           {t("sellAllCommonButton")}
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={toggleSelectMode}
+          aria-pressed={selectMode}
+          className={`min-h-11 rounded-(--ddp-radius-md) border px-2.5 py-1.5 text-[11px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
+            selectMode
+              ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-300"
+              : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
+          }`}
+        >
+          {tShop("multiSelectToggle")}
+        </button>
       </div>
       <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
         {items.length === 0 ? (
           <p className="text-[11px] text-ddp-ink-muted/70">{tShop("sellEmptyHint")}</p>
         ) : (
           items.map((it) => (
-            <SellRow key={it.instanceId} item={it} busy={busy} onSell={handleSell} />
+            <SellRow
+              key={it.instanceId}
+              item={it}
+              busy={busy}
+              onSell={handleSell}
+              selectMode={selectMode}
+              selected={selectedIds.includes(it.instanceId)}
+              onToggleSelect={handleToggleOne}
+              price={selectMode ? sellPriceOf(it) : undefined}
+            />
           ))
         )}
       </div>
+      {selectMode && (
+        <SellSelectionBar
+          count={selectedIds.length}
+          total={selectedTotal}
+          busy={busy}
+          onSelectAll={() => setSelectedIds(items.map((i) => i.instanceId))}
+          onClear={() => setSelectedIds([])}
+          onCancel={toggleSelectMode}
+          onConfirmSell={() => void handleSellSelected()}
+        />
+      )}
     </div>
   );
 }

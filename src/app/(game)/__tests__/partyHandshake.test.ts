@@ -211,6 +211,54 @@ describe("M8 party handshake — abort path", () => {
   });
 });
 
+describe("M8 party handshake — restart on a shadowed member (D1/D2)", () => {
+  it("a formation waiting on a member who never acks stays stuck; a restart over just the LIVE slots completes", () => {
+    // Model the deadlock: cohort [0,1,2] but slot 2's socket is dead (a reload / hidden
+    // tab) — it never offers or acks. Slots 0 and 1 exchange, but the exchange can NEVER
+    // converge because it needs all THREE offers observed. This is exactly the stuck
+    // "กำลังเชื่อมต่อปาร์ตี้…" chip (D2: a shadowed slot lingering in the cohort list).
+    const cohortSlots = [0, 1, 2];
+    const pending: { fromSlot: number; msg: PartyWireMsg }[] = [];
+    let seqCounter = 0;
+    const shared = sharedSave();
+    const live = [0, 1];
+    const stuck = new Map<number, PartyHandshake>();
+    for (const slot of live) {
+      stuck.set(
+        slot,
+        new PartyHandshake({
+          mySlot: slot,
+          cohortSlots,
+          send: (msg) => pending.push({ fromSlot: slot, msg }),
+          myProgression: prog(slot === 0 ? "swordsman" : "archer", 5 + slot),
+          mySharedSave: shared,
+          mintSeed: () => 4242,
+        }),
+      );
+    }
+    for (const slot of live) stuck.get(slot)!.start();
+    while (pending.length > 0) {
+      const batch = pending.splice(0, pending.length);
+      for (const item of batch) {
+        const seq = seqCounter++;
+        for (const slot of live) {
+          const h = stuck.get(slot)!;
+          if (item.msg.kind === "reseed-offer") h.receiveOffer(item.fromSlot, item.msg, seq);
+          else h.receiveAck(item.fromSlot, item.msg);
+        }
+      }
+    }
+    for (const slot of live) expect(stuck.get(slot)!.phase).toBe("offering"); // never all-3
+
+    // GameClient's reconcile: drop the shadowed slot, begin a FRESH handshake over the
+    // LIVE pair [0,1] — which converges normally even though slot 2 never returned.
+    const hs = runHandshakeCohort(live, (s) => prog(s === 0 ? "swordsman" : "archer", 5 + s), 0x55);
+    for (const h of hs) expect(h.phase).toBe("done");
+    expect(stateHash(hs[1].result!)).toBe(stateHash(hs[0].result!));
+    expect(hs[0].result!.heroes.map((h) => h.cls)).toEqual(["swordsman", "archer"]);
+  });
+});
+
 describe("M8 party handshake — cohort -> solo extraction (design C)", () => {
   it("extractSoloState rebuilds a valid 1-hero state carrying MY hero's own progression", () => {
     const cohort = buildCohortState(2024, sharedSave(7), [

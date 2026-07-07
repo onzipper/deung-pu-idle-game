@@ -46,6 +46,24 @@ export function deriveCohort(
   return slots.sort((a, b) => a - b);
 }
 
+/**
+ * The LIVE subset of a raw cohort slot list — every slot whose relay socket is NOT
+ * currently shadowed. Preserves the raw list's ascending order. A shadowed peer's
+ * zone beat LINGERS in peers' beat maps (only `member-left` removes a beat, not
+ * `member-shadowed`), so a raw cohort can still list a member whose socket is dead;
+ * handshake FORMATION and idle/in-flight membership reconciliation must operate on
+ * THIS list, because a shadowed member never sends a reseed-ack — waiting on it
+ * deadlocks the exchange forever (the "กำลังเชื่อมต่อปาร์ตี้…" stuck chip). My own
+ * slot is never in `shadowed` (a client never shadows itself), so the result always
+ * retains at least my slot (all-peers-shadowed ⇒ just me ⇒ the solo path).
+ */
+export function liveCohortSlots(
+  cohortSlots: readonly number[],
+  shadowed: ReadonlySet<number>,
+): number[] {
+  return cohortSlots.filter((s) => !shadowed.has(s));
+}
+
 // ── Pure: leader election + shadow-intent synthesis ────────────────────────────────
 
 /**

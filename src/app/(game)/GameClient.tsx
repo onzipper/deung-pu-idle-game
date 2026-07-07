@@ -135,6 +135,7 @@ import {
 import {
   PartySession,
   electLeader,
+  liveCohortSlots,
   resolveMemberDisplayName,
   synthesizeShadowMessage,
   type CohortMember,
@@ -142,6 +143,14 @@ import {
 } from "./partySession";
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
+import {
+  desiredHeroConfig,
+  dropAssignedIndex,
+  heroConfigDiff,
+  virtualWallet,
+  walletSliceFrom,
+  type WalletSlice,
+} from "./cohortWallet";
 import { TimeDirector } from "./timeDirector";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
@@ -157,6 +166,12 @@ function asRecord(v: unknown): Record<string, unknown> | null {
  * rather than reached into `@/server/**`). A buffer bigger than this flushes
  * across multiple autosave-cadence ticks instead of being truncated. */
 const MAX_CLAIM_BATCH = 64;
+
+/** Party handshake deadline safety net (partySession.ts D1/D2 fixes). A re-seed exchange
+ * that hasn't converged within `HANDSHAKE_DEADLINE_MS` is aborted + retried; a trip backs
+ * the next window off to `HANDSHAKE_RETRY_MS` so a genuinely-absent peer doesn't thrash. */
+const HANDSHAKE_DEADLINE_MS = 10_000;
+const HANDSHAKE_RETRY_MS = 15_000;
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
@@ -652,7 +667,15 @@ export function GameClient() {
      * [1,2] ⇒ ticket-slot 1 is array index 0). This is what the engine's per-hero
      * `TurnMessage.slot` routing actually needs. */
     let myCohortIndex = 0;
+    /** The LIVE cohort slot list the current handshake/active cohort is built over —
+     * shadowed members are already filtered OUT (see `liveCohortSlots`). Every consumer
+     * (`myCohortIndex` mapping, `cohortEngine` size, nameplate index) reads this. */
     let lastCohortSlots: number[] = [];
+    /** The last RAW slot list `partySession.onCohortChanged` delivered (a shadowed member
+     * still appears here — its beat lingers). `reconcileCohort()` re-derives the live list
+     * from THIS + `shadowedTicketSlots`, so a shadow/unshadow can re-run the membership
+     * decision without a fresh beat. */
+    let lastRawCohortSlots: number[] = [];
     const shadowedTicketSlots = new Set<number>();
     /** ticket slot -> userId, for cohort members OTHER than me (from the relay welcome/
      * membership stream). The stable key we resolve friendly names against. */
@@ -661,6 +684,23 @@ export function GameClient() {
      * Rebuilt by `resolveCohortNames()` against the friends-poll `party` snapshot. */
     let cohortMemberNames = new Map<number, string>();
     let handshake: PartyHandshake | null = null;
+    /** `performance.now()` when the in-flight handshake began — the frame loop's deadline
+     * safety net (a formation that never converges, e.g. a peer that vanished without a
+     * clean member-left, or a lost offer on a reload race) aborts + retries past this. */
+    let handshakeStartedAt = 0;
+    /** The current deadline window (ms). Starts short; backs off to `HANDSHAKE_RETRY_MS`
+     * after a trip so repeated failures don't thrash. Reset to base on a successful
+     * `activateCohort()`/`collapseToSolo()`. */
+    let handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS;
+    /** ECONOMY-INTEGRITY (cohortWallet.ts): my personal wallet AT THE MOMENT I joined
+     * this cohort (my pre-cohort solo wallet, or the settled value from the prior cohort
+     * on a re-seed) + the shared pot at that same moment. `virtualWallet(base, sharedBase,
+     * <pot now>, size)` reconstructs my personal share of the shared pot's drift WITHOUT
+     * ever writing into the live cohort `state` (that would desync the sim) — it only
+     * shapes save payloads, the HUD snapshot, and the post-collapse solo state. Both null
+     * while solo. */
+    let cohortWalletBase: WalletSlice | null = null;
+    let cohortSharedBase: WalletSlice | null = null;
     /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
      * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
     let cohortEngine: CohortTurnEngine | null = null;
@@ -701,15 +741,44 @@ export function GameClient() {
       cohortMemberNames = next;
     }
 
+    /** My personal wallet reconstructed from the live shared cohort pot (cohortWallet.ts),
+     * or null while solo / before the bases are set. Divisor = `state.heroes.length` (the
+     * cohort headcount by construction — race-free vs. the `lastCohortSlots` bookkeeping,
+     * which is updated at different points in the membership-change flow). NEVER writes to
+     * `state`. */
+    function myVirtualWallet(): WalletSlice | null {
+      if (!cohortActive || !cohortWalletBase || !cohortSharedBase) return null;
+      return virtualWallet(
+        cohortWalletBase,
+        cohortSharedBase,
+        walletSliceFrom(state),
+        Math.max(1, state.heroes.length),
+      );
+    }
+
     /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
      * `buildCohortState` primitive (`extractSoloState`), resume the ordinary solo
      * accumulator loop next frame. */
     function collapseToSolo(): void {
       if (!cohortActive) return;
+      // ECONOMY-INTEGRITY: settle my personal wallet from the cohort pot BEFORE the
+      // extract (which rebuilds solo from the SHARED slice — it would otherwise adopt the
+      // authority-seeded pot). Overwrite the rebuilt solo wallet with my settled share so
+      // leaving a party keeps my own gold/materials/potions, not the shared pot's.
+      const settled = myVirtualWallet();
       state = extractSoloState(state, myCohortIndex, seed);
+      if (settled) {
+        state.gold = settled.gold;
+        state.goldEarned = settled.goldEarned;
+        state.materials = settled.materials;
+        state.consumables = { ...state.consumables, ...settled.consumables };
+      }
+      cohortWalletBase = null;
+      cohortSharedBase = null;
       cohortActive = false;
       handshake?.abort();
       handshake = null;
+      handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS;
       cohortEngine = null;
       cohortPrevWaiting = false;
       cohortMemberNames = new Map();
@@ -738,6 +807,7 @@ export function GameClient() {
         mySharedSave: sharedSaveFromState(state),
         mintSeed: () => Date.now() >>> 0,
       });
+      handshakeStartedAt = performance.now();
       handshake.start();
     }
 
@@ -748,8 +818,18 @@ export function GameClient() {
       if (!handshake || handshake.phase !== "done") return;
       const built = handshake.result;
       if (!built) return;
+      // ECONOMY-INTEGRITY: my wallet base for the NEW cohort is my personal wallet right
+      // now — either my pre-cohort solo wallet, or (on a re-seed of an ALREADY-active
+      // cohort, e.g. a 3rd member joins) my SETTLED share of the old pot, so drift never
+      // double-counts across re-seeds. `state.heroes.length` here is still the OLD cohort
+      // size (state is overwritten below). Computed via `myVirtualWallet` which reads the
+      // current bases + live state.
+      const preWallet: WalletSlice = myVirtualWallet() ?? walletSliceFrom(state);
       state = built;
+      cohortWalletBase = preWallet;
+      cohortSharedBase = walletSliceFrom(built);
       handshake = null;
+      handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS; // converged — reset the backoff
       cohortActive = true;
       myCohortIndex = lastCohortSlots.indexOf(myTicketSlot);
       // Fix C: force the SHARED navigation globals OFF in a cohort — zone changes only ever
@@ -784,6 +864,11 @@ export function GameClient() {
         handshake = null;
         collapseToSolo(); // no-op if not active; sets cohortStatus to "solo"
         lastCohortSlots = [];
+        lastRawCohortSlots = [];
+        // A fresh (re)join re-derives membership + shadow state from the relay welcome/
+        // event stream — stale shadow flags would wrongly exclude a now-live peer from the
+        // next formation, so clear them and let fresh member-shadowed events re-populate.
+        shadowedTicketSlots.clear();
         useGameStore.getState().setCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
       } else if (status === "connecting" && !cohortActive) {
         useGameStore.getState().setCohortStatus({ kind: "connecting" });
@@ -807,6 +892,7 @@ export function GameClient() {
       members: ReadonlyMap<number, CohortMember>,
     ): void {
       myTicketSlot = partySession.slot;
+      lastRawCohortSlots = cohortSlots;
       // Record each peer's stable userId (NEVER surface it — `resolveCohortNames`
       // turns it into a friendly name against the friends-poll `party` snapshot).
       cohortMemberIds = new Map();
@@ -816,8 +902,18 @@ export function GameClient() {
         if (m) cohortMemberIds.set(slot, m.userId);
       }
       resolveCohortNames();
-      if (cohortSlots.length <= 1) {
-        lastCohortSlots = cohortSlots;
+      // FORMATION operates on the LIVE list: a shadowed member's beat lingers in the raw
+      // list (only member-left removes it) but it never sends a reseed-ack — including it
+      // would deadlock the handshake forever (the stuck "connecting" chip, D2).
+      applyCohortMembership(liveCohortSlots(cohortSlots, shadowedTicketSlots));
+    }
+
+    /** The membership decision, factored out so `reconcileCohort()` can re-run it after a
+     * shadow/unshadow WITHOUT waiting for a fresh beat. `live` is always the shadow-filtered
+     * slot list. */
+    function applyCohortMembership(live: number[]): void {
+      if (live.length <= 1) {
+        lastCohortSlots = live;
         // Discard an in-flight handshake explicitly: `collapseToSolo()` is a no-op
         // when the cohort never ACTIVATED, which would otherwise strand a stale
         // handshake (and its "connecting" chip) after the peer walked away mid-offer.
@@ -827,18 +923,39 @@ export function GameClient() {
         useGameStore.getState().setCohortStatus({ kind: "solo" });
         return;
       }
-      const changed = !sameSlots(cohortSlots, lastCohortSlots);
-      lastCohortSlots = cohortSlots;
-      if (changed) beginHandshake(cohortSlots);
+      const changed = !sameSlots(live, lastCohortSlots);
+      lastCohortSlots = live;
+      if (changed) beginHandshake(live);
       else refreshCohortStatus(); // membership unchanged — names may have (nick, etc.)
+    }
+
+    /** Re-run the membership decision from the LAST RAW cohort list + the CURRENT shadow
+     * set. Called when a shadow/unshadow (or the deadline net) changes which slots are live
+     * without a new beat arriving — an in-flight handshake restarts with the reduced/grown
+     * live list; ≤1 live ⇒ solo. */
+    function reconcileCohort(): void {
+      applyCohortMembership(liveCohortSlots(lastRawCohortSlots, shadowedTicketSlots));
     }
 
     function onPartyGameMessage(fromSlot: number, seq: number, payload: unknown): void {
       const rec = asRecord(payload);
       if (!rec) return;
-      if (rec.kind === "reseed-offer" && handshake) {
-        handshake.receiveOffer(fromSlot, payload as ReseedOfferMsg, seq);
-        activateCohort();
+      if (rec.kind === "reseed-offer") {
+        if (!handshake) {
+          // Belt-and-braces (reload race): a peer's offer reached me BEFORE my own
+          // onCohortChanged (re)started a handshake. If my zone-derived LIVE cohort still
+          // includes the sender (and me), form the handshake now; the ordered stream then
+          // replays the rest of the exchange in order. Otherwise the offer is ignored.
+          const live = liveCohortSlots(lastRawCohortSlots, shadowedTicketSlots);
+          if (live.length > 1 && live.includes(fromSlot) && live.includes(partySession.slot)) {
+            lastCohortSlots = []; // force reconcile to begin a fresh handshake
+            reconcileCohort();
+          }
+        }
+        if (handshake) {
+          handshake.receiveOffer(fromSlot, payload as ReseedOfferMsg, seq);
+          activateCohort();
+        }
         return;
       }
       if (rec.kind === "reseed-ack" && handshake) {
@@ -851,20 +968,57 @@ export function GameClient() {
       }
     }
 
-    function onPartyMemberShadowChanged(ticketSlot: number, shadowed: boolean): void {
-      if (shadowed) shadowedTicketSlots.add(ticketSlot);
-      else shadowedTicketSlots.delete(ticketSlot);
-      if (!cohortActive) return;
+    /** Broadcast the leader-authored `setShadowed` lane-fill intent for a member of the
+     * ACTIVE cohort (fix A.1: keeps the scheduler from stalling on absent lanes). No-op
+     * when the affected slot isn't a live-cohort member or I'm not the leader. */
+    function pushCohortShadowLane(ticketSlot: number, shadowed: boolean): void {
+      const affectedIndex = lastCohortSlots.indexOf(ticketSlot);
+      if (affectedIndex < 0) return;
       const liveTicketSlots = lastCohortSlots.filter((s) => !shadowedTicketSlots.has(s));
       const leader = liveTicketSlots.length ? electLeader(liveTicketSlots) : myTicketSlot;
-      const affectedIndex = lastCohortSlots.indexOf(ticketSlot);
-      if (affectedIndex < 0) return; // not (or no longer) part of this cohort
-      // Fix A.1: unblock the turn scheduler from waiting on a shadowed member's (now
-      // absent) lanes — it auto-fills `{}` for this index until it's un-shadowed.
       cohortEngine?.setSlotShadowed(affectedIndex, shadowed);
       const currentTurn = cohortEngine?.turn ?? 0;
       const msg = synthesizeShadowMessage(leader, myTicketSlot, affectedIndex, shadowed, currentTurn);
       if (msg) partySession.send(msg);
+    }
+
+    /**
+     * A member's live socket flipped (protocol §5). Membership RECONCILIATION with a
+     * deliberate asymmetry (partySession.ts D1/D2):
+     *  - SHADOWED: if this member is part of the ACTIVE cohort → keep running, just
+     *    auto-fill its lane (existing fix A.1). Otherwise (handshake in flight or idle)
+     *    → reconcile so an in-flight formation restarts WITHOUT the dead slot (≤1 ⇒ solo).
+     *  - UNSHADOWED: the returnee rebuilt its state from a fresh zone-boundary re-seed
+     *    (no turn history to resume), so the WHOLE cohort must re-form. If a cohort is
+     *    active, collapse to solo (settles the wallet) first, then reconcile INCLUDING the
+     *    returnee; if a handshake's in flight (or idle), just reconcile it back in. Both
+     *    sides process the same ordered member-unshadowed, so they restart symmetrically.
+     */
+    function onPartyMemberShadowChanged(ticketSlot: number, shadowed: boolean): void {
+      if (shadowed) shadowedTicketSlots.add(ticketSlot);
+      else shadowedTicketSlots.delete(ticketSlot);
+
+      if (shadowed) {
+        if (cohortActive && lastCohortSlots.includes(ticketSlot)) {
+          pushCohortShadowLane(ticketSlot, true); // keep running, auto-fill the dead lane
+        } else {
+          reconcileCohort(); // in-flight/idle — drop the dead slot from formation
+        }
+        return;
+      }
+
+      // UNSHADOWED
+      if (!lastRawCohortSlots.includes(ticketSlot)) {
+        // A returnee that isn't (any longer) one of my raw cohort members — nothing to
+        // re-form; just un-fill any stale auto-filled lane if we're somehow active.
+        if (cohortActive) pushCohortShadowLane(ticketSlot, false);
+        return;
+      }
+      if (cohortActive) {
+        collapseToSolo(); // settles my wallet share of the cohort pot
+        lastCohortSlots = []; // force reconcile to (re)begin a fresh handshake
+      }
+      reconcileCohort(); // fresh formation INCLUDING the returnee
     }
 
     const partySession = new PartySession({
@@ -1044,6 +1198,23 @@ export function GameClient() {
       // no-op guard (see `catchingUp`'s doc above).
       if (catchingUp) return;
 
+      // Handshake deadline safety net (partySession.ts D1/D2): a re-seed exchange that
+      // never converges (a peer that vanished without a clean member-left, a lost offer on
+      // a reload race) must not strand the "connecting" chip forever. Cheap — only touched
+      // while a handshake is actually in flight. Abort, FORGET the live list (so reconcile
+      // always re-forms), retry with a longer window to avoid thrash.
+      if (
+        handshake &&
+        (handshake.phase === "offering" || handshake.phase === "acking") &&
+        now - handshakeStartedAt > handshakeDeadlineMs
+      ) {
+        handshake.abort();
+        handshake = null;
+        handshakeDeadlineMs = HANDSHAKE_RETRY_MS;
+        lastCohortSlots = [];
+        reconcileCohort();
+      }
+
       const elapsed = Math.min((now - lastTime) / 1000, MAX_FRAME_SECONDS);
       lastTime = now;
       lastActiveAt = Date.now();
@@ -1130,7 +1301,28 @@ export function GameClient() {
           drainInput: () => {
             const pending = store.drainPendingInput();
             if (pending.buyShopItem) manualBuyThisFrame = true;
-            return buildFrameInput(pending, store.inventory.length, myCohortIndex);
+            const input = buildFrameInput(pending, store.inventory.length, myCohortIndex);
+            // ECONOMY-INTEGRITY / mid-cohort automation: solo's global config mirror
+            // (`syncPrimaryHeroConfig`) no-ops at heroes.length >= 2, so a bot/auto-cast/
+            // potion toggle would be DEAD in a cohort. Derive my desired config from the
+            // store (same recipe as the solo frame block), diff it against my hero's
+            // current config, and replicate any change on my lane — the engine applies it
+            // lane-index -> hero, so it lands (deterministically, on every client) within
+            // one turn. Re-sent until the change is observed in `state` (idempotent).
+            const diff = heroConfigDiff(
+              desiredHeroConfig({
+                autoHunt: store.autoHunt,
+                autoCast: store.autoCast,
+                autoAllocate: store.autoAllocate,
+                autoHpPotion: store.autoHpPotion,
+                autoManaPotion: store.autoManaPotion,
+                autoHpThreshold: store.autoHpThreshold,
+                autoManaThreshold: store.autoManaThreshold,
+              }),
+              state.heroes[myCohortIndex]?.config,
+            );
+            if (diff) input.setHeroConfig = diff;
+            return input;
           },
           send: (msg) => partySession.send(msg),
           runSubStep: (lanes) => {
@@ -1215,20 +1407,34 @@ export function GameClient() {
       // server claim (flushed on the autosave cadence / tab-hide below). The
       // engine's roll is already deterministic + monotonic (rollId), so this
       // is a plain append — no on-the-spot dedup needed in the common case.
+      // ECONOMY-INTEGRITY (cohortWallet.ts): in a cohort every client's shared sim emits
+      // the SAME `itemDrop`/`stoneDrop` events (no hero attribution), so buffering them
+      // all would mint every drop N times (claims are idempotent per rollId, so all N
+      // clients each mint it once into their OWN inventory = N× duplication). Assign each
+      // drop deterministically to exactly ONE member and buffer only MY assigned drops.
+      // The field fx/SFX pop still plays for everyone (one-way renderer/audio below) — a
+      // shared visual — but only the assignee claims + toasts it. Solo is unchanged.
+      const cohortSize = Math.max(1, state.heroes.length);
+      const dropIsMine = (rollId: string): boolean =>
+        !cohortActive || dropAssignedIndex(rollId, cohortSize) === myCohortIndex;
       for (const ev of frameEvents) {
         if (ev.type === "itemDrop") {
-          pendingClaims.push({
-            rollId: ev.rollId,
-            templateId: ev.templateId,
-            stage: state.stage,
-          });
+          if (dropIsMine(ev.rollId)) {
+            pendingClaims.push({
+              rollId: ev.rollId,
+              templateId: ev.templateId,
+              stage: state.stage,
+            });
+          }
         } else if (ev.type === "stoneDrop") {
           // หินเสริมพลัง drop juice: buffer the claim for the same batched
           // flush AND toast immediately (unlike gear, a stone toast doesn't
           // wait on the server mint — see `DropFeed.tsx`'s module doc). The
           // field fx/SFX pop is handled one-way by the renderer/audio below.
-          pendingStoneClaims.push({ rollId: ev.rollId, qty: ev.qty });
-          useGameStore.getState().pushStoneFeed(ev.qty);
+          if (dropIsMine(ev.rollId)) {
+            pendingStoneClaims.push({ rollId: ev.rollId, qty: ev.qty });
+            useGameStore.getState().pushStoneFeed(ev.qty);
+          }
         } else if (ev.type === "townArrived") {
           // M7.5 sell-trip bot: the engine restocked already (engine-side);
           // the CLIENT owns item instances, so a "sell"/"restockSell" arrival
@@ -1297,16 +1503,33 @@ export function GameClient() {
         // `state.heroes` is in SLOT order, so my hero can sit at index 1-2 — hand
         // the snapshot a my-hero-first view (engine state itself is untouched;
         // same object refs, so identity reads like `h === heroes[0]` stay true).
-        const snapState =
-          cohortActive && myCohortIndex > 0
-            ? {
-                ...state,
-                heroes: [
+        // ECONOMY-INTEGRITY: in a cohort the HUD must show MY personal wallet, not the
+        // shared pot — spread my virtualized wallet fields over the snapshot state
+        // (buildSnapshot reads `gold`, `materials`, and `consumables` for the potion
+        // counts + quick-use `ready` flags). Applies for EVERY cohort member incl. index 0
+        // (even the authority's personal share diverges from the pot over time). Never
+        // mutates the live `state`.
+        let snapState: GameState = state;
+        if (cohortActive) {
+          const heroes =
+            myCohortIndex > 0
+              ? [
                   state.heroes[myCohortIndex],
                   ...state.heroes.filter((_, i) => i !== myCohortIndex),
-                ],
+                ]
+              : state.heroes;
+          const w = myVirtualWallet();
+          snapState = w
+            ? {
+                ...state,
+                heroes,
+                gold: w.gold,
+                goldEarned: w.goldEarned,
+                materials: w.materials,
+                consumables: { ...state.consumables, ...w.consumables },
               }
-            : state;
+            : { ...state, heroes };
+        }
         store.syncFromEngine(buildSnapshot(snapState));
       }
 
@@ -1327,7 +1550,24 @@ export function GameClient() {
       // each client only ever POSTs its own slice.
       if (cohortActive) {
         const mine = state.heroes[myCohortIndex] ?? state.heroes[0];
-        return toSaveData({ ...state, heroes: [mine] });
+        // ECONOMY-INTEGRITY: never persist the SHARED pot into my save row — overwrite the
+        // wallet fields with my virtualized personal share (cohortWallet.ts). Without this,
+        // autosave + the hide beacon write the authority's gold/goldEarned/consumables into
+        // MY row (materials is server-authoritative on persist, but included for a coherent
+        // blob). `myVirtualWallet` reads the live pot, never mutating it.
+        const w = myVirtualWallet();
+        const base = { ...state, heroes: [mine] };
+        return toSaveData(
+          w
+            ? {
+                ...base,
+                gold: w.gold,
+                goldEarned: w.goldEarned,
+                materials: w.materials,
+                consumables: { ...state.consumables, ...w.consumables },
+              }
+            : base,
+        );
       }
       return toSaveData(state);
     }

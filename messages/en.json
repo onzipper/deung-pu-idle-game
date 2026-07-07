@@ -719,7 +719,7 @@
       "subtitle": "A solo MMORPG-lite adventure — hunt monsters, level up, and climb the ranks",
       "guestButton": "Play now",
       "guestLoading": "Entering the game...",
-      "guestHint": "Jump straight in, no sign-up needed. Progress is saved to this device — you can register later in Settings to unlock friend features (coming soon)",
+      "guestHint": "Jump straight in, no sign-up needed. Progress is saved to this device — you can register later in Settings to unlock friends and parties",
       "guestError": "Couldn't enter the game — try again",
       "dividerLabel": "or",
       "loginTab": "Log in",
@@ -742,7 +742,7 @@
       "passwordPlaceholder": "Choose a password",
       "displayNameLabel": "Display name (optional)",
       "displayNamePlaceholder": "Your nickname",
-      "displayNameHint": "Shown to friends in the friend system (coming soon)",
+      "displayNameHint": "Shown to friends in the friend and party systems",
       "submitButton": "Register",
       "submitting": "Registering...",
       "emailTaken": "That email is already registered",
@@ -764,7 +764,7 @@
       "logoutCancel": "Cancel",
       "logoutConfirm": "Confirm log out",
       "loggingOut": "Logging out...",
-      "guestPitch": "You're playing as a guest — register to unlock friend features (coming soon). Your current progress binds to the new account right away, nothing is lost",
+      "guestPitch": "You're playing as a guest — register to unlock friends and parties. Your current progress binds to the new account right away, nothing is lost",
       "switchAccountHint": "Already have an account? You can log in with it instead — but any unregistered progress on this device won't follow unless you register first",
       "switchAccountLink": "Log in with another account"
     }
@@ -797,6 +797,12 @@
     "tabSell": "Sell",
     "tabBuyback": "Buy back",
     "sellEmptyHint": "Bag's empty — nothing to sell.",
+    "multiSelectToggle": "Select multiple",
+    "selectAllButton": "Select all",
+    "clearSelectionButton": "Clear",
+    "cancelSelectionButton": "Cancel",
+    "sellSelectedButton": "Sell selected ({count}) — 💰{total}",
+    "sellSelectedConfirm": "Confirm sell {count} items — 💰{total}?",
     "buybackEmptyHint": "Nothing to buy back — sold items stick around here for 3 days",
     "buybackLoading": "Loading...",
     "buybackLoadError": "Couldn't load — try again",
@@ -1094,6 +1100,15 @@
           "warpSolo": "🌀 Warping or changing zones while in a party now takes just YOU — the rest keep playing (no more dragging the whole crew) — and you regroup automatically when zones match again",
           "townWalk": "🏘️ Everyone in a party can walk around town now (it used to be just one member)"
         }
+      },
+      "2026-07-08i": {
+        "items": {
+          "wallet": "💰 Party wallets are personal now — joining a party never loses or swaps your gold/potions/stones with a friend's; income while hunting together is split evenly per head",
+          "drops": "🎁 Party drops rotate fairly, one owner per drop — everyone collects a similar share (fixes the every-client-duplicate bug)",
+          "botToggle": "🤖 Bot/auto settings changed mid-party take effect immediately (used to require leaving the party)",
+          "reconnect": "🔄 Reloading or tabbing away and back now rejoins your party group automatically — no more dead-end \"connecting…\"",
+          "multiSell": "🛒 Multi-select selling! A \"select multiple\" mode in Pah Pu's shop — pick items, see the total, sell in one tap"
+        }
       }
     }
   },
@@ -1175,7 +1190,7 @@
     "errorRateLimited": "Sending too fast — slow down a bit",
     "errorGeneric": "That didn't work — try again",
     "partyGroupTitle": "Party ({count}/{max})",
-    "partyPhaseNote": "Party phase one: see each other status first — playing together for real is coming soon",
+    "partyPhaseNote": "Walk to the same hunting zone as a party member to see each other and hunt together in real time — EXP bonus + EXP share while in the same zone; split up and farm freely anytime",
     "partyLeaderBadge": "Party leader",
     "partyInviteButton": "Invite to party",
     "partyInviteSent": "Invite sent",
