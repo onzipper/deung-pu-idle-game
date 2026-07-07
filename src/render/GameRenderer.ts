@@ -42,11 +42,14 @@ import {
   type EnemyView,
 } from "@/render/views/enemyView";
 import { createHeroView, updateHeroView, type HeroView } from "@/render/views/heroView";
+import { createNpcView, updateNpcView, type NpcView } from "@/render/views/npcView";
 import {
   createProjectileView,
   updateProjectileView,
   type ProjectileView,
 } from "@/render/views/projectileView";
+import { NpcSpeechBubble } from "@/render/fx/npcSpeechBubble";
+import { TOWN_NPCS, type TownNpcId } from "@/render/townNpcs";
 
 /**
  * Manual play (M7.8) tap outcome: a live enemy id (monsters WIN over ground
@@ -56,6 +59,17 @@ import {
  * outside the logical world rect (the letterbox bars).
  */
 export type PointerHitResult = { kind: "monster"; id: number } | { kind: "ground"; x: number } | null;
+
+/**
+ * Town NPCs (ป้าปุ๊/ลุงดึ๋ง) tap outcome — see `hitTestNpc()`. Kept as a
+ * SEPARATE method/type from `hitTestPointer()`/`PointerHitResult` above
+ * (rather than folded into that union) so this task's render-only plumbing
+ * can land without touching `GameClient.tsx`'s existing tap-handler
+ * (`hit.kind === "monster" ? ... : hit.x` narrowing) — the later UI-gating
+ * wave is expected to call this alongside `hitTestPointer()` (NPC check
+ * first while in town, since the town zone never has live enemies).
+ */
+export type NpcHitResult = { kind: "npc"; id: TownNpcId } | null;
 
 /** Minimum on-screen touch half-extent (CSS px, NOT world units) a monster
  * hit-test guarantees regardless of the current letterbox scale — the task's
@@ -87,6 +101,12 @@ export class GameRenderer {
   private bossView: BossView | null = null;
   private bossHpBar: Graphics | null = null;
   private bossLabel: Text | null = null;
+  /** ป้าปุ๊/ลุงดึ๋ง — fixed-position town actors, built once in `create()` and
+   * kept for the whole session (never pooled-by-id like heroes/enemies,
+   * there are always exactly the two of them). Visibility toggles with the
+   * current zone kind every `draw()`. */
+  private npcViews: Map<TownNpcId, NpcView> | null = null;
+  private npcSpeech: NpcSpeechBubble | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private startTime = 0;
   /** Real elapsed ms at the previous draw() call — used to derive a real-time
@@ -182,6 +202,18 @@ export class GameRenderer {
     });
     overlay.addChild(this.bossHpBar, this.bossLabel);
 
+    // Town NPCs (ป้าปุ๊/ลุงดึ๋ง): fixed-position, built once — same layer as
+    // heroes/enemies/boss so they z-order correctly against the entity list,
+    // even though they never move. Visibility is toggled per-frame in
+    // `draw()` (only rendered while standing in the town zone).
+    this.npcViews = new Map();
+    for (const anchor of TOWN_NPCS) {
+      const view = createNpcView(anchor.id);
+      entities.addChild(view);
+      this.npcViews.set(anchor.id, view);
+    }
+    this.npcSpeech = new NpcSpeechBubble(fx);
+
     this.fx = new FxController(
       fx,
       world,
@@ -266,6 +298,17 @@ export class GameRenderer {
     }
     this.drawBossOverlay(state);
 
+    // Town NPCs: only animate/render while actually standing in the town
+    // zone — `zoneAt` is the same sanctioned read `enemyMapId`/the boss theme
+    // lookup above already use.
+    const inTown = zoneAt(state.location).kind === "town";
+    if (this.npcViews) {
+      for (const view of this.npcViews.values()) {
+        updateNpcView(view, { dt, visible: inTown });
+      }
+    }
+    this.npcSpeech?.update(dt);
+
     this.projectilePool.beginFrame();
     for (const p of state.projectiles) {
       updateProjectileView(this.projectilePool.get(p.id), p, state);
@@ -295,6 +338,13 @@ export class GameRenderer {
 
     this.fx?.destroy();
     this.fx = null;
+
+    if (this.npcViews) {
+      for (const view of this.npcViews.values()) view.destroy({ children: true });
+      this.npcViews = null;
+    }
+    this.npcSpeech?.destroy();
+    this.npcSpeech = null;
 
     this.environment?.destroy();
     this.environment = null;
@@ -394,6 +444,41 @@ export class GameRenderer {
     }
     if (bestId !== null) return { kind: "monster", id: bestId };
     return { kind: "ground", x: wx };
+  }
+
+  /**
+   * Town NPCs (M7.x "Town NPCs" task): same canvas-px -> world-space
+   * conversion as `hitTestPointer()` above (letterbox `baseTransform`, never
+   * the shaking/punching live transform), checked against the fixed
+   * `TOWN_NPCS` anchors. Only ever hits while the CURRENT zone is town (the
+   * anchors are meaningless positions in any farm/boss zone) — a separate
+   * method rather than folded into `hitTestPointer()`'s union, see
+   * `NpcHitResult`'s doc comment for why.
+   */
+  hitTestNpc(canvasX: number, canvasY: number, state: GameState): NpcHitResult {
+    if (!this.app) return null;
+    if (zoneAt(state.location).kind !== "town") return null;
+    const t = this.baseTransform;
+    const wx = (canvasX - t.x) / t.scale;
+    const wy = (canvasY - t.y) / t.scale;
+    if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
+
+    for (const anchor of TOWN_NPCS) {
+      if (Math.abs(wx - anchor.x) <= anchor.radius) return { kind: "npc", id: anchor.id };
+    }
+    return null;
+  }
+
+  /**
+   * UI-triggered (a later "ui gating" wave decides WHEN/WHAT text): shows a
+   * ~2.5s speech bubble above `npcId`'s head. No-op if `npcId` isn't one of
+   * the two built-once town actors (defensive — should never happen given
+   * `TownNpcId` is a closed union).
+   */
+  showNpcSpeech(npcId: TownNpcId, text: string): void {
+    const view = this.npcViews?.get(npcId);
+    if (!view || !this.npcSpeech) return;
+    this.npcSpeech.show(view.headAnchor, text);
   }
 
   /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */
