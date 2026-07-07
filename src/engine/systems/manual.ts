@@ -12,6 +12,7 @@
  */
 
 import { CONFIG } from "@/engine/config";
+import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
 import { getTargets } from "@/engine/systems/targeting";
 import type { CombatTarget } from "@/engine/entities";
@@ -70,4 +71,32 @@ export function applyManualCommand(state: GameState, input: FrameInput): void {
     }
     // Invalid / dead / despawned id -> ignore gracefully (clears nothing).
   }
+}
+
+/**
+ * The walk-only slice of command handling for the TOWN early-return in `step()`
+ * (UAT round-3 bug: that branch skips `updateHeroes` — no combat in the safe hub —
+ * which silently dropped every `moveTo` there, so tap-the-ground and the phase-3
+ * tap-an-NPC-to-approach did nothing in town). Honours a MOVE command at hunt
+ * speed, completing within `arriveEps` exactly like combat's handling. An ATTACK
+ * command cannot be created in town (no live targets to lock), and a stale one is
+ * already cleared on zone arrival, so only MOVE is handled.
+ *
+ * Yields to the two things that own the hero's feet in town: the bot's own town
+ * walk (`state.botWalk` drives `hero.x` directly — "a manual command can't wedge
+ * the trip", it waits the walk out) and a fast-travel channel (the hero stands
+ * still, mirroring the farm-zone `!channeling` gate on `updateHeroes`).
+ */
+export function tickTownManualWalk(state: GameState): void {
+  const h = state.heroes[0];
+  if (!h || h.dead) return;
+  if (!h.command || h.command.kind !== "move") return;
+  if (state.botWalk || state.fastTravelCast) return;
+  const d = h.command.x - h.x;
+  if (Math.abs(d) <= CONFIG.manual.arriveEps) {
+    h.command = null;
+    return;
+  }
+  const stepPx = CONFIG.hunt.huntSpeed * FIXED_DT;
+  h.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
 }

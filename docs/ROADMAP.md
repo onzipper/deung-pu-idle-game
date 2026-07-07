@@ -135,9 +135,16 @@
 
 > **UAT round-3 CLOSED (2026-07-08, หลัง PR #12):** เมือง NPC ครบวงจร (ป้าปุ๊/ลุงดึ๋ง, แตะซ้ำเพื่อคุย, panel เปิดผ่าน NPC เท่านั้น, บอทเดินไปหาเอง ~3.5 วิ/ทริป, anchors ใน CONFIG.townNpcs) · วาปง่าย (ตัด aggro block + damage interrupt, ตายกลางร่ายเท่านั้นที่ยกเลิก, บอสยังล็อก) · เควสคลาส 3 กติกาไต่ก่อน (tier3GateCleared = ต้องปลดห้องบอสแมพ 3 เอง, ไม่มีข้ามโซน, strand guard ตอน boot, guide-me พาไปหน้าด่านจริงระหว่างไต่) · เควสนำทุกเส้นทางบอท (botFarmTarget) · auto-advance เฉพาะ fresh unlock (free-farm โซนเก่าไม่โดนลาก) · แก้ softlock หลังล้มบอสเควส (returnToQuestFrontier) · การ์ดเควสอันดับ 1 เหนือประตูบอส · แบนเนอร์ "มีแพตช์ใหม่" (build id พ่วง /api/save, เซฟก่อน reload) · patch notes 2026-07-08b — 984/984, sim canonical เกตครบ (บอสเควสชนะ 3/3 คลาส)
 
-## M8 — Party
+## M8 — Party & Friends (ปรับสโคป 2026-07-08: เจ้าของขอเพิ่มระบบเพื่อน + ระบบ account จริง)
 
-- [ ] Websocket infra spike: ประเมิน VPS/Node server + ห้องปาร์ตี้ (ตัดสินใจ infra ก่อนเริ่ม)
+> **กติกาหลักจากเจ้าของ:** เพื่อน**ผูกกับ account ไม่ใช่ตัวละคร** — สร้างตัวใหม่/สลับตัวเล่น friend list ต้องอยู่ครบเหมือนเดิม → ต้องมี **account จริง (login)** มาก่อน friend graph · ฟีเจอร์เพื่อนชุดแรก: เห็น online/offline · เห็นว่าอยู่โซนไหน · เล่นตัวละครตัวไหนอยู่ · ขอปาร์ตี้ · ส่ง emoji หากัน
+>
+> โชคดีที่ schema เป็น `User → Character(≤3)` อยู่แล้ว — friend = ตาราง `User↔User` ได้ทันที และ `lastSeen` ก็ server-stamp ต่อ save อยู่แล้ว (HOF ใช้อยู่) = ฐาน presence ฟรี · **Friends MVP ไม่ต้องรอ websocket** (polling พอ) — websocket ค่อยมาอัปเกรดเป็น push + ทำ party จริง
+
+- [ ] **Phase 0 — Account system**: สมัคร/ล็อกอิน (identity อยู่หลัง `src/server/identity.ts` จุด swap ที่เตรียมไว้แล้ว) · **อัปเกรด anonymous cookie → account โดย save/ตัวละครเดิมห้ามหาย** (claim account จาก cookie เดิม) · ผู้เล่นเก่าที่ยังไม่สมัครต้องเล่นต่อได้ (cookie เดิมใช้ได้ แต่ฟีเจอร์เพื่อนต้องมี account) · friend code ต่อ account + display name
+- [ ] **Phase 1 — Friends MVP (polling, ก่อน websocket)**: ส่งคำขอเป็นเพื่อน (friend code / ค้นชื่อตัวละคร) + รับ/ปฏิเสธ/ลบ + กัน spam · friend panel: online/offline (จาก lastSeen), ตัวละครที่กำลังเล่น + โซนปัจจุบัน (denormalize stamp ตอน `/api/save` เหมือน level/power cache) · ส่ง emoji หากัน (store-and-forward + polling; อัปเกรดเป็น realtime push ตอน websocket มา)
+- [ ] Websocket infra spike: ประเมิน VPS/Node server + ห้องปาร์ตี้ + presence/emoji push (ตัดสินใจ infra ก่อนเริ่ม party จริง)
+- [ ] **Party request ผ่าน friend panel**: ชวนเพื่อน online เข้าปาร์ตี้ → accept แล้วเข้าห้องเดียวกัน (invite ค้างผ่าน polling ได้ก่อน websocket แต่ตัว party จริงต้องรอ websocket)
 - [ ] Lockstep party สูงสุด 3 คน: เห็นตัวกันจริง แชร์ exp+เงิน ของดรอปจอใครจอมัน + server replay validation
 - [ ] ร่างเงา offline (AI ใช้สแตต/สกิลจริง + ป้ายออฟไลน์ + เข้า offline-idle cap)
 - [ ] ไอเทมวาปหาสมาชิก (ขายที่ NPC)
