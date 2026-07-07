@@ -474,7 +474,12 @@ describe("M7.9b tier-3 quest BOSS objective (young Glacial Sovereign)", () => {
     step(s, {}); // resolveDeaths → onBossKilled (quest boss)
     expect(h.quest!.progress[1]).toBe(1); // killBoss objective advanced
     expect(isQuestComplete(h)).toBe(true); // quest done → hero may now evolve
-    expect(s.phase).toBe("victory");
+    // M7.95 SOFT-LOCK FIX: the win RETURNS the hero to the frontier field (phase battle),
+    // never a dead-end paused "victory" in the now-inaccessible boss room (the boss-room
+    // grant revoked the instant the killBoss objective filled above).
+    expect(s.phase).toBe("battle");
+    expect(s.boss).toBeNull();
+    expect(s.location).toEqual({ mapId: "map4", zoneIdx: 0 });
     // The scaled practice boss must NOT progress the world: no map5 unlock, no persisted map4.
     expect(s.unlockedZones.map5 ?? 0).toBe(0);
     expect(s.unlockedZones.map4 ?? 0).toBe(0);

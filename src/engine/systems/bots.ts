@@ -31,6 +31,7 @@ import {
 } from "@/engine/systems/consumables";
 import {
   beginTransit,
+  botFarmTarget,
   isZoneUnlocked,
   townLocation,
   zoneAt,
@@ -211,7 +212,9 @@ function tickSellDwell(state: GameState, inventoryCount?: number): void {
  * Depth-scaled like the to-town walk (owner call 2026-07-06): returning to a
  * deep farm zone takes botWalkSeconds x zoneIdx, symmetric with the trip out. */
 function botReturnToFarm(state: GameState): void {
-  const back = state.lastFarmZone;
+  // QUEST LEADS: return to the quest's frontier field while an evolution quest pins
+  // the hero, else the ordinary lastFarmZone (see `world.botFarmTarget`).
+  const back = botFarmTarget(state);
   if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
     const depth = Math.max(1, back.zoneIdx);
     beginTransit(state, back, CONFIG.travel.botWalkSeconds * depth, "walk");

@@ -30,7 +30,7 @@ import { FIXED_DT } from "@/engine/core/loop";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { creditGold } from "@/engine/systems/economy";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
-import { tier3QuestId, isTier3BossObjectiveActive } from "@/engine/systems/quests";
+import { tier3QuestId, isTier3BossObjectiveActive, isQuestComplete } from "@/engine/systems/quests";
 import type { WorldLocation, ZoneKind } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -245,6 +245,46 @@ export function effectiveUnlockedZones(state: GameState): Record<string, number>
     if (preview) out[preview.mapId] = Math.max(out[preview.mapId] ?? 0, preview.zoneIdx + 1);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// "Quest leads" routing (M7.95, owner "เควสนำมาก่อน" 2026-07-08). While the solo hero
+// holds an evolution quest with a MAP-SCOPED objective still open, ALL idle automation
+// (death auto-return, bot town-trip return, auto-advance guard) prefers the quest's
+// granted frontier field over the hero's ordinary lastFarmZone — so a "พาไปเลย" guide
+// jump can't be immediately re-routed back to ordinary farming.
+// ---------------------------------------------------------------------------
+
+/**
+ * The frontier field a HELD evolution quest pins the automation to, or null when no
+ * quest leads. Only the TIER-3 quest has map-scoped objectives (both scoped to
+ * killMapId = map4), so only it pins — through BOTH the kill phase and the boss-
+ * objective phase (a quest still not fully complete). The tier-1 class-change quest's
+ * objectives are UNSCOPED (count anywhere) so it never pins: routing stays on
+ * lastFarmZone (unchanged pre-M7.95 behavior — s1-15 byte-identical). Reuses
+ * `questGrantsZoneAccess` so a target the hero can't actually enter falls through to
+ * null (defensive). Pure state derivation (no RNG / wall-clock).
+ */
+function questFarmZone(state: GameState): WorldLocation | null {
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return null;
+  if (isQuestComplete(hero!)) return null; // fully done -> about to evolve; no pin
+  const preview = tier3PreviewZone();
+  if (!preview || !questGrantsZoneAccess(state, preview)) return null;
+  return preview;
+}
+
+/**
+ * The zone ALL idle automation treats as the solo hero's "home" farm: the quest-led
+ * frontier while an evolution quest pins it (see `questFarmZone`), else the ordinary
+ * `state.lastFarmZone`. Every auto-routing path funnels through this ONE derivation —
+ * death/scroll auto-return (`arriveAtZone`), the bot town-trip return
+ * (`systems/bots.botReturnToFarm`), and the auto-advance guard (`maybeAutoAdvance`) —
+ * so "quest leads" holds everywhere with no per-path special-casing. Pure.
+ */
+export function botFarmTarget(state: GameState): WorldLocation {
+  return questFarmZone(state) ?? state.lastFarmZone;
 }
 
 /** Per-map unlocked counts covering every global zone up to (and incl.) `loc`. */
@@ -495,7 +535,9 @@ export function arriveAtZone(
     // Toggle-gated for live play ("รอที่เมือง"); the offline replay forces it on so
     // idle never stalls. A plain "walk" into town (manual visit) stays put.
     if ((reason === "death" || reason === "scroll") && state.autoReturn) {
-      const back = state.lastFarmZone;
+      // QUEST LEADS: return to the quest's frontier field while an evolution quest
+      // pins the hero (else the ordinary lastFarmZone) — see `botFarmTarget`.
+      const back = botFarmTarget(state);
       if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
         beginTransit(state, back, CONFIG.world.transitSeconds, "walk");
       }
@@ -506,6 +548,30 @@ export function arriveAtZone(
     state.events.push({ type: "bossRoomEntered", mapId: zone.mapId, stage: zone.stage });
   }
   return zone;
+}
+
+/**
+ * Resolve a tier-3 QUEST-boss (young Glacial Sovereign) WIN by returning the solo hero to
+ * the frontier field instead of stranding them in the boss room. M7.95 SOFT-LOCK FIX:
+ * `boss.onBossKilled` skips `onBossRoomCleared` for the quest boss (it must not unlock the
+ * next map), and the boss-room access grant revokes the instant the killBoss objective
+ * fills — so leaving the hero in the now-inaccessible boss room on a paused "victory"
+ * dead-ends the UI (nothing tappable). Instead reuse the fast-travel arrival machinery:
+ * `arriveAtZone(..., "fasttravel")` sets phase="battle", respawns the frontier field,
+ * full-heals, and emits `zoneEntered` (the clean arrival render/UI already understand);
+ * the hero enters at the field's left edge like any warp. The now-complete quest then
+ * surfaces its reachable "เปลี่ยนคลาส!" (evolve) affordance on the quest card. Destination
+ * is derived from CONFIG (`tier3PreviewZone`), NOT `botFarmTarget`, because a COMPLETE
+ * quest no longer pins a zone. Returns false (state untouched) if it can't resolve the
+ * frontier. Deterministic (no RNG / wall-clock).
+ */
+export function returnToQuestFrontier(state: GameState): boolean {
+  const frontier = tier3PreviewZone();
+  if (!frontier) return false;
+  arriveAtZone(state, frontier, "fasttravel");
+  const h = state.heroes[0];
+  if (h) h.x = gateX(frontier.mapId, "left");
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -531,27 +597,33 @@ export function respawnToTown(state: GameState): void {
  * the old per-stage boss reward (xp/gold parity, no per-zone boss); unlocking the
  * BOSS ROOM grants nothing (the boss room pays out itself). Backtracking a cleared
  * zone re-grants nothing (next already unlocked). Called from step after combat.
+ *
+ * RETURNS true iff THIS call just transitioned the next FARM zone locked->unlocked
+ * (the fresh-frontier moment) — the deterministic same-step signal `maybeAutoAdvance`
+ * gates on (owner 2026-07-08: auto-advance fires ONLY at the progression frontier, not
+ * when parked in an already-cleared zone). A boss-room unlock returns false (never an
+ * auto-advance target). No persisted flag — the signal is threaded through step().
  */
-export function checkZoneUnlock(state: GameState): void {
-  if (state.traveling || state.phase !== "battle") return;
+export function checkZoneUnlock(state: GameState): boolean {
+  if (state.traveling || state.phase !== "battle") return false;
   const zone = zoneAt(state.location);
-  if (zone.kind !== "farm") return;
+  if (zone.kind !== "farm") return false;
   // A tier-3 quest PREVIEW zone (map4 z1, only quest-GRANTED, not persist-unlocked)
   // must NEVER cascade a real unlock to its neighbour — that would permanently open
   // map4 without the s15 boss kill (the redesign's core invariant). Only a
   // persist-unlocked farm zone advances the frontier.
-  if (!isZonePersistUnlocked(state, state.location)) return;
-  if (state.kills < CONFIG.killGoal(zone.stage)) return;
+  if (!isZonePersistUnlocked(state, state.location)) return false;
+  if (state.kills < CONFIG.killGoal(zone.stage)) return false;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
-  if (!next || next.mapId !== zone.mapId) return;
+  if (!next || next.mapId !== zone.mapId) return false;
   // Boss-gate arming (2026-07-07 fix, moved here from combat.ts): the challenge
   // affordance lights up ONLY where enterBossRoom can actually work — quota met
   // AT the map's LAST farm zone (the next zone is this map's boss room). The old
   // combat-side check armed on quota alone, so any cleared zone (kills persist
   // per-zone since SAVE v13) showed a glowing button that walked nowhere.
   if (next.kind === "boss" && !state.bossReady) state.bossReady = true;
-  if (next.zoneIdx < (state.unlockedZones[next.mapId] ?? 0)) return; // already unlocked
+  if (next.zoneIdx < (state.unlockedZones[next.mapId] ?? 0)) return false; // already unlocked
 
   state.unlockedZones[next.mapId] = next.zoneIdx + 1;
   state.events.push({ type: "zoneUnlocked", mapId: next.mapId, zoneIdx: next.zoneIdx });
@@ -559,28 +631,43 @@ export function checkZoneUnlock(state: GameState): void {
   if (next.kind === "farm") {
     creditGold(state, CONFIG.goldPerBoss(zone.stage));
     grantKillXp(state, CONFIG.leveling.xpPerBossKill(zone.stage));
+    return true; // fresh farm-zone unlock this step -> the auto-advance frontier moment
   }
+  return false; // a boss-room unlock is a player beat, never an auto-advance target
 }
 
 /**
- * Auto next-zone (owner request 2026-07-07, UI toggle `state.autoAdvance`):
- * once the CURRENT farm zone's quota is met and the next FARM zone in the same
- * map is unlocked, walk forward automatically. Never auto-enters a boss room
- * (the challenge is a player beat) and never crosses maps (that requires the
- * boss anyway). No-op mid-travel/cast/boss/death or in town.
+ * Auto next-zone (owner request 2026-07-07, UI toggle `state.autoAdvance`): on the step
+ * the next FARM zone just unlocked from farming HERE, walk forward automatically.
+ *
+ * FRONTIER-ONLY (owner 2026-07-08): gated on `justUnlockedNextFarm` — the same-step
+ * signal from `checkZoneUnlock`. A hero PARKED in an already-cleared zone (its next was
+ * unlocked on arrival, a deliberate free-farm spot) produces NO unlock transition, so it
+ * NEVER chain-walks toward the frontier. Never auto-enters a boss room (the challenge is
+ * a player beat — a boss unlock returns false above) and never crosses maps. No-op
+ * mid-travel/cast/boss/death or in town.
  */
-export function maybeAutoAdvance(state: GameState): void {
+export function maybeAutoAdvance(state: GameState, justUnlockedNextFarm: boolean): void {
   if (!state.autoAdvance) return;
+  // FRONTIER-ONLY: only the fresh locked->unlocked transition (this step) advances.
+  if (!justUnlockedNextFarm) return;
   if (state.traveling || state.fastTravelCast || state.phase !== "battle") return;
   const cur = zoneAt(state.location);
   if (cur.kind !== "farm") return;
   const hero = state.heroes[0];
   if (!hero || hero.dead) return;
-  if (state.kills < CONFIG.killGoal(cur.stage)) return;
+  // QUEST LEADS (owner "เควสนำมาก่อน"): while an evolution quest pins the hero to a
+  // frontier field, never auto-advance OUT of it — advancing abandons the map-scoped
+  // objective and the automation must never creep toward the boss room (the player
+  // taps the challenge button; automation stays dumb). A quest PREVIEW zone never
+  // triggers `justUnlockedNextFarm` (it isn't persist-unlocked), so this is
+  // defense-in-depth that also covers a really-unlocked map4 while the quest is held.
+  const pinned = questFarmZone(state);
+  if (pinned && pinned.mapId === cur.mapId && pinned.zoneIdx === cur.zoneIdx) return;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
   if (!next || next.kind !== "farm" || next.mapId !== cur.mapId) return;
-  if (next.zoneIdx >= (state.unlockedZones[next.mapId] ?? 0)) return; // locked
+  if (next.zoneIdx >= (state.unlockedZones[next.mapId] ?? 0)) return; // locked (defensive)
   walkToZone(state, { mapId: next.mapId, zoneIdx: next.zoneIdx });
 }
 

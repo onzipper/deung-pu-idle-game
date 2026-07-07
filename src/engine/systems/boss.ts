@@ -24,7 +24,7 @@ import {
   isTier3QuestBossFight,
   tier3QuestBossScale,
 } from "@/engine/systems/quests";
-import { onBossRoomCleared } from "@/engine/systems/world";
+import { onBossRoomCleared, returnToQuestFrontier } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
 import { creditGold } from "@/engine/systems/economy";
 import { recordBossClear } from "@/engine/systems/hallOfFame";
@@ -305,7 +305,14 @@ export function onBossKilled(state: GameState): void {
   // quest but never unlocks map5 or persists any map4 progression. The hero evolves to
   // tier 3, then returns to beat the REAL s15 boss, and THAT does the persisted map4
   // unlock; the next (real) s20 fight then unlocks map5 the normal way.
-  if (!questBoss) onBossRoomCleared(state);
+  //
+  // M7.95 SOFT-LOCK FIX: the quest boss must ALSO not strand the hero. The killBoss
+  // objective advanced above revoked the boss-room access grant this very step, so leaving
+  // the hero in the now-illegal boss room on a paused "victory" dead-locks the UI. Resolve
+  // the win by warping them back to the frontier field (phase->battle, field respawned) —
+  // the completed quest surfaces its reachable "เปลี่ยนคลาส!" evolve affordance there.
+  if (questBoss) returnToQuestFrontier(state);
+  else onBossRoomCleared(state);
 }
 
 /** Team wiped: boss leaves, revive the team, resume normal waves (retry allowed). */

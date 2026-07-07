@@ -88,6 +88,10 @@ export {
   // surfaces without a persisted unlock.
   questGrantsZoneAccess,
   effectiveUnlockedZones,
+  // "Quest leads" routing (M7.95): the single derivation every idle-automation path
+  // (death auto-return, bot town-trip return, auto-advance guard) uses to prefer the
+  // active evolution quest's granted frontier over the ordinary lastFarmZone.
+  botFarmTarget,
   firstFarmLocation,
   type Zone,
   type WorldNav,
