@@ -76,6 +76,13 @@ function Stepper({
   onChange: (next: number) => void;
 }) {
   const clamp = (n: number) => Math.max(min, max !== undefined ? Math.min(max, n) : n);
+  // Hit-zone trick (audit #6, same pattern as `InfoTip.tsx`'s `before:-inset-3`):
+  // the buttons stay their current VISUAL width (`w-9` = 36px, so the whole
+  // stepper doesn't bulk up), but each gets an invisible `before` pseudo-element
+  // extending its actual tap target out to the ≥44px mobile-safe minimum
+  // (36px + 4px each side = 44px). Height is already `min-h-11` (44px).
+  const hitZone =
+    "relative before:absolute before:inset-y-0 before:-inset-x-1 before:content-['']";
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-[11px] text-ddp-ink-muted/80">{label}</span>
@@ -84,7 +91,7 @@ function Stepper({
           type="button"
           onClick={() => onChange(clamp(value - step))}
           aria-label={`${label} -${step}`}
-          className="min-h-11 w-9 text-base font-black text-ddp-ink-muted"
+          className={`min-h-11 w-9 text-base font-black text-ddp-ink-muted ${hitZone}`}
         >
           −
         </button>
@@ -95,7 +102,7 @@ function Stepper({
           type="button"
           onClick={() => onChange(clamp(value + step))}
           aria-label={`${label} +${step}`}
-          className="min-h-11 w-9 text-base font-black text-ddp-ink-muted"
+          className={`min-h-11 w-9 text-base font-black text-ddp-ink-muted ${hitZone}`}
         >
           +
         </button>

@@ -125,7 +125,12 @@ export type OnboardingAnchor =
   | "settings-row"
   /** The bot MASTER switch (`BotMasterSwitch.tsx`, owner UX consolidation
    * 2026-07-07) — see the `botSwitchIntro` step below. */
-  | "bot-master";
+  | "bot-master"
+  /** The WHOLE goal-ladder card (`GoalLadder.tsx`'s outer container) — the
+   * class-change quest's accept/change-class controls live inside it now
+   * (UX-fix wave, moved off `skill-bar`), so quest-related tips spotlight
+   * this instead. */
+  | "goal-ladder";
 
 /** Player intents the "action" advance rule can detect via a snapshot diff.
  * Add a case here + in `didActionOccur` when a later step needs a new one. */

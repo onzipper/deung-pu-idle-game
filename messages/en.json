@@ -43,7 +43,9 @@
     },
     "classQuest": {
       "locked": "🔒 Lv.{gate}",
-      "readyHint": "Quest complete! See the skill bar below to change class."
+      "readyHint": "Quest complete! Tap below to change class.",
+      "bossStatusDone": "Defeated ✓",
+      "bossStatusPending": "Not yet"
     },
     "zoneBoss": {
       "farmingHint": "Kill enemies to unlock the next zone",
@@ -68,15 +70,9 @@
     "autoSlotAssigned": "Auto {slot}",
     "autoSlotToggleHint": "Toggle this skill into a free auto-cast slot",
     "autoSlotNextUnlock": "More auto slots at Lv.{level}",
-    "evolvedBadgeTitle": "{name} (Evolved)",
     "classQuest": {
-      "lockedHint": "Class-change quest unlocks at Lv.{level}",
-      "ariaLocked": "{heroName}: class change (quest unlocks at Lv.{level})",
       "acceptButton": "Accept quest",
       "ariaAccept": "{heroName}: accept the class-change quest",
-      "progress": "{kills}/{goal} · boss {boss}",
-      "progressTitle": "Class-change quest progress",
-      "ariaProgress": "{heroName}: class-change quest — {kills}/{goal} kills, boss {boss, select, done {defeated} other {pending}}",
       "changeButton": "Change class!",
       "confirmLabel": "Confirm?",
       "confirmHint": "Tap again to confirm",
@@ -97,10 +93,24 @@
       "rewardLine": "Reward: become {cls} · a big power jump + a new skill",
       "rewardLineTier3": "Reward: become {cls} · a big power jump + a new skill + 4th skill + 4th auto-cast slot",
       "guideButton": "Guide me",
-      "ariaGuide": "{heroName}: guide me to the next quest objective"
+      "ariaGuide": "{heroName}: guide me to the next quest objective",
+      "disabled": {
+        "dead": "Your hero is down — try again after reviving",
+        "channeling": "Warping in progress — wait a moment",
+        "traveling": "Already traveling — wait until you arrive"
+      }
     },
     "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})",
-    "atkBuffTooltip": "+{percent}% ATK"
+    "atkBuffTooltip": "+{percent}% ATK",
+    "skillInfoAria": "More info about {skillName}",
+    "skillStat": {
+      "damage": "DMG ×{mult}",
+      "radius": "Radius {radius}",
+      "targets": "{targets} hits",
+      "buff": "+{percent}% ATK for {seconds}s",
+      "mana": "Mana {cost}",
+      "cooldown": "CD {cd}s"
+    }
   },
   "stats": {
     "title": "Stats",
@@ -109,6 +119,7 @@
     "combatPower": "Power",
     "autoAllocateToggle": "🎯 Auto Stat: {state, select, on {ON} other {OFF}}",
     "allocateAria": "Add 1 point to {stat}",
+    "autoBlockedHint": "Turn off Auto Stat to allocate manually",
     "primaryTag": "main",
     "names": {
       "str": "STR",
@@ -211,7 +222,7 @@
       },
       "slotAutoSkill": {
         "title": "Slot a skill into auto-cast",
-        "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (up to 3, unlocked by level). Skills outside a slot still need a manual tap."
+        "body": "Tap the \"+ Auto\" badge under a skill to drop it into an auto-cast slot (3 unlock by level, a 4th opens at Class Tier 3). Skills outside a slot still need a manual tap."
       },
       "botSwitchIntro": {
         "title": "This is the bot switch",
@@ -241,11 +252,11 @@
       },
       "questOffered": {
         "title": "Class-change quest available!",
-        "body": "Your hero hit the level gate for the class-change quest. Tap \"Accept quest\" next to the level badge to start it."
+        "body": "Your hero hit the level gate for the class-change quest. Tap \"Accept quest\" in the quest card above to start it."
       },
       "questComplete": {
         "title": "Quest complete!",
-        "body": "Objectives done. Tap \"Change class!\" (tap again to confirm) to advance to the next class tier with a new skill."
+        "body": "Objectives done. Tap \"Change class!\" in the quest card (tap again to confirm) to advance to the next class tier with a new skill."
       },
       "autoSlotUnlocked": {
         "title": "New auto-cast slot unlocked!",
@@ -269,7 +280,7 @@
       },
       "tier3QuestOffered": {
         "title": "Tier-3 class quest available!",
-        "body": "Your evolved hero hit the level gate for its final class-change quest. Tap \"Accept quest\" next to the level badge to start it."
+        "body": "Your evolved hero hit the level gate for its final class-change quest. Tap \"Accept quest\" in the quest card above to start it."
       },
       "skill4Unlocked": {
         "title": "4th skill slot unlocked!",
@@ -311,7 +322,7 @@
       },
       "manaSkills": {
         "title": "Mana, skills & auto slots",
-        "body": "Skills cost mana (fed by INT) plus a cooldown. Each class tier learns 2-3 skills, unlocked by level. Tap a skill to cast it yourself, or drop it into an auto-cast slot with \"+ Auto\" (up to 3 slots, unlocked at Lv 1/15/30) — skills left outside a slot still need a manual tap."
+        "body": "Skills cost mana (fed by INT) plus a cooldown. Each class tier learns 2-3 skills, unlocked by level. Tap a skill to cast it yourself, or drop it into an auto-cast slot with \"+ Auto\" (3 slots unlock at Lv 1/15/30, a 4th opens at Class Tier 3) — skills left outside a slot still need a manual tap."
       },
       "classQuest": {
         "title": "Class-change quest",
@@ -332,7 +343,7 @@
       },
       "autoCast": {
         "title": "✨ Auto Skill",
-        "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. Up to 3 slots unlock by level (Lv 1/15/30) — no need to tap the skill buttons yourself."
+        "body": "When on, your hero automatically casts whatever skills are slotted into its auto-cast slots the instant cooldown and mana are ready. 3 slots unlock by level (Lv 1/15/30), and a 4th opens at Class Tier 3 — no need to tap the skill buttons yourself."
       },
       "autoAllocate": {
         "title": "🎯 Auto Stat",

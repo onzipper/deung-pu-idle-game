@@ -18,12 +18,13 @@
  *    `HudBar.tsx`) stay correct and visible from a fresh Lv.1 hero all the
  *    way through post-evolution farming — this is also what keeps BOTH FTUE
  *    anchors (`boss-panel`, `kill-progress`) resolvable no matter which
- *    narrative rung is current. An OPTIONAL milestone card (levelUp/
- *    classQuest progress) renders additionally, ABOVE the always-present core
- *    loop card, only while one of those is the current rung (i.e. before the
- *    hero evolves to tier 2) — the interactive accept/change-class controls
- *    themselves stay in `SkillBar.tsx` (`ClassQuestAffordance`); this card is
- *    read-only progress, not a second copy of that control.
+ *    narrative rung is current. An OPTIONAL milestone card (levelUp progress /
+ *    the FULL `ClassQuestCard`) renders additionally, ABOVE the always-present
+ *    core loop card, only while one of those is the current rung (i.e. before
+ *    the hero evolves to tier 2) — `ClassQuestCard` is the ONE place the
+ *    class-change quest's accept/guide/change-class controls live (UX-fix
+ *    wave, audit #1: moved off `SkillBar.tsx`'s old `ClassQuestAffordance`,
+ *    which is gone entirely).
  *
  * The `boss-panel` data-onboarding-anchor moves here (was on `BossPanel`'s
  * two branches) onto the always-rendered core-loop card, so the FTUE
@@ -31,7 +32,7 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CONFIG } from "@/engine";
 import { HallOfFamePanel } from "@/ui/hof/HallOfFamePanel";
 import {
@@ -42,6 +43,10 @@ import {
 } from "@/ui/goalLadder";
 import { selectQuestGuideTarget } from "@/ui/questGuide";
 import { useGameStore, type HeroQuestSummary } from "@/ui/store/gameStore";
+
+/** How long an armed (first-tap) class-change button stays armed before it
+ * resets — matches the pre-move `ClassQuestAffordance` behavior in `SkillBar.tsx`. */
+const EVOLVE_ARM_TIMEOUT_MS = 3000;
 
 const RUNG_ICON: Record<GoalRungId, string> = {
   levelUp: "⭐",
@@ -70,15 +75,22 @@ function RungPill({ rung, onClick }: { rung: GoalRungState; onClick?: () => void
           : "border-ddp-border-soft bg-black/20 text-ddp-ink-muted/70";
   const title = rung.status === "locked" ? t("hallOfFameHint") : label;
 
+  // The Hall of Fame rung is ALWAYS clickable (a real shortcut into the
+  // leaderboard viewer, `onClick` only ever passed for this one rung id —
+  // see the module doc) even though its narrative `status` reads "locked"
+  // (M9 doesn't exist yet). A live shortcut must never read as
+  // grayscale/disabled (audit #2/#8, owner-reported "สีเหมือนกดไม่ได้") — give
+  // it the SAME gold-accent language as `HallOfFameButton.tsx` so both
+  // entrances into the same panel read as one consistent affordance.
   if (onClick) {
     return (
       <button
         type="button"
         onClick={onClick}
         title={title}
-        className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold whitespace-nowrap transition-transform duration-100 active:scale-95 ${styles}`}
+        className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-ddp-gold/50 bg-ddp-gold/10 px-2 py-1 text-[10px] font-bold whitespace-nowrap text-ddp-gold-bright transition-all duration-100 hover:border-ddp-gold hover:bg-ddp-gold/20 active:scale-95"
       >
-        <span aria-hidden>{icon}</span>
+        <span aria-hidden>🏆</span>
         {label}
       </button>
     );
@@ -97,11 +109,14 @@ function RungPill({ rung, onClick }: { rung: GoalRungState; onClick?: () => void
 
 /** One objective ROW of the full quest card (owner-approved quest UX
  * upgrade): icon + label + its own progress bar (kill objectives, goal > 1)
- * or a plain ✓/✗ chip (boss objectives, goal 1) — plus, only while
- * incomplete, a plain-words location line underneath, and an optional
- * `action` node (M7.9b: the boss row's "⚔ ท้าบอส" challenge button) rendered
- * last. Generalizes over both objective types purely off `goal` so it never
- * needs to know which one it's rendering. */
+ * or a WORDED done/pending chip (boss objectives, goal 1 — owner item #9: a
+ * lone ✓/✗ glyph "communicates nothing", so the complete/incomplete state is
+ * spelled out — "Defeated ✓" / "Not yet" — with the checkmark kept only as a
+ * decoration NEXT TO the word) — plus, only while incomplete, a plain-words
+ * location line underneath, and an optional `action` node (M7.9b: the boss
+ * row's "⚔ ท้าบอส" challenge button) rendered last. Generalizes over both
+ * objective types purely off `goal` so it never needs to know which one it's
+ * rendering. */
 function QuestObjectiveRow({
   icon,
   label,
@@ -119,6 +134,7 @@ function QuestObjectiveRow({
   locationHint: string | null;
   action?: ReactNode;
 }) {
+  const t = useTranslations("ladder.classQuest");
   const pct = goal > 0 ? Math.min(100, (progress / goal) * 100) : 0;
   return (
     <div className="flex flex-col gap-1">
@@ -128,9 +144,15 @@ function QuestObjectiveRow({
           <span className="truncate">{label}</span>
         </span>
         <span
-          className={`shrink-0 font-bold tabular-nums ${done ? "text-emerald-400" : "text-ddp-ink"}`}
+          className={`shrink-0 font-bold tabular-nums whitespace-nowrap ${
+            done ? "text-emerald-400" : goal > 1 ? "text-ddp-ink" : "text-amber-400"
+          }`}
         >
-          {goal > 1 ? `${Math.min(progress, goal)}/${goal}` : done ? "✓" : "✗"}
+          {goal > 1
+            ? `${Math.min(progress, goal)}/${goal}`
+            : done
+              ? t("bossStatusDone")
+              : t("bossStatusPending")}
         </span>
       </div>
       {goal > 1 && (
@@ -149,12 +171,15 @@ function QuestObjectiveRow({
   );
 }
 
-/** The full quest card — replaces the old one-line progress readout. Renders
- * a PRE-ACCEPT preview (full objectives + reward, next to the existing
- * "รับเควส" button in `SkillBar.tsx`) while offered, or the per-objective
- * progress + location-guidance + "พาไปเลย" (Guide me) button once accepted.
- * Reads the hero/world state itself (same self-contained pattern as
- * `CoreLoopCard`). */
+/** The full quest card — the ONE place the class-change quest lives (audit
+ * #1, owner-reported: the accept-quest + change-class buttons, including the
+ * tap-again-confirm flow, moved HERE from `SkillBar.tsx`'s old
+ * `ClassQuestAffordance` — that component and its "skill bar" chips are gone
+ * entirely). Renders a PRE-ACCEPT preview (full objectives + reward + the
+ * accept button) while offered, or the per-objective progress +
+ * location-guidance + "พาไปเลย" (Guide me) button while accepted-incomplete,
+ * or the 2-tap-confirm "เปลี่ยนคลาส!" button once complete. Reads the
+ * hero/world state itself (same self-contained pattern as `CoreLoopCard`). */
 function ClassQuestCard({
   quest,
   tier,
@@ -175,6 +200,48 @@ function ClassQuestCard({
   const unlockedZones = useGameStore((s) => s.unlockedZones);
   const channeling = useGameStore((s) => s.fastTravelChannel !== null);
   const challengeBoss = useGameStore((s) => s.challengeBoss);
+  const acceptQuest = useGameStore((s) => s.acceptQuest);
+  const evolveHero = useGameStore((s) => s.evolveHero);
+  // Solo gameplay: the goal ladder always drives hero slot 0 (same convention
+  // as `StatPanel`/`SkillBar` reading `heroes[0]`) — party slots are M8+.
+  const slot = 0;
+  const [armed, setArmed] = useState(false);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (armTimer.current) clearTimeout(armTimer.current);
+    },
+    [],
+  );
+
+  function disarm(): void {
+    if (armTimer.current) clearTimeout(armTimer.current);
+    armTimer.current = null;
+    setArmed(false);
+  }
+
+  function handleChangeClass(): void {
+    if (!armed) {
+      setArmed(true);
+      armTimer.current = setTimeout(() => setArmed(false), EVOLVE_ARM_TIMEOUT_MS);
+      return;
+    }
+    disarm();
+    evolveHero(slot);
+  }
+
+  // Shared disabled-reason chain for the location/combat-gated buttons below
+  // (challenge/guide) — same "compute a reason, title explains it" pattern as
+  // `RefinePanel.tsx`'s `disabledReason` (audit #4). Priority: dead first
+  // (nothing else matters if the hero is down), then channeling/traveling.
+  const actionDisabledReason: "dead" | "channeling" | "traveling" | null = dead
+    ? "dead"
+    : channeling
+      ? "channeling"
+      : world.traveling
+        ? "traveling"
+        : null;
 
   // "{map name} (แมพ N)" — matches the codex's "บอสประจำ<map>" naming voice
   // while still surfacing the numbered map players already navigate by.
@@ -223,8 +290,9 @@ function ClassQuestCard({
       ? tq("rewardLine", { cls: nextClassName })
       : tq("rewardLineTier3", { cls: nextClassName });
 
-  // Pre-accept: full preview only — the accept button itself lives in
-  // `SkillBar.tsx`'s `ClassQuestAffordance` (no second control here).
+  // Pre-accept: full preview + the "รับเควส" accept button (moved here from
+  // `SkillBar.tsx` — audit #1). Not location-gated (accepting doesn't require
+  // travel), only guarded on the hero being alive.
   if (quest.offered) {
     return (
       <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-2.5">
@@ -250,6 +318,16 @@ function ClassQuestCard({
         <span className="text-[11px] font-semibold text-ddp-gold-bright">
           {rewardLine}
         </span>
+        <button
+          type="button"
+          disabled={dead}
+          onClick={() => acceptQuest(slot)}
+          title={dead ? tq("disabled.dead") : undefined}
+          aria-label={tq("ariaAccept", { heroName })}
+          className="min-h-11 w-full rounded-(--ddp-radius-md) border border-ddp-gold/50 bg-ddp-gold/10 px-3 text-[12px] font-bold text-ddp-gold-bright transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
+        >
+          {tq("acceptButton")}
+        </button>
       </div>
     );
   }
@@ -260,7 +338,12 @@ function ClassQuestCard({
     currentMapId: world.mapId,
     unlockedZones,
   });
-  const guideDisabled = channeling || world.traveling || !guideTarget;
+  // Priority: the shared dead/channeling/traveling chain first (audit #4 —
+  // "disabled reasons matching RefinePanel's pattern"), then the guide-
+  // specific "nowhere left to send you" edge case (no textual reason needed —
+  // it only happens once both objectives are already done-but-not-yet-synced).
+  const guideDisabledReason = actionDisabledReason ?? (!guideTarget ? "noTarget" : null);
+  const guideDisabled = guideDisabledReason !== null;
 
   const handleGuide = () => {
     if (!guideTarget) return;
@@ -279,7 +362,7 @@ function ClassQuestCard({
   // frontier zone the engine safely no-ops (never crosstalks with the
   // regular `bossReady` boss-gate rung, which arms off a totally different
   // read).
-  const challengeDisabled = channeling || world.traveling || dead;
+  const challengeDisabled = actionDisabledReason !== null;
 
   return (
     <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-2.5">
@@ -304,8 +387,9 @@ function ClassQuestCard({
               type="button"
               disabled={challengeDisabled}
               onClick={challengeBoss}
+              title={actionDisabledReason ? tq(`disabled.${actionDisabledReason}`) : undefined}
               aria-label={tq("ariaChallenge", { heroName })}
-              className="min-h-9 w-full rounded-(--ddp-radius-md) border border-ddp-boss/50 bg-ddp-boss/15 px-3 text-[12px] font-bold text-ddp-ink transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
+              className="min-h-11 w-full rounded-(--ddp-radius-md) border border-ddp-boss/50 bg-ddp-boss/15 px-3 text-[12px] font-bold text-ddp-ink transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
             >
               ⚔ {tq("challengeButton")}
             </button>
@@ -322,10 +406,36 @@ function ClassQuestCard({
           type="button"
           disabled={guideDisabled}
           onClick={handleGuide}
+          title={
+            guideDisabledReason && guideDisabledReason !== "noTarget"
+              ? tq(`disabled.${guideDisabledReason}`)
+              : undefined
+          }
           aria-label={tq("ariaGuide", { heroName })}
-          className="min-h-9 w-full rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 px-3 text-[12px] font-bold text-sky-200 transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
+          className="min-h-11 w-full rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 px-3 text-[12px] font-bold text-sky-200 transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
         >
           🧭 {tq("guideButton")}
+        </button>
+      )}
+      {/* Complete: the class-change button (2-tap confirm — moved here from
+          `SkillBar.tsx`'s old `ClassQuestAffordance`, audit #1). */}
+      {quest.complete && (
+        <button
+          type="button"
+          disabled={dead}
+          onClick={handleChangeClass}
+          onBlur={disarm}
+          title={
+            armed ? tq("confirmHint") : dead ? tq("disabled.dead") : undefined
+          }
+          aria-label={tq("ariaChange", { heroName, state: armed ? "confirm" : "normal" })}
+          className={`min-h-11 w-full rounded-(--ddp-radius-md) border px-3 text-[12px] font-bold transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted ${
+            armed
+              ? "animate-buy-pulse border-ddp-gold bg-ddp-gold text-ddp-panel-strong"
+              : "border-ddp-gold/50 bg-ddp-gold/10 text-ddp-gold-bright"
+          }`}
+        >
+          {armed ? tq("confirmLabel") : tq("changeButton")}
         </button>
       )}
     </div>
@@ -333,8 +443,9 @@ function ClassQuestCard({
 }
 
 /** Optional milestone detail card — only rendered while `levelUp`/`classQuest`
- * is the current rung (see module doc). Read-only progress; the actual
- * accept/change-class buttons live in `SkillBar.tsx`. */
+ * is the current rung (see module doc). Read-only progress for `levelUp`;
+ * `ClassQuestCard` (below) owns the FULL class-quest experience, including
+ * its own accept/guide/change-class controls. */
 function MilestoneCard({ current }: { current: GoalRungId }) {
   const hero = useGameStore((s) => s.heroes[0]);
   const t = useTranslations("ladder");
@@ -522,7 +633,10 @@ export function GoalLadder() {
   });
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)">
+    <div
+      data-onboarding-anchor="goal-ladder"
+      className="flex flex-col gap-2.5 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)"
+    >
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
         {rungs.map((rung) => (
           <RungPill

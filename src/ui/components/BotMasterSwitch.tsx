@@ -31,13 +31,16 @@ export function BotMasterSwitch() {
   const t = useTranslations("hud");
 
   return (
-    <div data-onboarding-anchor="bot-master" className="flex items-center gap-1">
+    <div
+      data-onboarding-anchor="bot-master"
+      className="flex shrink-0 items-center gap-1"
+    >
       <button
         type="button"
         onClick={toggleBotMaster}
         aria-pressed={botOn}
         aria-label={botOn ? t("botMasterAriaOn") : t("botMasterAriaOff")}
-        className={`min-h-11 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-extrabold tracking-wide transition-all duration-100 active:translate-y-0.5 active:scale-[0.97] ${
+        className={`min-h-11 shrink-0 rounded-(--ddp-radius-md) border px-3 py-2 text-xs font-extrabold tracking-wide whitespace-nowrap transition-all duration-100 active:translate-y-0.5 active:scale-[0.97] ${
           botOn
             ? "border-emerald-400/70 bg-emerald-950/60 text-emerald-300 shadow-(--ddp-shadow-btn)"
             : "border-ddp-border bg-black/30 text-ddp-ink-muted grayscale"
@@ -50,7 +53,7 @@ export function BotMasterSwitch() {
         onClick={() => setSettingsOpen(true)}
         aria-label={t("botSettingsButtonAria")}
         title={t("botSettingsButtonAria")}
-        className="flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 text-base text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-95"
+        className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 text-base text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-95"
       >
         <span aria-hidden>⚙</span>
       </button>

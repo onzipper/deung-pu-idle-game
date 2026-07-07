@@ -93,13 +93,13 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
   },
   {
     id: "questOffered",
-    anchor: "skill-bar",
+    anchor: "goal-ladder",
     mood: "excited",
     trigger: (_prev, next) => next.heroes.some((h) => h.questOffered),
   },
   {
     id: "questComplete",
-    anchor: "skill-bar",
+    anchor: "goal-ladder",
     mood: "excited",
     trigger: (_prev, next) => next.heroes.some((h) => h.questComplete),
   },
@@ -144,7 +144,7 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
   },
   {
     id: "tier3QuestOffered",
-    anchor: "skill-bar",
+    anchor: "goal-ladder",
     mood: "excited",
     trigger: (_prev, next) => next.heroes.some((h) => h.tier === 2 && h.questOffered),
   },
