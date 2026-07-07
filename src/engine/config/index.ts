@@ -1354,6 +1354,91 @@ export const CONFIG = {
       tickMult: 0.3, // per-tick damage to every hero = round(atk × this)
     },
   },
+
+  // ---- WORLD BOSS "เสี่ยจ๋อง" (hourly world boss — engine wave) ----
+  // An hourly PARTY-GATED world boss. It spawns at the TOP OF EVERY HOUR in ONE
+  // deterministically-chosen FARM zone of map1 (`worldBossZoneFor` over the windowId),
+  // lives `lifetimeMs`, then despawns. The CLIENT computes the wall-clock schedule
+  // (`worldBossPhaseAt`) and injects the `spawnWorldBoss` FrameInput while the player
+  // stands in the chosen zone — the engine never reads a wall clock. The boss REUSES the
+  // enemy pipeline (targeting/hits, systems/targeting getTargets + combat findById) and
+  // the M7.9 boss-mechanic machinery (systems/boss.updateBossEntity), themed via the
+  // `worldBoss` marker. Rewards are SERVER-claimed — the engine grants NO xp/gold and the
+  // kill NEVER counts toward killGoal/zoneKills/quests; it emits only `worldBossDefeated`.
+  //
+  // AGGRO = PASSIVE-until-attacked (owner rule "never farms newbies"): map1 is where NEW
+  // players roam, so the boss stands idle at the spawn edge and does NOT approach/attack
+  // until a hero has DAMAGED it (hp < maxHp). A cautious/idle player is never farmed; an
+  // auto-hunting hero that swings at it engages it (that is on the player).
+  //
+  // TUNING — FIRST PASS (the balance-sim wave refines these; DOCUMENTED reasoning):
+  //  - `hp` is set DIRECTLY (not off the tiny s5 `bossHp` curve) for independent control.
+  //    Target band: ~15 min × a generous solo endgame DPS must NOT finish it, while a
+  //    2-3 member Lv50-70 cohort clears in ~3-6 min. Because the AOE mechanics (slam +
+  //    hazard) repeatedly DROP a solo hero (death → walk-home → return kills its uptime)
+  //    while a party tanks/revives-in-place, the "requires a party" gate comes mostly from
+  //    SURVIVABILITY, not raw HP: at a strong 3-body ~1000-1500 group DPS, 400k HP ≈
+  //    4.5-6.5 min; a solo hero eating AOE can't sustain the uptime to reach it in 15 min.
+  //  - `atk` (350) is dangerous but survivable for a Lv40+ hero WITH potions; slam ×1.7 ≈
+  //    595, charge ×1.6 ≈ 560, hazard tick ×0.3 ≈ 105 (multi-tick). The balance wave tunes
+  //    hp/atk against real per-class DPS/HP tables.
+  //
+  // MECHANICS (3, telegraphed): base `slam`+`enrage` + `charge` (dodgeable dash — drift off
+  // the marked x) + `hazard` (arena-wide channel — a party out-heals/out-DPSes it). SUMMON
+  // is deliberately OMITTED: its adds flow into `state.enemies` and would pollute the farm
+  // kill-quota (killGoal/zoneKills) — kept out by design. Windups are a touch LONGER than
+  // the s20/s30 boss (open-field dodging). All DETERMINISTIC (fixed timing tables — NO RNG
+  // stream draw, NO loot-counter tick, so the mob/loot sequences stay byte-identical with a
+  // world boss present). Mirrors CONFIG.boss / CONFIG.bossBehavior shape so
+  // systems/boss.updateBossEntity runs it unmodified.
+  worldBoss: {
+    periodMs: 3_600_000, // spawns at the top of every hour
+    preAnnounceMs: 300_000, // 5-min pre-announce window before the hour
+    lifetimeMs: 900_000, // lives 15 min from spawn, then despawns
+    mapId: "map1", // one of map1's farm zones (chosen per-window by worldBossZoneFor)
+    hp: 400_000, // first-pass; see the block comment's DPS reasoning
+    atk: 350, // dangerous-but-survivable for Lv40+ w/ potions (map1 passive-until-hit)
+    // The 3 telegraphed mechanics (reuse the M7.9 machinery). NO "summon" (adds would
+    // pollute the farm kill-quota). Cast to BossBehavior[] in makeWorldBoss.
+    behaviors: ["slam", "enrage", "charge", "hazard"] as string[],
+    // Movement + slam/enrage tuning (CONFIG.boss shape). Longer telegraphs than the deep
+    // bosses so an open-field party can read + react.
+    boss: {
+      y: 190,
+      initialCd: 1.5,
+      initialSkillCd: 6,
+      moveSpeed: 40,
+      engageExtra: 20, // engageX = frontHeroX + clash + this
+      enrageThreshold: 0.25, // enrage below this HP fraction
+      slamMult: 1.7,
+      slamCdEnraged: 4.5,
+      slamCdNormal: 7,
+      telegraphEnraged: 0.9,
+      telegraphNormal: 1.3, // slightly longer than the s20/s30 boss (open-field dodge)
+      attackCdEnraged: 0.9,
+      attackCdNormal: 1.3,
+    },
+    // Signature-mechanic tuning (CONFIG.bossBehavior shape — charge + hazard only).
+    bossBehavior: {
+      charge: {
+        cd: 9.0,
+        cdEnraged: 6.0,
+        telegraph: 1.1, // longer wind-up than the s20 boss (0.85) — fair open-field read
+        dashSpeed: 460,
+        stopGap: 40,
+        hitRange: 78,
+        hitMult: 1.6, // charge damage = round(atk × this)
+      },
+      hazard: {
+        cd: 10.0,
+        cdEnraged: 6.5,
+        telegraph: 1.6, // longer warn window than the s30 boss (1.3)
+        duration: 1.2,
+        tickInterval: 0.3,
+        tickMult: 0.3, // per-tick damage to every alive hero = round(atk × this)
+      },
+    },
+  },
 } as const;
 
 export type SpeedMultiplier = (typeof CONFIG.speeds)[number];

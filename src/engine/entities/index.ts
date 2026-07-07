@@ -573,6 +573,35 @@ export interface Boss {
   variety?: BossVarietyState;
 }
 
+/**
+ * WORLD BOSS "เสี่ยจ๋อง" runtime state (hourly world boss — engine wave). Fully
+ * TRANSIENT: never persisted (toSaveData/SaveData untouched, no SAVE bump), rebuilt
+ * null on load. Spawned by the `spawnWorldBoss` FrameInput intent (the client computes
+ * the wall-clock schedule; the engine never reads a clock), it lives alongside the
+ * normal farm field during the BATTLE phase and reuses the enemy pipeline (targeting/
+ * hits) + the M7.9 boss-mechanic machinery. Sim-affecting → it IS in `stateHash`.
+ *
+ *  - `windowId`  : the hour-window this boss belongs to (`worldBossWindowId`). Once a
+ *    windowId has been spawned/handled this session the record persists (entity nulled
+ *    on despawn/defeat) so a re-injected `spawnWorldBoss` for the SAME window is a no-op
+ *    (idempotent — a cohort's several members may all inject it; first-wins).
+ *  - `mapId`/`zoneIdx` : the farm zone it spawned in — leaving that zone despawns it.
+ *  - `active`    : the entity is present + alive (drives getTargets/findById inclusion).
+ *  - `defeated`  : set once it dies (emits `worldBossDefeated`; blocks respawn same window).
+ *  - `countdown` : seconds until the lifetime despawn (seeded from the intent's
+ *    `remainingSeconds`, decremented per FIXED_DT battle step).
+ *  - `entity`    : the Boss entity (null when inactive) — a Boss with `variety` mechanics.
+ */
+export interface WorldBossState {
+  windowId: number;
+  mapId: string;
+  zoneIdx: number;
+  active: boolean;
+  defeated: boolean;
+  countdown: number;
+  entity: Boss | null;
+}
+
 export interface Projectile {
   id: number;
   team: Team;

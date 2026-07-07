@@ -23,6 +23,8 @@ import { Prisma } from "@prisma/client";
 import { CONFIG } from "@/engine/config";
 import {
   ITEM_TEMPLATES,
+  FORTIFIER_FOR_SLOT,
+  lookupTemplate,
   dropTableForStage,
   bossDropTableForStage,
   maxSummedDropChance,
@@ -224,22 +226,32 @@ export const sellSchema = z
   })
   .strict();
 
-/** Refine one owned item (M7.6). Single itemId — the server rolls the outcome. */
-export const refineSchema = z.object({ itemId: z.string().min(1).max(64) }).strict();
+/**
+ * Refine one owned item (M7.6). Single itemId — the server rolls the outcome.
+ * `useFortifier` (world-boss wave): when true, consume a matching-slot "แกร่ง"
+ * fortifier for a GUARANTEED success (no roll, break impossible) — same gold+materials
+ * cost as an ordinary attempt (owner rule: fortify is not free).
+ */
+export const refineSchema = z
+  .object({ itemId: z.string().min(1).max(64), useFortifier: z.boolean().optional() })
+  .strict();
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 export interface ItemInstanceDTO {
   id: string;
   templateId: string;
-  /** The template's gear slot (weapon/armor). */
+  /** For gear: the slot it equips into. For a fortifier: the slot it MATCHES. */
   slot: GearSlot;
-  /** Which slot it is CURRENTLY equipped in, or null (unequipped). */
+  /** Which slot it is CURRENTLY equipped in, or null (unequipped / non-gear). */
   equippedSlot: GearSlot | null;
   origin: string;
   acquiredAt: string;
   /** M7.6 RO-style refine +level (+0..+REFINE.maxRefine). */
   refineLevel: number;
+  /** Item category — "gear" (equippable) or "fortifier" (the "แกร่ง" consumable). The
+   *  UI wave uses this to render/route fortifiers apart from gear. */
+  kind: "gear" | "fortifier";
 }
 
 interface InstanceRow {
@@ -251,8 +263,11 @@ interface InstanceRow {
   refineLevel: number;
 }
 
-function toItemDTO(row: InstanceRow): ItemInstanceDTO | null {
-  const template = ITEM_TEMPLATES[row.templateId];
+/** Build the wire DTO for an item-instance row (exported so the world-boss claim
+ *  path can shape its minted fortifier the same way). Returns null for a row that
+ *  references a retired/unknown template. */
+export function toItemDTO(row: InstanceRow): ItemInstanceDTO | null {
+  const template = lookupTemplate(row.templateId); // gear OR fortifier
   // A row referencing a retired/unknown template is skipped from the DTO stream
   // rather than crashing the read (defensive — ids are frozen, so shouldn't happen).
   if (!template) return null;
@@ -264,10 +279,13 @@ function toItemDTO(row: InstanceRow): ItemInstanceDTO | null {
     origin: row.origin,
     acquiredAt: row.acquiredAt.toISOString(),
     refineLevel: clampRefine(row.refineLevel),
+    kind: template.kind ?? "gear",
   };
 }
 
-const INSTANCE_SELECT = {
+/** The column projection shared by every instance read/mint (exported for the
+ *  world-boss fortifier mint, which shapes its DTO via `toItemDTO`). */
+export const INSTANCE_SELECT = {
   id: true,
   templateId: true,
   equippedSlot: true,
@@ -563,7 +581,7 @@ export async function claimBatch(
 
 export type EquipResult =
   | { ok: true; item: ItemInstanceDTO }
-  | { ok: false; reason: "not_found" | "unknown_template" | "class_req" };
+  | { ok: false; reason: "not_found" | "unknown_template" | "class_req" | "not_equippable" };
 
 /**
  * Equip an owned, non-deleted item. The template's slot decides the target slot.
@@ -585,8 +603,11 @@ export async function equipItem(
       });
       if (!item) throw new ItemOpError("not_found");
 
-      const template = ITEM_TEMPLATES[item.templateId];
+      const template = lookupTemplate(item.templateId);
       if (!template) throw new ItemOpError("unknown_template");
+      // Fortifiers are consumables, never gear — refuse to seat one in a slot (it
+      // would displace real gear with an empty stat block). Server-authoritative.
+      if (template.kind === "fortifier") throw new ItemOpError("not_equippable");
       if (template.classReq && template.classReq !== baseClass) {
         throw new ItemOpError("class_req");
       }
@@ -715,7 +736,7 @@ export async function destroyItem(
 export type SellItemResult =
   | { itemId: string; status: "sold"; price: number }
   | { itemId: string; status: "already"; price: 0 }
-  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" | "not_sellable" };
 
 /**
  * Sell owned items to the NPC vendor. Each item is ONE $transaction: verify
@@ -781,6 +802,12 @@ export async function sellItems(
         // Equipped → reject; never auto-unequip on sell (owner-locked design).
         if (item.equippedSlot !== null) {
           results.push({ itemId, status: "rejected", reason: "equipped" });
+          continue;
+        }
+        // Fortifiers are never NPC-sellable (they'd destroy a valuable consumable for
+        // 0 gold — tier 0). Server-authoritative refusal.
+        if (lookupTemplate(item.templateId)?.kind === "fortifier") {
+          results.push({ itemId, status: "rejected", reason: "not_sellable" });
           continue;
         }
 
@@ -1001,6 +1028,8 @@ export type RefineResult =
       materialsDelta: number;
       goldDelta: number;
       cost: { materials: number; gold: number };
+      /** True when a "แกร่ง" fortifier was consumed for a guaranteed success. */
+      fortified: boolean;
     }
   | {
       ok: false;
@@ -1009,7 +1038,8 @@ export type RefineResult =
         | "unknown_template"
         | "max"
         | "insufficient_materials"
-        | "insufficient_gold";
+        | "insufficient_gold"
+        | "no_fortifier";
     };
 
 /** Crypto-backed uniform roll in [0, 1). Injectable for deterministic tests. This
@@ -1047,10 +1077,11 @@ export async function refineItem(
   characterId: string,
   itemId: string,
   goldBalance: number,
-  opts: { roll?: () => number; now?: Date } = {},
+  opts: { roll?: () => number; now?: Date; useFortifier?: boolean } = {},
 ): Promise<RefineResult> {
   const roll = opts.roll ?? cryptoRoll;
   const now = opts.now ?? new Date();
+  const useFortifier = opts.useFortifier ?? false;
   try {
     return await prisma.$transaction(async (tx) => {
       const item = await tx.itemInstance.findFirst({
@@ -1059,8 +1090,10 @@ export async function refineItem(
       });
       if (!item) throw new RefineOpError("not_found");
 
-      const template = ITEM_TEMPLATES[item.templateId];
+      const template = lookupTemplate(item.templateId);
       if (!template) throw new RefineOpError("unknown_template");
+      // A fortifier can't itself be a refine TARGET (only gear is refined).
+      if (template.kind === "fortifier") throw new RefineOpError("not_found");
 
       const current = clampRefine(item.refineLevel);
       if (current >= REFINE.maxRefine) throw new RefineOpError("max");
@@ -1071,6 +1104,20 @@ export async function refineItem(
       // route passed in; it is returned as a delta, never debited server-side (yet).
       if (goldBalance < cost.gold) throw new RefineOpError("insufficient_gold");
 
+      // World-boss "แกร่ง" guaranteed refine: the character must own a fortifier
+      // instance MATCHING the target's slot (weapon gear ↔ fort_weapon). Resolve it
+      // BEFORE any debit so a missing fortifier fails fast (tx aborts, nothing charged).
+      let fortifierId: string | null = null;
+      if (useFortifier) {
+        const want = FORTIFIER_FOR_SLOT[template.slot];
+        const fort = await tx.itemInstance.findFirst({
+          where: { ownerId: characterId, templateId: want, deletedAt: null },
+          select: { id: true },
+        });
+        if (!fort) throw new RefineOpError("no_fortifier");
+        fortifierId = fort.id;
+      }
+
       // Atomic materials check-and-set (locks the Character row → serialises the
       // character's concurrent refines). Count 0 = not enough materials → abort.
       const debit = await tx.character.updateMany({
@@ -1079,8 +1126,27 @@ export async function refineItem(
       });
       if (debit.count === 0) throw new RefineOpError("insufficient_materials");
 
-      // Server roll → outcome.
-      const success = roll() < successChanceForLevel(target);
+      // Consume the fortifier (soft-delete + destroyed event) in the SAME tx. The
+      // guarded updateMany (deletedAt:null) is the no-double-consume lock.
+      if (useFortifier && fortifierId) {
+        const consumed = await tx.itemInstance.updateMany({
+          where: { id: fortifierId, ownerId: characterId, deletedAt: null },
+          data: { deletedAt: now, equippedSlot: null },
+        });
+        if (consumed.count === 0) throw new RefineOpError("no_fortifier");
+        await tx.itemEvent.create({
+          data: {
+            itemId: fortifierId,
+            type: "destroyed",
+            fromCharacterId: characterId,
+            meta: JSON.stringify({ consumedBy: "fortify", targetItemId: itemId }),
+          },
+        });
+      }
+
+      // Fortified → guaranteed success (no roll, break impossible). Otherwise the
+      // SERVER roll decides the outcome.
+      const success = useFortifier || roll() < successChanceForLevel(target);
       let outcome: RefineOutcome;
       let newLevel = current;
       let destroyed = false;
@@ -1125,6 +1191,8 @@ export async function refineItem(
             outcome,
             cost,
             ...(destroyed ? { destroyed: true } : {}),
+            // Marker distinguishing a guaranteed fortified refine from a rolled one.
+            ...(useFortifier ? { fortified: true, fortifierId } : {}),
           }),
         },
       });
@@ -1173,6 +1241,7 @@ export async function refineItem(
         materialsDelta: -cost.materials,
         goldDelta: -cost.gold,
         cost,
+        fortified: useFortifier,
       };
     });
   } catch (err) {
@@ -1334,7 +1403,9 @@ class BuybackOpError extends Error {
 
 /** Internal control-flow error so a tx callback can abort with a typed reason. */
 class ItemOpError extends Error {
-  constructor(public readonly reason: "not_found" | "unknown_template" | "class_req") {
+  constructor(
+    public readonly reason: "not_found" | "unknown_template" | "class_req" | "not_equippable",
+  ) {
     super(reason);
   }
 }
@@ -1347,7 +1418,8 @@ class RefineOpError extends Error {
       | "unknown_template"
       | "max"
       | "insufficient_materials"
-      | "insufficient_gold",
+      | "insufficient_gold"
+      | "no_fortifier",
   ) {
     super(reason);
   }

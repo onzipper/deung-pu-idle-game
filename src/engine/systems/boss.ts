@@ -61,30 +61,93 @@ export function startBossFight(state: GameState): void {
   }
 }
 
-/** One fixed step of boss behaviour (movement, slam telegraph, normal attack). */
+/**
+ * Movement + slam/enrage tuning a boss entity runs on (a structural subset of
+ * `CONFIG.boss` — also satisfied by `CONFIG.worldBoss.boss`). Extracted so the WORLD
+ * BOSS reuses `updateBossEntity` with its own longer-windup tuning.
+ */
+export interface BossMoveTuning {
+  engageExtra: number;
+  moveSpeed: number;
+  enrageThreshold: number;
+  slamMult: number;
+  slamCdEnraged: number;
+  slamCdNormal: number;
+  telegraphEnraged: number;
+  telegraphNormal: number;
+  attackCdEnraged: number;
+  attackCdNormal: number;
+}
+/** CHARGE mechanic tuning (a subset of `CONFIG.bossBehavior.charge`). */
+export interface ChargeTuning {
+  cd: number;
+  cdEnraged: number;
+  telegraph: number;
+  dashSpeed: number;
+  stopGap: number;
+  hitRange: number;
+  hitMult: number;
+}
+/** SUMMON mechanic tuning (a subset of `CONFIG.bossBehavior.summon`). */
+export interface SummonTuning {
+  thresholds: readonly number[];
+  addKinds: readonly string[];
+  spawnSpacing: number;
+}
+/** FIELD-HAZARD mechanic tuning (a subset of `CONFIG.bossBehavior.hazard`). */
+export interface HazardTuning {
+  cd: number;
+  cdEnraged: number;
+  telegraph: number;
+  duration: number;
+  tickInterval: number;
+  tickMult: number;
+}
+/** The signature-mechanic tuning bundle (a subset of `CONFIG.bossBehavior`). */
+export interface BossBehaviorTuning {
+  charge: ChargeTuning;
+  summon: SummonTuning;
+  hazard: HazardTuning;
+}
+
+/** One fixed step of the stage boss (`state.boss`) — the classic entry point. */
 export function updateBoss(state: GameState): void {
-  const b = state.boss;
-  if (!b) return;
+  if (state.boss) updateBossEntity(state, state.boss, B, CONFIG.bossBehavior);
+}
+
+/**
+ * One fixed step of a boss entity's behaviour (movement, slam telegraph, normal
+ * attack + any signature mechanics it carries), parameterised by its `move`/`behavior`
+ * tuning. `updateBoss` calls it with `state.boss` + CONFIG.boss/bossBehavior (byte-
+ * identical to the pre-refactor path); the WORLD BOSS calls it with `state.worldBoss.
+ * entity` + its own CONFIG.worldBoss tuning. Deterministic — no RNG-stream draw.
+ */
+export function updateBossEntity(
+  state: GameState,
+  b: Boss,
+  move: BossMoveTuning,
+  behavior: BossBehaviorTuning,
+): void {
   const v = b.variety;
   const fX = frontHeroX(state);
-  const engageX = fX + CONFIG.clash + B.engageExtra;
+  const engageX = fX + CONFIG.clash + move.engageExtra;
 
   // M7.9 CHARGE dash: while committed to a rush the boss is fully occupied — it
   // moves toward the locked target x and resolves the hit on arrival, skipping the
   // normal approach / Slam / attack this step. Only bosses carrying "charge" ever
   // reach the "dash" phase, so classic bosses skip this entirely.
   if (v && v.chargePhase === "dash") {
-    updateChargeDash(state, b, v);
+    updateChargeDash(state, b, v, behavior.charge);
     return;
   }
 
   // Close the distance before doing anything else.
   if (b.x > engageX) {
-    b.x -= B.moveSpeed * FIXED_DT;
+    b.x -= move.moveSpeed * FIXED_DT;
     return;
   }
 
-  if (!b.enraged && b.hp < b.maxHp * B.enrageThreshold) {
+  if (!b.enraged && b.hp < b.maxHp * move.enrageThreshold) {
     b.enraged = true;
     state.events.push({ type: "bossEnraged", x: b.x, y: b.y });
   }
@@ -95,11 +158,11 @@ export function updateBoss(state: GameState): void {
   // below (byte-identical to pre-M7.9).
   if (v) {
     // SUMMON is instantaneous — fire any due add waves, then keep the base kit.
-    if (has(v, "summon")) maybeSummon(state, b, v);
+    if (has(v, "summon")) maybeSummon(state, b, v, behavior.summon);
     // CHARGE + HAZARD are CHANNELED: if one is winding up / acting this step it
     // consumes the boss's action (Slam + normal attack pause) — return early.
-    if (has(v, "charge") && updateChargeWindup(state, b, v)) return;
-    if (has(v, "hazard") && updateHazard(state, b, v)) return;
+    if (has(v, "charge") && updateChargeWindup(state, b, v, behavior.charge)) return;
+    if (has(v, "hazard") && updateHazard(state, b, v, behavior.hazard)) return;
   }
 
   // Slam: winds up (telegraph) then lands an AOE on the whole living team.
@@ -108,14 +171,14 @@ export function updateBoss(state: GameState): void {
     if (b.telegraph <= 0) {
       state.events.push({ type: "bossSlamLand", x: b.x, y: b.y });
       for (const h of aliveHeroes(state)) {
-        applyDamage(state, h, Math.round(b.atk * B.slamMult), "slam");
+        applyDamage(state, h, Math.round(b.atk * move.slamMult), "slam");
       }
-      b.skillCd = b.enraged ? B.slamCdEnraged : B.slamCdNormal;
+      b.skillCd = b.enraged ? move.slamCdEnraged : move.slamCdNormal;
     }
   } else {
     b.skillCd -= FIXED_DT;
     if (b.skillCd <= 0) {
-      b.telegraph = b.enraged ? B.telegraphEnraged : B.telegraphNormal;
+      b.telegraph = b.enraged ? move.telegraphEnraged : move.telegraphNormal;
       state.events.push({ type: "bossSlamTelegraph", x: b.x, y: b.y });
     }
   }
@@ -126,23 +189,24 @@ export function updateBoss(state: GameState): void {
     const h = nearestAliveHero(state, b.x);
     if (h) {
       applyDamage(state, h, b.atk, "attack");
-      b.cd = b.enraged ? B.attackCdEnraged : B.attackCdNormal;
+      b.cd = b.enraged ? move.attackCdEnraged : move.attackCdNormal;
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// M7.9 boss-variety mechanics (deterministic — no RNG-stream draws).
+// M7.9 boss-variety mechanics (deterministic — no RNG-stream draws). Parameterised
+// by their tuning (`ChargeTuning`/`SummonTuning`/`HazardTuning`) so the world boss
+// reuses them with longer-windup numbers.
 // ---------------------------------------------------------------------------
 
 /**
  * CHARGE (map4 s20) — the idle→windup handoff. Returns true if the boss is BUSY
  * charging this step (windup in progress, or a fresh charge just launched), so the
  * caller pauses the Slam/normal-attack kit. The dash itself (once `chargePhase`
- * flips to "dash") is driven by `updateChargeDash` from the top of `updateBoss`.
+ * flips to "dash") is driven by `updateChargeDash` from the top of `updateBossEntity`.
  */
-function updateChargeWindup(state: GameState, b: Boss, v: BossVarietyState): boolean {
-  const C = CONFIG.bossBehavior.charge;
+function updateChargeWindup(state: GameState, b: Boss, v: BossVarietyState, C: ChargeTuning): boolean {
   if (v.chargePhase === "windup") {
     v.chargeTimer -= FIXED_DT;
     if (v.chargeTimer <= 0) v.chargePhase = "dash"; // launch next step
@@ -163,8 +227,7 @@ function updateChargeWindup(state: GameState, b: Boss, v: BossVarietyState): boo
 }
 
 /** CHARGE dash movement + landing hit (the hero sits at lower x than the boss). */
-function updateChargeDash(state: GameState, b: Boss, v: BossVarietyState): void {
-  const C = CONFIG.bossBehavior.charge;
+function updateChargeDash(state: GameState, b: Boss, v: BossVarietyState, C: ChargeTuning): void {
   const target = v.chargeTargetX;
   const stepDist = C.dashSpeed * FIXED_DT;
   if (b.x - target <= stepDist) {
@@ -196,8 +259,7 @@ function updateChargeDash(state: GameState, b: Boss, v: BossVarietyState): void 
  * `state.enemies` (pooled render views key by id; the boss-phase target set +
  * `resolveDeaths` reap them). Instantaneous — never pauses the boss's base kit.
  */
-function maybeSummon(state: GameState, b: Boss, v: BossVarietyState): void {
-  const S = CONFIG.bossBehavior.summon;
+function maybeSummon(state: GameState, b: Boss, v: BossVarietyState, S: SummonTuning): void {
   while (v.summonsFired < S.thresholds.length && b.hp <= b.maxHp * S.thresholds[v.summonsFired]) {
     const kinds = S.addKinds;
     for (let i = 0; i < kinds.length; i++) {
@@ -218,8 +280,7 @@ function maybeSummon(state: GameState, b: Boss, v: BossVarietyState): void {
  * independent). Returns true while channeling (warn or strike) so the boss's Slam
  * + normal attack pause; false when idle (base kit runs, cd counting down).
  */
-function updateHazard(state: GameState, b: Boss, v: BossVarietyState): boolean {
-  const H = CONFIG.bossBehavior.hazard;
+function updateHazard(state: GameState, b: Boss, v: BossVarietyState, H: HazardTuning): boolean {
   if (v.hazardPhase === "warn") {
     v.hazardTimer -= FIXED_DT;
     if (v.hazardTimer <= 0) {

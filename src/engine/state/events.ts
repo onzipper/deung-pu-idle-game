@@ -74,6 +74,17 @@ export type GameEvent =
   | { type: "bossSummon"; x: number; count: number }
   | { type: "bossHazardWarn"; x: number }
   | { type: "bossHazardStrike"; x: number }
+  // WORLD BOSS "เสี่ยจ๋อง" lifecycle (hourly world boss — engine wave). Fires on the STEP
+  // the world boss spawns / despawns (lifetime expiry OR the hero leaving its zone) /
+  // dies. `windowId` identifies the hour-window. The boss REUSES the existing hit +
+  // boss-telegraph events (bossSlamTelegraph/bossSlamLand/bossChargeTelegraph/…/hit) for
+  // its combat juice; these three only bracket its life. Rewards are SERVER-claimed off
+  // `worldBossDefeated` (the engine grants no xp/gold). One-way like every event.
+  // NB (footgun #6): render/audio + a spawn-announce toast wire these in the render wave;
+  // unhandled they fall to the FxController/audio DEFAULT (a safe no-op), no crash.
+  | { type: "worldBossSpawned"; windowId: number }
+  | { type: "worldBossDespawned"; windowId: number }
+  | { type: "worldBossDefeated"; windowId: number }
   // A mob AGGROED onto the hero (M6 "สนามล่ามอน"): an aggressive mob's aggro radius
   // triggered, so it starts hunting the hero. One-way (render may hook a growl/alert
   // beat). Replaces the retired march-model `waveSpawn` (there are no waves now).

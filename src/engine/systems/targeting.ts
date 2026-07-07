@@ -117,5 +117,10 @@ export function getTargets(state: GameState): CombatTarget[] {
     for (const e of state.enemies) list.push(e);
     return list;
   }
+  // WORLD BOSS "เสี่ยจ๋อง": while an hourly world boss is live it joins the battle-phase
+  // target set alongside the farm mobs, so heroes acquire + AoE it and homing shots find
+  // it (findById). Byte-identical when none is active (returns the plain enemy list).
+  const wb = state.worldBoss;
+  if (wb && wb.active && wb.entity) return [...state.enemies, wb.entity];
   return state.enemies;
 }

@@ -31,6 +31,7 @@ import type {
   ConsumableCounts,
   BotSettings,
   WorldLocation,
+  WorldBossState,
 } from "@/engine/entities";
 import { emptyConsumables } from "@/engine/systems/consumables";
 import { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
@@ -233,6 +234,14 @@ export interface GameState {
   heroes: Hero[];
   enemies: Enemy[];
   boss: Boss | null;
+  /**
+   * WORLD BOSS "เสี่ยจ๋อง" runtime state (hourly world boss — engine wave), or null when
+   * none has been spawned this session. TRANSIENT — never persisted (toSaveData/SaveData
+   * untouched, no SAVE bump), rebuilt null on load. Sim-affecting (drives targeting +
+   * damage), so it IS folded into `stateHash`. See entities `WorldBossState` +
+   * systems/worldBoss.ts.
+   */
+  worldBoss: WorldBossState | null;
   projectiles: Projectile[];
   /** Formation anchor x the team advances toward. */
   anchorX: number;
@@ -541,6 +550,8 @@ export function initGameState(
     heroes: [],
     enemies: [],
     boss: null,
+    // World boss (hourly "เสี่ยจ๋อง") — dormant until a spawnWorldBoss intent lands.
+    worldBoss: null,
     projectiles: [],
     anchorX: CONFIG.baseAnchor,
     // Hunting spawn pool (M6): burst-fill the field on the first battle step of a

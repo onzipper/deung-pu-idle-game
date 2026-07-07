@@ -29,14 +29,27 @@ export type ItemRarity = "common" | "rare" | "epic";
 export interface ItemTemplate {
   /** Catalog key == ITEM_TEMPLATES map key == DB templateId. ≤64 chars. */
   id: string;
+  /** For "gear": the slot it equips into. For "fortifier": the gear slot it MATCHES
+   *  (weapon-fortifier ↔ weapon gear) — a fortifier is never equipped into it. */
   slot: GearSlot;
-  /** null = equippable by every class. */
+  /** null = equippable by every class. Fortifiers are always null (no class gate). */
   classReq: HeroClass | null;
   /** Power/visual tier — tier 3+ drives the M7 paper-doll sparkle/aura pass. */
   tier: number;
   rarity: ItemRarity;
   /** Flat additive stat block while equipped (extend cautiously; sim-swept). */
   stats: { atk?: number; def?: number; hp?: number };
+  /**
+   * Item CATEGORY (world-boss wave). Absent/"gear" = a normal equippable gear
+   * item (every pre-existing template — byte-identical). "fortifier" = a "แกร่ง"
+   * consumable minted ONLY by the world-boss claim: NOT equippable, NOT NPC-sellable,
+   * NOT in any drop table, and consumed by a GUARANTEED refine on a matching-slot gear
+   * item (see src/server/items.ts `refineItem` useFortifier + src/server/worldBoss.ts).
+   * `slot` is reused as the match key (fort_weapon.slot === "weapon"). The server layer
+   * enforces the non-equippable/non-sellable rules; `tier: 0` also keeps fortifiers out
+   * of every stage-banded drop table for free (tierForStage only ever returns 1..10).
+   */
+  kind?: "gear" | "fortifier";
 }
 
 /**
@@ -210,10 +223,43 @@ const CATALOG: ItemTemplate[] = [
   armor("a_mage_t8_seer", 8, "rare", "mage", [30, 560]),
 ];
 
-/** The item catalog, keyed by templateId (== DB `ItemInstance.templateId`). */
+/** The GEAR catalog, keyed by templateId (== DB `ItemInstance.templateId`). This map is
+ *  a FROZEN 46-entry contract (i18n + count are test-enforced ui-side) — fortifiers are
+ *  deliberately kept OUT of it (see FORTIFIER_TEMPLATES) so gear stays byte-identical. */
 export const ITEM_TEMPLATES: Record<string, ItemTemplate> = Object.fromEntries(
   CATALOG.map((t) => [t.id, t]),
 );
+
+// ---------------------------------------------------------------------------
+// World boss "เสี่ยจ๋อง" — "แกร่ง" fortifier consumables (SEPARATE catalog).
+// ---------------------------------------------------------------------------
+// Minted ONLY by the world-boss claim (50:50 crypto roll), NEVER dropped/sold/equipped.
+// They are ItemInstances (not a counter) so a future marketplace can trade them. `slot`
+// is the gear slot each one fortifies (the guaranteed-refine match key); tier 0 + empty
+// stats keep them off every curve. Held in their OWN map (not ITEM_TEMPLATES / CATALOG) so
+// the gear catalog's frozen count + drop tables are untouched; the server resolves an
+// item instance's template via `lookupTemplate` (gear ∪ fortifier). Display name/desc are
+// ui-side i18n (`items.fort_weapon` / `items.fort_armor`), never here.
+export const FORTIFIER_TEMPLATES: Record<string, ItemTemplate> = {
+  fort_weapon: { id: "fort_weapon", slot: "weapon", classReq: null, tier: 0, rarity: "epic", stats: {}, kind: "fortifier" },
+  fort_armor: { id: "fort_armor", slot: "armor", classReq: null, tier: 0, rarity: "epic", stats: {}, kind: "fortifier" },
+};
+
+/** The "แกร่ง" fortifier templateId that matches (and guarantees a refine on) each gear
+ *  slot — the single source both the world-boss mint and the guaranteed-refine match
+ *  key read (weapon gear ↔ fort_weapon, armor gear ↔ fort_armor). */
+export const FORTIFIER_FOR_SLOT: Record<GearSlot, string> = {
+  weapon: "fort_weapon",
+  armor: "fort_armor",
+};
+
+/** Resolve ANY item-instance template — gear OR fortifier. Use this (not a bare
+ *  `ITEM_TEMPLATES[id]`) wherever a persisted `ItemInstance.templateId` is turned back
+ *  into a template, so fortifier instances resolve while the gear-only maps/tables stay
+ *  fortifier-free. Returns undefined for a retired/unknown id. */
+export function lookupTemplate(id: string): ItemTemplate | undefined {
+  return ITEM_TEMPLATES[id] ?? FORTIFIER_TEMPLATES[id];
+}
 
 // ---------------------------------------------------------------------------
 // Drop tables — banded to the stage the mob was killed at.

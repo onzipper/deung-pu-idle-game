@@ -437,6 +437,10 @@ function findById(state: GameState, id: number | null): Hero | Enemy | Boss | nu
   for (const h of state.heroes) if (h.id === id) return h;
   for (const e of state.enemies) if (e.id === id) return e;
   if (state.boss && state.boss.id === id) return state.boss;
+  // WORLD BOSS "เสี่ยจ๋อง": homing hero shots (arrows/bolts) must be able to find the
+  // live world boss the same way they find `state.boss`.
+  const wb = state.worldBoss;
+  if (wb && wb.active && wb.entity && wb.entity.id === id) return wb.entity;
   return null;
 }
 
