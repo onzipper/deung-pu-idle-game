@@ -78,7 +78,6 @@ import {
   unlockedAutoSlotCount,
   worldNav,
   effectiveUnlockedZones,
-  type FrameInput,
   type GameEvent,
   type GameState,
   type Hero,
@@ -86,7 +85,7 @@ import {
   type SaveData,
   type TownNpcId,
 } from "@/engine";
-import { INPUT_DELAY_TURNS, SUB_STEPS_PER_TURN, TURN_MS, type TurnMessage } from "@/engine/lockstep";
+import { type TurnMessage } from "@/engine/lockstep";
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import type { AnnouncementWire } from "@/ui/announcements/types";
@@ -136,15 +135,14 @@ import {
 import {
   PartySession,
   electLeader,
+  resolveMemberDisplayName,
   synthesizeShadowMessage,
   type CohortMember,
   type PartyConnStatus,
 } from "./partySession";
+import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
+import { buildFrameInput } from "./buildFrameInput";
 import { TimeDirector } from "./timeDirector";
-
-/** Wall-clock a cohort turn lane may go missing before the HUD shows "waiting"
- * (design C: "late lane >~2s ⇒ waiting chip"). */
-const COHORT_WAITING_MS = 2_000;
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
  * relay `g` payloads (handshake messages / lockstep `TurnMessage`s) — mirrors
@@ -656,21 +654,18 @@ export function GameClient() {
     let myCohortIndex = 0;
     let lastCohortSlots: number[] = [];
     const shadowedTicketSlots = new Set<number>();
-    /** ticket slot -> display name, for cohort members OTHER than me. */
+    /** ticket slot -> userId, for cohort members OTHER than me (from the relay welcome/
+     * membership stream). The stable key we resolve friendly names against. */
+    let cohortMemberIds = new Map<number, string>();
+    /** ticket slot -> RESOLVED display name (never a userId — null resolutions omitted).
+     * Rebuilt by `resolveCohortNames()` against the friends-poll `party` snapshot. */
     let cohortMemberNames = new Map<number, string>();
     let handshake: PartyHandshake | null = null;
-    /** The next turn this client will execute (mirrors `LockstepClient.turn`'s
-     * contract exactly — see `tickCohortTurns`'s doc for why the stepping itself is
-     * reimplemented locally rather than calling `LockstepClient.advance()`). */
-    let cohortTurn = 0;
-    /** executeTurn -> (cohort index -> input) — mirrors `LockstepClient`'s private
-     * buffer; kept locally because it needs to be READ (assembling the lane vector)
-     * to step sub-step-by-sub-step, which `LockstepClient`'s public API doesn't
-     * expose (see `tickCohortTurns`). */
-    const cohortTurnBuffer = new Map<number, Map<number, FrameInput>>();
-    let cohortIssueAccumMs = 0;
-    let cohortLastAdvanceAt = performance.now();
-    let cohortWaiting = false;
+    /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
+     * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
+    let cohortEngine: CohortTurnEngine | null = null;
+    /** Last-seen `waiting` value from the engine, to detect chip transitions per frame. */
+    let cohortPrevWaiting = false;
     let lastZoneKey: string | null = null;
 
     /** Rebuild the `heroId -> displayName` map `GameRenderer.setHeroDisplayNames`
@@ -692,6 +687,20 @@ export function GameClient() {
       renderer.setHeroDisplayNames(currentHeroDisplayNames());
     }
 
+    /** Rebuild `cohortMemberNames` (ticket slot -> friendly name) by resolving each
+     * peer's stable `userId` against the CURRENT friends-poll `party` snapshot. A slot
+     * whose name isn't known yet is OMITTED (never falls back to the cuid) — a late poll
+     * fills it in and `refreshCohortStatus()` re-pushes it to the chip/nameplates. */
+    function resolveCohortNames(): void {
+      const party = useGameStore.getState().party;
+      const next = new Map<number, string>();
+      for (const [slot, userId] of cohortMemberIds) {
+        const name = resolveMemberDisplayName(userId, party);
+        if (name) next.set(slot, name);
+      }
+      cohortMemberNames = next;
+    }
+
     /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
      * `buildCohortState` primitive (`extractSoloState`), resume the ordinary solo
      * accumulator loop next frame. */
@@ -701,10 +710,11 @@ export function GameClient() {
       cohortActive = false;
       handshake?.abort();
       handshake = null;
-      cohortTurnBuffer.clear();
-      cohortTurn = 0;
+      cohortEngine = null;
+      cohortPrevWaiting = false;
       cohortMemberNames = new Map();
       renderer.setHeroDisplayNames(null);
+      renderer.setPovHeroIndex(0);
       useGameStore.getState().setCohortStatus({ kind: "solo" });
     }
 
@@ -742,11 +752,9 @@ export function GameClient() {
       handshake = null;
       cohortActive = true;
       myCohortIndex = lastCohortSlots.indexOf(myTicketSlot);
-      cohortTurn = 0;
-      cohortTurnBuffer.clear();
-      cohortIssueAccumMs = 0;
-      cohortLastAdvanceAt = performance.now();
-      cohortWaiting = false;
+      cohortEngine = new CohortTurnEngine(lastCohortSlots.length, myCohortIndex, performance.now());
+      cohortPrevWaiting = false;
+      renderer.setPovHeroIndex(myCohortIndex);
       refreshCohortStatus();
     }
 
@@ -785,12 +793,15 @@ export function GameClient() {
       members: ReadonlyMap<number, CohortMember>,
     ): void {
       myTicketSlot = partySession.slot;
-      cohortMemberNames = new Map();
+      // Record each peer's stable userId (NEVER surface it — `resolveCohortNames`
+      // turns it into a friendly name against the friends-poll `party` snapshot).
+      cohortMemberIds = new Map();
       for (const slot of cohortSlots) {
         if (slot === myTicketSlot) continue;
         const m = members.get(slot);
-        if (m) cohortMemberNames.set(slot, m.displayName ?? m.userId);
+        if (m) cohortMemberIds.set(slot, m.userId);
       }
+      resolveCohortNames();
       if (cohortSlots.length <= 1) {
         lastCohortSlots = cohortSlots;
         // Discard an in-flight handshake explicitly: `collapseToSolo()` is a no-op
@@ -822,7 +833,7 @@ export function GameClient() {
         return;
       }
       if (cohortActive && typeof rec.executeTurn === "number" && typeof rec.slot === "number") {
-        cohortBufferDeliver(payload as TurnMessage);
+        cohortEngine?.deliver(payload as TurnMessage);
       }
     }
 
@@ -834,7 +845,8 @@ export function GameClient() {
       const leader = liveTicketSlots.length ? electLeader(liveTicketSlots) : myTicketSlot;
       const affectedIndex = lastCohortSlots.indexOf(ticketSlot);
       if (affectedIndex < 0) return; // not (or no longer) part of this cohort
-      const msg = synthesizeShadowMessage(leader, myTicketSlot, affectedIndex, shadowed, cohortTurn);
+      const currentTurn = cohortEngine?.turn ?? 0;
+      const msg = synthesizeShadowMessage(leader, myTicketSlot, affectedIndex, shadowed, currentTurn);
       if (msg) partySession.send(msg);
     }
 
@@ -844,89 +856,6 @@ export function GameClient() {
       onStatusChange: onPartyStatusChange,
       onMemberShadowChanged: onPartyMemberShadowChanged,
     });
-
-    /** Buffer one relay-delivered cohort `TurnMessage`, keyed by its `executeTurn`
-     * (mirrors `LockstepClient.deliver()`'s contract exactly — see `tickCohortTurns`'s
-     * doc for why this is reimplemented locally instead of calling it). A stale
-     * message for an already-executed turn is dropped (matches `LockstepClient`). */
-    function cohortBufferDeliver(msg: TurnMessage): void {
-      if (msg.executeTurn < cohortTurn) return;
-      let lane = cohortTurnBuffer.get(msg.executeTurn);
-      if (!lane) {
-        lane = new Map();
-        cohortTurnBuffer.set(msg.executeTurn, lane);
-      }
-      lane.set(msg.slot, msg.input);
-    }
-
-    /**
-     * Cohort turn ticking (design C): drains MY OWN pendingInput into MY lane for
-     * turn `cohortTurn + INPUT_DELAY_TURNS`, broadcasts it, and executes every turn
-     * whose FULL lane set (every cohort member) has arrived — turns advance on WALL-
-     * CLOCK cadence (`TURN_MS`), never on `TimeDirector`'s shaped time (design note:
-     * "lockstep turns advance on wall-clock cadence; hit-stop stays render-side").
-     *
-     * A turn is executed step-by-step here (SUB_STEPS_PER_TURN raw `step()` calls,
-     * the lane applied on sub-step 0 only) RATHER than via `@/engine/lockstep`'s
-     * `LockstepClient.advance()`/`executeTurn()` — those helpers only leave the LAST
-     * sub-step's `state.events` on `state` (each `step()` clears the buffer at its
-     * own start), which is fine for the engine's OWN determinism-hash tests (they
-     * never read events) but would silently drop 5 of every 6 sub-steps' hit/drop/
-     * skill events for render + audio here. `engine/lockstep/**` is frozen for this
-     * task, so the render-safe per-turn stepping lives in this file instead (flagged
-     * as a good small engine follow-up: an event-collecting `executeTurn` variant).
-     *
-     * A lane that hasn't fully arrived is NEVER treated as idle (that would silently
-     * paper over a genuinely slow peer, corrupting THEIR next real input) — ticking
-     * simply pauses until it arrives; past `COHORT_WAITING_MS` the HUD chip flips to
-     * "waiting" (cleared the instant ticking resumes).
-     */
-    function tickCohortTurns(elapsedSeconds: number, myInput: FrameInput): GameEvent[] {
-      const events: GameEvent[] = [];
-      const cohortSize = lastCohortSlots.length;
-      if (cohortSize < 2) return events;
-
-      cohortIssueAccumMs += elapsedSeconds * 1000;
-      let issuedMine = false;
-      while (cohortIssueAccumMs >= TURN_MS) {
-        cohortIssueAccumMs -= TURN_MS;
-        const msg: TurnMessage = {
-          slot: myCohortIndex,
-          executeTurn: cohortTurn + INPUT_DELAY_TURNS,
-          input: issuedMine ? {} : myInput,
-        };
-        issuedMine = true;
-        cohortBufferDeliver(msg); // self-deliver immediately — no need to wait on the echo
-        partySession.send(msg);
-      }
-
-      const now = performance.now();
-      let advancedAny = false;
-      while ((cohortTurnBuffer.get(cohortTurn)?.size ?? 0) >= cohortSize) {
-        const laneMap = cohortTurnBuffer.get(cohortTurn)!;
-        const lanes: FrameInput[] = new Array(cohortSize);
-        for (let i = 0; i < cohortSize; i++) lanes[i] = laneMap.get(i) ?? {};
-        cohortTurnBuffer.delete(cohortTurn);
-        for (let sub = 0; sub < SUB_STEPS_PER_TURN; sub++) {
-          step(state, sub === 0 ? lanes : []);
-          events.push(...state.events);
-        }
-        cohortTurn++;
-        advancedAny = true;
-      }
-
-      if (advancedAny) {
-        cohortLastAdvanceAt = now;
-        if (cohortWaiting) {
-          cohortWaiting = false;
-          refreshCohortStatus();
-        }
-      } else if (!cohortWaiting && now - cohortLastAdvanceAt > COHORT_WAITING_MS) {
-        cohortWaiting = true;
-        useGameStore.getState().setCohortStatus({ kind: "waiting" });
-      }
-      return events;
-    }
 
     let rafId = 0;
     let lastTime = performance.now();
@@ -1136,73 +1065,58 @@ export function GameClient() {
       // same pattern (never queued through FrameInput; it isn't sim state).
       audio.setMuted(store.soundMuted);
 
-      // Drain the one-shot intent queue exactly once per real frame; only the
-      // first fixed sub-step of this frame gets it (remaining sub-steps, if
-      // the speed multiplier produces more than one, get an empty input).
-      const pending = store.drainPendingInput();
-      const firstInput: FrameInput = {
-        castSkills: pending.castSkills.length ? pending.castSkills : undefined,
-        setAutoSlots: pending.setAutoSlots.length ? pending.setAutoSlots : undefined,
-        challengeBoss: pending.challengeBoss || undefined,
-        advanceStage: pending.advanceStage || undefined,
-        walkToZone: pending.walkToZone ?? undefined,
-        evolveHero: pending.evolveHero ?? undefined,
-        acceptQuest: pending.acceptQuest ?? undefined,
-        // M7.9 stat-tap-fix: a per-stat batch map (accumulated by the store,
-        // not last-wins — see `PendingInput.allocateStat`'s doc), passed
-        // straight through; the engine applies every entry in one step().
-        allocateStat: pending.allocateStat ?? undefined,
-        buyShopItem: pending.buyShopItem ?? undefined,
-        useConsumable: pending.useConsumable ?? undefined,
-        useReturnScroll: pending.useReturnScroll || undefined,
-        equip: pending.equip ?? undefined,
-        setBotSettings: pending.setBotSettings ?? undefined,
-        setAutoHunt: pending.setAutoHunt ?? undefined,
-        fastTravel: pending.fastTravel ?? undefined,
-        goldCredit: pending.goldCredit ?? undefined,
-        // M7.6 ตีบวก: signed material-counter delta (salvage +, refine −), see
-        // `PendingInput.materialsDelta`'s doc.
-        materialsDelta: pending.materialsDelta ?? undefined,
-        // M7.5: the sell-trip bot's trigger — the engine knows nothing about
-        // item instances, so the client feeds this transient count every frame
-        // (see `FrameInput.inventoryCount`'s doc).
-        inventoryCount: store.inventory.length,
-        // M7.8 Manual Play: RO-style tap-to-move / tap-to-attack, queued by the
-        // canvas tap handler below (see `hitTestPointer()`/`onArenaClick()`).
-        moveTo: pending.moveTo ?? undefined,
-        attackTarget: pending.attackTarget ?? undefined,
-        cancelCommand: pending.cancelCommand || undefined,
-        // M8 quest Wave C: daily-roster install/reconcile, daily/main claim
-        // intents, and the "วาปหาเพื่อน" warp scroll — see `PendingInput`'s docs.
-        setDailies: pending.setDailies ?? undefined,
-        claimDaily: pending.claimDaily ?? undefined,
-        claimMainReward: pending.claimMainReward ?? undefined,
-        useWarpScroll: pending.useWarpScroll ?? undefined,
-      };
-
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
       // LAST frame's events — real `elapsed` still drives the renderer, audio,
-      // and UI-sync below so fx/SFX/HUD never stutter, even mid-freeze.
+      // and UI-sync below so fx/SFX/HUD never stutter, even mid-freeze. Computed
+      // every frame (both branches) so TimeDirector's internal cadence is unbroken;
+      // it feeds only the SOLO accumulator (the cohort branch uses real `elapsed`).
       const simElapsed = timeDirector.shape(elapsed, lastFrameEvents);
 
-      // `state.events` is cleared at the START of each step() and holds only
-      // that sub-step's events; a stalled/dropped rAF frame can still produce
-      // more than one fixed sub-step here (via `simElapsed`), so we must
-      // collect across ALL of them before draw() (see
-      // engine/state/events.ts's collection contract). The speed multiplier
-      // itself is hardcoded to 1 — the player-facing 1x/2x/3x selector was
-      // removed (M6.7); `drainAccumulator`'s speed parameter still exists for
-      // the sim/balance harness and engine tests.
-      // M8 party P4b: an ACTIVE cohort ticks on its own wall-clock lockstep cadence
-      // (`tickCohortTurns`) instead of the solo fixed-step accumulator — see that
-      // function's doc. `simElapsed` (TimeDirector-shaped) is intentionally UNUSED
-      // in that branch (design note: hit-stop/slow-mo stay render-side for a cohort;
-      // only the SOLO accumulator is time-shaped). The solo path below is otherwise
-      // byte-for-byte unchanged.
+      // Did this frame drain a manual potion buy? Drives the `botRestocked`-toast
+      // suppression below (line ~"potGain") — in SOLO it's just `pending.buyShopItem`;
+      // in a cohort the drain happens inside the scheduler's issue boundary, so the
+      // closure below flags it there. Preserves the original per-frame check either way.
+      let manualBuyThisFrame = false;
+
+      // `state.events` is cleared at the START of each step() and holds only that
+      // sub-step's events; a frame can run more than one sub-step, so we collect
+      // across ALL of them before draw() (see engine/state/events.ts's contract).
+      // M8 party P4b: an ACTIVE cohort ticks through `CohortTurnEngine` (issue my lane
+      // at 100ms boundaries, meter out sub-steps on real time) instead of the solo
+      // fixed-step accumulator. `simElapsed` (TimeDirector-shaped) is intentionally
+      // UNUSED there — hit-stop/slow-mo stay render-side for a cohort. The solo path
+      // stays byte-for-byte unchanged.
       let frameEvents: GameEvent[];
-      if (cohortActive) {
-        frameEvents = tickCohortTurns(elapsed, firstInput);
+      if (cohortActive && cohortEngine) {
+        const collected: GameEvent[] = [];
+        const io: CohortTickIO = {
+          // Drained ONLY at issue boundaries (not per rAF frame) — no tap is lost.
+          drainInput: () => {
+            const pending = store.drainPendingInput();
+            if (pending.buyShopItem) manualBuyThisFrame = true;
+            return buildFrameInput(pending, store.inventory.length, myCohortIndex);
+          },
+          send: (msg) => partySession.send(msg),
+          runSubStep: (lanes) => {
+            step(state, lanes);
+            collected.push(...state.events);
+          },
+        };
+        const { waiting } = cohortEngine.tick(elapsed * 1000, now, io);
+        frameEvents = collected;
+        // Map the engine's waiting flag onto the HUD chip on TRANSITIONS only.
+        if (waiting && !cohortPrevWaiting) {
+          useGameStore.getState().setCohortStatus({ kind: "waiting" });
+        } else if (!waiting && cohortPrevWaiting) {
+          refreshCohortStatus(); // resumed — restore "active" (names)
+        }
+        cohortPrevWaiting = waiting;
       } else {
+        // Drain the one-shot intent queue exactly once per real frame; only the first
+        // fixed sub-step of this frame gets it (remaining sub-steps get empty input).
+        const pending = store.drainPendingInput();
+        manualBuyThisFrame = !!pending.buyShopItem;
+        const firstInput = buildFrameInput(pending, store.inventory.length, 0);
         const steps = drainAccumulator(acc, simElapsed, 1);
         frameEvents = [];
         for (let i = 0; i < steps; i++) {
@@ -1240,7 +1154,7 @@ export function GameClient() {
         mp: Math.max(0, state.consumables.manaPotion - potsBefore.mp),
         scroll: Math.max(0, state.consumables.returnScroll - potsBefore.scroll),
       };
-      if ((potGain.hp || potGain.mp || potGain.scroll) && !pending.buyShopItem) {
+      if ((potGain.hp || potGain.mp || potGain.scroll) && !manualBuyThisFrame) {
         // A stock jump the player didn't click for = the bot restocked.
         store.pushNotice("botRestocked", potGain);
         botTownActivityUntil = now + 15_000;
@@ -1840,7 +1754,14 @@ export function GameClient() {
       // above. Feed the CURRENT value too (a poll may have already landed before this
       // subscription attaches — e.g. `FriendsButton` mounted earlier in the same tick).
       unsubscribeParty = useGameStore.subscribe((next, prev) => {
-        if (next.party !== prev.party) partySession.setParty(next.party);
+        if (next.party !== prev.party) {
+          partySession.setParty(next.party);
+          // A fresh friends poll may carry names the cohort couldn't resolve yet (the
+          // relay only ever hands us userIds) — re-resolve and, if a cohort is live,
+          // re-push the now-known names to the HUD chip + hero nameplates.
+          resolveCohortNames();
+          if (cohortActive) refreshCohortStatus();
+        }
       });
       partySession.setParty(useGameStore.getState().party);
 

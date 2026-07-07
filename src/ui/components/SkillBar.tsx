@@ -378,7 +378,11 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
 }
 
 export function SkillBar() {
-  const heroes = useGameStore((s) => s.heroes);
+  // MY hero only — the snapshot contract is "heroes[0] = my hero" (GameClient
+  // reorders in cohort mode). Rendering every hero here showed the FRIEND's
+  // whole skill kit + mana bar in an active party cohort, and those buttons'
+  // castSkill intents target my own hero anyway (M8 live-test report).
+  const hero = useGameStore((s) => s.heroes[0]);
   const t = useTranslations("panels");
 
   return (
@@ -386,11 +390,7 @@ export function SkillBar() {
       <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("skillsLabel")}
       </span>
-      <div className="flex gap-4">
-        {heroes.map((hero, i) => (
-          <HeroSkills key={i} hero={hero} />
-        ))}
-      </div>
+      <div className="flex gap-4">{hero && <HeroSkills hero={hero} />}</div>
       {/* The "Auto สกิล" master toggle moved into the consolidated bot-settings
           modal (owner UX pass, 2026-07-07 — see `BotSettingsModal.tsx`); this
           bar keeps only the per-skill "+ อัตโนมัติ" slot badges (an owner-

@@ -107,6 +107,33 @@ export class SeqTracker {
   }
 }
 
+// ── Pure: friendly-name resolution (NEVER leak a cuid) ─────────────────────────────
+
+/**
+ * Resolve a cohort member's HUMAN name from the friends-poll `party` snapshot: prefer
+ * the account `displayName`, fall back to the currently-played character's name, and
+ * return `null` when neither is known — NEVER the raw `userId` (a cuid), which is what
+ * leaked to the HUD chip + nameplates before this. The `party` shape is typed
+ * STRUCTURALLY (not imported from `src/ui`) so this session layer never reaches across
+ * the layer boundary; `PartyWire`/`PartyMemberWire` in `@/ui/friends/types` are a
+ * width-compatible superset. Callers OMIT a `null` result (show nothing) rather than
+ * ever falling back to an id.
+ */
+export function resolveMemberDisplayName(
+  userId: string,
+  party: {
+    members: readonly {
+      userId: string;
+      displayName: string | null;
+      currentCharacter: { name: string } | null;
+    }[];
+  } | null,
+): string | null {
+  const m = party?.members.find((x) => x.userId === userId);
+  if (!m) return null;
+  return m.displayName ?? m.currentCharacter?.name ?? null;
+}
+
 // ── Impure: the actual relay transport ─────────────────────────────────────────────
 
 export type PartyConnStatus = "off" | "connecting" | "connected" | "reconnecting";

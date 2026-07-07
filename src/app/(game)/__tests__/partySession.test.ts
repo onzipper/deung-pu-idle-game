@@ -6,6 +6,7 @@ import {
   SeqTracker,
   deriveCohort,
   electLeader,
+  resolveMemberDisplayName,
   synthesizeShadowMessage,
   type ZoneBeat,
 } from "../partySession";
@@ -389,5 +390,31 @@ describe("PartySession re-announces its zone to late joiners", () => {
     ws.emit({ t: "member-joined", seq: 5, slot: 0, userId: "me" });
     expect(zoneBeatsIn(ws.sent)).toEqual([]);
     rig.session.setParty(null);
+  });
+});
+
+// ── resolveMemberDisplayName (never leak a cuid to the HUD) ─────────────────────────
+
+describe("resolveMemberDisplayName", () => {
+  const party = {
+    members: [
+      { userId: "u1", displayName: "Nok", currentCharacter: { name: "SwordGuy" } },
+      { userId: "u2", displayName: null, currentCharacter: { name: "MageGal" } },
+      { userId: "u3", displayName: null, currentCharacter: null },
+    ],
+  };
+
+  it("prefers the account displayName", () => {
+    expect(resolveMemberDisplayName("u1", party)).toBe("Nok");
+  });
+
+  it("falls back to the current character's name when displayName is null", () => {
+    expect(resolveMemberDisplayName("u2", party)).toBe("MageGal");
+  });
+
+  it("returns null (NEVER the userId) when both are absent, or the user/party is unknown", () => {
+    expect(resolveMemberDisplayName("u3", party)).toBeNull();
+    expect(resolveMemberDisplayName("nope", party)).toBeNull();
+    expect(resolveMemberDisplayName("u1", null)).toBeNull();
   });
 });

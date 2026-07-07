@@ -1,0 +1,64 @@
+/**
+ * M8 party P4b — pure `PendingInput` -> `FrameInput` builder, shared by the SOLO loop
+ * and the cohort turn scheduler so BOTH construct my lane identically.
+ *
+ * Lives in its own module (rather than inside `GameClient.tsx`) purely so it stays unit-
+ * testable WITHOUT dragging the Pixi renderer / audio / React graph into a headless test.
+ * Both its type imports are ERASED at runtime, so this module has zero runtime deps.
+ *
+ * `myHeroIndex` is my position in `state.heroes[]` (0 for solo; my cohort array index
+ * otherwise). Intents that EMBED an explicit hero index — `castSkills[].slot`,
+ * `evolveHero`, `acceptQuest` (the store hardcodes these to 0, since the HUD always
+ * treats "my hero" as index 0) — are REMAPPED to `myHeroIndex`, because `step()` applies
+ * each lane's embedded index against `state.heroes[<that index>]` from EVERY lane (see
+ * `engine/core/step.ts`'s routing). Without the remap a non-index-0 member's manual cast /
+ * evolve / quest-accept would target `heroes[0]` (the OTHER player). `setAutoSlots[].slot`
+ * is an AUTO-CAST slot (0-2), NOT a hero index — left untouched. For `myHeroIndex === 0`
+ * the output deep-equals the legacy solo literal (the remap is the identity there).
+ */
+
+import type { FrameInput } from "@/engine";
+import type { PendingInput } from "@/ui/store/gameStore";
+
+export function buildFrameInput(
+  pending: PendingInput,
+  inventoryCount: number,
+  myHeroIndex: number,
+): FrameInput {
+  return {
+    castSkills: pending.castSkills.length
+      ? pending.castSkills.map((c) => ({ ...c, slot: myHeroIndex }))
+      : undefined,
+    setAutoSlots: pending.setAutoSlots.length ? pending.setAutoSlots : undefined,
+    challengeBoss: pending.challengeBoss || undefined,
+    advanceStage: pending.advanceStage || undefined,
+    walkToZone: pending.walkToZone ?? undefined,
+    evolveHero: pending.evolveHero !== null ? myHeroIndex : undefined,
+    acceptQuest: pending.acceptQuest !== null ? myHeroIndex : undefined,
+    // M7.9 stat-tap-fix: a per-stat batch map (accumulated by the store, not last-wins),
+    // passed straight through; the engine applies every entry in one step().
+    allocateStat: pending.allocateStat ?? undefined,
+    buyShopItem: pending.buyShopItem ?? undefined,
+    useConsumable: pending.useConsumable ?? undefined,
+    useReturnScroll: pending.useReturnScroll || undefined,
+    equip: pending.equip ?? undefined,
+    setBotSettings: pending.setBotSettings ?? undefined,
+    setAutoHunt: pending.setAutoHunt ?? undefined,
+    fastTravel: pending.fastTravel ?? undefined,
+    goldCredit: pending.goldCredit ?? undefined,
+    // M7.6 ตีบวก: signed material-counter delta (salvage +, refine −).
+    materialsDelta: pending.materialsDelta ?? undefined,
+    // M7.5: the sell-trip bot's trigger — the engine knows nothing about item instances,
+    // so the client feeds this transient count every frame.
+    inventoryCount,
+    // M7.8 Manual Play: RO-style tap-to-move / tap-to-attack.
+    moveTo: pending.moveTo ?? undefined,
+    attackTarget: pending.attackTarget ?? undefined,
+    cancelCommand: pending.cancelCommand || undefined,
+    // M8 quest Wave C: daily-roster install/reconcile, daily/main claim intents, warp scroll.
+    setDailies: pending.setDailies ?? undefined,
+    claimDaily: pending.claimDaily ?? undefined,
+    claimMainReward: pending.claimMainReward ?? undefined,
+    useWarpScroll: pending.useWarpScroll ?? undefined,
+  };
+}

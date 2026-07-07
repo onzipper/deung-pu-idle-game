@@ -149,6 +149,20 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08f.items.connFix",
     ],
   },
+  // Live-test round 2: the cohort freeze fix (turn-0 pre-seed) + smooth per-frame
+  // stepping + real names + pov-gated skill spectacle + party cap 3 -> 6.
+  {
+    id: "2026-07-08g",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08g.items.freezeFix",
+      "releases.2026-07-08g.items.smooth",
+      "releases.2026-07-08g.items.names",
+      "releases.2026-07-08g.items.povFx",
+      "releases.2026-07-08g.items.party6",
+      "releases.2026-07-08g.items.social",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

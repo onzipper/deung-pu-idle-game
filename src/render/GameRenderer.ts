@@ -140,6 +140,19 @@ export class GameRenderer {
    * See `setHeroDisplayNames()`.
    */
   private heroDisplayNames: ReadonlyMap<number, string> | null = null;
+  /**
+   * M8 party P6 hook: index into `state.heroes` of the LOCAL point-of-view
+   * hero — forwarded to `FxController.setPovHeroIndex()` so a co-op friend's
+   * ultimate keeps its world-anchored spectacle (visible to everyone) while
+   * SCREEN-level beats (camera shake/punch, sky-darken/flash overlays, impact
+   * filters) only fire for the hero this client actually controls. Stored
+   * here (not just forwarded) so it survives an `FxController` being torn
+   * down/recreated (mirrors `heroDisplayNames`'s own defensive-read
+   * convention) — applied to a freshly-constructed `FxController` in
+   * `create()` regardless of call order against `setPovHeroIndex()`. Default 0
+   * matches solo's always-slot-0 hero.
+   */
+  private povHeroIndex = 0;
 
   /** Set up the Pixi Application and scene layers. Client-only. */
   async create(canvasParent: HTMLElement): Promise<void> {
@@ -245,6 +258,11 @@ export class GameRenderer {
       (target, id) => this.getEntityView(target, id),
       (id) => this.heroPool?.peek(id) ?? null,
     );
+    // Apply whatever POV index was already registered (possibly before
+    // `create()` resolved) — same "ordering doesn't matter" guarantee
+    // `setHeroDisplayNames()` gives, applied here instead of a defensive read
+    // in `draw()` since the fx controller owns the gating state itself.
+    this.fx.setPovHeroIndex(this.povHeroIndex);
 
     // Pixi's built-in `resizeTo` only reacts to `window` resize events; a
     // ResizeObserver on the actual mount element is what makes layout-driven
@@ -542,6 +560,20 @@ export class GameRenderer {
    */
   setHeroDisplayNames(names: ReadonlyMap<number, string> | null): void {
     this.heroDisplayNames = names;
+  }
+
+  /**
+   * M8 party P6 seam (mirrors `setHeroDisplayNames()` above): registers which
+   * `state.heroes` slot is the LOCAL point-of-view hero, forwarded to the
+   * `FxController` so co-op SCREEN-level skill beats stay personal while
+   * world-anchored spectacle stays shared — see `FxController.setPovHeroIndex()`'s
+   * doc comment. Safe to call any time (before `create()` resolves, mid-
+   * session, or after `destroy()`); the value is stored here and re-applied
+   * to a freshly-built `FxController` regardless of call order.
+   */
+  setPovHeroIndex(index: number): void {
+    this.povHeroIndex = index;
+    this.fx?.setPovHeroIndex(index);
   }
 
   /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */
