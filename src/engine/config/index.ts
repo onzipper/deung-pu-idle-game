@@ -1407,7 +1407,7 @@ const SKILL_LIST = [
   // Learned at tier 3 + level 40. `targets` MUST equal stormOffsets.length.
   {
     id: "archer_storm", cls: "archer", tier: 3, unlockLevel: 40, kind: "rain",
-    cost: 120, cd: 15, radius: 80, mult: 1.1, targets: 20, projSpeed: 260, range: 900,
+    cost: 90, cd: 13, radius: 95, mult: 2.0, targets: 20, projSpeed: 260, range: 900,
     buffMult: 1, buffDuration: 0,
   },
 

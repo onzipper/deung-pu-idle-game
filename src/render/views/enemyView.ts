@@ -37,8 +37,8 @@ import { Container, Graphics } from "pixi.js";
 import type { Enemy, EnemyKind } from "@/engine/entities";
 import type { GameEvent } from "@/engine/state";
 import { GROUND_Y } from "@/render/layout";
-import { ENEMY_COLORS, PALETTE, safeRadius } from "@/render/theme";
 import { drawHpBar } from "@/render/views/hpBar";
+import { enemySpeciesFor } from "@/render/views/enemySpecies";
 
 // ---------------------------------------------------------------------------
 // Per-kind tunables — the single table personality differences read from.
@@ -160,6 +160,13 @@ export interface EnemyFrameContext {
   dt: number;
   /** This frame's collected engine events. */
   events: readonly GameEvent[];
+  /** The map (`CONFIG.world.maps[].id`, e.g. `"map4"`) this enemy spawned
+   * into — drives `enemySpecies.ts`'s per-map silhouette (M7.9 "new mob
+   * species"). Only read at first-sight `buildRig()` time (an enemy never
+   * changes map mid-life — see `enemySpecies.ts`'s doc comment), same
+   * plumbing convention as `bossView.ts`'s `ctx.mapId`. Optional/undefined
+   * falls back to the map1/2/3 original silhouettes. */
+  mapId?: string;
 }
 
 export interface EnemyView extends Container {
@@ -213,71 +220,21 @@ function frontPoint(kind: EnemyKind, size: number): { x: number; y: number } {
  * task, which matters with many enemies live at once. Colors stay
  * kind-coded (`color` = the kind's single base hex); shading/eyes/plates use
  * plain black/white alpha overlays on that same hue, never a new palette
- * entry per kind — the flat-alpha-layering rule, not gradients. */
-function buildRig(view: EnemyView, kind: EnemyKind, size: number): void {
+ * entry per kind — the flat-alpha-layering rule, not gradients.
+ *
+ * M7.9 "new mob species": WHICH silhouette/color this kind draws now comes
+ * from `enemySpecies.ts` (keyed by `mapId × kind`) instead of a hardcoded
+ * switch here — map1/2/3 resolve to the exact original builders (byte-
+ * identical, see that module's doc comment), map4/5/6 get their own species.
+ * Everything else below (legs/limbArm, the rest of the rig contract) is
+ * unchanged by this task. */
+function buildRig(view: EnemyView, kind: EnemyKind, size: number, mapId: string | undefined): void {
   const s = Math.max(0.1, size);
-  const color = ENEMY_COLORS[kind];
+  const { color, build } = enemySpeciesFor(mapId, kind);
 
   const g = view.body;
   g.clear();
-  if (kind === "tank") {
-    // Armored block: base plate + two darker seam lines (layered plates) +
-    // a jutting heavy jaw + small menacing eyes.
-    const bx = -12 * s;
-    const by = GROUND_Y - 30 * s;
-    const bw = safeRadius(24 * s);
-    const bh = safeRadius(28 * s);
-    g.roundRect(bx, by, bw, bh, 4).fill(color);
-    g.rect(bx, by + bh * 0.32, bw, Math.max(1, 1.2 * s)).fill({ color: 0x000000, alpha: 0.25 });
-    g.rect(bx, by + bh * 0.62, bw, Math.max(1, 1.2 * s)).fill({ color: 0x000000, alpha: 0.2 });
-    g.roundRect(bx + 1.5 * s, GROUND_Y - 9 * s, 7 * s, 5 * s, 1).fill({
-      color: 0x000000,
-      alpha: 0.45,
-    });
-    g.circle(-6 * s, GROUND_Y - 26 * s, safeRadius(1.7 * s)).fill({
-      color: 0x000000,
-      alpha: 0.65,
-    });
-    g.circle(-9.5 * s, GROUND_Y - 26 * s, safeRadius(1.7 * s)).fill({
-      color: 0x000000,
-      alpha: 0.65,
-    });
-  } else if (kind === "ranged") {
-    // Kite body + a hooded shadow over the top half + faint glowing eyes.
-    const cy = GROUND_Y - 16;
-    g.poly([0, cy - 10 * s, 10 * s, cy, 0, cy + 10 * s, -10 * s, cy], true).fill(color);
-    g.poly([0, cy - 10 * s, 6 * s, cy - 2 * s, 0, cy + 2 * s, -6 * s, cy - 2 * s], true).fill({
-      color: 0x000000,
-      alpha: 0.28,
-    });
-    g.circle(-2.2 * s, cy - 2.5 * s, safeRadius(1.1 * s)).fill({ color: 0xffffff, alpha: 0.85 });
-  } else if (kind === "fast") {
-    // Low, elongated sleek silhouette (distinct from `normal`'s upright
-    // wedge) + a sharp angry-slit brow.
-    g.poly(
-      [-17 * s, GROUND_Y - 10, 9 * s, GROUND_Y - 20, 15 * s, GROUND_Y - 8, 7 * s, GROUND_Y - 2],
-      true,
-    ).fill(color);
-    g.moveTo(-11 * s, GROUND_Y - 15)
-      .lineTo(-4 * s, GROUND_Y - 18)
-      .stroke({ width: 1.4, color: PALETTE.outline, alpha: 0.7, cap: "round" });
-    g.moveTo(-11 * s, GROUND_Y - 12)
-      .lineTo(-4 * s, GROUND_Y - 14.5)
-      .stroke({ width: 1.4, color: PALETTE.outline, alpha: 0.7, cap: "round" });
-  } else {
-    // Workmanlike upright wedge + a plain double-eyed brow.
-    g.poly(
-      [-15 * s, GROUND_Y - 16, 13 * s, GROUND_Y - 16 - 14 * s, 13 * s, GROUND_Y - 2],
-      true,
-    ).fill(color);
-    g.moveTo(-11 * s, GROUND_Y - 22)
-      .lineTo(-3 * s, GROUND_Y - 24)
-      .stroke({ width: 1.2, color: 0x000000, alpha: 0.3, cap: "round" });
-  }
-  if (kind !== "tank" && kind !== "ranged") {
-    g.circle(-3 * s, GROUND_Y - 17, safeRadius(2.5 * s)).fill({ color: 0x000000, alpha: 0.5 });
-    g.circle(-8 * s, GROUND_Y - 17, safeRadius(2 * s)).fill({ color: 0x000000, alpha: 0.5 });
-  }
+  build(g, s, color);
 
   view.legs.clear();
   view.legs
@@ -388,7 +345,7 @@ function recoilCurve(progress: number): number {
 export function updateEnemyView(view: EnemyView, enemy: Enemy, ctx: EnemyFrameContext): void {
   if (view.kind !== enemy.kind) {
     view.kind = enemy.kind;
-    buildRig(view, enemy.kind, enemy.size);
+    buildRig(view, enemy.kind, enemy.size, ctx.mapId);
   }
 
   const anim = view.anim;

@@ -116,8 +116,16 @@ function weapon(
   cls: HeroClass,
   tier: number,
   rarity: ItemRarity,
+  atkOverride?: number,
 ): ItemTemplate {
-  return { id, slot: "weapon", classReq: cls, tier, rarity, stats: { atk: WEAPON_ATK[tier] } };
+  return {
+    id,
+    slot: "weapon",
+    classReq: cls,
+    tier,
+    rarity,
+    stats: { atk: atkOverride ?? WEAPON_ATK[tier] },
+  };
 }
 function armor(
   id: string,
@@ -176,8 +184,13 @@ const CATALOG: ItemTemplate[] = [
   // ---- archer weapons ----
   weapon("w_bow_t7_frost", "archer", 7, "rare"),
   weapon("w_bow_t8_dune", "archer", 8, "rare"),
-  weapon("w_bow_t9_obsidian", "archer", 9, "rare"),
-  weapon("w_bow_t10_apocalypse", "archer", 10, "epic"),
+  // M7.9 "Archer friction pass": t9/t10 bows carry a small class-specific ATK PREMIUM
+  // over the shared WEAPON_ATK curve (53/70). The archer's frontier deaths are boss
+  // wipes (its AoE storm scatters off a lone boss); flat bow ATK lifts its single-target
+  // basic+powershot boss DPS. Class-locked (classReq=archer) so sword/mage are
+  // byte-unchanged; t9/t10 drop only at s23+ so s1-22 is byte-identical.
+  weapon("w_bow_t9_obsidian", "archer", 9, "rare", 66),
+  weapon("w_bow_t10_apocalypse", "archer", 10, "epic", 88),
   // ---- mage weapons ----
   weapon("w_staff_t7_frost", "mage", 7, "rare"),
   weapon("w_staff_t8_dune", "mage", 8, "rare"),

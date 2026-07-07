@@ -171,13 +171,50 @@ export const HERO_COLORS: Record<HeroClass, { body: number; light: number; shade
   mage: { body: 0xc77dff, light: 0xe6c9ff, shade: 0x8a4fc2 },
 };
 
-/** Enemy kind -> body color (POC grunt/runner/tank/shooter). */
+/** Enemy kind -> body color (POC grunt/runner/tank/shooter). This is the
+ * map1/2/3 (+ any frontier-overflow map) look — `views/enemySpecies.ts`
+ * resolves map4/5/6's OWN species colors below instead; this table stays the
+ * untouched fallback so maps 1-3 render byte-identically to before M7.9's
+ * "new mob species" pass. */
 export const ENEMY_COLORS: Record<EnemyKind, number> = {
   normal: 0xf07a52, // grunt
   fast: 0xf5c542, // runner
   tank: 0xc9542f,
   ranged: 0xe56ba8, // shooter
 };
+
+/** map4/5/6 mob-species base body color per kind (M7.9 "new mob species" —
+ * render-only, owner-approved). Each map's 4 kinds keep the SAME silhouette
+ * rig/motion personality (`ENEMY_MOTION` in `enemyView.ts` stays keyed by
+ * `EnemyKind` only) — only the body color + shape details vary, resolved by
+ * `views/enemySpecies.ts`. Picked to stay legible (pop) against that map's own
+ * `environment/biomes.ts` ground tones, including map6's near-black grounds —
+ * see `ENEMY_SPECIES_ACCENT` below for the glow accents that carry the rest of
+ * that legibility work on map6 specifically. */
+export const ENEMY_SPECIES_COLORS: Record<"map4" | "map5" | "map6", Record<EnemyKind, number>> = {
+  // map4 ice tundra: frost-wolf / ice golem / frozen shambler / frost wisp.
+  map4: { fast: 0x9fe0ff, tank: 0x4a7fae, normal: 0x6fa8cc, ranged: 0xcdeaff },
+  // map5 desert ruins: sand scorpion / sandstone colossus / bandaged mummy /
+  // sand-wraith staff caster.
+  map5: { fast: 0x2f8f6b, tank: 0xc79148, normal: 0xd8c9a0, ranged: 0x8a6fae },
+  // map6 hell city: imp / charcoal brute / ash ghoul / cinder warlock — all
+  // deliberately lighter-value than the near-black hell-city grounds so the
+  // silhouette itself pops without relying on the glow accent alone.
+  map6: { fast: 0x8a2a2a, tank: 0x554842, normal: 0x6b625a, ranged: 0x4a1f3a },
+};
+
+/** map4/5/6's "glowing eyes / cold-crystal / ember-crack" accent — a single
+ * dedicated hue per map (mirrors `BOSS_COLORS`' body/crown/eye split), layered
+ * as flat alpha fills/strokes on the species body, never a gradient. */
+export const ENEMY_SPECIES_ACCENT: Record<"map4" | "map5" | "map6", number> = {
+  map4: 0x2ec8ff, // cold cyan glow (frost eyes / crystalline edges)
+  map5: 0xffd88a, // warm gold glow (mummy/colossus/scorpion eyes)
+  map6: 0xff6a2e, // ember orange-red glow (eyes / crack-lines)
+};
+/** map5's sand-wraith caster gets its own mystical violet eye glow instead of
+ * the shared warm-gold accent above (a caster-specific "different magic"
+ * read, same one-extra-accent convention `bossThemes.ts` uses per boss). */
+export const ENEMY_SPECIES_WRAITH_ACCENT = 0xcfa8ff;
 
 /** Projectile kind -> body color (falls back to owner's color where the POC
  * colored per-attack rather than per-kind; arrow/orb use the firing hero's

@@ -234,9 +234,14 @@ export class GameRenderer {
     heroPool.endFrame();
 
     // Enemies list is empty during the boss phase (the sim clears it on entry).
+    // M7.9 "new mob species": resolved from the CURRENT zone, same
+    // `zoneAt(state.location).mapId` plumbing as the boss theme below — safe
+    // because it's only read once, at a view's first-sight `buildRig()` (an
+    // enemy never changes map mid-life).
+    const enemyMapId = zoneAt(state.location).mapId;
     this.enemyPool.beginFrame();
     for (const e of state.enemies) {
-      updateEnemyView(this.enemyPool.get(e.id), e, { dt, events: frameEvents });
+      updateEnemyView(this.enemyPool.get(e.id), e, { dt, events: frameEvents, mapId: enemyMapId });
     }
     this.enemyPool.endFrame();
 

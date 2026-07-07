@@ -24,7 +24,6 @@ import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import {
   BOSS_COLORS,
-  ENEMY_COLORS,
   HERO_COLORS,
   PALETTE,
   PROJECTILE_COLORS,
@@ -65,6 +64,7 @@ import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
 import { TravelPortalController } from "@/render/fx/travelPortal";
 import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
 import { gateX, isBossZoneIdx } from "@/render/environment/zoneGates";
+import { enemyColorFor } from "@/render/views/enemySpecies";
 import {
   getArmorAnchorPos,
   getSwordTipPos,
@@ -939,7 +939,7 @@ export class FxController {
           this.onHit(ev, state, skillImpactSeen, meleeSparkGuard);
           break;
         case "kill":
-          this.onKill(ev);
+          this.onKill(ev, state);
           break;
         case "heroDown":
           this.shake.trigger(3); // mild
@@ -1413,11 +1413,15 @@ export class FxController {
    * + corpse-crumple base layer, PLUS a bigger kind-colored "dissolving"
    * burst, a rising soul wisp (skipped outright if the wisp pool is
    * saturated — see `soulWisp.ts`), and — tank only — a couple of arcing
-   * armor-shard chips. */
-  private onKill(ev: Extract<GameEvent, { type: "kill" }>): void {
+   * armor-shard chips. M7.9 "new mob species": `kindColor` is resolved
+   * through `enemySpecies.ts`'s `enemyColorFor()` (map1/2/3 fall back to the
+   * plain `ENEMY_COLORS[kind]`), same `zoneAt(state.location).mapId`
+   * plumbing as `resolveBossTint()`, so a map4/5/6 mob's dissolve burst /
+   * soul wisp / armor shards / corpse echo stay tinted to ITS OWN species. */
+  private onKill(ev: Extract<GameEvent, { type: "kill" }>, state: GameState): void {
     const size = ENEMY_TYPES[ev.kind]?.size ?? 1;
     const y = GROUND_Y - 20 - 8 * size;
-    const kindColor = ENEMY_COLORS[ev.kind];
+    const kindColor = enemyColorFor(zoneAt(state.location).mapId, ev.kind);
 
     burst(this.particles, ev.x, y, 10, PALETTE.killGold, {
       speed: 110,
@@ -1447,7 +1451,7 @@ export class FxController {
     // `enemyView.ts`'s pooled view is already gone — this brief crumple
     // echo (kept subtle; the burst above already covers the "impact") is
     // the render-side stand-in for a death animation.
-    this.corpseEcho.spawn(ev.x, GROUND_Y - 4, ev.kind, size);
+    this.corpseEcho.spawn(ev.x, GROUND_Y - 4, kindColor, size);
 
     this.soulWisps.trySpawn({
       x: ev.x,
@@ -2885,11 +2889,15 @@ export class FxController {
    * once-per-wave `waveSpawn`. */
   private updateEnemySpawns(state: GameState): void {
     this.frameEnemyIdScratch.clear();
+    // M7.9 "new mob species": species-resolved tint (see `onKill`'s doc
+    // comment) — computed once per call, not per enemy (every enemy this
+    // frame shares the same current-zone map).
+    const mapId = zoneAt(state.location).mapId;
     for (const e of state.enemies) {
       this.frameEnemyIdScratch.add(e.id);
       if (!this.seenEnemyIds.has(e.id)) {
         this.seenEnemyIds.add(e.id);
-        this.portals.spawn(e.x, GROUND_Y, ENEMY_COLORS[e.kind], e.size);
+        this.portals.spawn(e.x, GROUND_Y, enemyColorFor(mapId, e.kind), e.size);
       }
     }
     for (const id of this.seenEnemyIds) {

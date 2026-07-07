@@ -118,6 +118,17 @@
 
 > **หมายเหตุปิด M7.9 (2026-07-07):** in-browser visual pass ยังไม่ได้ทำ — แนะนำ owner playtest: หน้าตาบอส 6 ตัว (เขากว้าง map2/map6 vs HP bar), spectacle สกิล 4 ทั้ง 3, ความรู้สึกไต่ s16-30 (โดยเฉพาะธนู)
 
+## M7.95 — Hall of Fame 🏆 (สเปกเคาะกับเจ้าของ 2026-07-08 · ดึงขึ้นมาก่อน M8 ได้ ไม่พึ่ง websocket · ประมาณ ~4.5-5.5 ชม.)
+
+> **Top 10 ต่อหมวด** + ฟิลเตอร์อาชีพ (ดาบ/ธนู/เวท) บนทุกบอร์ด · หมวด: ① Level สูงสุด (tiebreaker = ใครถึงก่อน, เก็บ timestamp แตะ 90) ② Power สูงสุด (สูตรคำนวณฝั่ง server จาก save blob เท่านั้น) ③ **ยอดเงินหาได้รวม (total gold earned)** — ผลรวมทองที่*เคยได้รับ*ทั้งหมดตั้งแต่สร้างตัวละคร (ฆ่ามอน+ขายของ) ใช้จ่ายแล้วไม่ลด; ไม่ใช่เงินคงเหลือ และไม่เกี่ยวกับเวลาออนไลน์ (เจ้าของเคาะชื่อ 2026-07-08 — เดิมเรียก "เงินสะสม lifetime" แล้วชวนสับสน) ④ เวลาเคลียร์บอสดีที่สุดต่อโซน (6 บอร์ดย่อย s5-s30, ตัดค่าที่เร็วกว่า "พื้นความเป็นไปได้" จาก sim อัตโนมัติ) ⑤ **เวลาออนไลน์รวม** (เพิ่ม 2026-07-08 — server สะสมจากส่วนต่าง lastSeen ระหว่าง save ที่ < เกณฑ์ ~5 นาที: นับเฉพาะตอนเปิดเกมจริงรวม AFK, ไม่นับ offline idle, server-clock ล้วนจึงโกงไม่ได้ ไม่ต้องรอ re-derive, ไม่มี SAVE bump) · **หน้าโปรไฟล์กดดูได้** (paper-doll + ออร่า + ชื่อทอง prestige) · เก็บ timestamp ทุกสถิติเผื่อซีซันในอนาคต · ปุ่ม 🏆 บนการ์ดเป้าหมายเปิดแผงนี้ · ยังไม่ทำ: รางวัลอันดับ/ซีซัน/ของตกแต่งโปรไฟล์
+
+- [ ] Engine/SAVE v16: counter ยอดเงินหาได้รวม + best boss-clear time ต่อโซน (+timestamp) + migrate v15→v16
+- [ ] **Anti-cheat re-derive (หนี้ M5 — เงื่อนไขก่อนเปิดบอร์ด 1-3):** server ตรวจความเป็นไปได้ของ level/power/เงินสะสม จาก lastSeen + เคิร์ฟเกม (engine deterministic → re-derive ได้จริง); ค่าเกินเพดาน = ไม่ขึ้นทำเนียบ (ไม่แบน)
+- [ ] Server/DB: ตาราง leaderboard snapshot (Prisma db push), อัปเดตตอน /api/save, endpoint top-10 + my-rank ต่อหมวด + class filter, พื้นเวลาบอสต่อโซนจาก sim, **onlineSeconds accumulator** (delta lastSeen < เกณฑ์)
+- [ ] UI: แผงทำเนียบ (ModalPortal, มือถือ first-class), 4 หมวด + 6 บอร์ดย่อยบอส, แถวอันดับตัวเอง, หน้าโปรไฟล์, i18n th/en
+- [ ] ประกาศ server-wide: คนแรกแตะ 90 / แซงอันดับ 1 (ท่อ announcement เดิม) + patch notes entry
+- [ ] QA + sim sanity (บอร์ดต้องไม่แตะ gameplay/balance เลย — read-only จาก save)
+
 ## M8 — Party
 
 - [ ] Websocket infra spike: ประเมิน VPS/Node server + ห้องปาร์ตี้ (ตัดสินใจ infra ก่อนเริ่ม)
@@ -138,3 +149,4 @@
 
 - ⏸️ Prestige / reset loop — ตัดสินใจหลัง M9
 - ❌ PvP arena — ตัดออก (2026-07-05)
+- ❌ Conditional auto-cast (เลือกสกิลตามสถานการณ์ เช่น AoE ต้องมีมอน ≥3) — เจ้าของตัด (2026-07-08): "ช่วยเหลือมากเกินไป" — auto-play ต้องเล่นแบบซื่อ ๆ ความสูญเสีย/การตายที่ endgame คือ friction ที่ตั้งใจ อย่าเสนอ automation ที่เล่นเก่งแทนผู้เล่นอีก
