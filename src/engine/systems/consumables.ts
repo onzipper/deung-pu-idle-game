@@ -18,8 +18,9 @@ import { CONFIG } from "@/engine/config";
 import { dpow } from "@/engine/core/dmath";
 import { FIXED_DT } from "@/engine/core/loop";
 import { arriveAtZone, townLocation, zoneAt } from "@/engine/systems/world";
-import type { ConsumableCounts, ShopItemId } from "@/engine/entities";
+import type { ConsumableCounts, Hero, ShopItemId } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
+import type { FrameInput } from "@/engine/core/step";
 
 const SHOP = CONFIG.shop;
 
@@ -110,9 +111,8 @@ export function buyShopItem(state: GameState, item: ShopItemId, qty = 1): boolea
  * pool is already full (never wastes a potion — protects the resource for both
  * manual taps and auto-use).
  */
-export function applyConsumable(state: GameState, item: ShopItemId): boolean {
+export function applyConsumable(state: GameState, hero: Hero | undefined, item: ShopItemId): boolean {
   if (item !== "hpPotion" && item !== "manaPotion") return false;
-  const hero = state.heroes[0];
   if (!hero || hero.dead) return false;
   if ((state.consumables[item] ?? 0) <= 0) return false;
   if ((state.consumableCds[item] ?? 0) > 0) return false;
@@ -151,28 +151,36 @@ export function applyReturnScroll(state: GameState): boolean {
 }
 
 /**
- * Per-step consumable resolution (battle path): a manual quick-use (once per
- * drained input) then threshold-gated AUTO-USE of the two potions. Auto-use reads
- * the UI-owned toggles/thresholds off `state`; the per-type cooldown (ticked in
- * `tickConsumableCds`) keeps it from double-drinking. Manual runs first so a tap
- * and an auto-trigger never both spend on the same type the same step.
+ * Per-step consumable resolution (battle path): for every hero, a manual quick-use
+ * (once per drained input, from its own lane) then threshold-gated AUTO-USE of the
+ * two potions. Auto-use now reads the PER-HERO config (was the global toggles); the
+ * per-type cooldown (ticked in `tickConsumableCds`) keeps it from double-drinking.
+ * Manual runs first so a tap and an auto-trigger never both spend on the same type
+ * the same step.
+ *
+ * M8 party P1b: `lanes[i].useConsumable` → `heroes[i]`. Solo (one lane / one hero)
+ * reproduces the old `state.heroes[0]` path exactly (config mirrors the globals), so
+ * a 1-hero run is byte-identical. NOTE the potion STACK (`state.consumables`) + the
+ * use-cooldowns stay SHARED (the lead/local player's) in P1b — a full per-hero potion
+ * inventory is part of the deferred economy-per-hero split (design §5); iteration is
+ * fixed heroId order so a cohort draining the shared stack is still deterministic.
  */
-export function processConsumables(state: GameState, manualUse?: ShopItemId): void {
-  const hero = state.heroes[0];
-  if (!hero || hero.dead) return;
-  if (manualUse) applyConsumable(state, manualUse);
-  if (
-    state.autoHpPotion &&
-    hero.maxHp > 0 &&
-    hero.hp / hero.maxHp < state.autoHpThreshold
-  ) {
-    applyConsumable(state, "hpPotion");
-  }
-  if (
-    state.autoManaPotion &&
-    hero.maxMana > 0 &&
-    hero.mana / hero.maxMana < state.autoManaThreshold
-  ) {
-    applyConsumable(state, "manaPotion");
+export function processConsumables(state: GameState, lanes: FrameInput[]): void {
+  // TODO PARTY-COHORT PREREQ: per-hero potion stacks required before the shared cohort
+  // sim ships — auto-potion mutates combat state; a shared stack would diverge from each
+  // player's true persisted inventory. (P1b keeps the stack global by design §5; each
+  // player persists their own economy via their own save.)
+  for (let i = 0; i < state.heroes.length; i++) {
+    const hero = state.heroes[i];
+    if (!hero || hero.dead) continue;
+    const manualUse = (lanes[i] ?? {}).useConsumable;
+    if (manualUse) applyConsumable(state, hero, manualUse);
+    const cfg = hero.config;
+    if (cfg.autoHpPotion && hero.maxHp > 0 && hero.hp / hero.maxHp < cfg.autoHpThreshold) {
+      applyConsumable(state, hero, "hpPotion");
+    }
+    if (cfg.autoManaPotion && hero.maxMana > 0 && hero.mana / hero.maxMana < cfg.autoManaThreshold) {
+      applyConsumable(state, hero, "manaPotion");
+    }
   }
 }

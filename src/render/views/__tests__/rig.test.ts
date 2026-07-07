@@ -22,6 +22,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Boss, Enemy, Hero } from "@/engine/entities";
+import { defaultHeroConfig } from "@/engine/entities";
 import { GROUND_Y } from "@/render/layout";
 import { createBossView, updateBossView } from "@/render/views/bossView";
 import { createEnemyView, updateEnemyView } from "@/render/views/enemyView";
@@ -52,6 +53,7 @@ function makeHero(cls: Hero["cls"]): Hero {
     quest: null,
     equipped: { weapon: null, armor: null },
     command: null,
+    config: defaultHeroConfig(),
     aimX: null,
   };
 }

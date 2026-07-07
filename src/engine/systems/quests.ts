@@ -202,35 +202,39 @@ export function acceptQuest(state: GameState, index: number): boolean {
  * emission site instead of reading `state.events`.
  */
 export function advanceQuestObjective(state: GameState, type: QuestObjectiveType): void {
-  const hero = state.heroes[0];
-  if (!hero) return;
-  const q = hero.quest;
-  if (!q || !q.accepted) return;
-  const def = activeQuestDef(hero);
-  if (!def || isQuestComplete(hero)) return;
+  // M8 party P1b: iterate ALL heroes in slot order so the SHARED cohort state is identical
+  // on every client (each hero's own quest advances; each player persists only their own
+  // slot). Solo (one hero) is the old `state.heroes[0]` path exactly — byte-identical
+  // (same single increment, same single event).
+  for (const hero of state.heroes) {
+    const q = hero.quest;
+    if (!q || !q.accepted) continue;
+    const def = activeQuestDef(hero);
+    if (!def || isQuestComplete(hero)) continue;
 
-  let changed = false;
-  for (let i = 0; i < def.objectives.length; i++) {
-    const o = def.objectives[i];
-    if (o.type !== type) continue;
-    // MAP SCOPE (M7.9 tier-3 quest): a map-scoped objective only counts an event that
-    // happened in its map (the tier-3 quest requires map4 kills + a map4-boss kill — the
-    // young Sovereign). Unscoped objectives (the tier-2 class-change quest) count anywhere.
-    if (o.mapId !== undefined && state.location.mapId !== o.mapId) continue;
-    const cur = q.progress[i] ?? 0;
-    if (cur >= o.count) continue;
-    q.progress[i] = cur + 1;
-    changed = true;
-    state.events.push({
-      type: "questObjectiveProgress",
-      id: hero.id,
-      questId: q.id,
-      objectiveIndex: i,
-      progress: q.progress[i],
-      count: o.count,
-    });
-  }
-  if (changed && isQuestComplete(hero)) {
-    state.events.push({ type: "questCompleted", id: hero.id, questId: q.id });
+    let changed = false;
+    for (let i = 0; i < def.objectives.length; i++) {
+      const o = def.objectives[i];
+      if (o.type !== type) continue;
+      // MAP SCOPE (M7.9 tier-3 quest): a map-scoped objective only counts an event that
+      // happened in its map (the tier-3 quest requires map4 kills + a map4-boss kill — the
+      // young Sovereign). Unscoped objectives (the tier-2 class-change quest) count anywhere.
+      if (o.mapId !== undefined && state.location.mapId !== o.mapId) continue;
+      const cur = q.progress[i] ?? 0;
+      if (cur >= o.count) continue;
+      q.progress[i] = cur + 1;
+      changed = true;
+      state.events.push({
+        type: "questObjectiveProgress",
+        id: hero.id,
+        questId: q.id,
+        objectiveIndex: i,
+        progress: q.progress[i],
+        count: o.count,
+      });
+    }
+    if (changed && isQuestComplete(hero)) {
+      state.events.push({ type: "questCompleted", id: hero.id, questId: q.id });
+    }
   }
 }

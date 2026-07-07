@@ -25,7 +25,7 @@ import {
 } from "@/engine/systems/stats";
 import { applyDamage, applyAoeDamage, damageInRadius, isHero } from "@/engine/systems/damage";
 import { rollEnemyDrop } from "@/engine/systems/gear";
-import { creditGold } from "@/engine/systems/economy";
+import { creditKillGold } from "@/engine/systems/economy";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { onBossKilled } from "@/engine/systems/boss";
@@ -225,26 +225,29 @@ export function updateEnemies(state: GameState): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Targets the hero MAY hunt/attack this step (M6.6 "autoHunt toggle"). With the
- * toggle ON (default) or during the boss phase, every current target is fair
- * game (unchanged behaviour). With it OFF outside the boss phase, the hero must
- * not acquire NEW targets — no chasing, no initiating on idle/passive mobs — but
- * an enemy already `engaged` (aggro-triggered or retaliating after a hit) stays a
- * valid target, so the hero fights off its current attackers then stands idle.
- * `getTargets` returns plain `state.enemies` whenever phase !== "boss", so this
- * filter only ever touches `Enemy`s (never the boss).
+ * Targets `hero` MAY hunt/attack this step (M6.6 "autoHunt toggle"). With the
+ * PER-HERO toggle ON (default) or during the boss phase, every current target is fair
+ * game (unchanged behaviour). With it OFF outside the boss phase, the hero must not
+ * acquire NEW targets — no chasing, no initiating on idle/passive mobs — but an enemy
+ * already `engaged` (aggro-triggered or retaliating after a hit) stays a valid target,
+ * so the hero fights off its current attackers then stands idle. `getTargets` returns
+ * plain `state.enemies` whenever phase !== "boss", so this filter only ever touches
+ * `Enemy`s (never the boss).
+ *
+ * M8 party P1b: the toggle is now `hero.config.autoHunt` (was the global `state.autoHunt`)
+ * so each cohort member hunts independently. Solo mirrors the global onto heroes[0].config
+ * — a 1-hero run is byte-identical (same list, same order). Computed per hero (≤3) each step.
  */
-function huntableTargets(state: GameState): CombatTarget[] {
-  if (state.autoHunt || state.phase === "boss") return getTargets(state);
+function huntableTargetsFor(state: GameState, hero: Hero): CombatTarget[] {
+  if (hero.config.autoHunt || state.phase === "boss") return getTargets(state);
   return state.enemies.filter((e) => e.engaged);
 }
 
 export function updateHeroes(state: GameState): void {
   const hunt = CONFIG.hunt;
-  const targets = huntableTargets(state);
   // Manual attack commands (M7.8) resolve against the FULL target list (not the
-  // AUTO-off-filtered `targets`) so a tapped passive/idle mob is engageable even
-  // with auto-hunt off. Empty during the boss phase — commands are ignored there
+  // AUTO-off-filtered per-hero huntable set) so a tapped passive/idle mob is engageable
+  // even with auto-hunt off. Empty during the boss phase — commands are ignored there
   // (boss forced-combat overrides them, exactly like the AUTO-off toggle).
   const bossPhase = state.phase === "boss";
   const commandTargets = bossPhase ? [] : getTargets(state);
@@ -253,6 +256,8 @@ export function updateHeroes(state: GameState): void {
   for (const h of state.heroes) {
     if (h.dead) continue;
     const t = HERO_TYPES[h.cls];
+    // Per-hero huntable set (M8 party P1b) — each hero honours its own autoHunt config.
+    const targets = huntableTargetsFor(state, h);
 
     // MANUAL command (M7.8 "Manual Play") takes priority over auto-hunt, unless the
     // boss phase is forcing combat (then commands are ignored — see `bossPhase`).
@@ -495,7 +500,7 @@ export function resolveDeaths(state: GameState): void {
       if (e.hp <= 0) {
         state.kills++;
         const goldGained = CONFIG.goldPerKill(state.stage);
-        creditGold(state, goldGained);
+        creditKillGold(state, goldGained);
         // Every alive hero banks kill XP (dead heroes earn nothing).
         grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
         state.events.push({
@@ -524,7 +529,7 @@ export function resolveDeaths(state: GameState): void {
           // NB: no `state.kills++` — that's the FARM-zone quota counter; a boss-room
           // kill must not touch it (checkZoneUnlock is a boss-phase no-op anyway).
           const goldGained = CONFIG.goldPerKill(state.stage);
-          creditGold(state, goldGained);
+          creditKillGold(state, goldGained);
           grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
           state.events.push({ type: "kill", kind: e.kind, x: e.x, y: e.y, goldGained });
           advanceQuestObjective(state, "kill");

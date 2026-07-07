@@ -413,6 +413,30 @@ export const CONFIG = {
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.
   maxHeroes: 3,
+  // M8 party P1b — shared-zone reward/scaling hooks. ALL default INERT (identity at
+  // any party size) so a solo (1-hero) sim is byte-identical; the real curves are a
+  // later balance-sim task (docs/party-design-m8.md §5, owner numbers pending). Every
+  // hook is a PURE function of `partySize` (= heroes present) so all cohort clients
+  // compute the same result — no RNG, no wall-clock. Wired at the kill/xp/spawn sites.
+  party: {
+    // Per-hero XP multiplier for a cohort kill (design §5 "แชร์ exp"). Identity today.
+    expShareMult: (partySize: number): number => {
+      void partySize; // inert hook — the real per-size curve is a balance-sim task
+      return 1;
+    },
+    // Per-client gold multiplier for a cohort kill (each client credits its OWN hero;
+    // design §5 "ทุกคนได้เต็ม" vs "หาร" is this knob). Identity today.
+    goldShareMult: (partySize: number): number => {
+      void partySize; // inert hook — balance-flagged
+      return 1;
+    },
+    // Mob-pool scale per cohort size (design §2/§6 "density/killGoal ต่อหัว"): more
+    // heroes → a fuller field. Identity today; balance-flagged. Applied to `maxAlive`.
+    spawnMaxAliveScale: (partySize: number): number => {
+      void partySize; // inert hook — balance-flagged
+      return 1;
+    },
+  },
   heroBaseAtk: 10,
   heroBaseHp: 150,
   // Solo RESPAWN (GDD: dead solo hero = respawn, town doesn't exist until M6).

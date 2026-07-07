@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Hero } from "@/engine/entities";
+import { defaultHeroConfig } from "@/engine/entities";
 import { createHeroView, updateHeroView, type HeroFrameContext } from "@/render/views/heroView";
 
 const DT = 1 / 60;
@@ -44,6 +45,7 @@ function hero(x: number, aimX: number | null): Hero {
     quest: null,
     equipped: { weapon: null, armor: null },
     command: null,
+    config: defaultHeroConfig(),
     aimX,
   };
 }

@@ -26,7 +26,7 @@ import {
 } from "@/engine/systems/quests";
 import { onBossRoomCleared, returnToQuestFrontier } from "@/engine/systems/world";
 import { applyDamage } from "@/engine/systems/damage";
-import { creditGold } from "@/engine/systems/economy";
+import { creditKillGold } from "@/engine/systems/economy";
 import { recordBossClear } from "@/engine/systems/hallOfFame";
 import { rollBossDrop } from "@/engine/systems/gear";
 import { aliveHeroes, frontHeroX, nearestAliveHero } from "@/engine/systems/targeting";
@@ -275,7 +275,7 @@ export function onBossKilled(state: GameState): void {
     state.bossFightStart = null;
   }
   const goldGained = CONFIG.goldPerBoss(state.stage);
-  creditGold(state, goldGained);
+  creditKillGold(state, goldGained);
   // Boss kills grant a larger XP milestone to every alive hero (before payout /
   // phase flip, while the winning team is still on the field).
   grantKillXp(state, CONFIG.leveling.xpPerBossKill(state.stage));

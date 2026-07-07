@@ -201,6 +201,44 @@ export type ManualCommand =
   | { kind: "move"; x: number }
   | { kind: "attack"; targetId: number };
 
+/**
+ * Per-hero SIM-AFFECTING automation config (M8 party P1b). These toggles/thresholds
+ * used to live as GLOBAL `GameState` fields mirrored from the UI store each frame —
+ * fine for solo, but a desync trap in a SHARED cohort sim (client A enabling autoCast
+ * for its own hero while client B doesn't → the field diverges; design doc §2). They
+ * now live PER HERO so each cohort member's automation is part of the replicated
+ * shared state, changed only via the `setHeroConfig` replicated intent.
+ *
+ * SOLO fast path (design §2 "one code path, no divergence"): the outer layers still
+ * feed the store-mirrored GLOBALS (`state.autoCast` …); when the zone holds exactly
+ * ONE hero, `step()` mirrors those globals onto `heroes[0].config` through the SAME
+ * `applyHeroConfig` the intent uses — so a 1-hero run is byte-identical and there is a
+ * single write path. In a cohort (≥2 heroes) the mirror is skipped and config comes
+ * only from replicated `setHeroConfig` intents (canonical, no "local player" leak).
+ *
+ * TRANSIENT — NOT persisted (the globals it mirrors carry their own save fields where
+ * they had them: `autoHunt` SAVE v12, the rest are UI-owned). Rebuilt on load; no
+ * SAVE_VERSION bump. Navigation toggles (`autoReturn`/`autoAdvance`) deliberately stay
+ * GLOBAL — zone travel is a cohort-level action (re-seed at the boundary, design §3),
+ * not a per-hero combat decision, so they are not moved here.
+ */
+export interface HeroConfig {
+  /** Auto-cast this hero's slotted skills (was global `state.autoCast`). */
+  autoCast: boolean;
+  /** Auto-allocate this hero's stat points to its class ratio (was `autoAllocate`). */
+  autoAllocate: boolean;
+  /** Auto-acquire new hunt targets (was `state.autoHunt`; combat-affecting per hero). */
+  autoHunt: boolean;
+  /** Auto-drink an hp potion below `autoHpThreshold` (was `state.autoHpPotion`). */
+  autoHpPotion: boolean;
+  /** Auto-drink a mana potion below `autoManaThreshold` (was `state.autoManaPotion`). */
+  autoManaPotion: boolean;
+  /** Auto hp-potion fires below this fraction of MAX HP (0..1). */
+  autoHpThreshold: number;
+  /** Auto mana-potion fires below this fraction of MAX MANA (0..1). */
+  autoManaThreshold: number;
+}
+
 export interface Hero {
   id: number;
   cls: HeroClass;
@@ -304,6 +342,13 @@ export interface Hero {
    * (rebuilt null on load, cleared on any zone arrival).
    */
   command: ManualCommand | null;
+  /**
+   * Per-hero automation config (M8 party P1b) — see `HeroConfig`. In solo it is
+   * mirrored from the store-fed GLOBALS each step (`step()` → `syncPrimaryHeroConfig`);
+   * in a cohort it is set by the replicated `setHeroConfig` intent. TRANSIENT (never
+   * persisted — no SAVE bump; rebuilt from the globals/intents on load).
+   */
+  config: HeroConfig;
   /**
    * This step's COMBAT AIM — the world-x of whatever the hero is engaging this
    * step (the basic-attack / hunt target, a manual attack-command target, the

@@ -11,6 +11,7 @@ import type { Rng } from "@/engine/core/rng";
 import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
 import type {
   Hero,
+  HeroConfig,
   Enemy,
   Boss,
   BossBehavior,
@@ -20,6 +21,25 @@ import type {
   EnemyKind,
   SkillId,
 } from "@/engine/entities";
+
+/**
+ * A fresh per-hero automation config (M8 party P1b), seeded to the SAME defaults the
+ * global fields carried: auto-cast/allocate OFF, auto-hunt ON, auto-potions + their
+ * thresholds from `CONFIG.shop.autoDefaults`. In solo these are immediately overwritten
+ * each step by `syncPrimaryHeroConfig` (store-mirror); a cohort hero keeps them until a
+ * `setHeroConfig` intent arrives. See `HeroConfig`.
+ */
+export function defaultHeroConfig(): HeroConfig {
+  return {
+    autoCast: false,
+    autoAllocate: false,
+    autoHunt: true,
+    autoHpPotion: CONFIG.shop.autoDefaults.hpPotion,
+    autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
+    autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
+    autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
+  };
+}
 
 /**
  * How many auto-cast slots a hero of `tier` HOLDS (its `autoSlots` array LENGTH).
@@ -58,6 +78,7 @@ export function makeHero(
   autoSlots: (SkillId | null)[] = defaultAutoSlots(cls, tier),
   quest: HeroQuest | null = null,
   equipped: EquippedGear = emptyEquipped(),
+  config: HeroConfig = defaultHeroConfig(),
 ): Hero {
   const t = HERO_TYPES[cls];
   // Max HP folds in equipped armor's flat HP (0 for an unarmored hero, so a fresh
@@ -105,6 +126,9 @@ export function makeHero(
     },
     // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
     command: null,
+    // Per-hero automation config (M8 party P1b) — solo mirrors the globals each step;
+    // cohort sets it via setHeroConfig. Transient.
+    config,
     // Combat aim (render-only facing observer) — re-derived each step. Transient.
     aimX: null,
   };

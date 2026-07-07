@@ -131,6 +131,14 @@ export function updateSpawns(state: GameState, rng: Rng): void {
   const zone = zoneAt(state.location);
   if (zone.kind !== "farm") return;
   const sp = zoneSpawnParams(zone);
+  // M8 party P1b — scale the mob POOL by cohort size (design §2/§6 "density ต่อหัว"): a
+  // fuller field for more heroes. The hook is IDENTITY at every party size today (inert;
+  // balance-flagged), and the `!== 1` guard leaves `sp.maxAlive` untouched, so a solo
+  // (and any current cohort) is byte-identical. Scaling `maxAlive` — not the draw order —
+  // keeps the seeded spawn stream (kind→temperament→placement→makeEnemy) unperturbed:
+  // more heroes just raises the cap the SAME draw sequence fills toward.
+  const poolScale = CONFIG.party.spawnMaxAliveScale(state.heroes.length);
+  if (poolScale !== 1) sp.maxAlive = Math.max(1, Math.round(sp.maxAlive * poolScale));
 
   if (state.spawnBurst) {
     // Gradual re-entry fill: seed only a fraction of the cap; the trickle below

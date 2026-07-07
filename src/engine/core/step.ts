@@ -14,9 +14,10 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
-import type { BotSettings, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
+import type { BotSettings, HeroConfig, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
 import type { GearSlot } from "@/engine/config/items";
 import { equipItem } from "@/engine/systems/gear";
+import { applyHeroConfig, syncPrimaryHeroConfig } from "@/engine/systems/heroConfig";
 import { creditGold } from "@/engine/systems/economy";
 import { onBotTownArrival, setBotSettings, updateBots } from "@/engine/systems/bots";
 import {
@@ -218,10 +219,52 @@ export interface FrameInput {
    * drained input.
    */
   cancelCommand?: boolean;
+  /**
+   * M8 party P1b — the REPLICATED per-hero config change. In a cohort every client
+   * replays the same `setHeroConfig` intent so each member's automation
+   * (`autoCast` / `autoAllocate` / `autoHunt` / auto-potions + thresholds) is part
+   * of the deterministic shared state (design §2 — the store-mirror pattern desyncs
+   * a shared sim). Merged onto THIS lane's hero via the single `applyHeroConfig`
+   * writer. In the SOLO fast path the store-fed globals mirror onto `heroes[0]`
+   * instead (`syncPrimaryHeroConfig`), so solo callers never need this. Applied once
+   * per drained input.
+   */
+  setHeroConfig?: Partial<HeroConfig>;
 }
 
-export function step(state: GameState, input: FrameInput = {}): GameState {
+/**
+ * M8 party P1b — the multi-hero input shape. `step()` accepts EITHER a single
+ * `FrameInput` (the SOLO / lane-0 fast path — every existing call site stays
+ * byte-for-byte unchanged) OR an ARRAY of per-hero lanes, one `FrameInput` per party
+ * slot: `lanes[i]` drives `heroes[i]`. This is the on-wire `TurnInput` contract for
+ * the P3-P4 lockstep layer — a room collects one lane per player per turn and calls
+ * `step(state, lanes)` for each of the turn's 6 sub-steps (an absent/idle lane is
+ * `{}`; a short array is padded with idle lanes).
+ *
+ * Routing (see `step()`):
+ *  - PER-HERO intents route to `heroes[i]` from `lanes[i]`: `setAutoSlots` /
+ *    `allocateStat` / `moveTo` / `attackTarget` / `cancelCommand` / `useConsumable` /
+ *    `equip` / `setHeroConfig` (and `setAutoHunt` for i≥1). Intents that already
+ *    embed an explicit hero index (`castSkills[].slot`, `acceptQuest`, `evolveHero`)
+ *    are applied from every lane by that embedded index.
+ *  - SHARED-ZONE intents are read from LANE 0 only (the navigation/economy "lead" —
+ *    design §3 makes zone travel a cohort-level action): `walkToZone` /
+ *    `challengeBoss` / `advanceStage` / `fastTravel` / `buyShopItem` /
+ *    `useReturnScroll` / `goldCredit` / `materialsDelta` / `setBotSettings` /
+ *    `inventoryCount`, plus lane-0 `setAutoHunt` (persisted global).
+ */
+export type PartyInput = FrameInput[];
+
+export function step(state: GameState, input: FrameInput | PartyInput = {}): GameState {
   const rng = createRng(state.rngState);
+
+  // M8 party P1b — normalise to per-hero input lanes. A single `FrameInput` is the
+  // SOLO / lane-0 fast path (`lanes = [input]`), so every existing call site is
+  // byte-identical; an array is the cohort's per-slot lanes (`lanes[i]` → `heroes[i]`).
+  const lanes: PartyInput = Array.isArray(input) ? input : [input];
+  const primary: FrameInput = lanes[0] ?? {};
+  /** This step's lane for hero `i` (idle `{}` when the array is short). */
+  const laneFor = (i: number): FrameInput => lanes[i] ?? {};
 
   // Drop last step's events before this step fills them (one-way render/audio
   // buffer). Clear-in-place keeps the array identity stable and allocation-light.
@@ -234,52 +277,69 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   // walking. Pure state derivation — no effect on the sim (byte-identical).
   for (const h of state.heroes) h.aimX = null;
 
+  // M8 party P1b — establish each hero's automation config BEFORE any system reads it
+  // (auto-allocate below, then auto-potion/auto-cast/auto-hunt in the battle pass).
+  // Cohort lanes' replicated `setHeroConfig` first (canonical shared state), then the
+  // SOLO store-mirror (single-hero only, so a cohort is never overwritten by a global).
+  for (let i = 0; i < state.heroes.length; i++) {
+    const cfg = laneFor(i).setHeroConfig;
+    if (cfg) applyHeroConfig(state.heroes[i], cfg);
+  }
+  syncPrimaryHeroConfig(state);
+
   // Tick per-type consumable-use cooldowns (M6) — unconditional so a cooldown
   // counts down in every phase (town / travel / battle).
   tickConsumableCds(state);
 
   // --- discrete player actions (valid across phases) ---
-  if (input.acceptQuest !== undefined) acceptQuest(state, input.acceptQuest);
-  if (input.evolveHero !== undefined) evolveHero(state, input.evolveHero);
+  // Hero-addressed intents (`acceptQuest`/`evolveHero` embed the hero index): apply
+  // from EVERY lane by that embedded index — solo (one lane) is the old single call.
+  for (const lane of lanes) {
+    if (lane.acceptQuest !== undefined) acceptQuest(state, lane.acceptQuest);
+    if (lane.evolveHero !== undefined) evolveHero(state, lane.evolveHero);
+  }
   // Idle-bot settings update (M7.5) — merged + clamped onto the persisted state.bot.
-  if (input.setBotSettings) setBotSettings(state, input.setBotSettings);
-  // Auto-hunt toggle (M6.6) — engine-persisted (SAVE v12); see FrameInput.setAutoHunt.
-  if (input.setAutoHunt !== undefined) state.autoHunt = input.setAutoHunt;
-  // Equip / unequip gear on the solo hero (M7) — validated inside equipItem.
+  // Bot is the LEAD/local player's automation (lane 0).
+  if (primary.setBotSettings) setBotSettings(state, primary.setBotSettings);
+  // Auto-hunt toggle (M6.6): lane 0 sets the persisted global (mirrored onto
+  // heroes[0].config above); a cohort member (i≥1) sets its OWN hero's config.
+  if (primary.setAutoHunt !== undefined) state.autoHunt = primary.setAutoHunt;
+  for (let i = 1; i < state.heroes.length; i++) {
+    const v = laneFor(i).setAutoHunt;
+    if (v !== undefined) applyHeroConfig(state.heroes[i], { autoHunt: v });
+  }
+  // Equip / unequip gear (M7) — per hero from its own lane; validated inside equipItem.
   // `refineLevel` (M7.6) is the server-decided +N (default 0).
-  if (input.equip) {
-    equipItem(
-      state,
-      state.heroes[0],
-      input.equip.slot,
-      input.equip.templateId,
-      input.equip.refineLevel,
-    );
+  for (let i = 0; i < state.heroes.length; i++) {
+    const eq = laneFor(i).equip;
+    if (eq) equipItem(state, state.heroes[i], eq.slot, eq.templateId, eq.refineLevel);
   }
-  // Material counter delta (M7.6 ตีบวก) — server-confirmed salvage(+)/refine(−).
-  if (input.materialsDelta !== undefined && Number.isFinite(input.materialsDelta)) {
-    state.materials = Math.max(0, Math.floor(state.materials + input.materialsDelta));
+  // Material counter delta (M7.6 ตีบวก) — server-confirmed salvage(+)/refine(−). Lead
+  // player's economy (lane 0; each cohort client owns its own materials → its own save).
+  if (primary.materialsDelta !== undefined && Number.isFinite(primary.materialsDelta)) {
+    state.materials = Math.max(0, Math.floor(state.materials + primary.materialsDelta));
   }
-  // Auto-cast slot assignment (M5 skill framework v2) — solo hero (slot 0).
-  if (input.setAutoSlots) {
-    for (const a of input.setAutoSlots) setAutoSlot(state, state.heroes[0], a.slot, a.skillId);
+  // Auto-cast slot assignment (M5 skill framework v2) — per hero from its own lane.
+  for (let i = 0; i < state.heroes.length; i++) {
+    const sets = laneFor(i).setAutoSlots;
+    if (sets) for (const a of sets) setAutoSlot(state, state.heroes[i], a.slot, a.skillId);
   }
   // Manual + auto base-stat allocation (M5 "Base stats"). Runs in all phases so a
   // player can spend points between stages (victory) and auto-allocate keeps up
-  // with boss-kill level-ups; before the victory early-return below.
-  processStatAllocation(state, input.allocateStat);
+  // with boss-kill level-ups; before the victory early-return below. Per-hero via lanes.
+  processStatAllocation(state, lanes);
 
-  // --- NPC shop / consumables (M6 "เมืองหลัก") ---
+  // --- NPC shop / consumables (M6 "เมืองหลัก") --- lead/local economy (lane 0).
   // Buy is town-only (checked inside); the return scroll teleports before the walk
   // intents below so a scroll+walk in the same frame resolves scroll-first.
-  if (input.buyShopItem) buyShopItem(state, input.buyShopItem.item, input.buyShopItem.qty ?? 1);
-  if (input.useReturnScroll) applyReturnScroll(state);
+  if (primary.buyShopItem) buyShopItem(state, primary.buyShopItem.item, primary.buyShopItem.qty ?? 1);
+  if (primary.useReturnScroll) applyReturnScroll(state);
   // Server-confirmed gold delta (M7.5 NPC-sale credit, M7.6 ตีบวก refine cost
   // debit — see FrameInput.goldCredit contract). SIGNED since M7.6: a refine
   // attempt's gold cost arrives as a negative delta; floored at 0 so a stale/
   // out-of-order client application can never drive gold negative.
-  if (input.goldCredit !== undefined && Number.isFinite(input.goldCredit) && input.goldCredit !== 0) {
-    const delta = Math.floor(input.goldCredit);
+  if (primary.goldCredit !== undefined && Number.isFinite(primary.goldCredit) && primary.goldCredit !== 0) {
+    const delta = Math.floor(primary.goldCredit);
     // A POSITIVE credit (NPC sale) funnels through creditGold so it also banks the
     // M7.95 lifetime `goldEarned` total; a NEGATIVE delta (refine cost) only debits
     // spendable gold (floored at 0) and must NEVER decrease the earned total.
@@ -287,15 +347,15 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
     else state.gold = Math.max(0, state.gold + delta);
   }
 
-  // --- world navigation (M6 "World & Town") ---
+  // --- world navigation (M6 "World & Town") --- cohort-level (lead, lane 0; design §3).
   // Fast travel (M7.5): begins a channel here; only completes (in tickFastTravel,
   // after combat) if the hero isn't hit. A bot trip may also START here (updateBots,
   // farm-zone only) and set `traveling` before the walk intents below run.
-  if (input.fastTravel) startFastTravel(state, input.fastTravel);
-  updateBots(state, input.inventoryCount);
-  if (input.walkToZone) walkToZone(state, input.walkToZone);
-  if (input.challengeBoss) enterBossRoom(state);
-  if (input.advanceStage) advanceToNextMap(state);
+  if (primary.fastTravel) startFastTravel(state, primary.fastTravel);
+  updateBots(state, primary.inventoryCount);
+  if (primary.walkToZone) walkToZone(state, primary.walkToZone);
+  if (primary.challengeBoss) enterBossRoom(state);
+  if (primary.advanceStage) advanceToNextMap(state);
 
   // While walking between zones the sim only ticks the transit (no combat/waves).
   // On arrival at a BOSS ROOM, start the boss fight (world stays free of a boss
@@ -324,7 +384,7 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
     // drives hero.x directly — but the player couldn't). Apply the intents, then
     // the walk-only slice (no combat in the safe hub); botWalk/channeling keep
     // priority inside tickTownManualWalk.
-    applyManualCommand(state, input);
+    applyManualCommand(state, lanes);
     tickTownManualWalk(state);
     tickFastTravel(state);
     state.time += FIXED_DT;
@@ -342,18 +402,18 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   decayHeroTimers(state);
   // Consumables (M6): a manual quick-use then threshold-gated auto-use, BEFORE
   // skills so a mana potion this step can fund a cast the same step.
-  processConsumables(state, input.useConsumable);
+  processConsumables(state, lanes);
   // Manual play (M7.8): apply this frame's moveTo / attackTarget / cancelCommand
-  // onto the solo hero's transient command slot (never persisted). updateHeroes
-  // honours it below; the boss phase's forced combat overrides it. Runs before
-  // skills/movement so a fresh command steers THIS step's hunt.
-  applyManualCommand(state, input);
+  // onto each hero's transient command slot (never persisted). updateHeroes honours
+  // it below; the boss phase's forced combat overrides it. Runs before skills/
+  // movement so a fresh command steers THIS step's hunt. Per-hero via lanes.
+  applyManualCommand(state, lanes);
   // Fast-travel channel (M7.5): while channeling the hero stands still — skip its
   // offense (skills + auto-hunt movement/attacks) so it doesn't wander off and
   // re-engage mobs. Enemies + projectiles still resolve, so a mob CAN reach + hit
   // the hero and cancel the warp (checked in tickFastTravel below).
   const channeling = state.fastTravelCast !== null;
-  if (!channeling) processSkills(state, input); // manual casts + guarded auto-cast
+  if (!channeling) processSkills(state, lanes); // manual casts + guarded auto-cast
   updateAnchor(state);
   updateSpawns(state, rng); // maintain the farm zone's mob pool (M6 "สนามล่ามอน")
   updateEnemies(state); // no-op during the boss phase (field is cleared)

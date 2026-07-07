@@ -26,6 +26,7 @@ import { CONFIG } from "@/engine/config";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
 import type { Hero, StatKey } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
+import type { FrameInput } from "@/engine/core/step";
 
 /** Fixed stat order — the deterministic tie-break for the auto-allocate v2 ratio. */
 const STAT_ORDER: readonly StatKey[] = ["str", "dex", "int", "vit"];
@@ -95,6 +96,10 @@ export function allocateStat(
 export function autoAllocateStats(state: GameState): void {
   const cap = CONFIG.stats.cap;
   for (const hero of state.heroes) {
+    // M8 party P1b: gate on the PER-HERO config (was the global `state.autoAllocate`)
+    // so each cohort member's auto-allocate is independent + deterministic. Solo mirrors
+    // the global onto heroes[0].config, so a 1-hero run is byte-identical.
+    if (!hero.config.autoAllocate) continue;
     if (hero.statPoints <= 0) continue;
     const ratio = CONFIG.stats.autoAllocRatio[hero.cls];
     // The ratio stats with a positive weight, in the fixed tie-break order.
@@ -125,25 +130,26 @@ export function autoAllocateStats(state: GameState): void {
 }
 
 /**
- * Per-step allocation pass: apply the manual intent (to the solo hero) first, then
- * auto-allocate when the toggle is on. Called from `step()`.
+ * Per-step allocation pass: apply each hero's manual `allocateStat` intent (from its
+ * own input lane) first, then per-hero auto-allocate. Called from `step()`.
  *
- * `alloc` is a batch map (M7.9 stat-tap-fix — see `FrameInput.allocateStat`'s
- * doc): several stats (or several taps on the SAME stat, pre-summed by the UI
- * store) can all be queued from one real frame's input and must ALL apply, not
- * last-wins. Applied in the fixed str/dex/int/vit order for determinism; each
- * entry goes through the same guarded `allocateStat()` — a rejected entry
- * (invalid amount / over-spend / cap breach) no-ops just that entry.
+ * M8 party P1b: `lanes[i].allocateStat` routes to `heroes[i]` — solo (one lane / one
+ * hero) is the old `state.heroes[0]` path, byte-identical. Each `allocateStat` is a
+ * batch map (M7.9 stat-tap-fix — see `FrameInput.allocateStat`'s doc): several stats
+ * (or several taps on the SAME stat, pre-summed by the UI store) queued in one real
+ * frame must ALL apply, not last-wins. Applied in the fixed str/dex/int/vit order for
+ * determinism; each entry goes through the same guarded `allocateStat()` — a rejected
+ * entry (invalid amount / over-spend / cap breach) no-ops just that entry. Auto-allocate
+ * is now per-hero (config-gated) inside `autoAllocateStats`.
  */
-export function processStatAllocation(
-  state: GameState,
-  alloc: Partial<Record<StatKey, number>> | undefined,
-): void {
-  if (alloc) {
+export function processStatAllocation(state: GameState, lanes: FrameInput[]): void {
+  for (let i = 0; i < state.heroes.length; i++) {
+    const alloc = (lanes[i] ?? {}).allocateStat;
+    if (!alloc) continue;
     for (const stat of STAT_ORDER) {
       const amount = alloc[stat];
-      if (amount !== undefined) allocateStat(state, state.heroes[0], stat, amount);
+      if (amount !== undefined) allocateStat(state, state.heroes[i], stat, amount);
     }
   }
-  if (state.autoAllocate) autoAllocateStats(state);
+  autoAllocateStats(state);
 }

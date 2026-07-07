@@ -400,6 +400,11 @@ export function initHeroes(state: GameState): void {
             },
           }
         : emptyEquipped(),
+      // Per-hero automation config (M8 party P1b) survives a battlefield reset (stage
+      // advance) like the auto-slot loadout — a stage clear must not silently flip a
+      // cohort member's autoCast/auto-potion choices. Solo re-mirrors from globals
+      // anyway (syncPrimaryHeroConfig), so this only matters for a party hero.
+      prev ? { ...prev.config } : undefined,
     ),
   ];
 }

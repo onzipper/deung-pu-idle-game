@@ -47,8 +47,17 @@ function findAliveTarget(state: GameState, id: number): CombatTarget | null {
  *    nothing — the current command survives).
  *  - `cancelCommand`: clear the command (emit `commandCancelled` only if one existed).
  */
-export function applyManualCommand(state: GameState, input: FrameInput): void {
-  const h = state.heroes[0];
+export function applyManualCommand(state: GameState, lanes: FrameInput[]): void {
+  // M8 party P1b: `lanes[i]` drives `heroes[i]`'s command slot. Solo (one lane / one
+  // hero) is the old `state.heroes[0]` path exactly — byte-identical.
+  for (let i = 0; i < state.heroes.length; i++) {
+    applyOneCommand(state, i, lanes[i] ?? {});
+  }
+}
+
+/** Apply one lane's manual-play intents onto `heroes[heroIdx]`'s command slot. */
+function applyOneCommand(state: GameState, heroIdx: number, input: FrameInput): void {
+  const h = state.heroes[heroIdx];
   if (!h) return;
 
   if (input.cancelCommand && h.command) {

@@ -57,7 +57,15 @@ export function grantHeroXp(state: GameState, hero: Hero, amount: number): void 
   }
 }
 
-/** Award kill XP to every ALIVE hero (dead heroes earn nothing). */
+/**
+ * Award kill XP to every ALIVE hero (dead heroes earn nothing). The per-hero amount is
+ * scaled by the cohort `expShareMult` hook (M8 party P1b "แชร์ exp", design §5) — IDENTITY
+ * at every party size today (inert; real curve is a balance-sim task). The `mult === 1`
+ * fast path leaves `amount` untouched, so a solo (and any current cohort) is byte-identical.
+ * Determinism: `state.heroes.length` is identical on all cohort clients (canonical order).
+ */
 export function grantKillXp(state: GameState, amount: number): void {
-  for (const h of aliveHeroes(state)) grantHeroXp(state, h, amount);
+  const mult = CONFIG.party.expShareMult(state.heroes.length);
+  const each = mult === 1 ? amount : amount * mult;
+  for (const h of aliveHeroes(state)) grantHeroXp(state, h, each);
 }
