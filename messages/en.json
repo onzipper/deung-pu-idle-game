@@ -785,6 +785,12 @@
     "firstToCap": "🏆 {charName} is the first player to reach Lv.{level}!",
     "rankOne": "👑 {charName} has claimed the #1 Combat Power throne!"
   },
+  "updateBanner": {
+    "message": "🚀 New patch available!",
+    "button": "Update now",
+    "buttonTooltip": "Already saved — go ahead",
+    "closeButton": "Close"
+  },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
     "autoSalvageDone": "Bot auto-salvaged {count} item(s) +{materials} material(s)",

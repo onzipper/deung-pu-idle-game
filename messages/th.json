@@ -785,6 +785,12 @@
     "firstToCap": "🏆 {charName} คือผู้เล่นคนแรกที่ถึง Lv.{level}!",
     "rankOne": "👑 {charName} ขึ้นแท่นอันดับ 1 พลังต่อสู้!"
   },
+  "updateBanner": {
+    "message": "🚀 มีแพตช์ใหม่!",
+    "button": "อัปเดตเลย",
+    "buttonTooltip": "เซฟให้แล้ว กดได้เลย",
+    "closeButton": "ปิด"
+  },
   "notices": {
     "autoSellDone": "บอทขายของอัตโนมัติ {count} ชิ้น +{gold} ทอง",
     "autoSalvageDone": "บอทย่อยของอัตโนมัติ {count} ชิ้น +{materials} วัสดุ",

@@ -870,6 +870,29 @@ export interface HudState {
    * display timer. Capped at `MAX_ANNOUNCEMENT_QUEUE`. */
   announcementQueue: AnnouncementEntry[];
 
+  // ---- mid-session "new patch deployed" banner (owner-approved feature) —
+  // see `ui/updateBanner.ts` for the pure decision logic + `UpdateBanner.tsx`
+  // for the presentation. Transport is the existing autosave/boot save-route
+  // responses (no extra requests, no websockets — see `@/server/buildId`). ----
+  /** The server's build id, as read off the latest `/api/save` response
+   * (GET at boot, POST on the autosave cadence), or `null` before the first
+   * one has landed. Compared against this client's own inlined
+   * `CLIENT_BUILD_ID` by `resolveUpdateBannerDecision`. */
+  serverBuildId: string | null;
+  /** Dismiss bookkeeping for the update banner — `null`/`null` if never
+   * dismissed. Scoped to the SPECIFIC mismatched server build id so a NEWER
+   * deploy landing during the cooldown always shows immediately (see
+   * `resolveUpdateBannerDecision`'s doc). */
+  updateBannerDismissedAt: number | null;
+  updateBannerDismissedForId: string | null;
+  /** One-shot intent (same "the UI dispatches, `GameClient`'s loop drains it"
+   * shape as `pendingInput`, generalized to this app-level browser action):
+   * flipped by the update banner's button tap; `GameClient.tsx` subscribes to
+   * this transition to flush a final save (via the SAME sendBeacon path used
+   * on tab-hide) and THEN `location.reload()` — never reload without the
+   * flush. Never reset back to `false` (the page reloads immediately after). */
+  updateReloadRequested: boolean;
+
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted UI preference,
   // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
   autoSellCommon: AutoSellAction;
@@ -1120,6 +1143,17 @@ export interface HudState {
    * display timer, advancing to the next queued one (if any). */
   shiftAnnouncementQueue: () => void;
 
+  // ---- mid-session "new patch deployed" banner ----
+  /** `GameClient.tsx`-only: record the build id off a fresh `/api/save`
+   * response (GET or POST). */
+  setServerBuildId: (id: string | null) => void;
+  /** `UpdateBanner.tsx`-only: dismiss the banner for the CURRENT mismatched
+   * server build id (see `updateBannerDismissedForId`'s doc). */
+  dismissUpdateBanner: (forId: string) => void;
+  /** `UpdateBanner.tsx`-only: request the flush-then-reload (see
+   * `updateReloadRequested`'s doc). */
+  requestReload: () => void;
+
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
   setAutoSellCommon: (action: AutoSellAction) => void;
   setAutoSellRare: (action: AutoSellAction) => void;
@@ -1177,6 +1211,11 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   myCharacterId: null,
   announcementQueue: [],
+
+  serverBuildId: null,
+  updateBannerDismissedAt: null,
+  updateBannerDismissedForId: null,
+  updateReloadRequested: false,
 
   // Safe defaults pre-hydration; a mount effect (`SettingsPanel`'s bot/auto-sell
   // section) applies the persisted values once via `hydrateAutoSellRules` —
@@ -1449,6 +1488,11 @@ export const useGameStore = create<HudState>((set, get) => ({
     }),
   shiftAnnouncementQueue: () =>
     set((s) => ({ announcementQueue: s.announcementQueue.slice(1) })),
+
+  setServerBuildId: (id) => set({ serverBuildId: id }),
+  dismissUpdateBanner: (forId) =>
+    set({ updateBannerDismissedAt: Date.now(), updateBannerDismissedForId: forId }),
+  requestReload: () => set({ updateReloadRequested: true }),
 
   setAutoSellCommon: (action) =>
     set((s) => {

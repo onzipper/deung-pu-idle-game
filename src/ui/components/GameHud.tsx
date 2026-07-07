@@ -41,6 +41,7 @@ import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
 import { StatPanel } from "@/ui/components/StatPanel";
 import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
+import { UpdateBanner } from "@/ui/components/UpdateBanner";
 import { WalkControls } from "@/ui/components/WalkControls";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
@@ -74,6 +75,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           the goal card / console dock below (it lives in the page's top
           safe-area strip, not inside the HUD flow). */}
       <AnnouncementBanner />
+      {/* Mid-session "new patch deployed" banner — same top strip as
+          `AnnouncementBanner` above, mutually exclusive with it (see
+          `UpdateBanner.tsx`'s doc: announcements play first). */}
+      <UpdateBanner />
       {/* M7 Gear & Drops: drop-notification toasts, store-driven off claim
           results — sits above the arena, below the modal panels (z-70). */}
       <DropFeed />

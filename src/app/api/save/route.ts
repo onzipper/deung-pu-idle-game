@@ -11,6 +11,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { currentBuildId } from "@/server/buildId";
 import { getOrCreateUserId } from "@/server/identity";
 import { resolveActiveCharacterId } from "@/server/activeCharacter";
 import { getOwnedLiveCharacterClass } from "@/server/characters";
@@ -48,6 +49,10 @@ export async function GET() {
         // here for a beat before a character is selected) — see the POST
         // branch's doc for the feed shape.
         announcements: await recentAnnouncements(),
+        // Mid-session "new patch deployed" banner: piggyback the build id on
+        // this boot response too (a fresh login lands here for a beat before
+        // a character is selected) — see `@/server/buildId` + `@/ui/updateBanner`.
+        buildId: currentBuildId(),
       });
     }
     // M7 boot payload: additively include the character's inventory + equipped
@@ -87,6 +92,10 @@ export async function GET() {
       materials,
       uiConfig,
       announcements,
+      // Mid-session "new patch deployed" banner (owner-approved feature): the
+      // client compares this against its own inlined `NEXT_PUBLIC_BUILD_ID` on
+      // every save response — see `@/server/buildId` + `@/ui/updateBanner`.
+      buildId: currentBuildId(),
     });
   } catch (err) {
     console.error("[api/save] GET failed:", err);
@@ -140,6 +149,10 @@ export async function POST(request: Request) {
       ok: true,
       lastSeen: result.lastSeen,
       announcements: await recentAnnouncements(),
+      // Mid-session "new patch deployed" banner: zero extra requests — this
+      // rides the existing autosave POST response (see `@/server/buildId` +
+      // `@/ui/updateBanner`).
+      buildId: currentBuildId(),
     });
   } catch (err) {
     console.error("[api/save] POST failed:", err);

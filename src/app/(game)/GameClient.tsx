@@ -550,6 +550,10 @@ export function GameClient() {
     let botPrevDwell = false;
     let botTownActivityUntil = 0;
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
+    // Mid-session "new patch deployed" banner: unsubscribe handle for the
+    // `updateReloadRequested` store subscription (registered once boot
+    // succeeds, alongside the other event listeners below).
+    let unsubscribeReload: (() => void) | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
@@ -887,13 +891,23 @@ export function GameClient() {
         keepalive: true,
       })
         .then((res) =>
-          res.ok ? (res.json() as Promise<{ announcements?: AnnouncementWire[] }>) : null,
+          res.ok
+            ? (res.json() as Promise<{
+                announcements?: AnnouncementWire[];
+                /** Mid-session "new patch deployed" banner — see the GET boot
+                 * handler above / `@/server/buildId` / `@/ui/updateBanner`. */
+                buildId?: string | null;
+              }>)
+            : null,
         )
         .then((json) => {
           // M7.9: the polling piggyback — every autosave response carries any
           // recent server-wide high-refine landing (no websockets this phase).
           if (json?.announcements) {
             useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
+          if (json?.buildId) {
+            useGameStore.getState().setServerBuildId(json.buildId);
           }
         })
         .catch(() => {
@@ -950,6 +964,31 @@ export function GameClient() {
         });
     }
 
+    // Best-effort synchronous flush via `sendBeacon` — guaranteed to fire
+    // during unload where a normal `fetch` may be killed. Shared by the
+    // tab-hide handler below AND the mid-session update banner's "อัปเดตเลย"
+    // reload button (owner spec: "never reload without the flush" — see the
+    // `updateReloadRequested` subscription further down).
+    function flushSaveBeacon(): void {
+      const blob = new Blob([JSON.stringify(serializeWithUiConfig())], {
+        type: "application/json",
+      });
+      navigator.sendBeacon("/api/save", blob);
+
+      // Best-effort drop-claim flush via the same fire-and-forget beacon
+      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
+      // accepted v1 loss (no response to merge into the inventory slice even
+      // if it lands) — documented tradeoff, see this function's doc comment.
+      if (pendingClaims.length > 0) {
+        const claimBlob = new Blob(
+          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+          { type: "application/json" },
+        );
+        navigator.sendBeacon("/api/items/claim", claimBlob);
+        pendingClaims = [];
+      }
+    }
+
     // On tab-hide (covers most real "closing the game" cases): sendBeacon is
     // guaranteed to flush during unload where a normal fetch may be killed.
     // ALSO doubles as the backgrounded-tab catch-up's hide/show boundary
@@ -958,23 +997,7 @@ export function GameClient() {
     function onVisibility(): void {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
-        const blob = new Blob([JSON.stringify(serializeWithUiConfig())], {
-          type: "application/json",
-        });
-        navigator.sendBeacon("/api/save", blob);
-
-        // Best-effort drop-claim flush via the same fire-and-forget beacon
-        // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
-        // accepted v1 loss (no response to merge into the inventory slice even
-        // if it lands) — documented tradeoff, see this function's doc comment.
-        if (pendingClaims.length > 0) {
-          const claimBlob = new Blob(
-            [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
-            { type: "application/json" },
-          );
-          navigator.sendBeacon("/api/items/claim", claimBlob);
-          pendingClaims = [];
-        }
+        flushSaveBeacon();
         return;
       }
       if (document.visibilityState === "visible") handleReturnFromBackground();
@@ -1087,6 +1110,11 @@ export function GameClient() {
              * (last 5 min, LIMIT 10, newest-first) — same shape the autosave
              * POST response carries every ~30s thereafter. */
             announcements?: AnnouncementWire[];
+            /** Mid-session "new patch deployed" banner: the server's build id
+             * (see `@/server/buildId`), present on this boot response too —
+             * compared against this client's own inlined `CLIENT_BUILD_ID`
+             * (`@/ui/updateBanner`). */
+            buildId?: string | null;
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -1105,6 +1133,9 @@ export function GameClient() {
           }
           if (json.announcements) {
             useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
+          if (json.buildId) {
+            useGameStore.getState().setServerBuildId(json.buildId);
           }
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
@@ -1184,6 +1215,19 @@ export function GameClient() {
       document.addEventListener("visibilitychange", onVisibility);
       window.addEventListener("pageshow", onPageShow);
 
+      // Mid-session "new patch deployed" banner: the update button's ONLY
+      // entry point into this effect's closure — `UpdateBanner.tsx` just
+      // flips `updateReloadRequested` via a store action; this is the one
+      // place with access to `flushSaveBeacon`/the live engine state, same
+      // "UI dispatches an intent, the integration loop drains it" shape as
+      // `pendingInput`. Zustand's `subscribe` fires synchronously on `set()`.
+      unsubscribeReload = useGameStore.subscribe((next, prev) => {
+        if (next.updateReloadRequested && !prev.updateReloadRequested) {
+          flushSaveBeacon();
+          window.location.reload();
+        }
+      });
+
       lastTime = performance.now();
       lastActiveAt = Date.now();
       rafId = requestAnimationFrame(frame);
@@ -1202,6 +1246,7 @@ export function GameClient() {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
+      unsubscribeReload?.();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       arenaEl.removeEventListener("pointerdown", onPointerDown);
