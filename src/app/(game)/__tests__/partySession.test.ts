@@ -181,3 +181,91 @@ describe("synthesizeShadowMessage", () => {
     expect(new Set(clients[0].hashes).size).toBeGreaterThan(1);
   });
 });
+
+// ── prewake must never gate the websocket (CORS incident regression) ───────────────
+//
+// Real incident: the relay's /health had no CORS headers, the browser blocked the
+// cross-origin pre-wake fetch, and the old code treated that as "unhealthy" ->
+// scheduleReconnect forever -> party mode bricked while the relay was fine. The
+// websocket handshake is CORS-exempt, so a failed/blocked prewake must fall through
+// to openSocket after the deadline.
+
+import { PartySession } from "../partySession";
+import { afterEach, beforeEach, vi } from "vitest";
+
+describe("PartySession prewake is best-effort", () => {
+  const noopHandlers = {
+    onCohortChanged: () => {},
+    onGameMessage: () => {},
+    onStatusChange: () => {},
+    onMemberShadowChanged: () => {},
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function stubTicketFetch(healthBehavior: "reject" | "resolve"): { wsUrls: string[] } {
+    const created: { wsUrls: string[] } = { wsUrls: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/party/ticket")) {
+          return {
+            ok: true,
+            json: async () => ({
+              relayUrl: "ws://relay.test",
+              ticket: "t",
+              slot: 0,
+              partyId: "p1",
+              exp: Date.now() + 60_000,
+            }),
+          } as Response;
+        }
+        // the /health prewake
+        if (healthBehavior === "reject") throw new TypeError("Failed to fetch"); // CORS/network
+        return { ok: false, type: "opaque" } as unknown as Response; // no-cors opaque
+      }),
+    );
+    class FakeWebSocket {
+      static instances: FakeWebSocket[] = [];
+      url: string;
+      onopen: (() => void) | null = null;
+      onmessage: ((e: unknown) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        created.wsUrls.push(url);
+      }
+      send(): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    return created;
+  }
+
+  it("opens the websocket even when every prewake fetch is CORS/network-blocked", async () => {
+    const created = stubTicketFetch("reject");
+    const session = new PartySession(noopHandlers);
+    session.setParty({ partyId: "p1" });
+    // Burn through the full prewake deadline (60s) + retry sleeps.
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(created.wsUrls).toContain("ws://relay.test");
+    session.setParty(null);
+  });
+
+  it("opens the websocket immediately when the no-cors prewake resolves (opaque ok)", async () => {
+    const created = stubTicketFetch("resolve");
+    const session = new PartySession(noopHandlers);
+    session.setParty({ partyId: "p1" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(created.wsUrls).toContain("ws://relay.test");
+    session.setParty(null);
+  });
+});

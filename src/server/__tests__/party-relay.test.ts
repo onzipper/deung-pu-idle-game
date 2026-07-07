@@ -314,5 +314,9 @@ describe("party-relay", () => {
     expect(json.status).toBe("ok");
     expect(json.rooms).toBe(1);
     expect(json.sockets).toBe(1);
+    // The game page pre-wakes cross-origin — without a wildcard ACAO the browser
+    // hides the 200 from the client (real incident: deung-pu.softrock.space vs
+    // the Render relay origin).
+    expect(body.toLowerCase()).toContain("access-control-allow-origin: *");
   });
 });
