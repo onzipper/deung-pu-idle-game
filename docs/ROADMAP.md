@@ -142,7 +142,8 @@
 > - [x] ระบบซื้อคืน (owner request): ตาราง `SoldItem` additive, ขายบันทึกใน tx เดียวกัน, GET/POST `/api/items/buyback` — หน้าต่าง 3 วัน server ตัดสินเวลา, atomic restore (+N คงเดิม, `origin:buyback` ไม่นับเพดาน drop, `boughtBack` ItemEvent), ของย่อยซื้อคืนไม่ได้ (กันปั๊มวัสดุ), manual เท่านั้นบอทห้ามเรียก, เช็คทอง = MVP gap เดิมแบบตีบวก (PR #16)
 > - [x] patch notes 2026-07-08c (แก้เมือง+แท็บขาย) + 2026-07-08d (ซื้อคืน)
 > - หมายเหตุ: บอทขาย/ย่อยของตำนาน owner ถามหา — **มีอยู่แล้ว** (v3 "option A": ตั้งค่าบอท→Drops→ของตำนาน, keep-guard บังคับ, ของใส่กันสองชั้น) ไม่ต้องแก้
-> - ⚠ **ค้างก่อน deploy: เจ้าของต้องรัน `prisma db push`** (ตาราง `SoldItem` ใหม่ — ไม่ push แล้วขายของจะ error) + playtest แท็บใหม่ใน browser (desktop+mobile) — 1009/1009, tsc/eslint/next build เขียว, engine แตะแค่ nav ไม่ต้อง sim
+> - [x] เจ้าของรัน `prisma db push` แล้ว (2026-07-08, ยืนยันตาราง `SoldItem` ขึ้นจริงผ่าน information_schema) — DB sync ครบ พร้อม deploy
+> - ⚠ ค้างอย่างเดียว: playtest แท็บใหม่ใน browser (desktop+mobile) — 1009/1009, tsc/eslint/next build เขียว, engine แตะแค่ nav ไม่ต้อง sim
 
 ## M8 — Party & Friends (ปรับสโคป 2026-07-08: เจ้าของขอเพิ่มระบบเพื่อน + ระบบ account จริง)
 
