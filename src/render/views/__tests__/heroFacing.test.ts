@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Hero } from "@/engine/entities";
+import { defaultHeroConfig, emptyDailies } from "@/engine/entities";
 import { createHeroView, updateHeroView, type HeroFrameContext } from "@/render/views/heroView";
 
 const DT = 1 / 60;
@@ -38,12 +39,16 @@ function hero(x: number, aimX: number | null): Hero {
     level: 1,
     xp: 0,
     tier: 1,
+    mainClaimed: [],
+    dailies: emptyDailies(),
     statPoints: 0,
     stats: { str: 4, dex: 8, int: 3, vit: 6 },
     autoSlots: ["arrow_multishot", null, null],
     quest: null,
     equipped: { weapon: null, armor: null },
     command: null,
+    shadowed: false,
+    config: defaultHeroConfig(),
     aimX,
   };
 }

@@ -30,6 +30,7 @@ import { CodexButton } from "@/ui/components/CodexButton";
 import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { DropFeed } from "@/ui/components/DropFeed";
 import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
+import { FriendsButton } from "@/ui/components/FriendsButton";
 import { GoalLadder } from "@/ui/components/GoalLadder";
 import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
 import { HudBar } from "@/ui/components/HudBar";
@@ -139,6 +140,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
             <InventoryButton />
             <RefineButton />
             <HallOfFameButton />
+            <FriendsButton />
             <CodexButton />
             <SettingsButton />
           </div>

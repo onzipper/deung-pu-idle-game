@@ -67,12 +67,14 @@ export type SellItemResultWire =
   | { itemId: string; status: "already"; price: 0 }
   | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
 
-/** One salvage result, mirroring `server/items.ts`'s `SalvageItemResult` (M7.6).
- * Same "already gone / rejected leaves it alone" shape as sell above. */
-export type SalvageItemResultWire =
-  | { itemId: string; status: "salvaged"; yield: number }
-  | { itemId: string; status: "already"; yield: 0 }
-  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+/** One หินเสริมพลัง (enhancement-stone) claim result, mirroring
+ * `server/items.ts`'s `StoneClaimResult` — the `stones[]` sibling of
+ * `ClaimItemResultWire` returned in the SAME `/api/items/claim` response
+ * (`stoneResults`). "existing" is the idempotent retry case (already credited
+ * by an earlier request — credits nothing again); "rejected" never credits. */
+export type StoneClaimResultWire =
+  | { status: "credited" | "existing"; rollId: string; qty: number }
+  | { status: "rejected"; reason: "qty" | "rate"; rollId: string };
 
 /** M7.6 ตีบวก refine outcome (mirrors `server/items.ts`'s `RefineOutcome`). */
 export type RefineOutcome = "success" | "degrade" | "break" | "safe";

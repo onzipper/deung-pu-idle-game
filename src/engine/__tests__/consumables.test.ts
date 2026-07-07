@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   CONFIG,
+  dpow,
   SAVE_VERSION,
   initGameState,
   migrate,
@@ -40,7 +41,7 @@ describe("shop pricing", () => {
       const base = CONFIG.shop.items[item].basePrice;
       expect(shopPriceAt(item, 1)).toBe(base);
       expect(shopPriceAt(item, 5)).toBe(
-        Math.round(base * Math.pow(CONFIG.shop.priceStageBase, 4)),
+        Math.round(base * dpow(CONFIG.shop.priceStageBase, 4)),
       );
       // Strictly increasing with stage (a deeper zone's potion costs more).
       expect(shopPriceAt(item, 10)).toBeGreaterThan(shopPriceAt(item, 5));
@@ -252,7 +253,7 @@ describe("SAVE v8 -> v9 migration + round-trip", () => {
       hero: { cls: "mage", level: 20, tier: 1 },
     });
     expect(m.version).toBe(SAVE_VERSION);
-    expect(m.consumables).toEqual({ hpPotion: 0, manaPotion: 0, returnScroll: 0 });
+    expect(m.consumables).toEqual({ hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 });
   });
 
   it("preserves + clamps a v9 save's counts", () => {
@@ -281,6 +282,7 @@ describe("SAVE v8 -> v9 migration + round-trip", () => {
       hpPotion: 12,
       manaPotion: 4,
       returnScroll: 1,
+      warpScroll: 0,
     });
   });
 });

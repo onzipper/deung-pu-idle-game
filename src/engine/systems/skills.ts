@@ -316,28 +316,33 @@ export function setAutoSlot(
 }
 
 /**
- * Process this step's skill activity: explicit manual casts first, then
- * auto-cast for the slotted skills of every alive hero when the toggle is on.
- * Both route through `castSkill`, so the guards (cooldown, mana, range) hold.
+ * Process this step's skill activity: explicit manual casts first, then per-hero
+ * auto-cast for the slotted skills of every alive hero whose config enables it. Both
+ * route through `castSkill`, so the guards (cooldown, mana, range) hold.
+ *
+ * M8 party P1b: manual `castSkills[].slot` is an explicit HERO index, so casts from
+ * ALL lanes are applied by that index (solo = lane 0's slot-0 → heroes[0], unchanged).
+ * Auto-cast is gated by the PER-HERO `config.autoCast` (was the global `state.autoCast`);
+ * solo mirrors the global onto heroes[0].config, so a 1-hero run is byte-identical.
  */
-export function processSkills(state: GameState, input: FrameInput): void {
-  if (input.castSkills) {
-    for (const { slot, skillId } of input.castSkills) {
+export function processSkills(state: GameState, lanes: FrameInput[]): void {
+  for (const lane of lanes) {
+    if (!lane.castSkills) continue;
+    for (const { slot, skillId } of lane.castSkills) {
       const h = state.heroes[slot];
       const def = SKILLS[skillId];
       if (h && def) castSkill(state, h, def);
     }
   }
-  if (state.autoCast) {
-    for (const h of aliveHeroes(state)) {
-      // Deterministic priority: walk the unlocked slots IN ORDER.
-      const unlocked = unlockedAutoSlotCount(h.level, h.tier);
-      for (let i = 0; i < unlocked && i < h.autoSlots.length; i++) {
-        const id = h.autoSlots[i];
-        if (!id) continue;
-        const def = SKILLS[id];
-        if (def) castSkill(state, h, def);
-      }
+  for (const h of aliveHeroes(state)) {
+    if (!h.config.autoCast) continue;
+    // Deterministic priority: walk the unlocked slots IN ORDER.
+    const unlocked = unlockedAutoSlotCount(h.level, h.tier);
+    for (let i = 0; i < unlocked && i < h.autoSlots.length; i++) {
+      const id = h.autoSlots[i];
+      if (!id) continue;
+      const def = SKILLS[id];
+      if (def) castSkill(state, h, def);
     }
   }
 }

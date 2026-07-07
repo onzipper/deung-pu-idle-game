@@ -166,7 +166,10 @@ describe("per-skill cooldowns are independent", () => {
 describe("auto-cast across a full 3-hero team", () => {
   it("casts every hero's SLOTTED signature skill in the same step once each guard passes", () => {
     const s = makeParty(7);
-    s.autoCast = true;
+    // M8 party P1b: auto-cast is now PER-HERO config (the global `s.autoCast` only
+    // mirrors onto a SOLO hero). A cohort enables it per member (via setHeroConfig in
+    // real play); set it directly here. Assertions unchanged.
+    for (const h of s.heroes) h.config.autoCast = true;
     const sword = s.heroes[0];
     // One enemy inside the swordsman's spin radius also satisfies the mage
     // (330 range) and the archer (field-wide range) simultaneously.
@@ -181,7 +184,7 @@ describe("auto-cast across a full 3-hero team", () => {
 
   it("auto-cast guard still holds for the full team: no target -> no casts, no cooldowns", () => {
     const s = makeParty(7);
-    s.autoCast = true;
+    for (const h of s.heroes) h.config.autoCast = true; // per-hero (see note above)
     s.enemies = []; // nothing to hit anywhere
 
     step(s, {});

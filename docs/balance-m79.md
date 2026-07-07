@@ -347,3 +347,181 @@ s20, after the boss fight — "may shift later than s16" per owner) — HELD. s1
 (`bossSlamTelegraph/Land`, `bossChargeTelegraph/Hit`, `bossEnraged`, `bossDefeated`, …). The
 render `bossVariety`/CHARGE fx key off `mapId` (map4 → ice-tundra + charge visuals), NOT boss
 stats, so the scaled boss draws identically. The render side needs NOTHING new.
+
+---
+
+## Mana relief pass (owner request 2026-07-08)
+
+Owner: **"มานาใช้เยอะไป ซื้อยามานาจนตังหมด"** — mana burn is too aggressive; the flat-pool
+str/dex classes (esp. sword mid-late + the owner's own run) drain gold on mana potions. Goal:
+roughly **halve** sword/archer mana-potion burn, keep the mage ~as-is (already tiny), and hold
+every M7.9 gate. Mana stays a real sink (owner: don't make it irrelevant) — just not bankrupting.
+
+### Diagnosis
+
+Potion count ≈ (mana consumed beyond regen, over the frontier where the sink bites) ÷ (restore
+per potion = `restoreFrac 0.45 × MAX mana`). Candidate levers, judged for the "keep mage as-is"
+constraint:
+
+- **baseRegen / regenPerIntPoint up** — rejected: both cut the mage's burn as much as (or more
+  than) the flat classes' (mage sits near regen break-even on a deep pool), so they can't relieve
+  sword/archer without also slashing the mage. Not mage-neutral.
+- **manaPotion.restoreFrac up** — rejected: a uniform % restore boost cuts ALL classes equally,
+  so it would drop the mage by the same fraction. Not mage-neutral.
+- **tier3PoolBonus up (chosen)** — an ADDITIVE pool bump is a large % restore for the shallow
+  str/dex pools (~250) but a tiny % for the mage's deep INT pool (~615). Asymmetric by
+  construction, and tier-3-only → s1-15 untouched.
+- **Per-skill cost down, tier-3 skill-4 ONLY (chosen)** — cutting consumption directly. Only
+  `sword_skyfall` / `archer_storm` qualify: they unlock at L40 and auto-cast solely from the
+  tier-gated slot 4 (evolve ~s16), so they touch ONLY s16+. The other big archer drains
+  (`archer_barrage` L15, `archer_powershot` L8) and sword's `sword_quake` (L15) fire from ~s6+,
+  so cutting them would break the s1-15 byte-identical gate — left untouched. The mage kit is
+  left 100% byte-identical (relief comes only from its share of the pool bump).
+
+### Knobs changed (before → after)
+
+| knob (`config/index.ts`) | before | after | scope |
+|---|---|---|---|
+| `mana.tier3PoolBonus` | 90 | **170** | tier-3 only (evolve ~s16); mage-light by design |
+| `SKILLS.sword_skyfall.cost` | 120 | **80** | tier-3 skill-4, s16+ only |
+| `SKILLS.archer_storm.cost` | 90 | **45** | tier-3 skill-4, s16+ only |
+
+`mage_apocalypse` / `mage_cataclysm` / all tier-1/2 skills / all farm+boss curves: **unchanged.**
+No `mana.base`, `baseRegen`, `regenPerIntPoint`, `restoreFrac`, or `autoAllocRatio` touched (those
+would hit s1-15 and/or the mage). No SAVE-shape change.
+
+### Before / after (organic, 5 seeds × 5400s, GEAR+REFINE — the canonical mode)
+
+Mana-potion burn (the sink) and deaths:
+
+| class | mana pot/run before | after | Δ | deaths before | after |
+|---|---|---|---|---|---|
+| swordsman | 198 | **103** | **−48%** | 657 | 543 |
+| archer | 210 | **112** | **−47%** | 478 | 360 |
+| mage | 94 | **87** | −7% (as-is) | 38 | 49 |
+
+Gold spent on mana tracks the count at the stage-scaled price (`45 × 1.12^(stage-1)`, bought
+mostly at the frontier) — so gold-on-mana falls ~in step with the count (≈halved for sword/archer).
+Deaths IMPROVED for both flagged classes vs baseline (the deeper pool + cheaper storm also cut
+archer's wasteful boss-spam death loop, 478 → 360; sword 657 → 543); mage deaths flat (38 → 49).
+
+Time-to-clear (mean s) — s1-15 **byte-identical** (diff empty; all three levers are tier-3 /
+L40-gated); s16-30 modestly faster from the extra skill uptime, never trivialised:
+
+| stage | sword b→a | archer b→a | mage b→a |
+|---|---|---|---|
+| 20 | 142→140 | 143→140 | 193→182 |
+| 25 | 184→173 | 209→193 | 182→190 |
+| 30 | 261→256 | 407→306 | 299→235 |
+
+(archer s30 407→306 is the biggest single gain — the storm relief eases the hard-mode class's
+deep-farm grind; s30 boss still walls.)
+
+### Gate checklist (all HELD)
+
+1. **s1-15 byte-identical** — HELD. Farm-time diff s1-15 is EMPTY; every changed knob is tier-3 /
+   L40-gated (heroes are tier 1/2 through s15). s5/s10/s15 boss = 5/5 all classes.
+2. **class-change ~s5** — HELD (s5, 5/5 all classes/seeds).
+3. **tier-3 quest reached, no stall** — HELD (tier3 @ s16 all; young-Sovereign quest boss won
+   5/5 all classes at ~20-25s; all reach map6/s30).
+4. **s16-25 climb + s20/s25 bosses** — HELD (s20 5/5, s25 5/5 all classes; farm times monotonic,
+   modestly faster, not trivial).
+5. **s30 soft-wall** — HELD (s30 boss 0/5 all classes; reached by all).
+6. **Mana a real sink** — HELD. Sword 103 / archer 112 / mage 87 pot/run — a felt gold sink for
+   all three, just no longer bankrupting. skyfall 80 ≥ the tier-2 quake (50); storm 45 stays a
+   real chunk; the sink SPIRIT (mana matters, isn't irrelevant) is intact even though the
+   individual "ultimate nearly empties the pool" gating softens by owner intent.
+
+**Tests / typecheck.** `grand-expansion-tier3.test.ts` "meaningful mana cost" updated to the new
+exact costs (80 / 45) with a `≥40` floor guard (never trivial); the tier-3/L40 STRUCTURAL gate
+asserts are untouched. 1044/1044 vitest green, `tsc --noEmit` clean. No SAVE bump.
+
+---
+
+## หินเสริมพลัง drop conversion (M7.6 follow-up, owner 2026-07-08)
+
+**Ask.** Refine materials came ONLY from SALVAGING gear (M7.6: server-minted into
+`Character.materials` on the salvage endpoint). Owner found salvage cumbersome → enhancement
+**stones now DROP from mobs directly and auto-collect into the SAME `materials` counter**. Salvage
+stays a source for now; a later server/UI wave removes it (existing stockpiles survive = the
+compensation). Engine-side only here.
+
+**Mechanism / stream choice.** A stone roll rides every kill's gear roll (`systems/gear`
+`rollEnemyDrop`/`rollBossDrop`). It hashes a SEPARATE domain-tagged stream (`core/hash.stoneFloat`
+= `lootHash(salt ^ STONE_DOMAIN, counter)`) off the **same persisted `(lootSalt, lootCounter)`** the
+gear roll uses — **reusing the counter, consuming NO extra tick**. So the gear-drop cadence is
+untouched → the existing gear sequence is byte-identical, and there is **no SAVE-shape change / no
+`SAVE_VERSION` bump** (a second persisted counter would have forced one; it buys nothing since
+`splitmix32`'s avalanche fully decorrelates the two streams off a constant XOR). Never the wave RNG.
+
+**Claim contract (server agent).** New per-step event `stoneDrop { rollId, qty, x, y, mobId }`.
+`rollId` = the kill's loot-counter value (SAME id as that kill's gear `itemDrop`, if any). The
+server credits `Character.materials += qty`, **idempotent on claim key `${characterId}:stone:${rollId}`**
+— namespaced apart from gear's `${characterId}:${rollId}` so a kill that drops both never collides.
+Monotonic + save/load-disjoint like gear (no re-credit on reload/offline replay). Follows the gear
+claim idiom exactly; the `:stone:` prefix keeps the server change additive. (Render/UI wave: this
+event kind needs a toast + fx map entry — footgun #6; unhandled it falls to the safe FX default.)
+
+**Config (`CONFIG.stoneDrops`, all sweepable).** `mapTier` = ceil(stage/5) clamped to 6.
+- Normal kill: drop chance `baseChance 0.18 + (mapTier-1)*chancePerMapTier 0.02` (→ 0.18…0.28);
+  qty `qtyBase 2 + (mapTier-1)*qtyPerMapTier 1` (→ 2,3,4,5,6,7).
+- Boss kill: GUARANTEED `bossBonusBase 8 + (mapTier-1)*bossBonusPerMapTier 4` (→ 8…28).
+
+**Rate tuning — income before/after vs salvage-era** (canonical sim: `GEAR=1 REFINE=1`, 5 seeds ×
+5400s, full climb to s30). Target = the salvage-era material BANK, ±20%, never a nerf.
+
+| class | salvage-era `mat earned`/run | หินเสริมพลัง stones/run | Δ |
+|---|---|---|---|
+| swordsman | 9008 | 8633 | −4.2% |
+| archer | 8533 | 8575 | +0.5% |
+| mage | 8441 | 8625 | +2.2% |
+
+All within ±5% — a clean match (materials were never the binding refine constraint anyway: banked
+~9000 vs spent ~4000-5000, GOLD gates refining, so `+N`-reached / attempts are unchanged). Stone
+income is deep-weighted like salvage — mean stones/run by map: **m1 ~122 · m2 ~402 · m3 ~811 ·
+m4 ~1471 · m5 ~2300 · m6 ~3504** (deeper maps trickle bigger stacks, matching salvage's own
+tier-weighted yield and the tier-scaled refine cost).
+
+**Gates (all HELD, byte-identical s1-15 gear drops).** Gear `drops`/run byte-identical to the
+pre-stone baseline (sword seed1/2 `572,537` = baseline `572,537`; archer `573,536`; mage `572,544`)
++ a unit test proves the whole `itemDrop` sequence matches a pure gear-only recompute off
+`(salt,counter)`. Class-change **s5** (5/5 all classes), tier-3 quest reached **s16** + young
+Sovereign won 5/5, s20/s25 cleared, **s30 boss soft-wall intact** (0/5). Refine attempts/breaks
+unchanged (119-133 attempts, 4-7 breaks / ~550 drops).
+
+**Tests / typecheck.** +7 tests (`stone-drops.test.ts`: stream primitive independence, drop
+determinism, qty depth-scaling, **stream isolation** = gear byte-identical + one-tick-per-kill,
+claim-key uniqueness/idempotence + save-load disjointness). **1051/1051** vitest green,
+`tsc --noEmit` clean, eslint clean. No SAVE bump.
+
+---
+
+## Float determinism rebaseline (party P1a) — 2026-07-07
+
+**What & why.** Lockstep party (M8) needs the sim to be bit-identical across JS engines
+(V8/JavaScriptCore/SpiderMonkey). IEEE-754 only mandates correct rounding for `+ - * /` and
+`sqrt`; `Math.sin/cos/pow/hypot/...` are implementation-defined and can diverge by an ULP →
+desync. All such calls whose RESULT ENTERS SIM STATE were moved to the new
+`src/engine/core/dmath.ts`: `dsin/dcos` (4096-entry quarter-wave LUT + lerp, the table itself
+built at load from a Taylor polynomial using only `+ - *` — never `Math.sin`), `dhypot` (=
+`sqrt(x²+y²)`, IEEE-exact), `dpow` (exact integer exponentiation-by-squaring). Call sites swapped:
+mob wander `sin` (combat.ts), two projectile-distance `hypot` (combat.ts), and every growth-curve
+`Math.pow` (config: enemyHp/enemyAtk/bossHp/bossAtk/goldPerKill/xpToLevel/enemyAtk|HpDamp; shop
+priceStageBase). A source-scan guard test (`float-determinism-guard.test.ts`) fails the build if a
+banned `Math.*` transcendental reappears in `engine/` outside dmath/tests.
+
+**Observed drift = ZERO at reporting resolution.** Ran the canonical `GEAR=1 REFINE=1
+SIM_SECONDS=5400` (5 seeds × 3 classes) and `BOSSISO=1` BEFORE and AFTER the swap on the same
+current code: **every reported metric is byte-identical** — deaths (sword 543 / archer 360 / mage
+49), mana pot/run (103 / 112 / 87), stones/run (8633 / 8575 / 8625), quest-boss winT, and BOSSISO
+s20/s25/s30 win-times (s30 sword 13.4s / archer 14.9s / mage 12.7s). Reason: every `pow` result
+flows through `Math.round` in a config curve, so the sub-integer `dpow` delta rounds to the same
+integer; the `dsin` wander perturbation is <1e-4 px and never crosses an engagement threshold in
+these runs. The underlying raw floats do shift microscopically (dsin/dpow ≠ libm bit-for-bit) —
+that is the intended one-time move — but it stays below the sim's measurement resolution.
+
+**Gates (all HELD):** class-change s5 (5/5), tier-3 quest reached s16 + young Sovereign won 5/5,
+s20/s25 organic clears, **s30 boss soft-wall intact** (organic 0/5, BOSSISO wins all t10+10), no
+stalls to the frontier, mana relief + stone income unchanged. **This is the new baseline.** No
+curve was retuned; no SAVE bump. Vitest 1069/1069 green (+13 dmath/guard tests), `tsc` + eslint
+clean.

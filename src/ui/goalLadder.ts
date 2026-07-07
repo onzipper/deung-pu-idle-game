@@ -28,6 +28,15 @@
 
 import type { Phase } from "@/engine";
 
+// M8 quest Wave A handoff ("goalLadder ui->engine re-export flagged for Wave
+// C"): re-export the MAIN-quest chapter derivation from the engine so new UI
+// code (the goal card's chapter line, the Quest Board panel) has ONE import
+// path for both this module's rung logic and the chapter defs, instead of a
+// second `@/engine` import line. Purely additive (no existing export
+// touched) — existing call sites are untouched, so this doesn't churn any
+// tests.
+export { mainChapterDefs, type MainChapterDef } from "@/engine";
+
 export type GoalRungId = "levelUp" | "classQuest" | "zoneBoss" | "hallOfFame";
 
 /** Fixed display order — matches the GDD/ROADMAP motivation ladder exactly. */

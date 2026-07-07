@@ -20,6 +20,7 @@
 
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
+import { CONFIG } from "@/engine/config";
 import {
   ITEM_TEMPLATES,
   dropTableForStage,
@@ -32,7 +33,6 @@ import {
 import {
   REFINE,
   refineCost,
-  salvageYield,
   successChanceForLevel,
   failModeForLevel,
   clampRefine,
@@ -47,9 +47,6 @@ export const MAX_CLAIM_BATCH = 64;
 /** Hard cap on itemIds per POST /api/items/sell batch (DoS / abuse bound). Sized
  *  to the full inventory so a "sell everything" trip is one request. */
 export const MAX_SELL_BATCH = 100;
-/** Hard cap on itemIds per POST /api/items/salvage batch (mirrors sell — a full
- *  inventory "salvage all dupes" trip is one request). */
-export const MAX_SALVAGE_BATCH = 100;
 /**
  * GENEROUS kills/sec ceiling for the rate-plausibility guard — real auto-hunting
  * clears well under ~1 mob/sec; 5 leaves huge headroom for legit bursts/AoE while
@@ -60,6 +57,33 @@ export const KILLS_PER_SEC_CEILING = 5;
 /** Flat grace added to the ceiling: absorbs clock skew + gives fresh characters
  *  a starting allowance so the very first legit drops are never rate-rejected. */
 export const CLAIM_GRACE = 50;
+
+// ── หินเสริมพลัง enhancement-stone claim tunables (M7.6 follow-up) ────────────
+// Stones are the SOLE refine-material source now (salvage removed). The engine
+// drops them per kill on the same loot-counter tick as gear (see
+// engine/systems/gear.ts `rollStoneDrop`): normal kill chance
+// `baseChance + (mapTier-1)*chancePerMapTier`, qty `qtyBase + (mapTier-1)*…`,
+// boss GUARANTEED `bossBonusBase + (mapTier-1)*…`. The plausibility ceilings are
+// derived from these config maxima at the DEEPEST map tier so they auto-track a
+// balance tweak (no magic numbers to rot).
+const STONE_CFG = CONFIG.stoneDrops;
+const MAX_MAP_TIER = CONFIG.world.maps.length;
+/** Deepest-tier per-normal-kill stone drop probability (drives the rate ceiling). */
+const MAX_STONE_DROP_CHANCE = STONE_CFG.baseChance + (MAX_MAP_TIER - 1) * STONE_CFG.chancePerMapTier;
+/** Deepest-tier guaranteed boss stone bonus — the largest legit single-claim qty. */
+const MAX_STONE_BOSS_QTY = STONE_CFG.bossBonusBase + (MAX_MAP_TIER - 1) * STONE_CFG.bossBonusPerMapTier;
+/**
+ * Per-claim qty plausibility ceiling: 2× the deepest legit boss bonus — generous
+ * headroom over honest play (boss ≈ MAX_STONE_BOSS_QTY at the last map) while still
+ * rejecting a client that inflates a single claim's `qty`. A claim over this is
+ * rejected (reason "qty"), never credited. */
+export const MAX_STONE_QTY_PER_CLAIM = MAX_STONE_BOSS_QTY * 2;
+/** Origin tag stamped on a stone-claim RECEIPT row (see `claimStones`) — distinct
+ *  from gear's drop/boss so it never touches the gear drop-rate ceiling. */
+const STONE_ORIGIN = "stone";
+/** Sentinel templateId for a stone receipt (NOT a real ITEM_TEMPLATES key, so it is
+ *  invisible to inventory reads — `toItemDTO` returns null for it). */
+const STONE_SENTINEL_TEMPLATE = "__stone__";
 
 // ── Claim: idempotency + plausibility (pure, unit-testable) ──────────────────
 
@@ -83,6 +107,30 @@ export function plausibleDropCeiling(elapsedSeconds: number): number {
   const perSecond = KILLS_PER_SEC_CEILING * maxSummedDropChance();
   const safeElapsed = Math.max(0, elapsedSeconds);
   return Math.floor(safeElapsed * perSecond) + CLAIM_GRACE;
+}
+
+/**
+ * Idempotency key for a STONE claim → `${characterId}:stone:${rollId}`. NAMESPACED
+ * apart from gear's `${characterId}:${rollId}` (engine/systems/gear.ts contract) so
+ * a single kill that drops BOTH a gear item and stones on the SAME `rollId` yields
+ * two DISTINCT unique keys — each credits exactly once. Stored on the same UNIQUE
+ * `ItemInstance.claimKey` column gear uses (a stone claim mints a born-dead receipt
+ * row — see `claimStones`), so the P2002 dedupe mechanism is reused verbatim.
+ */
+export function deriveStoneClaimKey(characterId: string, rollId: string): string {
+  return `${characterId}:stone:${rollId}`;
+}
+
+/**
+ * Max plausible LIFETIME stone claims (receipt rows) for a character given seconds
+ * of existence — mirrors `plausibleDropCeiling` but keyed to the stone drop chance:
+ * at most `MAX_STONE_DROP_CHANCE` of kills drop stones, and `KILLS_PER_SEC_CEILING`
+ * bounds kills/sec, so this bounds the CLAIM COUNT. The per-claim `qty` is bounded
+ * separately by `MAX_STONE_QTY_PER_CLAIM`. Pure → unit-tested without a DB.
+ */
+export function plausibleStoneCeiling(elapsedSeconds: number): number {
+  const perSecond = KILLS_PER_SEC_CEILING * MAX_STONE_DROP_CHANCE;
+  return Math.floor(Math.max(0, elapsedSeconds) * perSecond) + CLAIM_GRACE;
 }
 
 export type ClaimClassification =
@@ -130,13 +178,40 @@ const claimEntrySchema = z
   })
   .strict();
 
-export const claimBatchSchema = z
+/**
+ * A single หินเสริมพลัง (enhancement-stone) claim entry: the shared per-kill
+ * `rollId` + how many stones dropped. `qty`'s zod bound is a loose overflow guard;
+ * the real plausibility ceiling (`MAX_STONE_QTY_PER_CLAIM`) is enforced per-entry in
+ * `claimStones` (a graceful per-entry reject, so one absurd stone claim never fails
+ * the whole batch's gear claims).
+ */
+const stoneClaimEntrySchema = z
   .object({
-    items: z.array(claimEntrySchema).min(1).max(MAX_CLAIM_BATCH),
+    rollId: z
+      .union([z.string().min(1).max(64), z.number().int().nonnegative()])
+      .transform((v) => String(v)),
+    qty: z.number().int().min(1).max(1_000_000),
   })
   .strict();
 
+/**
+ * ADDITIVE batch shape: gear `items` AND/OR enhancement-stone `stones` in ONE POST.
+ * Both arrays are OPTIONAL so an old client posting only `{ items: [...] }` still
+ * validates unchanged; the refine requires the batch to carry at least one claim of
+ * either kind (so `{ items: [] }` — an empty request — is still rejected as before).
+ */
+export const claimBatchSchema = z
+  .object({
+    items: z.array(claimEntrySchema).max(MAX_CLAIM_BATCH).optional(),
+    stones: z.array(stoneClaimEntrySchema).max(MAX_CLAIM_BATCH).optional(),
+  })
+  .strict()
+  .refine((b) => (b.items?.length ?? 0) + (b.stones?.length ?? 0) >= 1, {
+    message: "batch must contain at least one item or stone claim",
+  });
+
 export type ClaimEntry = z.infer<typeof claimEntrySchema>;
+export type StoneClaimEntry = z.infer<typeof stoneClaimEntrySchema>;
 
 export const equipSchema = z.object({ itemId: z.string().min(1).max(64) }).strict();
 export const unequipSchema = equipSchema;
@@ -146,14 +221,6 @@ export const unequipSchema = equipSchema;
 export const sellSchema = z
   .object({
     itemIds: z.array(z.string().min(1).max(64)).min(1).max(MAX_SELL_BATCH),
-  })
-  .strict();
-
-/** Salvage batch (M7.6). Ids are deduped in `salvageItems` (one soft-destroy +
- *  material credit per unique id); a duplicated id can never mint materials twice. */
-export const salvageSchema = z
-  .object({
-    itemIds: z.array(z.string().min(1).max(64)).min(1).max(MAX_SALVAGE_BATCH),
   })
   .strict();
 
@@ -416,6 +483,10 @@ export async function claimBatch(
   entries: ClaimEntry[],
   now: number = Date.now(),
 ): Promise<{ results: ClaimItemResult[]; unverifiedMembership: number }> {
+  // A stone-only batch (no gear drops this cycle) reaches here with no entries —
+  // skip every DB read and return an empty gear result.
+  if (entries.length === 0) return { results: [], unverifiedMembership: 0 };
+
   const character = await prisma.character.findUnique({
     where: { id: characterId },
     select: { createdAt: true },
@@ -765,125 +836,151 @@ export async function sellItems(
   );
 }
 
-// ── Salvage (destroy → refine materials) ─────────────────────────────────────
+// ── Stone claim (หินเสริมพลัง → refine materials) ─────────────────────────────
+//
+// Enhancement stones REPLACE salvage as the refine-material source (owner decision).
+// The engine drops them per kill (engine/systems/gear.ts) as a transient `stoneDrop`
+// event; the client buffers them like gear drops and posts them alongside gear in the
+// SAME /api/items/claim batch. Each claim credits `Character.materials += qty` in the
+// SAME tx as an idempotency RECEIPT — a born-dead `ItemInstance` (deletedAt stamped at
+// creation, origin "stone", sentinel templateId) whose UNIQUE `claimKey`
+// (`${characterId}:stone:${rollId}`) is the SAME P2002 dedupe mechanism gear mints use.
+// The receipt is born-dead so it never appears in inventory reads/counts (deletedAt is
+// set → excluded by the `deletedAt: null` filters) and its "stone" origin keeps it out
+// of the gear drop-rate ceiling (`origin: { in: ["drop","boss"] }`). A `stoneClaimed`
+// ItemEvent on that receipt (meta {qty, rollId}) is the append-only audit (invariant 9).
 
-export type SalvageItemResult =
-  | { itemId: string; status: "salvaged"; yield: number }
-  | { itemId: string; status: "already"; yield: 0 }
-  | { itemId: string; status: "rejected"; reason: "equipped" | "not_found" };
+export type StoneClaimResult =
+  | { status: "credited" | "existing"; rollId: string; qty: number }
+  | { status: "rejected"; reason: "qty" | "rate"; rollId: string };
 
 /**
- * Salvage owned items into REFINE MATERIALS (M7.6). Mirrors `sellItems` exactly,
- * only the currency differs: instead of returning gold for the client to apply,
- * salvage MINTS materials into the AUTHORITATIVE `Character.materials` column in
- * the SAME tx as the soft-destroys — so the material counter is server-owned, not
- * client-trusted (anti-cheat foundation for the refine sink).
- *
- * NO DOUBLE-CREDIT (mirrors the sell idempotency pattern — no separate client key
- * needed): each item's soft-delete is a conditional `updateMany` guarded by
- * `deletedAt: null` + `equippedSlot: null` (an atomic check-and-set). Two concurrent
- * salvage calls for the same id race on that write — exactly one matches (count 1 →
- * "salvaged", yield counted), the loser matches nothing (count 0 → "already",
- * yield 0). Only the WON set contributes to the materials increment, so a
- * retried/duplicated request can never mint materials twice. Equipped items REJECT
- * ("equipped") — salvage never auto-unequips (mirrors sell).
- *
- * Yield is captured per item via `salvageYield(tier, rarity)` (engine config) and
- * recorded in each `salvaged` ItemEvent (meta) as the AUTHORITATIVE audit for a
- * future server-side re-derivation (never recomputed from today's config).
+ * Credit ONE stone claim in a single tx (receipt instance + `stoneClaimed` event +
+ * `Character.materials += qty`) — the mint-in-one-tx recipe (invariants 1/7/9),
+ * reused for a non-item currency. A `claimKey` P2002 collision means the claim
+ * already landed (retry/duplicate): NOTHING is credited, and the current balance is
+ * returned as "existing" (idempotent, invariant 4).
  */
-export async function salvageItems(
+async function creditStoneOne(
   characterId: string,
-  itemIds: string[],
-  now: Date = new Date(),
-): Promise<{ results: SalvageItemResult[]; totalMaterials: number; materials: number }> {
-  const uniqueIds = [...new Set(itemIds)];
-  if (uniqueIds.length === 0) {
-    return { results: [], totalMaterials: 0, materials: await loadMaterials(characterId) };
+  entry: StoneClaimEntry,
+  claimKey: string,
+  now: Date,
+): Promise<{ status: "credited" | "existing"; materials: number }> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const receipt = await tx.itemInstance.create({
+        data: {
+          ownerId: characterId,
+          templateId: STONE_SENTINEL_TEMPLATE,
+          origin: STONE_ORIGIN,
+          sourceDetail: `stone:${entry.qty}`,
+          claimKey,
+          // Born-dead receipt: a pure idempotency + audit marker, never live inventory.
+          deletedAt: now,
+        },
+        select: { id: true },
+      });
+      await tx.itemEvent.create({
+        data: {
+          itemId: receipt.id,
+          type: "stoneClaimed",
+          toCharacterId: characterId,
+          meta: JSON.stringify({ qty: entry.qty, rollId: entry.rollId }),
+        },
+      });
+      const updated = await tx.character.update({
+        where: { id: characterId },
+        data: { materials: { increment: entry.qty } },
+        select: { materials: true },
+      });
+      return { status: "credited" as const, materials: updated.materials };
+    });
+  } catch (err) {
+    if (isUniqueViolation(err, "claimKey")) {
+      // Already credited on a prior request — return the current balance, credit nothing.
+      return { status: "existing", materials: await loadMaterials(characterId) };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Batch เคลม (claim) enhancement stones for the active character. Idempotent per
+ * namespaced `claimKey`, and bounded by TWO plausibility guards mirroring the gear
+ * ceiling: a per-claim `qty` cap (`MAX_STONE_QTY_PER_CLAIM`, reason "qty") and a
+ * lifetime CLAIM-COUNT ceiling (`plausibleStoneCeiling`, reason "rate"). A NEW credit
+ * consumes rate budget; an idempotent existing-claim return does NOT (already counted).
+ * Excess/absurd claims are REJECTED, never credited. Returns the authoritative
+ * `materials` balance for the client to seed its mirror (like the old salvage response).
+ */
+export async function claimStones(
+  characterId: string,
+  entries: StoneClaimEntry[],
+  now: number = Date.now(),
+): Promise<{ results: StoneClaimResult[]; totalCredited: number; materials: number }> {
+  if (entries.length === 0) {
+    return { results: [], totalCredited: 0, materials: await loadMaterials(characterId) };
   }
 
-  return prisma.$transaction(
-    async (tx) => {
-      const rows = await tx.itemInstance.findMany({
-        where: { id: { in: uniqueIds }, ownerId: characterId },
-        select: { id: true, templateId: true, deletedAt: true, equippedSlot: true },
+  const character = await prisma.character.findUnique({
+    where: { id: characterId },
+    select: { createdAt: true },
+  });
+  const createdAtMs = character?.createdAt.getTime() ?? now;
+  const elapsedSeconds = Math.max(0, now - createdAtMs) / 1000;
+  const ceiling = plausibleStoneCeiling(elapsedSeconds);
+
+  // Existing receipts already count against the lifetime claim ceiling.
+  const existingClaims = await prisma.itemInstance.count({
+    where: { ownerId: characterId, origin: STONE_ORIGIN },
+  });
+  let remaining = Math.max(0, ceiling - existingClaims);
+
+  const nowDate = new Date(now);
+  const results: StoneClaimResult[] = [];
+  let totalCredited = 0;
+  let materials: number | null = null;
+
+  for (const entry of entries) {
+    const claimKey = deriveStoneClaimKey(characterId, entry.rollId);
+
+    // Per-claim qty plausibility: an inflated single claim is rejected, never credited.
+    if (entry.qty > MAX_STONE_QTY_PER_CLAIM) {
+      results.push({ status: "rejected", reason: "qty", rollId: entry.rollId });
+      continue;
+    }
+
+    if (remaining <= 0) {
+      // Rate gate — still honour an idempotent retry of an already-credited claim
+      // (it credits nothing, so it can't breach the ceiling), otherwise reject.
+      const existing = await prisma.itemInstance.findUnique({
+        where: { claimKey },
+        select: { id: true },
       });
-      const byId = new Map(rows.map((r) => [r.id, r]));
-
-      const results: SalvageItemResult[] = [];
-      const salvaged: { itemId: string; yield: number; tier: number; rarity: string }[] = [];
-      for (const itemId of uniqueIds) {
-        const item = byId.get(itemId);
-        if (!item) {
-          results.push({ itemId, status: "rejected", reason: "not_found" });
-          continue;
-        }
-        if (item.deletedAt !== null) {
-          results.push({ itemId, status: "already", yield: 0 });
-          continue;
-        }
-        if (item.equippedSlot !== null) {
-          results.push({ itemId, status: "rejected", reason: "equipped" });
-          continue;
-        }
-        const template = ITEM_TEMPLATES[item.templateId];
-        if (!template) {
-          // Retired/unknown template — cannot value it; treat as un-salvageable.
-          results.push({ itemId, status: "rejected", reason: "not_found" });
-          continue;
-        }
-
-        const gained = salvageYield(template.tier, template.rarity);
-        // Atomic check-and-set (deletedAt:null + equippedSlot:null is the lock).
-        const res = await tx.itemInstance.updateMany({
-          where: { id: itemId, ownerId: characterId, deletedAt: null, equippedSlot: null },
-          data: { deletedAt: now },
-        });
-        if (res.count === 0) {
-          results.push({ itemId, status: "already", yield: 0 });
-          continue;
-        }
-        salvaged.push({ itemId, yield: gained, tier: template.tier, rarity: template.rarity });
-        results.push({ itemId, status: "salvaged", yield: gained });
+      if (existing) {
+        materials = await loadMaterials(characterId);
+        results.push({ status: "existing", rollId: entry.rollId, qty: entry.qty });
+        continue;
       }
+      results.push({ status: "rejected", reason: "rate", rollId: entry.rollId });
+      continue;
+    }
 
-      const totalMaterials = salvaged.reduce((acc, s) => acc + s.yield, 0);
-      let materials: number;
-      if (salvaged.length > 0) {
-        await tx.itemEvent.createMany({
-          data: salvaged.map((s) => ({
-            itemId: s.itemId,
-            type: "salvaged",
-            fromCharacterId: characterId,
-            meta: JSON.stringify({
-              salvaged: true,
-              yield: s.yield,
-              tier: s.tier,
-              rarity: s.rarity,
-              currency: "materials",
-            }),
-          })),
-        });
-        // Credit the authoritative counter in the SAME tx (won set only).
-        const updated = await tx.character.update({
-          where: { id: characterId },
-          data: { materials: { increment: totalMaterials } },
-          select: { materials: true },
-        });
-        materials = updated.materials;
-      } else {
-        const cur = await tx.character.findUnique({
-          where: { id: characterId },
-          select: { materials: true },
-        });
-        materials = cur?.materials ?? 0;
-      }
+    const credited = await creditStoneOne(characterId, entry, claimKey, nowDate);
+    materials = credited.materials;
+    if (credited.status === "credited") {
+      remaining--;
+      totalCredited += entry.qty;
+    }
+    results.push({ status: credited.status, rollId: entry.rollId, qty: entry.qty });
+  }
 
-      return { results, totalMaterials, materials };
-    },
-    // Same headroom as the sell batch (≤100 indexed single-row writes on a shared host).
-    { maxWait: 10_000, timeout: 20_000 },
-  );
+  return {
+    results,
+    totalCredited,
+    materials: materials ?? (await loadMaterials(characterId)),
+  };
 }
 
 // ── Refine (ตีบวก — server-authoritative roll) ───────────────────────────────

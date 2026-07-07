@@ -2,7 +2,7 @@
  * M7.5 Inventory UX overhaul — pure stack-grouping. Instances of the SAME
  * templateId AND refine +level are identical (no per-instance stat rolls, see
  * `docs/GDD.md`), so stacking by the compound `templateId:refineLevel` key is
- * lossless: every stack-level action (equip/sell/salvage/refine) just needs ONE
+ * lossless: every stack-level action (equip/sell/refine) just needs ONE
  * representative instance id out of the group. A +0 sword and a +5 sword of the
  * same template are DELIBERATELY separate stacks (M7.6 "ตีบวก") — different
  * effective stats, so they must render/act as distinct grid cells (see

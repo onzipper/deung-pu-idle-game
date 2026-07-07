@@ -79,11 +79,12 @@ function makeSnapshot(
       right: null,
     },
     shop: {
-      counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+      counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 },
       prices: {
         hpPotion: CONFIG.shop.items.hpPotion.basePrice,
         manaPotion: CONFIG.shop.items.manaPotion.basePrice,
         returnScroll: CONFIG.shop.items.returnScroll.basePrice,
+        warpScroll: CONFIG.shop.items.warpScroll.basePrice,
       },
       stackCap: CONFIG.shop.stackCap,
       ready: { hpPotion: false, manaPotion: false },
@@ -92,9 +93,11 @@ function makeSnapshot(
     autoHunt: true,
     unlockedZones: {},
     materials: 0,
-    npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+    npcInRange: { "npc:pahpu": false, "npc:lungdueng": false, "npc:elder": false },
     tier3FrontierLocked: false,
     deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
+    mainChapters: [],
+    dailies: { serverDay: 0, quests: [] },
   };
 }
 

@@ -238,13 +238,13 @@ describe("SAVE v16 migration (M7.95)", () => {
     quest: null,
   });
 
-  it("SAVE_VERSION is 16", () => {
-    expect(SAVE_VERSION).toBe(16);
+  it("SAVE_VERSION is 17", () => {
+    expect(SAVE_VERSION).toBe(17);
   });
 
   it("v14 -> v16: goldEarned 0 (not fabricated from gold), empty bossBest, null levelCapAt", () => {
     const m = migrate({ version: 14, stage: 3, gold: 5000, hero: rawHero(), lastSeen: 0 });
-    expect(m.version).toBe(16);
+    expect(m.version).toBe(17);
     expect(m.goldEarned).toBe(0); // retroactive earned totals are unknowable
     expect(m.bossBest).toEqual({});
     expect(m.levelCapAt).toBeNull();
@@ -252,7 +252,7 @@ describe("SAVE v16 migration (M7.95)", () => {
 
   it("v15 -> v16: same HOF backfill (0 / {} / null)", () => {
     const m = migrate({ version: 15, stage: 8, gold: 12_000, hero: rawHero("mage"), lastSeen: 0 });
-    expect(m.version).toBe(16);
+    expect(m.version).toBe(17);
     expect(m.goldEarned).toBe(0);
     expect(m.bossBest).toEqual({});
     expect(m.levelCapAt).toBeNull();

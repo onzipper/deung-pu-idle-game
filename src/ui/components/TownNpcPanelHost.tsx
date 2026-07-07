@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Town NPCs phase 3 (final) — hosts the two NPC dialog panels (`ShopPanel` for
- * pahpu / `RefinePanel` for lungdueng) off the store's single `activeTownPanel`
- * field (see `gameStore.ts`'s `TownPanelId` doc). Neither panel auto-renders on
- * town arrival anymore — a panel opens ONLY via the tap-to-talk pointer flow
+ * Town NPCs phase 3 (final; extended M8 quest Wave C) — hosts the three NPC
+ * dialog panels (`ShopPanel` for pahpu / `RefinePanel` for lungdueng /
+ * `QuestBoardPanel` for elder) off the store's single `activeTownPanel` field
+ * (see `gameStore.ts`'s `TownPanelId` doc). No panel auto-renders on town
+ * arrival — a panel opens ONLY via the tap-to-talk pointer flow
  * (`GameClient.tsx`'s `talkToNpc`) or the refine dock shortcut
  * (`RefineButton.tsx`), i.e. "tap-again-to-talk" (owner-approved).
  *
@@ -19,9 +20,18 @@
  */
 
 import { useEffect } from "react";
+import { QuestBoardPanel } from "@/ui/components/QuestBoardPanel";
 import { RefinePanel } from "@/ui/components/RefinePanel";
 import { ShopPanel } from "@/ui/components/ShopPanel";
 import { useGameStore } from "@/ui/store/gameStore";
+import type { TownNpcId } from "@/engine";
+import type { TownPanelId } from "@/ui/store/gameStore";
+
+const NPC_ID_BY_PANEL: Record<TownPanelId, TownNpcId> = {
+  pahpu: "npc:pahpu",
+  lungdueng: "npc:lungdueng",
+  board: "npc:elder",
+};
 
 export function TownNpcPanelHost() {
   const activeTownPanel = useGameStore((s) => s.activeTownPanel);
@@ -31,11 +41,12 @@ export function TownNpcPanelHost() {
 
   useEffect(() => {
     if (!activeTownPanel) return;
-    const id = activeTownPanel === "pahpu" ? "npc:pahpu" : "npc:lungdueng";
+    const id = NPC_ID_BY_PANEL[activeTownPanel];
     if (!inTown || !npcInRange[id]) closeTownPanel();
   }, [activeTownPanel, inTown, npcInRange, closeTownPanel]);
 
   if (activeTownPanel === "pahpu") return <ShopPanel onClose={closeTownPanel} />;
   if (activeTownPanel === "lungdueng") return <RefinePanel onClose={closeTownPanel} />;
+  if (activeTownPanel === "board") return <QuestBoardPanel onClose={closeTownPanel} />;
   return null;
 }

@@ -25,6 +25,7 @@ import type {
   HeroClass,
   HeroStats,
   HeroQuest,
+  HeroDailies,
   SkillId,
   ShopItemId,
   ConsumableCounts,
@@ -309,6 +310,15 @@ export interface CharacterSave {
    * (re-offered on load), and a tier-2 hero has consumed its quest (null).
    */
   quest: HeroQuest | null;
+  /**
+   * Main-quest chapters whose reward has been CLAIMED (M8 Wave A, SAVE v17). The main
+   * line is derived from progression; only this claim log persists. The v17 migration
+   * prefills it with all already-completed chapters (mark-done, no backpay).
+   */
+  mainClaimed: string[];
+  /** Daily-quest roster + progress (M8 Wave A, SAVE v17). Server-chosen roster, engine-
+   * counted progress; empty until a `setDailies` intent arrives. */
+  dailies: HeroDailies;
 }
 
 export interface SaveData {
@@ -400,6 +410,15 @@ export function initHeroes(state: GameState): void {
             },
           }
         : emptyEquipped(),
+      // Per-hero automation config (M8 party P1b) survives a battlefield reset (stage
+      // advance) like the auto-slot loadout — a stage clear must not silently flip a
+      // cohort member's autoCast/auto-potion choices. Solo re-mirrors from globals
+      // anyway (syncPrimaryHeroConfig), so this only matters for a party hero.
+      prev ? { ...prev.config } : undefined,
+      // M8 Wave A: main-quest claim log + daily roster survive a battlefield reset (a
+      // boss-clear rebuilds the hero mid-run — claims/progress must not reset).
+      prev ? [...prev.mainClaimed] : undefined,
+      prev ? { serverDay: prev.dailies.serverDay, quests: prev.dailies.quests.map((q) => ({ ...q })) } : undefined,
     ),
   ];
 }
@@ -589,6 +608,11 @@ export function initGameState(
     // tier-3 hero has no quest; a saved accepted quest is validated against the tier's
     // current quest def (unknown/foreign or un-accepted -> re-offer by leaving it null).
     h.quest = normalizeHeroQuest(h.cls, h.tier, save.hero.quest);
+    // Restore the main-quest claim log + daily roster (M8 Wave A, SAVE v17). A well-formed
+    // v17 save carries both (migrate prefills mainClaimed with completed-no-backpay + an
+    // empty dailies for a pre-v17 save); normalise defensively for a raw save literal.
+    h.mainClaimed = normalizeMainClaimed(save.hero.mainClaimed);
+    h.dailies = normalizeDailies(save.hero.dailies);
 
     // Boot-time strand guard (owner rule 2026-07-07 "ห้ามข้ามแมพ"): the tier-3 tundra grant
     // now requires map3's boss room to be persist-unlocked. A save written under the OLDER,
@@ -638,6 +662,53 @@ function normalizeHeroQuest(
     return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
   });
   return { id: def.id, accepted: true, progress };
+}
+
+/**
+ * Coerce a saved main-quest claim log to a clean string[] of KNOWN chapter ids (M8 Wave A,
+ * SAVE v17): drops non-strings, unknown ids, and duplicates. A missing array → []. The
+ * v17 migration owns the completed-no-backpay PREFILL; this only fixes the shape on load.
+ */
+function normalizeMainClaimed(saved: unknown): string[] {
+  if (!Array.isArray(saved)) return [];
+  const known = new Set<string>(CONFIG.mainQuest.chapters.map((c) => c.id));
+  const out: string[] = [];
+  for (const v of saved) {
+    if (typeof v === "string" && known.has(v) && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Coerce a saved daily-quest block to the {serverDay, quests[]} shape (M8 Wave A, SAVE v17):
+ * a non-negative integer day + quests keyed by a KNOWN catalog id (unknown ids dropped),
+ * each with a non-negative integer progress + boolean claimed. A missing/malformed block →
+ * an empty roster. Defensive — a well-formed v17 save is exact.
+ */
+function normalizeDailies(saved: unknown): HeroDailies {
+  const empty: HeroDailies = { serverDay: 0, quests: [] };
+  if (!saved || typeof saved !== "object") return empty;
+  const s = saved as { serverDay?: unknown; quests?: unknown };
+  const serverDay =
+    typeof s.serverDay === "number" && Number.isFinite(s.serverDay) && s.serverDay >= 0
+      ? Math.floor(s.serverDay)
+      : 0;
+  const known = new Set(Object.keys(CONFIG.dailyQuests.catalog));
+  const quests: HeroDailies["quests"] = [];
+  if (Array.isArray(s.quests)) {
+    for (const q of s.quests) {
+      if (!q || typeof q !== "object") continue;
+      const qq = q as { id?: unknown; progress?: unknown; claimed?: unknown };
+      if (typeof qq.id !== "string" || !known.has(qq.id)) continue;
+      if (quests.some((e) => e.id === qq.id)) continue; // no dup ids
+      const progress =
+        typeof qq.progress === "number" && Number.isFinite(qq.progress) && qq.progress >= 0
+          ? Math.floor(qq.progress)
+          : 0;
+      quests.push({ id: qq.id, progress, claimed: qq.claimed === true });
+    }
+  }
+  return { serverDay, quests };
 }
 
 /**
@@ -722,6 +793,9 @@ export function toSaveData(state: GameState): SaveData {
       // Persist the class-change quest (M5 task 5) — only an accepted, unfinished
       // quest is meaningful; null otherwise (offer is re-derived, tier 2 consumed).
       quest: h.quest ? { id: h.quest.id, accepted: h.quest.accepted, progress: [...h.quest.progress] } : null,
+      // M8 Wave A (SAVE v17): main-quest claim log + daily roster/progress.
+      mainClaimed: [...h.mainClaimed],
+      dailies: { serverDay: h.dailies.serverDay, quests: h.dailies.quests.map((q) => ({ ...q })) },
     },
     // M7 drop-roll bookkeeping (SAVE v10): monotonic counter + per-save salt.
     lootCounter: state.lootCounter,

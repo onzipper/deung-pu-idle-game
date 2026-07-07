@@ -162,7 +162,7 @@
       "townGroup": "Town trips",
       "townGroupHint": "The bot warps to town to buy potions / sell / equip its best gear on its own.",
       "dropGroup": "Drops",
-      "dropGroupHint": "Rules for what the bot sells/salvages/keeps per drop rarity on its town trips.",
+      "dropGroupHint": "Rules for what the bot sells/keeps per drop rarity on its town trips.",
       "walkGroup": "Walking",
       "walkGroupHint": "Behavior after your hero dies, and auto-advancing to the next zone.",
       "autoReturnHint": "After your hero respawns in town, walk back to farming automatically.",
@@ -180,7 +180,7 @@
       "goldReserve": "Minimum gold reserve",
       "goldReserveHint": "The bot will always leave at least this much gold (not a spending budget)",
       "restockHint": "Warps to town on its own once HP/mana potions run out, then buys back up to target.",
-      "sellTripHint": "Warps to town on its own once the bag is full, then sells/salvages per the drop rules.",
+      "sellTripHint": "Warps to town on its own once the bag is full, then sells per the drop rules.",
       "masterOffDisabledHint": "Turn the main bot switch on first to enable this.",
       "autoSlotsTitle": "Auto-cast slots",
       "autoSlotEmpty": "Empty",
@@ -191,10 +191,9 @@
       "commonLabel": "Common",
       "rareLabel": "Rare",
       "epicLabel": "Epic",
-      "epicHint": "Epic protection is always forced on: the bot can only sell/salvage an epic that's worse than what's equipped and isn't the best piece for an empty slot — even with \"Protect good gear\" off",
+      "epicHint": "Epic protection is always forced on: the bot can only sell an epic that's worse than what's equipped and isn't the best piece for an empty slot — even with \"Protect good gear\" off",
       "actionOff": "Off",
       "actionSell": "Sell",
-      "actionSalvage": "Salvage",
       "keepBetterStat": "Protect good gear (upgrades over equipped + best piece for an empty slot)"
     }
   },
@@ -290,6 +289,10 @@
       "townNpcTapHint": {
         "title": "Tap an NPC to talk",
         "body": "Tap an NPC to walk over and talk — buying/refining happens right there with them now. First tap walks over, tap again once you arrive to open the shop/refine station."
+      },
+      "questBoardHint": {
+        "title": "The village elder has quests!",
+        "body": "Tap the elder in town to open the Quest Board — a story-driven main quest and 3 daily quests to do each day (miss a day, lose nothing)."
       }
     }
   },
@@ -360,7 +363,7 @@
       },
       "gear": {
         "title": "Drops & Gear",
-        "body": "Enemies and bosses have a chance to drop weapons/armor to collect. Each item has a tier and rarity (common/rare/epic). Open your Inventory (🎒) to equip one weapon + one armor — some pieces require a matching class."
+        "body": "Enemies and bosses have a chance to drop weapons/armor to collect. Each item has a tier and rarity (common/rare/epic). Open your Inventory (🎒) to equip one weapon + one armor — some pieces require a matching class. Monsters also drop Enhancement Stones — collect them to power up your gear at Uncle Dueng's refine station in town."
       },
       "worldMaps": {
         "title": "6 maps, 30 stages",
@@ -369,6 +372,10 @@
       "classTier3": {
         "title": "Tier-3 class change (Grand Expansion)",
         "body": "At Lv.40 a second class-change quest unlocks: the gate to the Frozen Tundra frontier (map 4, first zone) opens early — hunt 90 monsters there. Once you're done, the boss-room gate opens — walk in and defeat the young Glacial Sovereign, a weakened taste of the real stage-20 fight. Completing it advances your hero to its final class tier — a huge power spike, a 4th skill, and a 4th auto-cast slot — then come back and smash the stage-15 boss."
+      },
+      "questBoard": {
+        "title": "Main quest, dailies, and the Quest Board",
+        "body": "The village elder (the town's 3rd NPC) opens the Quest Board: a main quest line, one chapter per map (beat that map's boss to finish the chapter — gold/materials/potions, never gear), plus 3 daily quests each day (kill/refine/buy potions/spend gold/beat any boss — miss a day, lose nothing; resets on the server clock). Rewards are claimed at the Quest Board only. A \"!\" badge over the elder's head means something's ready to claim. You can also buy a Warp Scroll from Auntie Pu to teleport to a party member standing in a zone you've already climbed to yourself."
       },
       "boss-map4": {
         "title": "Glacial Sovereign (stage 20) — Charge",
@@ -477,6 +484,10 @@
       "returnScroll": {
         "name": "Return Scroll",
         "desc": "Teleports you back to town"
+      },
+      "warpScroll": {
+        "name": "Friend Warp Scroll",
+        "desc": "Warp to a zone you've already unlocked — handy for catching up with your party"
       },
       "w_sword_t1_rusty": {
         "name": "Rusty Sword"
@@ -702,6 +713,62 @@
       "genericError": "Couldn't create the character — try again"
     }
   },
+  "auth": {
+    "welcome": {
+      "title": "ดึ๋งปุ๊ Idle Game",
+      "subtitle": "A solo MMORPG-lite adventure — hunt monsters, level up, and climb the ranks",
+      "guestButton": "Play now",
+      "guestLoading": "Entering the game...",
+      "guestHint": "Jump straight in, no sign-up needed. Progress is saved to this device — you can register later in Settings to unlock friend features (coming soon)",
+      "guestError": "Couldn't enter the game — try again",
+      "dividerLabel": "or",
+      "loginTab": "Log in",
+      "registerTab": "Register"
+    },
+    "login": {
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "Your password",
+      "submitButton": "Log in",
+      "submitting": "Logging in...",
+      "badCredentials": "Incorrect email or password",
+      "genericError": "Couldn't log in — try again"
+    },
+    "register": {
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "Choose a password",
+      "displayNameLabel": "Display name (optional)",
+      "displayNamePlaceholder": "Your nickname",
+      "displayNameHint": "Shown to friends in the friend system (coming soon)",
+      "submitButton": "Register",
+      "submitting": "Registering...",
+      "emailTaken": "That email is already registered",
+      "alreadyRegistered": "This account is already registered",
+      "genericError": "Couldn't register — try again"
+    },
+    "account": {
+      "groupTitle": "My account",
+      "loading": "Loading account info...",
+      "loadError": "Couldn't load account info",
+      "retryButton": "Retry",
+      "emailLabel": "Email",
+      "displayNameLabel": "Display name",
+      "friendCodeLabel": "Friend code",
+      "copyButton": "Copy",
+      "copied": "Copied!",
+      "logoutButton": "Log out",
+      "logoutWarning": "Logging out returns this device to a fresh guest — if you haven't registered yet, your current progress won't follow you",
+      "logoutCancel": "Cancel",
+      "logoutConfirm": "Confirm log out",
+      "loggingOut": "Logging out...",
+      "guestPitch": "You're playing as a guest — register to unlock friend features (coming soon). Your current progress binds to the new account right away, nothing is lost",
+      "switchAccountHint": "Already have an account? You can log in with it instead — but any unregistered progress on this device won't follow unless you register first",
+      "switchAccountLink": "Log in with another account"
+    }
+  },
   "world": {
     "zoneFarm": "Zone {stage}",
     "zoneTown": "Town",
@@ -727,7 +794,7 @@
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
     "tabBuy": "Buy",
-    "tabSell": "Sell & Salvage",
+    "tabSell": "Sell",
     "tabBuyback": "Buy back",
     "sellEmptyHint": "Bag's empty — nothing to sell.",
     "buybackEmptyHint": "Nothing to buy back — sold items stick around here for 3 days",
@@ -792,13 +859,11 @@
     "sellButton": "Sell",
     "sellAllCommonButton": "Sell all common",
     "confirmSell": "Confirm sell?",
-    "refinePlus": "+{level}",
-    "salvageButton": "Salvage (+{yield})",
-    "salvageJunkCommonButton": "Salvage junk common",
-    "confirmSalvage": "Confirm salvage?"
+    "refinePlus": "+{level}"
   },
   "dropFeed": {
-    "gotItem": "Item obtained: {name}"
+    "gotItem": "Item obtained: {name}",
+    "gotStones": "Enhancement Stone ×{qty}"
   },
   "announcements": {
     "landed": "🔥 {charName} landed a +{level} on {itemName}!",
@@ -814,7 +879,6 @@
   },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
-    "autoSalvageDone": "Bot auto-salvaged {count} item(s) +{materials} material(s)",
     "botTripStart": "🧭 Bot is walking to town...",
     "botSelling": "💰 Bot is selling at the shop...",
     "botRestocked": "🧪 Bot restocked (HP +{hp} / MP +{mp} / scroll +{scroll})",
@@ -825,6 +889,13 @@
     "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
     "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
+    "questRewardClaimed": "🎁 Quest reward: {summary}",
+    "rewardGold": "+{amount} gold",
+    "rewardMaterials": "+{amount} materials",
+    "rewardHpPotion": "+{amount} HP potions",
+    "rewardManaPotion": "+{amount} mana potions",
+    "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
+    "warpToFriendStarted": "🌀 Warping to your friend...",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -894,6 +965,14 @@
         "greeting3": "Materials ready — let's get to it"
       },
       "botFlavor": "Dropping some stuff off~"
+    },
+    "elder": {
+      "greetings": {
+        "greeting1": "Got a few quests for you — check the board",
+        "greeting2": "Three dailies waiting on you today",
+        "greeting3": "Safe travels — the village is counting on you"
+      },
+      "botFlavor": "Go see the elder later~"
     }
   },
   "patchNotes": {
@@ -978,6 +1057,18 @@
         "items": {
           "buyback": "🔁 Sold something by mistake? Buy it back from Pah Pu within 3 days, at the price you got for it — new \"Buy back\" tab in her shop"
         }
+      },
+      "2026-07-08e": {
+        "items": {
+          "account": "👤 Accounts are here! Keep playing as a guest like before, or register later in Settings > My Account — log in and pick up on any device",
+          "friends": "👥 Friends are here! Tap the 👥 button, add by friend code or character name, see who's online / what they're playing / which zone, and send emoji greetings",
+          "party": "🎉 Party phase 1: invite up to 3 friends into a party and see teammate status live — playing together for real is coming next",
+          "quest": "📜 A whole new quest lineup! Story quests by chapter plus 3 dailies a day, claimed at the new village elder NPC in town (miss a day, lose nothing)",
+          "warpFriend": "🌀 The friend-warp scroll is now on sale at Pah Pu's shop — teleport straight to a party member, limited to zones you've personally reached",
+          "materials": "💎 Enhancement stones now drop straight from monsters — no more salvaging. Anything you already stockpiled stays put; the salvage tab is gone and the bot only sells for gold now",
+          "manaCut": "🧪 Sword and bow mana burn cut nearly in half — go longer before running dry",
+          "llama": "🦙 A new friend (with more on the way) has wandered into town — go tap it"
+        }
       }
     }
   },
@@ -1006,6 +1097,143 @@
       "swordsman": "Sword",
       "archer": "Bow",
       "mage": "Magic"
+    }
+  },
+  "friends": {
+    "openButton": "Friends",
+    "title": "Friends",
+    "closeButton": "Close",
+    "loading": "Loading...",
+    "loadError": "Couldn't load your friends",
+    "retryButton": "Retry",
+    "guestPitch": "Friends need a registered account — sign up in Settings > My Account. Your current progress carries over, nothing is lost.",
+    "guestCta": "Go to My Account",
+    "addFriendGroupTitle": "Add a Friend",
+    "byCodeLabel": "Enter a friend code",
+    "byCodePlaceholder": "e.g. ABCD1234",
+    "orDivider": "or",
+    "byNameLabel": "Enter a character name",
+    "byNamePlaceholder": "Friend's character name",
+    "sendButton": "Send Request",
+    "sending": "Sending...",
+    "autoAccepted": "You're friends now! (they'd already sent you a request)",
+    "requestSent": "Friend request sent",
+    "multipleMatchesPrompt": "Several characters share that name — pick the right one",
+    "incomingGroupTitle": "Friend Requests",
+    "unknownPlayer": "Unknown player",
+    "acceptButton": "Accept",
+    "declineButton": "Decline",
+    "friendsGroupTitle": "Friends List",
+    "emptyFriends": "No friends yet — try adding one above",
+    "noCharacter": "No character yet",
+    "unknownZone": "Unknown zone",
+    "neverSeen": "Never been online",
+    "lastSeenJustNow": "Online just now",
+    "lastSeenMinutes": "Offline {m}m ago",
+    "lastSeenHours": "Offline {h}h ago",
+    "lastSeenDays": "Offline {d}d ago",
+    "emojiButton": "Send an emoji greeting",
+    "removeButton": "Remove",
+    "removeConfirmPrompt": "Remove this friend?",
+    "removeConfirmButton": "Confirm remove",
+    "removeCancelButton": "Cancel",
+    "errorAccountRequired": "You need a registered account to use friends",
+    "errorNotFound": "No player found",
+    "errorSelf": "You can't add yourself as a friend",
+    "errorAlreadyFriends": "You're already friends",
+    "errorAlreadyPending": "Request already sent — wait for a response",
+    "errorTooManyPending": "Too many pending requests — wait for one to be answered",
+    "errorBadEmoji": "That emoji isn't allowed",
+    "errorNotFriends": "You need to be friends to send an emoji",
+    "errorRateLimited": "Sending too fast — slow down a bit",
+    "errorGeneric": "That didn't work — try again",
+    "partyGroupTitle": "Party ({count}/{max})",
+    "partyPhaseNote": "Party phase one: see each other status first — playing together for real is coming soon",
+    "partyLeaderBadge": "Party leader",
+    "partyInviteButton": "Invite to party",
+    "partyInviteSent": "Invite sent",
+    "partyInvitesGroupTitle": "Party Invites",
+    "partyLeaveButton": "Leave party",
+    "partyLeaveConfirmPrompt": "Leave this party?",
+    "partyLeaveConfirmButton": "Confirm leave",
+    "partyLeaveCancelButton": "Cancel",
+    "errorPartyFull": "Party is full (max 3)",
+    "errorAlreadyMember": "Already in the same party",
+    "errorAlreadyInvited": "Invite already sent — wait for a response",
+    "errorAlreadyInParty": "Leave your current party first to join a new one",
+    "warpToFriendButton": "Warp to them",
+    "warpToFriendButtonWithCount": "Warp to them ({count})",
+    "warpNoScrollHint": "Buy a Warp Scroll from Auntie Pu",
+    "warpNotClimbedHint": "You haven't climbed to that zone yet"
+  },
+  "questBoard": {
+    "title": "Quest Board",
+    "closeButton": "Close",
+    "dailySectionTitle": "Today's Dailies",
+    "dailyEmpty": "No dailies today — check back tomorrow",
+    "dailyInProgressHint": "Not there yet — keep going",
+    "dailyClaimButton": "Claim reward",
+    "dailyClaiming": "Claiming...",
+    "dailyClaimedLabel": "Claimed ✓",
+    "dailyClaimFailed": "Couldn't claim it — try again",
+    "mainSectionTitle": "Main Quest",
+    "mainAllDone": "You've finished every chapter! Thanks for the journey",
+    "mainChapterLabel": "Chapter {n}: {title}",
+    "mainProgressHere": "Farming this map already: {kills}/{killGoal}",
+    "mainProgressElsewhere": "Head to {map} to keep going on this chapter",
+    "mainInProgressHint": "In progress",
+    "mainClaimButton": "Claim reward",
+    "mainClaimedButton": "Reward claimed ✓",
+    "mainNextChapter": "Next chapter: {title}"
+  },
+  "quest": {
+    "main": {
+      "chapter_map1": {
+        "title": "First Steps in the Human World",
+        "desc": "Explore the Human World, hunt your way through every zone, and beat the map's boss to move on"
+      },
+      "chapter_map2": {
+        "title": "Into the Demon Realm",
+        "desc": "Push through the Demon Realm to its boss room and defeat it to open the way to the Wild Frontier"
+      },
+      "chapter_map3": {
+        "title": "Claim the Wild Frontier",
+        "desc": "Fight through the Wild Frontier to its boss gate and finish the chapter"
+      },
+      "chapter_map4": {
+        "title": "Conquer the Frozen Tundra",
+        "desc": "Push into the Frozen Tundra all the way to its boss — watch out for the charge attack"
+      },
+      "chapter_map5": {
+        "title": "Cross the Desert Ruins",
+        "desc": "Fight through the Desert Ruins to its Pharaoh boss — watch for the summoned reinforcements"
+      },
+      "chapter_map6": {
+        "title": "Storm the Infernal City",
+        "desc": "Close out the journey in the Infernal City and defeat its warlord"
+      }
+    },
+    "daily": {
+      "daily_kill": {
+        "title": "Hunt Monsters",
+        "desc": "Kill {count} monsters anywhere"
+      },
+      "daily_refine": {
+        "title": "Refine Once",
+        "desc": "Refine at Uncle Dueng's station at least {count} time"
+      },
+      "daily_potions": {
+        "title": "Buy Potions",
+        "desc": "Buy {count} potions from Auntie Pu"
+      },
+      "daily_spend": {
+        "title": "Spend Gold",
+        "desc": "Spend {count} gold in town"
+      },
+      "daily_boss": {
+        "title": "Beat a Boss",
+        "desc": "Defeat any boss {count} time(s)"
+      }
     }
   }
 }

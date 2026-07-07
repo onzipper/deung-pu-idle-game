@@ -89,13 +89,15 @@ export interface WorldLocation {
 }
 
 /**
- * The two named town actors (M6 town NPCs, phase 2 — the engine owns their geometry
+ * The named town actors (M6 town NPCs, phase 2 — the engine owns their geometry
  * so the layer rule holds: render/ui DERIVE their rigs from `CONFIG.townNpcs`, engine
  * never imports render). `npc:pahpu` = ป้าปุ๊ the merchant (buy/sell/salvage — the ONLY
  * NPC the idle bot transacts with); `npc:lungdueng` = ลุงดึ๋ง the refine smith
- * (player-only; never botted). Anchor x + interaction radius live in `CONFIG.townNpcs`.
+ * (player-only; never botted); `npc:elder` = ผู้ใหญ่บ้าน the village head (M8 quest
+ * Wave C — opens the Quest Board panel; player-only, never botted, same as the smith).
+ * Anchor x + interaction radius live in `CONFIG.townNpcs`.
  */
-export type TownNpcId = "npc:pahpu" | "npc:lungdueng";
+export type TownNpcId = "npc:pahpu" | "npc:lungdueng" | "npc:elder";
 
 /**
  * NPC-shop consumable ids (M6 "เมืองหลัก + NPC shops", ROADMAP task): bought with
@@ -106,15 +108,22 @@ export type TownNpcId = "npc:pahpu" | "npc:lungdueng";
  * item-instance model (unique id + ownerId + audit, server-authoritative) is for
  * TRADABLE GEAR only; NPC potions are fungible, non-tradable, and cheap, so they
  * live as plain counts in the save (SAVE v9) — no per-item identity to dupe. A
- * future warp/party-summon item (M8) can join this union without a schema change.
+ * The M8 warp scroll ("วาปหาเพื่อน") joins this union (SAVE v17) exactly as designed.
  */
-export type ShopItemId = "hpPotion" | "manaPotion" | "returnScroll";
+export type ShopItemId = "hpPotion" | "manaPotion" | "returnScroll" | "warpScroll";
 
-/** Held stack counts of each NPC consumable (M6, SAVE v9). Persisted. */
+/** Held stack counts of each NPC consumable (M6, SAVE v9; `warpScroll` SAVE v17). Persisted. */
 export interface ConsumableCounts {
   hpPotion: number;
   manaPotion: number;
   returnScroll: number;
+  /**
+   * "วาปหาเพื่อน" warp scroll (M8, SAVE v17): consumed to fast-travel to ANY already-
+   * unlocked, non-boss zone (a party "warp to a friend" fantasy — the social/party
+   * validation is a UI/server concern; the engine only enforces zone legality). Reuses
+   * the fast-travel channel (same cast time + death-cancel). NEVER used by the idle bot.
+   */
+  warpScroll: number;
 }
 
 /**
@@ -155,7 +164,31 @@ export interface BotSettings {
  * rather than the single `Hero.quest` slot v1 uses. The `{id, objectives}` def +
  * `{id, accepted, progress[]}` instance split already anticipates all of that.
  */
-export type QuestObjectiveType = "kill" | "killBoss";
+export type QuestObjectiveType =
+  | "kill"
+  | "killBoss"
+  // ---- M8 DAILY-quest objective types (Wave A) ----
+  // Counted at the SAME deterministic emission choke points as kill/killBoss, but on
+  // the per-hero `dailies` roster (below) instead of an evolution quest. Each is a
+  // "presence" objective (design doc §2 — reward being AROUND, never optimal-play):
+  //  - killAnywhere : any mob kill in any unlocked zone (combat resolve).
+  //  - refineOnce   : a server-confirmed refine attempt (the `refined` FrameInput).
+  //  - buyPotions   : hp/mana potions bought at the NPC (buyShopItem).
+  //  - spendGold    : gold spent at the NPC (shop purchase + refine cost).
+  //  - clearAnyBoss : any boss room cleared (onBossKilled).
+  | "killAnywhere"
+  | "refineOnce"
+  | "buyPotions"
+  | "spendGold"
+  | "clearAnyBoss";
+
+/** The subset of `QuestObjectiveType` a DAILY-quest template may use (M8, Wave A). */
+export type DailyObjectiveType =
+  | "killAnywhere"
+  | "refineOnce"
+  | "buyPotions"
+  | "spendGold"
+  | "clearAnyBoss";
 
 /** One objective line of a quest def: reach `count` of the counted event `type`. */
 export interface QuestObjective {
@@ -189,6 +222,33 @@ export interface HeroQuest {
 }
 
 /**
+ * One DAILY-quest instance on a hero's roster (M8 Wave A). The objective TYPE, TARGET
+ * count and REWARD are NOT stored here — they resolve from the `CONFIG.dailyQuests`
+ * catalog by `id` (so daily content scales with a config+i18n entry, never a logic/
+ * SAVE change; design doc §5). Only the mutable per-hero counters persist:
+ *  - `progress` : deterministic count toward the catalog target (capped at it).
+ *  - `claimed`  : whether the reward has been granted (survives the save).
+ */
+export interface DailyQuest {
+  id: string;
+  progress: number;
+  claimed: boolean;
+}
+
+/**
+ * A hero's DAILY-quest block (M8 Wave A, SAVE v17). The roster of 3 is chosen SERVER-
+ * side (seeded from serverDay + user material — the engine never computes calendar
+ * time, keeping purity) and fed in via the `setDailies` intent; the engine only COUNTS
+ * progress at the emission choke points + validates claims client-side (server re-
+ * validates at claim). `serverDay` is an opaque integer day-epoch: when a `setDailies`
+ * carries a NEW `serverDay` the roster resets (fresh progress/claims). Persisted per hero.
+ */
+export interface HeroDailies {
+  serverDay: number;
+  quests: DailyQuest[];
+}
+
+/**
  * A player-issued MANUAL command (M7.8 "Manual Play"), or null when the hero is on
  * AUTO. RO-style: the player taps the ground (`move` — walk to `x`, ignoring
  * huntable targets) or taps a monster (`attack` — close to range + fight
@@ -200,6 +260,44 @@ export interface HeroQuest {
 export type ManualCommand =
   | { kind: "move"; x: number }
   | { kind: "attack"; targetId: number };
+
+/**
+ * Per-hero SIM-AFFECTING automation config (M8 party P1b). These toggles/thresholds
+ * used to live as GLOBAL `GameState` fields mirrored from the UI store each frame —
+ * fine for solo, but a desync trap in a SHARED cohort sim (client A enabling autoCast
+ * for its own hero while client B doesn't → the field diverges; design doc §2). They
+ * now live PER HERO so each cohort member's automation is part of the replicated
+ * shared state, changed only via the `setHeroConfig` replicated intent.
+ *
+ * SOLO fast path (design §2 "one code path, no divergence"): the outer layers still
+ * feed the store-mirrored GLOBALS (`state.autoCast` …); when the zone holds exactly
+ * ONE hero, `step()` mirrors those globals onto `heroes[0].config` through the SAME
+ * `applyHeroConfig` the intent uses — so a 1-hero run is byte-identical and there is a
+ * single write path. In a cohort (≥2 heroes) the mirror is skipped and config comes
+ * only from replicated `setHeroConfig` intents (canonical, no "local player" leak).
+ *
+ * TRANSIENT — NOT persisted (the globals it mirrors carry their own save fields where
+ * they had them: `autoHunt` SAVE v12, the rest are UI-owned). Rebuilt on load; no
+ * SAVE_VERSION bump. Navigation toggles (`autoReturn`/`autoAdvance`) deliberately stay
+ * GLOBAL — zone travel is a cohort-level action (re-seed at the boundary, design §3),
+ * not a per-hero combat decision, so they are not moved here.
+ */
+export interface HeroConfig {
+  /** Auto-cast this hero's slotted skills (was global `state.autoCast`). */
+  autoCast: boolean;
+  /** Auto-allocate this hero's stat points to its class ratio (was `autoAllocate`). */
+  autoAllocate: boolean;
+  /** Auto-acquire new hunt targets (was `state.autoHunt`; combat-affecting per hero). */
+  autoHunt: boolean;
+  /** Auto-drink an hp potion below `autoHpThreshold` (was `state.autoHpPotion`). */
+  autoHpPotion: boolean;
+  /** Auto-drink a mana potion below `autoManaThreshold` (was `state.autoManaPotion`). */
+  autoManaPotion: boolean;
+  /** Auto hp-potion fires below this fraction of MAX HP (0..1). */
+  autoHpThreshold: number;
+  /** Auto mana-potion fires below this fraction of MAX MANA (0..1). */
+  autoManaThreshold: number;
+}
 
 export interface Hero {
   id: number;
@@ -275,6 +373,23 @@ export interface Hero {
    * object). Set to the accepted instance by the `acceptQuest` intent. Persisted. */
   quest: HeroQuest | null;
   /**
+   * MAIN-quest chapters whose reward has been CLAIMED (M8 Wave A, SAVE v17) — chapter
+   * ids from `CONFIG.mainQuest.chapters`. The main line itself is DERIVED (a chapter is
+   * "complete" purely from progression — `systems/mainQuest`), so this is the ONLY main-
+   * quest state that persists: it guards against double-claiming the reward across the
+   * server's migrate-on-every-save. The v16→v17 migration prefills this with every
+   * ALREADY-COMPLETED chapter (mark-done, NO backpay — mirrors v16 `goldEarned=0`), so an
+   * existing deep character starts claiming from its NEXT chapter only. Persisted per hero.
+   */
+  mainClaimed: string[];
+  /**
+   * DAILY-quest roster + progress (M8 Wave A, SAVE v17) — see `HeroDailies`. Empty
+   * `{serverDay:0, quests:[]}` until the server feeds a roster via `setDailies`; all
+   * new-path mutations are inert until then (so the balance sim, which never sets
+   * dailies, is byte-identical). Persisted per hero.
+   */
+  dailies: HeroDailies;
+  /**
    * Unspent base-stat points (M5 "Base stats"). Each level-up grants
    * `CONFIG.stats.pointsPerLevel`; the player allocates them via the
    * `allocateStat` intent (or the auto-allocate toggle dumps them into the
@@ -304,6 +419,32 @@ export interface Hero {
    * (rebuilt null on load, cleared on any zone arrival).
    */
   command: ManualCommand | null;
+  /**
+   * Per-hero automation config (M8 party P1b) — see `HeroConfig`. In solo it is
+   * mirrored from the store-fed GLOBALS each step (`step()` → `syncPrimaryHeroConfig`);
+   * in a cohort it is set by the replicated `setHeroConfig` intent. TRANSIENT (never
+   * persisted — no SAVE bump; rebuilt from the globals/intents on load).
+   */
+  config: HeroConfig;
+  /**
+   * SHADOW-BODY flag (M8 party P2 — "ร่างเงา", design §9). `true` while this hero's
+   * owning player is DISCONNECTED past grace / was offline when the cohort formed: the
+   * hero keeps fighting via the SAME autonomous systems (auto-hunt / auto-cast / auto-
+   * potion) on its FROZEN `config`, but MANUAL intents on its lane are ignored
+   * deterministically (`step()` neutralizes a shadowed lane — defense against a stale/
+   * haunted client injecting inputs). Flipped ONLY by the replicated `setShadowed`
+   * intent, which the ROOM (relay) synthesizes on the slot's lane when the owner drops
+   * (→ true) and again on reconnect (→ false); every client applies it identically, so
+   * the flag is part of the shared sim (it IS in `stateHash`). SOLO-GUARDED: a 1-hero
+   * zone can never be shadowed (the intent no-ops at `heroes.length === 1`).
+   *
+   * TRANSIENT — NOT persisted (no SAVE bump; rebuilt `false` on load). Income needs NO
+   * special handling: each player persists their OWN hero from their OWN client, so an
+   * offline owner's earnings remain their normal offline-idle pool on return; the shadow
+   * exists socially/visually in the cohort, its on-field gold/xp is the peers' co-op
+   * credit, never cross-credited back to the absent owner.
+   */
+  shadowed: boolean;
   /**
    * This step's COMBAT AIM — the world-x of whatever the hero is engaging this
    * step (the basic-attack / hunt target, a manual attack-command target, the

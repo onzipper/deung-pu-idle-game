@@ -26,6 +26,10 @@
  *   ├── sparks (ลุงดึ๋ง ONLY: a tiny fixed pool of pooled Graphics dots, one
  *   │   flash per hammer strike — real-dt, capped, never allocated per-strike)
  *   ├── nameLabel (Text, floating name plate above the head)
+ *   ├── indicator (M8 quest Wave C, ผู้ใหญ่บ้าน ONLY: a small bobbing "!" badge
+ *   │   above the name plate — toggled by `NpcUpdateCtx.showIndicator`, driven
+ *   │   by the throttled snapshot's "any daily claimable / main chapter
+ *   │   unclaimed" read, never built for the other two NPCs)
  *   └── affordanceRing (Graphics: soft pulsing "แตะได้" ring at the feet —
  *       NOT a quest marker arrow, just a gentle glint)
  *
@@ -94,9 +98,12 @@ export interface NpcView extends Container {
   upperBody: Container;
   nameLabel: Text;
   affordanceRing: Graphics;
-  /** ลุงดึ๋ง only — `null` for ป้าปุ๊. */
+  /** ลุงดึ๋ง only — `null` for the other two. */
   hammerArm: Graphics | null;
   sparks: SparkSlot[];
+  /** ผู้ใหญ่บ้าน only (M8 quest Wave C) — `null` for the other two. Visibility
+   * toggled per-frame by `NpcUpdateCtx.showIndicator`. */
+  indicator: { root: Container; bg: Graphics; text: Text } | null;
   /** World-space point (view-local, since `view.position.x` is the anchor's
    * fixed world-x and `y` is always 0) a UI-triggered speech bubble should
    * anchor above — see `GameRenderer.showNpcSpeech()`. */
@@ -111,6 +118,10 @@ export interface NpcUpdateCtx {
   /** Only true while standing in the town zone — gates both visibility and
    * the (otherwise free-running) idle animation work. */
   visible: boolean;
+  /** ผู้ใหญ่บ้าน only (M8 quest Wave C): show the bobbing "!" badge — any daily
+   * claimable or the current main-chapter reward unclaimed (engine-derived by
+   * the caller). Ignored for the other two NPCs (no `indicator` to toggle). */
+  showIndicator?: boolean;
 }
 
 function buildLowerBody(color: number, shade: number): Graphics {
@@ -221,20 +232,98 @@ function buildAnvilProps(): Graphics {
   return g;
 }
 
+/** ผู้ใหญ่บ้าน's props (M8 quest Wave C): a walking staff resting at his OFF
+ * side (mirrors the smith's off-hand anvil offset) + a quest-board signpost
+ * at his other side — static, sibling of `bodyRoot` so neither breathes/bobs
+ * with the figure. Built in ABSOLUTE (GROUND_Y-relative) coords. */
+function buildElderProps(): Graphics {
+  const g = new Graphics();
+  // Staff (left side) — a plain post + a small knob top, static.
+  const staffX = -20;
+  const staffTop = SHOULDER_Y - 4;
+  g.rect(staffX, staffTop, 3, FEET_Y - staffTop).fill({ color: PALETTE.npcElderStaff, alpha: 0.95 });
+  g.circle(staffX + 1.5, staffTop, safeRadius(3)).fill({ color: PALETTE.npcElderHat, alpha: 0.9 });
+  // Quest-board signpost (right side) — post + corkboard face with two
+  // "posted notice" strips, echoing the affordance-ring accent.
+  const postTop = GROUND_Y - 58;
+  const boardTop = postTop - 4;
+  g.rect(16, postTop, 4, FEET_Y - postTop).fill({ color: PALETTE.npcBoardWood, alpha: 0.92 });
+  g.roundRect(2, boardTop - 26, 34, 26, 2).fill({ color: PALETTE.npcBoardFace, alpha: 0.95 });
+  g.roundRect(2, boardTop - 26, 34, 26, 2).stroke({
+    width: 1.2,
+    color: PALETTE.npcBoardWood,
+    alpha: 0.8,
+  });
+  g.rect(6, boardTop - 21, 12, 3).fill({ color: PALETTE.npcBoardWood, alpha: 0.5 });
+  g.rect(6, boardTop - 15, 18, 3).fill({ color: PALETTE.npcBoardWood, alpha: 0.4 });
+  return g;
+}
+
+/** ผู้ใหญ่บ้าน's head extras (M8 quest Wave C) — a conical hat + a small white
+ * beard, drawn ABSOLUTE (GROUND_Y-relative) and added as a sibling of `torso`
+ * inside `upperBody` (so they breathe/sway together, same as the torso). */
+function buildElderHeadExtras(): Graphics {
+  const g = new Graphics();
+  const hatBaseY = HEAD_Y - HEAD_R + 1;
+  const hatTipY = HEAD_Y - HEAD_R - 12;
+  g.poly([-7, hatBaseY, 7, hatBaseY, 0, hatTipY], true).fill({
+    color: PALETTE.npcElderHat,
+    alpha: 0.95,
+  });
+  g.poly([-7, hatBaseY, 7, hatBaseY, 0, hatTipY], true).stroke({
+    width: 1,
+    color: PALETTE.outline,
+    alpha: 0.6,
+  });
+  g.roundRect(-8, hatBaseY - 2, 16, 3, 1.5).fill({ color: PALETTE.npcElderHat, alpha: 0.95 });
+  // Small white beard triangle under the chin.
+  g.poly([-4, HEAD_Y + HEAD_R - 2, 4, HEAD_Y + HEAD_R - 2, 0, HEAD_Y + HEAD_R + 8], true).fill({
+    color: PALETTE.npcElderBeard,
+    alpha: 0.92,
+  });
+  return g;
+}
+
+/** ผู้ใหญ่บ้าน's "!" indicator badge (M8 quest Wave C) — a small pooled circle +
+ * text, built ONCE and toggled visible/positioned per-frame (never rebuilt). */
+function buildIndicatorBadge(): { root: Container; bg: Graphics; text: Text } {
+  const root = new Container();
+  const bg = new Graphics();
+  bg.circle(0, 0, safeRadius(7)).fill({ color: PALETTE.npcAffordance, alpha: 0.95 });
+  bg.circle(0, 0, safeRadius(7)).stroke({ width: 1, color: PALETTE.outline, alpha: 0.7 });
+  const text = new Text({
+    text: "!",
+    style: { fontSize: 11, fontWeight: "800", fill: 0x2a2410, fontFamily: "sans-serif" },
+  });
+  text.anchor.set(0.5);
+  root.addChild(bg, text);
+  root.visible = false;
+  return { root, bg, text };
+}
+
 /** Build ONCE, first sight (mirrors `createHeroView`/`createEnemyView`). */
 export function createNpcView(npcId: TownNpcId): NpcView {
   const view = new Container() as NpcView;
   view.npcId = npcId;
   const isSmith = npcId === "npc:lungdueng";
+  const isElder = npcId === "npc:elder";
 
   const anchor = townNpcAnchor(npcId);
   view.position.set(anchor.x, 0);
 
-  const bodyColor = isSmith ? PALETTE.npcSmithTunic : PALETTE.npcApron;
-  const shadeColor = isSmith ? PALETTE.npcSmithTunicShade : PALETTE.npcApronShade;
+  const bodyColor = isSmith
+    ? PALETTE.npcSmithTunic
+    : isElder
+      ? PALETTE.npcElderRobe
+      : PALETTE.npcApron;
+  const shadeColor = isSmith
+    ? PALETTE.npcSmithTunicShade
+    : isElder
+      ? PALETTE.npcElderRobeShade
+      : PALETTE.npcApronShade;
 
   // Static set dressing goes in FIRST (behind the figure).
-  const props = isSmith ? buildAnvilProps() : buildStallProps();
+  const props = isSmith ? buildAnvilProps() : isElder ? buildElderProps() : buildStallProps();
   view.addChild(props);
 
   const bodyRoot = new Container();
@@ -248,6 +337,9 @@ export function createNpcView(npcId: TownNpcId): NpcView {
   upperBody.position.set(0, HIP_Y);
   const torso = buildTorso(bodyColor, shadeColor);
   upperBody.addChild(torso);
+  // ผู้ใหญ่บ้าน's hat + beard sit ON TOP of the torso (drawn after it) so they
+  // breathe/sway together via the same `upperBody` transform.
+  if (isElder) upperBody.addChild(buildElderHeadExtras());
 
   let hammerArm: Graphics | null = null;
   if (isSmith) {
@@ -308,12 +400,22 @@ export function createNpcView(npcId: TownNpcId): NpcView {
   nameLabel.position.set(0, HEAD_Y - HEAD_R - 12);
   view.addChild(nameLabel);
 
+  // ผู้ใหญ่บ้าน only (M8 quest Wave C): the bobbing "!" claimable-notice badge,
+  // built once and hidden by default (toggled in `updateNpcView`).
+  let indicator: { root: Container; bg: Graphics; text: Text } | null = null;
+  if (isElder) {
+    indicator = buildIndicatorBadge();
+    indicator.root.position.set(0, HEAD_Y - HEAD_R - 28);
+    view.addChild(indicator.root);
+  }
+
   view.bodyRoot = bodyRoot;
   view.upperBody = upperBody;
   view.nameLabel = nameLabel;
   view.affordanceRing = affordanceRing;
   view.hammerArm = hammerArm;
   view.sparks = sparks;
+  view.indicator = indicator;
   view.headAnchor = { x: anchor.x, y: HEAD_Y };
   view.anim = {
     breathPhase: Math.random() * Math.PI * 2,
@@ -347,6 +449,18 @@ export function updateNpcView(view: NpcView, ctx: NpcUpdateCtx): void {
   view.affordanceRing.alpha = AFFORDANCE_MIN_ALPHA + (AFFORDANCE_MAX_ALPHA - AFFORDANCE_MIN_ALPHA) * pulse;
   const ringScale = 0.92 + 0.12 * pulse;
   view.affordanceRing.scale.set(ringScale, ringScale);
+
+  // ผู้ใหญ่บ้าน only (M8 quest Wave C): show/bob the "!" badge. Reuses
+  // `breathPhase` (already ticking every frame regardless of NPC) at a
+  // different multiplier/amplitude rather than adding a dedicated phase.
+  if (view.indicator) {
+    const show = ctx.showIndicator === true;
+    view.indicator.root.visible = show;
+    if (show) {
+      const bob = Math.sin(anim.breathPhase * 1.6) * 2;
+      view.indicator.root.position.set(0, HEAD_Y - HEAD_R - 28 + bob);
+    }
+  }
 
   if (view.hammerArm) {
     anim.hammerT += dt;

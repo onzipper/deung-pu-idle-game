@@ -54,6 +54,7 @@ import {
   canUseConsumable,
   combatPower,
   createAccumulator,
+  dailyDef,
   deepestUnlockedFarm,
   drainAccumulator,
   evolutionQuestFor,
@@ -61,6 +62,8 @@ import {
   isEvolutionQuestOffered,
   isTier3BossObjectiveActive,
   learnedSkills,
+  mainChapterDefs,
+  mainQuestChapters,
   migrate,
   npcInRange,
   repairHeroClass,
@@ -89,22 +92,32 @@ import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
-import { selectAutoSellSalvageIds } from "@/ui/gear/autoSell";
-import { takeBatch, type ClaimBufferEntry } from "@/ui/gear/claimBuffer";
+import { selectAutoSellIds } from "@/ui/gear/autoSell";
+import {
+  takeBatch,
+  type ClaimBufferEntry,
+  type StoneClaimBufferEntry,
+} from "@/ui/gear/claimBuffer";
 import { postClaimBatch, postEquip } from "@/ui/gear/api";
 import { applyEquipChange } from "@/ui/gear/inventoryOps";
-import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
 import { toInventoryItem } from "@/ui/gear/types";
-import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
+import type {
+  ClaimItemResultWire,
+  ItemInstanceWire,
+  StoneClaimResultWire,
+} from "@/ui/gear/types";
 import {
   useGameStore,
   readStoredUiConfig,
   selectUiConfig,
   writeUiConfig,
+  type DailyBoardSummary,
+  type DailyQuestSummary,
   type EngineSnapshot,
   type HeroQuestSummary,
   type HeroSummary,
+  type MainChapterSummary,
   type ShopSummary,
   type SkillSummary,
   type TownPanelId,
@@ -198,11 +211,24 @@ async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void
   }
 }
 
-/** Town NPCs phase 3 (final): maps the engine's `TownNpcId` union onto the
- * store's shorter `TownPanelId` (which panel a given NPC opens — pahpu ->
- * ShopPanel, lungdueng -> RefinePanel). */
+/** Town NPCs phase 3 (final; extended M8 quest Wave C): maps the engine's
+ * `TownNpcId` union onto the store's shorter `TownPanelId` (which panel a
+ * given NPC opens — pahpu -> ShopPanel, lungdueng -> RefinePanel, elder ->
+ * QuestBoardPanel). */
 function townPanelOf(id: TownNpcId): TownPanelId {
-  return id === "npc:pahpu" ? "pahpu" : "lungdueng";
+  if (id === "npc:pahpu") return "pahpu";
+  if (id === "npc:lungdueng") return "lungdueng";
+  return "board";
+}
+
+/** Town NPCs phase 3 (final; extended M8 quest Wave C): maps the engine's
+ * `TownNpcId` union onto the `townNpc.<key>` i18n namespace key (greetings +
+ * bot-flavor line) — shared by `talkToNpc`'s speech-bubble lookup and the
+ * `npcTrade` bot-flavor handler below. */
+function npcI18nKey(id: TownNpcId): "pahpu" | "lungdueng" | "elder" {
+  if (id === "npc:pahpu") return "pahpu";
+  if (id === "npc:lungdueng") return "lungdueng";
+  return "elder";
 }
 
 /** Precompute the learned-skill kit's display state (M5 skill framework v2). */
@@ -336,6 +362,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       hpPotion: shopPriceAt("hpPotion", shopStage),
       manaPotion: shopPriceAt("manaPotion", shopStage),
       returnScroll: shopPriceAt("returnScroll", shopStage),
+      warpScroll: shopPriceAt("warpScroll", shopStage),
     },
     stackCap: CONFIG.shop.stackCap,
     ready: {
@@ -381,6 +408,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     npcInRange: {
       "npc:pahpu": npcInRange(state, "npc:pahpu"),
       "npc:lungdueng": npcInRange(state, "npc:lungdueng"),
+      "npc:elder": npcInRange(state, "npc:elder"),
     },
     // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — pure engine
     // reads, same one-way "engine computes, store just carries it" pattern as
@@ -388,20 +416,48 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // gated branch (`ui/questGuide.ts`).
     tier3FrontierLocked: tier3FrontierLocked(state),
     deepestUnlockedFarm: deepestUnlockedFarm(state),
+    // M8 quest Wave C — main-chapter tracker, precomputed here (the one place
+    // engine reads run — same rule `xpProgress` follows): each chapter's
+    // derived state zipped with its STATIC reward (a pure config lookup, safe
+    // to call every sync since `mainChapterDefs()` is a plain CONFIG read).
+    mainChapters: mainQuestChapters(state).map((c): MainChapterSummary => {
+      const def = mainChapterDefs().find((d) => d.id === c.id);
+      return { ...c, reward: def?.reward ?? {} };
+    }),
+    // M8 quest Wave C — today's daily roster, precomputed display-ready: each
+    // slot's `type`/`target`/`reward` resolved once from the `dailyDef`
+    // catalog (same "engine reads only happen in buildSnapshot" rule).
+    dailies: ((): DailyBoardSummary => {
+      const hd = state.heroes[0]?.dailies;
+      if (!hd) return { serverDay: 0, quests: [] };
+      return {
+        serverDay: hd.serverDay,
+        quests: hd.quests.map((dq): DailyQuestSummary => {
+          const def = dailyDef(dq.id);
+          return {
+            id: dq.id,
+            type: def?.type ?? "killAnywhere",
+            progress: dq.progress,
+            target: def?.target ?? 0,
+            claimed: dq.claimed,
+            complete: def !== null && dq.progress >= def.target,
+            reward: def?.reward ?? {},
+          };
+        }),
+      };
+    })(),
   };
 }
 
 /**
- * M7.5→M7.7 auto-dispose executor — runs off a `townArrived` event (reason
- * "sell" / "restockSell"): computes the sell AND salvage lists from the
- * CURRENT inventory slice + persisted rules in ONE sweep
- * (`selectAutoSellSalvageIds`), then reuses the same POST-first flows the
- * manual `InventoryPanel` sell/salvage buttons use (`executeSell` /
- * `executeSalvage`) — sell first, then salvage (order doesn't matter
- * functionally; sequential keeps the shared 100-slot inventory bookkeeping
- * simple). Fire-and-forget: a dropped/failed run simply leaves the inventory
- * full, so the NEXT trip (or a manual dispose) retries it — never a stuck
- * state.
+ * M7.5→M7.9 auto-dispose executor — runs off a `townArrived` event (reason
+ * "sell" / "restockSell"): computes the sell list from the CURRENT inventory
+ * slice + persisted rules in ONE sweep (`selectAutoSellIds`), then reuses the
+ * same POST-first flow the manual `InventoryPanel` sell button uses
+ * (`executeSell`). Fire-and-forget: a dropped/failed run simply leaves the
+ * inventory full, so the NEXT trip (or a manual dispose) retries it — never a
+ * stuck state. Owner request 2026-07-08 (หินเสริมพลัง final wave): salvage is
+ * RETIRED (refine stones now drop directly from mobs instead) — sell-only.
  */
 /**
  * M7.5 auto-equip executor (owner request 2026-07-06) — keeps the hero in its
@@ -447,7 +503,9 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
   // while the master is off (see `toggleBotMaster`'s doc), so this event
   // should never fire in that state, but never auto-dispose regardless.
   if (!store.autoHunt) return;
-  const { sellIds, salvageIds } = selectAutoSellSalvageIds(
+  // Owner request 2026-07-08 (หินเสริมพลัง final wave): salvage is RETIRED —
+  // the bot is sell-only now (refine stones drop directly from mobs instead).
+  const sellIds = selectAutoSellIds(
     store.inventory,
     ITEM_TEMPLATES,
     {
@@ -458,12 +516,12 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
     },
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
   );
-  if (sellIds.length === 0 && salvageIds.length === 0) {
+  if (sellIds.length === 0) {
     // Rules matched nothing. On a GENUINE full-bag sell trip the engine latches its
     // sell-trip watermark and stops tripping, so tell the player WHY the bot gave up
-    // (fix = loosen the rules in Settings or sell/salvage manually). On an
-    // OPPORTUNISTIC sweep (a potions trip that also tidies the bag) a nothing-to-do
-    // result is normal, not a stuck bot — stay silent (`suppressNothingNotice`).
+    // (fix = loosen the rules in Settings or sell manually). On an OPPORTUNISTIC
+    // sweep (a potions trip that also tidies the bag) a nothing-to-do result is
+    // normal, not a stuck bot — stay silent (`suppressNothingNotice`).
     if (!suppressNothingNotice) store.pushNotice("autoSellNothing");
     return;
   }
@@ -479,17 +537,6 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
     // makes the "warps but sells nothing" report undiagnosable in the field.
     console.warn("[GameClient] auto-sell POST failed; bag stays full, will retry", {
       requested: sellIds.length,
-    });
-  }
-  const salvageResult = await executeSalvage(salvageIds);
-  if (salvageResult.ok && salvageResult.salvagedCount > 0) {
-    useGameStore.getState().pushNotice("autoSalvageDone", {
-      count: salvageResult.salvagedCount,
-      materials: salvageResult.totalMaterials.toLocaleString(),
-    });
-  } else if (!salvageResult.ok) {
-    console.warn("[GameClient] auto-salvage POST failed; bag stays full, will retry", {
-      requested: salvageIds.length,
     });
   }
 }
@@ -511,6 +558,12 @@ export function GameClient() {
   const tTownNpc = useTranslations("townNpc");
   const tTownNpcRef = useRef(tTownNpc);
   tTownNpcRef.current = tTownNpc;
+
+  // M8 quest Wave C: the reward-toast/daily-complete notice copy — same
+  // ref-captured pattern as `tTownNpcRef` (mid-session locale switch safety).
+  const tNotices = useTranslations("notices");
+  const tNoticesRef = useRef(tNotices);
+  tNoticesRef.current = tNotices;
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -596,6 +649,7 @@ export function GameClient() {
     const npcGreetingIndex: Record<TownNpcId, number> = {
       "npc:pahpu": 0,
       "npc:lungdueng": 0,
+      "npc:elder": 0,
     };
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
     // Mid-session "new patch deployed" banner: unsubscribe handle for the
@@ -608,9 +662,14 @@ export function GameClient() {
 
     // ---- M7 Gear & Drops: drop-claim buffer (closure state, NOT React/Zustand
     // — same "never per-frame state in React" rule as engine state itself).
-    // `itemDrop` events are collected here every frame and flushed as a batch
-    // on the autosave cadence + tab-hide (see `flushClaims`/`onVisibility`). ----
+    // `itemDrop`/`stoneDrop` events are collected here every frame and flushed
+    // as one batch on the autosave cadence + tab-hide (see
+    // `flushClaims`/`onVisibility`). ----
     let pendingClaims: ClaimBufferEntry[] = [];
+    // หินเสริมพลัง (enhancement-stone) claim buffer — the `stones[]` sibling of
+    // `pendingClaims` above, sent in the SAME `/api/items/claim` batch (see
+    // `flushClaims`/`flushSaveBeacon` below).
+    let pendingStoneClaims: StoneClaimBufferEntry[] = [];
     let claimInFlight = false;
 
     /**
@@ -671,9 +730,9 @@ export function GameClient() {
      * Event-flood suppression: like the boot replay, this calls `step()`
      * directly and never touches `frameEvents`/`renderer.draw`/
      * `audio.consumeEvents`/drop-claim buffering — the replayed steps' events
-     * are simply discarded (same as boot: a `itemDrop` rolled during a replay
-     * is not claimed, an accepted parity with the existing offline-idle
-     * behavior). The very next live `frame()` tick draws + UI-syncs the
+     * are simply discarded (same as boot: an `itemDrop`/`stoneDrop` rolled
+     * during a replay is not claimed, an accepted parity with the existing
+     * offline-idle behavior). The very next live `frame()` tick draws + UI-syncs the
      * POST-replay state normally, so the HUD just "jumps" to the caught-up
      * numbers instead of visibly fast-forwarding.
      */
@@ -793,6 +852,12 @@ export function GameClient() {
         moveTo: pending.moveTo ?? undefined,
         attackTarget: pending.attackTarget ?? undefined,
         cancelCommand: pending.cancelCommand || undefined,
+        // M8 quest Wave C: daily-roster install/reconcile, daily/main claim
+        // intents, and the "วาปหาเพื่อน" warp scroll — see `PendingInput`'s docs.
+        setDailies: pending.setDailies ?? undefined,
+        claimDaily: pending.claimDaily ?? undefined,
+        claimMainReward: pending.claimMainReward ?? undefined,
+        useWarpScroll: pending.useWarpScroll ?? undefined,
       };
 
       // Shape ONLY the accumulator's input (hit-stop/slow-mo, M4 juice) off of
@@ -865,6 +930,13 @@ export function GameClient() {
             templateId: ev.templateId,
             stage: state.stage,
           });
+        } else if (ev.type === "stoneDrop") {
+          // หินเสริมพลัง drop juice: buffer the claim for the same batched
+          // flush AND toast immediately (unlike gear, a stone toast doesn't
+          // wait on the server mint — see `DropFeed.tsx`'s module doc). The
+          // field fx/SFX pop is handled one-way by the renderer/audio below.
+          pendingStoneClaims.push({ rollId: ev.rollId, qty: ev.qty });
+          useGameStore.getState().pushStoneFeed(ev.qty);
         } else if (ev.type === "townArrived") {
           // M7.5 sell-trip bot: the engine restocked already (engine-side);
           // the CLIENT owns item instances, so a "sell"/"restockSell" arrival
@@ -902,8 +974,26 @@ export function GameClient() {
           // Town NPCs phase 3 (final): flavor-only — the bot's transaction
           // itself is already engine-side (systems/bots.ts); this NEVER opens
           // `activeTownPanel` (the panel is a PLAYER dialog, not a ledger view).
-          const key = ev.npcId === "npc:pahpu" ? "pahpu" : "lungdueng";
-          renderer.showNpcSpeech(ev.npcId, tTownNpcRef.current(`${key}.botFlavor`));
+          renderer.showNpcSpeech(ev.npcId, tTownNpcRef.current(`${npcI18nKey(ev.npcId)}.botFlavor`));
+        } else if (ev.type === "questReward") {
+          // M8 quest Wave C: celebratory toast (reuses NoticeToast's existing
+          // look) — compose the reward summary from small localized unit
+          // labels rather than one giant ICU conditional, same inline-
+          // composition style `botRestocked` already uses.
+          const parts: string[] = [];
+          if (ev.gold > 0) parts.push(tNoticesRef.current("rewardGold", { amount: ev.gold }));
+          if (ev.materials > 0) {
+            parts.push(tNoticesRef.current("rewardMaterials", { amount: ev.materials }));
+          }
+          if (ev.hpPotion > 0) parts.push(tNoticesRef.current("rewardHpPotion", { amount: ev.hpPotion }));
+          if (ev.manaPotion > 0) {
+            parts.push(tNoticesRef.current("rewardManaPotion", { amount: ev.manaPotion }));
+          }
+          useGameStore.getState().pushNotice("questRewardClaimed", { summary: parts.join(" ") });
+        } else if (ev.type === "dailyProgress" && ev.complete) {
+          // M8 quest Wave C: throttled by the engine already (fires once, on
+          // the complete transition) — points the player at ผู้ใหญ่บ้าน to claim.
+          useGameStore.getState().pushNotice("dailyQuestComplete");
         }
       }
 
@@ -951,6 +1041,11 @@ export function GameClient() {
                 /** Mid-session "new patch deployed" banner — see the GET boot
                  * handler above / `@/server/buildId` / `@/ui/updateBanner`. */
                 buildId?: string | null;
+                /** M8 quest Wave B/C: today's daily roster (serverDay + up to
+                 * `rosterSize` quest ids), recomputed every request from the
+                 * SERVER clock — zero extra requests (see the GET boot
+                 * handler above / `@/server/dailyQuests`). */
+                dailies?: { serverDay: number; questIds: string[] };
               }>)
             : null,
         )
@@ -962,6 +1057,13 @@ export function GameClient() {
           }
           if (json?.buildId) {
             useGameStore.getState().setServerBuildId(json.buildId);
+          }
+          // M8 quest Wave C: refresh the engine's daily roster on every autosave
+          // tick too (idempotent same-day reconcile) — picks up a server-day
+          // rollover mid-session within one cadence, same "zero extra requests"
+          // piggyback as announcements/buildId above.
+          if (json?.dailies) {
+            useGameStore.getState().queueSetDailies(json.dailies.serverDay, json.dailies.questIds);
           }
         })
         .catch(() => {
@@ -1003,15 +1105,50 @@ export function GameClient() {
       }
     }
 
+    /** หินเสริมพลัง claim results (`stoneResults`) — mirrors `applyClaimResults`'
+     * shape, but the only local-state mutation is crediting the AUTHORITATIVE
+     * `totalMaterials` the server already summed (same `creditMaterials`
+     * intent path the old salvage response used — see `postClaimBatch`'s doc). */
+    function applyStoneClaimResults(
+      results: StoneClaimResultWire[],
+      totalMaterials: number,
+    ): void {
+      const rejectedCounts: Partial<Record<string, number>> = {};
+      for (const r of results) {
+        if (r.status === "rejected") {
+          rejectedCounts[r.reason] = (rejectedCounts[r.reason] ?? 0) + 1;
+        }
+      }
+      if (totalMaterials > 0) useGameStore.getState().creditMaterials(totalMaterials);
+      if (Object.keys(rejectedCounts).length) {
+        console.warn("[GameClient] stone-claim rejections:", rejectedCounts);
+      }
+    }
+
     function flushClaims(): void {
-      if (claimInFlight || pendingClaims.length === 0) return;
+      if (claimInFlight || (pendingClaims.length === 0 && pendingStoneClaims.length === 0)) {
+        return;
+      }
       const { batch, remaining } = takeBatch(pendingClaims, MAX_CLAIM_BATCH);
+      const { batch: stoneBatch, remaining: stoneRemaining } = takeBatch(
+        pendingStoneClaims,
+        MAX_CLAIM_BATCH,
+      );
       pendingClaims = remaining;
+      pendingStoneClaims = stoneRemaining;
       claimInFlight = true;
-      void postClaimBatch(batch)
+      void postClaimBatch(batch, stoneBatch)
         .then((res) => {
-          if (res) applyClaimResults(res.results);
-          else pendingClaims = [...batch, ...pendingClaims]; // network failure — retry next cadence
+          if (res) {
+            applyClaimResults(res.results);
+            if (res.stoneResults) {
+              applyStoneClaimResults(res.stoneResults, res.totalMaterials ?? 0);
+            }
+          } else {
+            // network failure — retry next cadence
+            pendingClaims = [...batch, ...pendingClaims];
+            pendingStoneClaims = [...stoneBatch, ...pendingStoneClaims];
+          }
         })
         .finally(() => {
           claimInFlight = false;
@@ -1030,16 +1167,24 @@ export function GameClient() {
       navigator.sendBeacon("/api/save", blob);
 
       // Best-effort drop-claim flush via the same fire-and-forget beacon
-      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
-      // accepted v1 loss (no response to merge into the inventory slice even
-      // if it lands) — documented tradeoff, see this function's doc comment.
-      if (pendingClaims.length > 0) {
+      // mechanism (gear items AND หินเสริมพลัง stones in the SAME batch, same
+      // contract as `flushClaims`). UNLIKE the save beacon, a lost claim
+      // beacon here is an accepted v1 loss (no response to merge into the
+      // inventory/materials slices even if it lands) — documented tradeoff,
+      // see this function's doc comment.
+      if (pendingClaims.length > 0 || pendingStoneClaims.length > 0) {
         const claimBlob = new Blob(
-          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+          [
+            JSON.stringify({
+              items: pendingClaims.slice(0, MAX_CLAIM_BATCH),
+              stones: pendingStoneClaims.slice(0, MAX_CLAIM_BATCH),
+            }),
+          ],
           { type: "application/json" },
         );
         navigator.sendBeacon("/api/items/claim", claimBlob);
         pendingClaims = [];
+        pendingStoneClaims = [];
       }
     }
 
@@ -1082,7 +1227,7 @@ export function GameClient() {
     // (`npcGreetingIndex` above) so repeat taps don't feel canned.
     function talkToNpc(id: TownNpcId): void {
       useGameStore.getState().openTownPanel(townPanelOf(id));
-      const key = id === "npc:pahpu" ? "pahpu" : "lungdueng";
+      const key = npcI18nKey(id);
       const idx = npcGreetingIndex[id];
       npcGreetingIndex[id] = (idx + 1) % NPC_GREETING_COUNT;
       renderer.showNpcSpeech(id, tTownNpcRef.current(`${key}.greetings.greeting${idx + 1}`));
@@ -1201,6 +1346,10 @@ export function GameClient() {
              * compared against this client's own inlined `CLIENT_BUILD_ID`
              * (`@/ui/updateBanner`). */
             buildId?: string | null;
+            /** M8 quest Wave B/C: today's daily roster (serverDay + up to
+             * `rosterSize` quest ids), present even pre-character (the roster
+             * is USER-scoped) — see `@/server/dailyQuests`. */
+            dailies?: { serverDay: number; questIds: string[] };
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -1222,6 +1371,12 @@ export function GameClient() {
           }
           if (json.buildId) {
             useGameStore.getState().setServerBuildId(json.buildId);
+          }
+          // M8 quest Wave C: queue the boot roster — the engine applies it on
+          // the very first real frame() tick (harmless even pre-character;
+          // `setHeroDailies` no-ops on an absent hero).
+          if (json.dailies) {
+            useGameStore.getState().queueSetDailies(json.dailies.serverDay, json.dailies.questIds);
           }
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;

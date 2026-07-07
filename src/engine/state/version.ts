@@ -22,11 +22,13 @@ import {
   zoneAt,
 } from "@/engine/systems/world";
 import { normalizeBotSettings } from "@/engine/systems/bots";
+import { completedChapterIds } from "@/engine/systems/mainQuest";
 import type { SaveData, CharacterSave } from "@/engine/state";
 import type {
   HeroClass,
   HeroStats,
   HeroQuest,
+  HeroDailies,
   SkillId,
   ShopItemId,
   ConsumableCounts,
@@ -140,7 +142,25 @@ import type {
 // tier-3 quest whose progress length ≠ the new def's objective count is RESET to un-accepted
 // (null → re-offered at L40), so an old 2-entry progress can never crash or mis-map onto the
 // new single objective. No migrate() branch + no SAVE_VERSION bump required.
-export const SAVE_VERSION = 16;
+// v16 -> v17 (M8 Wave A "Quest system" + "วาปหาเพื่อน" warp scroll — bundled so ONE bump
+// covers both). Three save-shape changes:
+//  (a) `consumables` gains `warpScroll` — a new NPC-shop consumable stack (the party warp
+//      scroll). A pre-v17 save backfills it to 0 (no scrolls held); a v17 save's count is
+//      preserved (clamped to [0, stackCap] — idempotent).
+//  (b) each hero gains `mainClaimed: string[]` — the MAIN-quest chapters whose reward has
+//      been claimed. The main line itself is DERIVED from progression (systems/mainQuest),
+//      so only the claim log persists. ⚠️ A pre-v17 deep character has completed many
+//      chapters already; backfilling `[]` would leave every finished chapter "claimable",
+//      wrongly owing a pile of retroactive rewards. FIX (mirrors v16 goldEarned=0 "no
+//      backpay"): prefill `mainClaimed` with every chapter the CURRENT progression already
+//      implies complete (`completedChapterIds(unlockedZones, bossBest)`), granting NO
+//      reward — the player starts claiming from their NEXT chapter only. Idempotent for
+//      migrate-on-every-save: a v17 save with a real array is preserved (known ids only).
+//  (c) each hero gains `dailies: {serverDay, quests:[{id,progress,claimed}]}` — the daily-
+//      quest roster + progress. A pre-v17 save backfills an EMPTY roster (serverDay 0, no
+//      quests — safe: nothing done today; the server feeds a fresh roster on boot). A v17
+//      save's roster is preserved (unknown catalog ids dropped, counters clamped).
+export const SAVE_VERSION = 17;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -203,8 +223,14 @@ export interface UnknownSave {
   location?: UnknownLocation;
   unlockedZones?: Record<string, unknown>;
   lastFarmZone?: UnknownLocation;
-  // v9 NPC-consumable stacks (M6). Optional so a pre-v9 save backfills to zeros.
-  consumables?: { hpPotion?: unknown; manaPotion?: unknown; returnScroll?: unknown };
+  // v9 NPC-consumable stacks (M6); v17 adds `warpScroll`. Optional so a pre-v9/v17 save
+  // backfills to zeros.
+  consumables?: {
+    hpPotion?: unknown;
+    manaPotion?: unknown;
+    returnScroll?: unknown;
+    warpScroll?: unknown;
+  };
   // v11 idle-bot settings (M7.5). Optional so a pre-v11 save backfills to defaults
   // (both bots OFF). Partial so a trimmed block is filled by `normalizeBotSettings`.
   bot?: Partial<BotSettings>;
@@ -235,6 +261,10 @@ export interface UnknownSave {
     mana?: number;
     autoSlots?: (SkillId | null)[];
     quest?: HeroQuest | null;
+    // v17 (M8 Wave A): main-quest claim log + daily block. Optional/unknown so a pre-v17
+    // save backfills (mainClaimed -> completed-no-backpay, dailies -> empty).
+    mainClaimed?: unknown;
+    dailies?: unknown;
   };
   // pre-v4 team shape:
   unlocked?: string[];
@@ -353,7 +383,40 @@ function normalizeConsumables(
     hpPotion: one(saved?.hpPotion),
     manaPotion: one(saved?.manaPotion),
     returnScroll: one(saved?.returnScroll),
+    // "วาปหาเพื่อน" warp scroll (M8, v17): pre-v17 saves have no field -> 0.
+    warpScroll: one(saved?.warpScroll),
   } satisfies Record<ShopItemId, number>;
+}
+
+/** Coerce a saved main-quest claim log to known chapter ids (M8, v17), deduped. */
+function normalizeMainClaimedIds(saved: unknown): string[] {
+  if (!Array.isArray(saved)) return [];
+  const known = new Set<string>(CONFIG.mainQuest.chapters.map((c) => c.id));
+  const out: string[] = [];
+  for (const v of saved) {
+    if (typeof v === "string" && known.has(v) && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+/** Coerce a saved daily block to {serverDay, quests[]} (M8, v17): known ids, sane counters. */
+function normalizeDailiesBlock(saved: unknown): HeroDailies {
+  const empty: HeroDailies = { serverDay: 0, quests: [] };
+  if (!saved || typeof saved !== "object") return empty;
+  const s = saved as { serverDay?: unknown; quests?: unknown };
+  const serverDay = asStat(numOrUndef(s.serverDay), 0);
+  const known = new Set(Object.keys(CONFIG.dailyQuests.catalog));
+  const quests: HeroDailies["quests"] = [];
+  if (Array.isArray(s.quests)) {
+    for (const q of s.quests) {
+      if (!q || typeof q !== "object") continue;
+      const qq = q as { id?: unknown; progress?: unknown; claimed?: unknown };
+      if (typeof qq.id !== "string" || !known.has(qq.id)) continue;
+      if (quests.some((e) => e.id === qq.id)) continue;
+      quests.push({ id: qq.id, progress: asStat(numOrUndef(qq.progress), 0), claimed: qq.claimed === true });
+    }
+  }
+  return { serverDay, quests };
 }
 
 /**
@@ -469,6 +532,9 @@ export function migrate(save: UnknownSave): SaveData {
       // v7/v15 keeps a saved accepted evolution quest (validated against the tier's
       // def); a pre-v7 save (no quest) -> null (re-offered on load if eligible).
       quest: normalizeQuest(cls, tier, save.hero.quest),
+      // v17 (M8 Wave A): placeholders — reassigned below once unlockedZones/bossBest exist.
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     };
   } else {
     // Pre-v4 team save: adopt the highest-level unlocked hero, then grant stats.
@@ -499,6 +565,9 @@ export function migrate(save: UnknownSave): SaveData {
       autoSlots: defaultAutoSlotsFor(cls, tier),
       // Pre-v4 team saves predate quests entirely -> null (re-offered if eligible).
       quest: null,
+      // v17 (M8 Wave A): placeholders — reassigned below once unlockedZones/bossBest exist.
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     };
   }
 
@@ -518,6 +587,18 @@ export function migrate(save: UnknownSave): SaveData {
         ? location
         : farmLocationForStage(rawStage);
   const unlockedZones = normalizeUnlocked(save.unlockedZones, unlockUpTo(location));
+  const bossBest = normalizeBossBest(save.bossBest);
+
+  // ---- M8 Wave A quest state (v17) ----
+  // mainClaimed: a v17 save keeps its (validated) claim log; a pre-v17 save PREFILLS with
+  // every chapter the current progression already implies complete — mark-done, NO backpay
+  // (mirrors v16 goldEarned=0), so a returning deep character isn't owed a pile of rewards.
+  // Detection: a real array present -> v17 (preserve); absent -> pre-v17 (prefill).
+  hero.mainClaimed = Array.isArray(save.hero?.mainClaimed)
+    ? normalizeMainClaimedIds(save.hero.mainClaimed)
+    : completedChapterIds(unlockedZones, bossBest);
+  // dailies: v17 preserves its roster (known ids, sane counters); pre-v17 -> empty (safe).
+  hero.dailies = normalizeDailiesBlock(save.hero?.dailies);
 
   return {
     version: SAVE_VERSION,
@@ -527,7 +608,7 @@ export function migrate(save: UnknownSave): SaveData {
     // save backfills goldEarned -> 0 (retroactive EARNED totals are unknowable —
     // don't fabricate from current gold), bossBest -> {}, levelCapAt -> null.
     goldEarned: asStat(numOrUndef(save.goldEarned), 0),
-    bossBest: normalizeBossBest(save.bossBest),
+    bossBest,
     levelCapAt: normalizeLevelCapAt(save.levelCapAt),
     hero,
     location,

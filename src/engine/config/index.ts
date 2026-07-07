@@ -15,6 +15,11 @@ import type {
   StatKey,
   HeroStats,
 } from "@/engine/entities";
+// Cross-engine deterministic pow (M8 party P1a): every growth curve here raises a
+// literal base to an INTEGER exponent (stage/level offsets), so `dpow` is exact
+// integer exponentiation-by-squaring — bit-identical on V8/JSC/SpiderMonkey, unlike
+// the implementation-defined `Math.pow`. See src/engine/core/dmath.ts.
+import { dpow } from "@/engine/core/dmath";
 
 // M5 Character Pivot (docs/GDD.md v2): the 3-hero team became a SINGLE player
 // character. The formation / targeting / multi-hero combat engine is KEPT intact
@@ -63,9 +68,9 @@ const STAGE_ATK_DAMP_BASE = 0.92;
 const STAGE_HP_DAMP_FROM = 15;
 const STAGE_HP_DAMP_BASE = 0.94;
 const enemyAtkDamp = (n: number): number =>
-  n <= STAGE_ATK_DAMP_FROM ? 1 : Math.pow(STAGE_ATK_DAMP_BASE, n - STAGE_ATK_DAMP_FROM);
+  n <= STAGE_ATK_DAMP_FROM ? 1 : dpow(STAGE_ATK_DAMP_BASE, n - STAGE_ATK_DAMP_FROM);
 const enemyHpDamp = (n: number): number =>
-  n <= STAGE_HP_DAMP_FROM ? 1 : Math.pow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
+  n <= STAGE_HP_DAMP_FROM ? 1 : dpow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
 
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
@@ -288,12 +293,55 @@ export const CONFIG = {
       /** Auto mana-potion fires below this fraction of MAX MANA. */
       manaThreshold: 0.25,
     },
-    /** The catalog. `restoreFrac` / `cooldown` are 0 for the non-potion scroll. */
+    /** The catalog. `restoreFrac` / `cooldown` are 0 for the non-potion scrolls. */
     items: {
       hpPotion: { basePrice: 60, restoreFrac: 0.5, cooldown: 8 },
       manaPotion: { basePrice: 45, restoreFrac: 0.45, cooldown: 10 },
       returnScroll: { basePrice: 150, restoreFrac: 0, cooldown: 0 },
+      // "วาปหาเพื่อน" warp scroll (M8, SAVE v17): a party "warp to a friend" hop. Priced
+      // ABOVE the return scroll (150) on the SAME stage-scaling rule (priceStageBase) —
+      // warping to an arbitrary unlocked zone is worth more than a one-way trip home.
+      warpScroll: { basePrice: 200, restoreFrac: 0, cooldown: 0 },
     },
+  },
+
+  // ---- "หินเสริมพลัง" enhancement-stone drops (M7.6 follow-up, owner 2026-07-08) ----
+  // Refine materials used to come ONLY from SALVAGING gear (cumbersome — owner's word).
+  // Stones now DROP from mob kills directly and AUTO-COLLECT into the SAME materials
+  // counter salvage feeds (server credits Character.materials idempotently by claimKey).
+  // The roll is a STATELESS, domain-tagged hash off the SAME (lootSalt, lootCounter) the
+  // gear roll uses (core/hash.stoneFloat) — it consumes NO extra counter tick, so the
+  // GEAR-drop sequence is byte-identical and there is no SAVE-shape change. NEVER the
+  // wave RNG (reserved for wave composition). All knobs sim-tuned so material income per
+  // run ≈ the salvage-era bank (docs/balance-m79.md "หินเสริมพลัง drop conversion").
+  //
+  // Per NORMAL kill: drop with `dropChance(stage)` = baseChance + (mapTier-1) *
+  //   chancePerMapTier (deeper maps drop a touch more often), yielding
+  //   qtyBase + (mapTier-1)*qtyPerMapTier whole stones (deeper maps — where refine costs
+  //   scale by tier — trickle bigger stacks, matching salvage's own deep-weighted income).
+  //   `mapTier` = which of the 6 maps the stage sits in (ceil(stage/5), clamped to count).
+  // Per BOSS kill: a GUARANTEED bonus of `bossBonusBase + (mapTier-1)*bossBonusPerMapTier`
+  //   stones (a chunky milestone, like the guaranteed boss gear drop) — rolled off the
+  //   stone stream but not gated on the drop chance.
+  //
+  // Tuned (docs/balance-m79.md "หินเสริมพลัง drop conversion"): total stones/run ≈ the
+  // salvage-era material BANK (sim: ~8500-9000/run, matched within ±20%). Materials were
+  // never the binding refine constraint anyway (banked ~8900 vs spent ~4500 — GOLD gates
+  // refining), so refine pacing (+N reached, attempts) is unchanged; this just removes the
+  // salvage chore. Deep-weighted like salvage (m1 ~150/run → m6 ~3300/run).
+  stoneDrops: {
+    /** Per-NORMAL-kill base drop probability at map tier 1 (s1-5). */
+    baseChance: 0.18,
+    /** Added to the drop probability per map tier deeper (mapTier 2..6). */
+    chancePerMapTier: 0.02,
+    /** Whole stones granted per NORMAL drop at map tier 1. */
+    qtyBase: 2,
+    /** +this stones per drop per map tier deeper (tier→qty: 2,3,4,5,6,7). */
+    qtyPerMapTier: 1,
+    /** GUARANTEED stones a boss drops at map tier 1. */
+    bossBonusBase: 8,
+    /** Added to the boss stone bonus per map tier deeper. */
+    bossBonusPerMapTier: 4,
   },
 
   // ---- idle bots + fast travel (M7.5 "Sell, Bots & Inventory UX") ----
@@ -360,15 +408,44 @@ export const CONFIG = {
   // (the idle bot's auto-walk target + the phase-3 tap gate). ป้าปุ๊ = merchant (buy/
   // sell/salvage — the ONLY NPC the bot transacts with); ลุงดึ๋ง = refine smith
   // (player-only; never botted). Same values render phase-1 shipped with (commit 20b3da3).
+  // `npc:elder` (M8 quest Wave C) = ผู้ใหญ่บ้าน the village head, opening the Quest Board
+  // panel (main/daily quest claims) — player-only, never botted, same as the smith. x=400
+  // sits clear of pahpu (230±42 -> 188-272) and lungdueng (560±42 -> 518-602), and clear
+  // of the ambient town-llama patch (~690).
   townNpcs: [
     { id: "npc:pahpu", x: 230, radius: 42 },
     { id: "npc:lungdueng", x: 560, radius: 42 },
+    { id: "npc:elder", x: 400, radius: 42 },
   ],
 
   // ---- party / hero base ----
   // Party cap (M8 real-time party of ≤3). Solo gameplay spawns 1 hero, but the
   // multi-actor engine is retained for M8, so this stays as the formation cap.
   maxHeroes: 3,
+  // M8 party P1b — shared-zone reward/scaling hooks. ALL default INERT (identity at
+  // any party size) so a solo (1-hero) sim is byte-identical; the real curves are a
+  // later balance-sim task (docs/party-design-m8.md §5, owner numbers pending). Every
+  // hook is a PURE function of `partySize` (= heroes present) so all cohort clients
+  // compute the same result — no RNG, no wall-clock. Wired at the kill/xp/spawn sites.
+  party: {
+    // Per-hero XP multiplier for a cohort kill (design §5 "แชร์ exp"). Identity today.
+    expShareMult: (partySize: number): number => {
+      void partySize; // inert hook — the real per-size curve is a balance-sim task
+      return 1;
+    },
+    // Per-client gold multiplier for a cohort kill (each client credits its OWN hero;
+    // design §5 "ทุกคนได้เต็ม" vs "หาร" is this knob). Identity today.
+    goldShareMult: (partySize: number): number => {
+      void partySize; // inert hook — balance-flagged
+      return 1;
+    },
+    // Mob-pool scale per cohort size (design §2/§6 "density/killGoal ต่อหัว"): more
+    // heroes → a fuller field. Identity today; balance-flagged. Applied to `maxAlive`.
+    spawnMaxAliveScale: (partySize: number): number => {
+      void partySize; // inert hook — balance-flagged
+      return 1;
+    },
+  },
   heroBaseAtk: 10,
   heroBaseHp: 150,
   // Solo RESPAWN (GDD: dead solo hero = respawn, town doesn't exist until M6).
@@ -530,10 +607,10 @@ export const CONFIG = {
   // M7.9: the geometric base is UNCHANGED (s1-15 byte-identical); the s16-30 overlay
   // (enemyHpDamp / enemyAtkDamp, identity for the frozen bands) damps only the deep
   // frontier — see the overlay block above CONFIG for the rationale + curve values.
-  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * enemyHpDamp(n)),
-  enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * enemyAtkDamp(n)),
-  bossHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * 16),
-  bossAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * 2.1),
+  enemyHp: (n: number): number => Math.round(25 * dpow(1.2, n - 1) * enemyHpDamp(n)),
+  enemyAtk: (n: number): number => Math.round(6 * dpow(1.19, n - 1) * enemyAtkDamp(n)),
+  bossHp: (n: number): number => Math.round(25 * dpow(1.2, n - 1) * 16),
+  bossAtk: (n: number): number => Math.round(6 * dpow(1.19, n - 1) * 2.1),
   // M4 tune: gold/kill was purely linear (5 + 2n) while upgrade costs are
   // geometric, so late stages starved and the wall spiked. A gentle 1.05^(n-1)
   // multiplier keeps stage 1-3 values effectively unchanged (7, 9, 12 vs 7, 9,
@@ -543,7 +620,7 @@ export const CONFIG = {
   // killGoal factor (≈ 3.125 + 1.25n) so gold-per-ZONE = killGoal × goldPerKill is
   // preserved — income trajectory and the depth-scaled potion-sink %s are unchanged.
   goldPerKill: (n: number): number =>
-    Math.round(((3.125 + n * 1.25) / 1.5) * Math.pow(1.05, n - 1)),
+    Math.round(((3.125 + n * 1.25) / 1.5) * dpow(1.05, n - 1)),
   goldPerBoss: (n: number): number => 50 + n * 20,
 
   // ---- spatial layout ----
@@ -751,7 +828,7 @@ export const CONFIG = {
     // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
     // geometric growth so the hero keeps leveling deep into the run (reaching
     // ~L40+ by S10) rather than stalling at a hard cap mid-game.
-    xpToLevel: (level: number): number => Math.round(30 * Math.pow(1.12, level - 1)),
+    xpToLevel: (level: number): number => Math.round(30 * dpow(1.12, level - 1)),
   },
 
   // ---- base stats (M5 "Base stats", 86d3jv7m3) ----
@@ -870,14 +947,18 @@ export const CONFIG = {
     // The signature-cast guarantee is untouched (baseRegen alone sustains it).
     regenPerIntPoint: 0.05, // +mana/sec per INT point above base (caster identity)
     // ---- M7.9 "Grand Expansion" tier-3 mana-pool bonus ----
-    // Tier 3 grants a FLAT pool bump (systems/stats `heroMaxMana`, tier 3 only) so the
-    // grander tier-3 skill-4 (cost ~120) is CASTABLE but still GATING — same philosophy
-    // as the tier-2 ultimates (see sword_quake / archer_barrage: cost≈pool so a cast
-    // nearly empties it). A str/dex class sits on the flat base pool (60); +90 -> 150
-    // lets it afford the 120 skill-4 with ~30 to spare, so a cast drains the pool and
-    // the next waits on regen (mana potions stay a real sink). The INT-fed mage already
-    // has the deepest pool; this lifts its ceiling in step. Applied on evolve to tier 3.
-    tier3PoolBonus: 90,
+    // Tier 3 grants a FLAT pool bump (systems/stats `heroMaxMana`, tier 3 only). A str/dex
+    // class sits on the flat base pool (60 + a small INT-share contribution); this bonus is
+    // what makes the grander tier-3 skill-4 castable and deepens the reservoir that a mana
+    // potion refills (potion restore = restoreFrac × MAX mana).
+    // Mana relief pass (owner request 2026-07-08, "มานาใช้เยอะไป ซื้อยามานาจนตังหมด"): raised
+    // 90 → 170. This is a DELIBERATELY ASYMMETRIC lever — an ADDITIVE bump is a large % of the
+    // shallow str/dex pools (~250 → ~330, +30% restore/potion) but a tiny % of the mage's deep
+    // INT-fed pool (~615 → ~695, +13%), so it relieves the flat-pool classes the owner flagged
+    // while leaving the mage ~unchanged (sim: mage 94 → 87 pot/run, −7%). Tier-3 ONLY — heroes
+    // are tier 1/2 through s15, so s1-15 stays byte-identical. See docs/balance-m79.md
+    // "Mana relief pass". The INT-fed mage already has the deepest pool; this lifts it in step.
+    tier3PoolBonus: 170,
   },
 
   // ---- auto-cast slots (M5 "skill framework v2") ----
@@ -1027,6 +1108,47 @@ export const CONFIG = {
       // bossVariety[20] 0.7/0.62 so a tier-2 Lv40 hero can win it in a real fight).
       bossHpScale: 0.58,
       bossAtkScale: 0.5,
+    },
+  },
+
+  // ---- M8 MAIN quest line (Wave A, design doc §1 "ห่อ goal-ladder เดิม") ----
+  // The main line is a CHAPTER CHAIN, one chapter per world map. A chapter is a PURE
+  // DERIVATION of existing progression (`systems/mainQuest.isChapterComplete`) — it is
+  // "complete" once that map's boss is cleared (the NEXT map's first zone is persist-
+  // unlocked; the LAST map keys off `bossBest[bossStageId]`). So there is NO second
+  // progression source of truth (the game's worst bug class): only the CLAIMED-reward
+  // set persists (`hero.mainClaimed`). Rewards are gold / refine stones / potions ONLY —
+  // NEVER power items (owner taste). `id` is the i18n + claim key (quest.main.<id>).
+  // ORDER MUST match `world.maps` (chapter i ↔ map i). First-pass numbers; sim-tunable.
+  mainQuest: {
+    chapters: [
+      { id: "chapter_map1", mapId: "map1", reward: { gold: 400, materials: 15 } },
+      { id: "chapter_map2", mapId: "map2", reward: { gold: 900, materials: 30, hpPotion: 5 } },
+      { id: "chapter_map3", mapId: "map3", reward: { gold: 1800, materials: 60, manaPotion: 5 } },
+      { id: "chapter_map4", mapId: "map4", reward: { gold: 3200, materials: 100, hpPotion: 8 } },
+      { id: "chapter_map5", mapId: "map5", reward: { gold: 5200, materials: 150, manaPotion: 8 } },
+      { id: "chapter_map6", mapId: "map6", reward: { gold: 8000, materials: 220, hpPotion: 10, manaPotion: 10 } },
+    ],
+  },
+
+  // ---- M8 DAILY quests (Wave A, design doc §2 "presence ไม่ใช่ optimal-play") ----
+  // A per-hero roster of `rosterSize` daily quests, CHOSEN SERVER-SIDE (seeded from the
+  // serverDay + user material — the engine never reads calendar time, keeping purity) and
+  // fed in via the `setDailies` intent. Each catalog entry is a "presence" objective: it
+  // gives a reason to come back WITHOUT FOMO (no streak-punish, no power/gate reward — all
+  // rewards are gold / stones / potions ONLY, owner taste). The engine COUNTS progress at
+  // the emission choke points + validates claims client-side (server re-validates). `id` is
+  // the i18n + claim key (quest.daily.<id>). Content scales by adding a catalog entry + i18n
+  // key — no logic change. First-pass numbers; sim-tunable.
+  dailyQuests: {
+    /** How many dailies a hero holds at once (echoes the 3 auto-cast slots — design §2). */
+    rosterSize: 3,
+    catalog: {
+      daily_kill: { type: "killAnywhere", target: 120, reward: { gold: 350 } },
+      daily_refine: { type: "refineOnce", target: 1, reward: { materials: 40 } },
+      daily_potions: { type: "buyPotions", target: 10, reward: { gold: 250 } },
+      daily_spend: { type: "spendGold", target: 2500, reward: { materials: 30 } },
+      daily_boss: { type: "clearAnyBoss", target: 1, reward: { gold: 600, hpPotion: 3 } },
     },
   },
 
@@ -1410,12 +1532,15 @@ const SKILL_LIST = [
   // SKYFALL BLADE (tier-3 skill-4 "ดาบฟ้าผ่าสนาม") — a FIELD-WIDE sky-strike: an instant
   // AoE (reuses the `strike` quake/field mechanism, r500 spans the ~900px field) at a
   // grander mult than the quake. The time-freeze/flash beat is timeDirector/render's
-  // job — the engine only emits the skillCast event + the damage. cost 120 needs the
-  // tier-3 mana bonus (str pool 60+90=150) to be castable; it nearly empties the pool,
-  // so it's a hard gate (mana potions bite). Learned at tier 3 + level 40.
+  // job — the engine only emits the skillCast event + the damage. Learned at tier 3 + level
+  // 40. Mana relief pass (owner 2026-07-08): cost 120 → 80. At 120 sword burned ~198 mana
+  // pot/run (owner "ซื้อยามานาจนตังหมด"); skyfall was its dominant drain (8.6 mana/s on a
+  // 14s cd). 80 (+ the deeper tier3PoolBonus 170) roughly HALVES that (sim: 198 → 103/run,
+  // −48%) while staying ≥ the tier-2 quake (50) and a real cost — mana stays a sink, not
+  // irrelevant. Tier-3 skill-4 only (auto-slot 4, tier-gated) → s1-15 byte-identical.
   {
     id: "sword_skyfall", cls: "swordsman", tier: 3, unlockLevel: 40, kind: "strike",
-    cost: 120, cd: 14, radius: 500, mult: 10.0, targets: 0, projSpeed: 0, range: 540,
+    cost: 80, cd: 14, radius: 500, mult: 10.0, targets: 0, projSpeed: 0, range: 540,
     buffMult: 1, buffDuration: 0,
   },
 
@@ -1448,11 +1573,16 @@ const SKILL_LIST = [
   // whose LANDINGS SPREAD over ~4s of real time via spawn-height stagger (`stormOffsets`,
   // a wide 20-row table with a TALL ry ramp). Reuses the rainArrow fall — NO new
   // ProjectileKind. The DELIBERATELY slow projSpeed (260) is what stretches the ry
-  // stagger into the ~4s window (see stormOffsets). cost 120 gates it on the tier-3 pool.
-  // Learned at tier 3 + level 40. `targets` MUST equal stormOffsets.length.
+  // stagger into the ~4s window (see stormOffsets). Learned at tier 3 + level 40. `targets`
+  // MUST equal stormOffsets.length. Cost history: 120 (launch) → 90 (M7.9 archer friction
+  // pass) → 45 (mana relief pass, owner 2026-07-08). Archer was the HIGHEST burner (210
+  // pot/run) and — unlike sword — its other big drains (barrage/powershot) fire from L8/L15,
+  // so cutting them would break the s1-15 byte-identical gate; storm (the only tier-3-safe
+  // archer cost) + the deeper tier3PoolBonus 170 carry the relief (sim: 210 → 112/run, −47%;
+  // storm deaths also fell 478 → 360 as the sustained barrage stopped starving powershot).
   {
     id: "archer_storm", cls: "archer", tier: 3, unlockLevel: 40, kind: "rain",
-    cost: 90, cd: 13, radius: 95, mult: 2.0, targets: 20, projSpeed: 260, range: 900,
+    cost: 45, cd: 13, radius: 95, mult: 2.0, targets: 20, projSpeed: 260, range: 900,
     buffMult: 1, buffDuration: 0,
   },
 

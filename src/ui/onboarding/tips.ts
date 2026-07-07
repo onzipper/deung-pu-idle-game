@@ -169,6 +169,20 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
     mood: "excited",
     trigger: (prev, next) => !prev.inTown && next.inTown,
   },
+  /**
+   * `questBoardHint` (M8 quest Wave C): points at ผู้ใหญ่บ้าน, the town's
+   * quest-giver NPC. Reuses the SAME town-arrival trigger as `townNpcTapHint`
+   * (registry order picks `townNpcTapHint` first on that very first arrival;
+   * this one naturally fires on the NEXT town-boundary crossing instead of
+   * never firing at all — both are one-off tips, so this is an acceptable,
+   * simple trigger reuse rather than adding a new detectable signal). No
+   * anchor (points at the town NPC on the canvas itself, same as its sibling).
+   */
+  {
+    id: "questBoardHint",
+    mood: "excited",
+    trigger: (prev, next) => !prev.inTown && next.inTown,
+  },
 ];
 
 /**

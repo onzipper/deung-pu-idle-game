@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ws-probe — ทดสอบ Websocket ค้างสาย</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Sarabun", Tahoma, sans-serif;
+    background: #14161b;
+    color: #e8e8ec;
+    margin: 0;
+    padding: 16px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 4px; }
+  .sub { color: #9a9aa5; font-size: 0.85rem; margin-bottom: 16px; }
+  .card {
+    background: #1d2027;
+    border: 1px solid #2c303a;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .card h2 { font-size: 0.95rem; margin: 0 0 8px; color: #cfd3ff; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+  .stat { min-width: 130px; }
+  .stat .label { font-size: 0.72rem; color: #9a9aa5; }
+  .stat .value { font-size: 1.15rem; font-weight: 600; }
+  .ok { color: #6ee7a0; }
+  .bad { color: #ff8080; }
+  .warn { color: #ffcf6e; }
+  button, input {
+    font: inherit;
+    background: #2a2e38;
+    color: #e8e8ec;
+    border: 1px solid #3a3f4c;
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { background: #343946; }
+  input { width: 140px; }
+  ul#eventLog, ul#broadcastLog {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.82rem;
+  }
+  ul#eventLog li, ul#broadcastLog li {
+    padding: 3px 0;
+    border-bottom: 1px solid #262a33;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+  pre#summary {
+    background: #101216;
+    border: 1px solid #2c303a;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    max-height: 260px;
+  }
+  code { color: #cfd3ff; }
+</style>
+</head>
+<body>
+
+<h1>ws-probe — ทดสอบ Websocket แบบค้างสาย (persistent connection)</h1>
+<div class="sub">ใช้ตรวจว่า host นี้ (Hostinger shared/premium หรือ VPS) รองรับ websocket ค้างสายพอสำหรับ lockstep party (M8) หรือไม่ — อ่านผลได้ตาม README-th.md</div>
+
+<div class="card">
+  <h2>1) สถานะการเชื่อมต่อ</h2>
+  <div class="row">
+    <div class="stat"><div class="label">สถานะ</div><div class="value" id="statStatus">กำลังเชื่อมต่อ...</div></div>
+    <div class="stat"><div class="label">Client ID</div><div class="value" id="statId">-</div></div>
+    <div class="stat"><div class="label">เชื่อมต่อเมื่อ</div><div class="value" id="statConnectedAt">-</div></div>
+    <div class="stat"><div class="label">อายุการเชื่อมต่อ (สด)</div><div class="value" id="statLifetime">-</div></div>
+    <div class="stat"><div class="label">จำนวนครั้งที่หลุด</div><div class="value" id="statDisconnectCount">0</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2) RTT sampling (30 วิแรก, ทุก 500ms)</h2>
+  <div class="row">
+    <div class="stat"><div class="label">ตัวอย่างที่เก็บได้</div><div class="value" id="statSamples">0</div></div>
+    <div class="stat"><div class="label">RTT median</div><div class="value" id="statMedian">-</div></div>
+    <div class="stat"><div class="label">RTT p95</div><div class="value" id="statP95">-</div></div>
+    <div class="stat"><div class="label">jitter (p95-min)</div><div class="value" id="statJitter">-</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>3) Heartbeat ระยะยาว (ทุก 15 วิ ต่อเนื่อง ≥10 นาที)</h2>
+  <div class="row">
+    <div class="stat"><div class="label">heartbeat ล่าสุด RTT</div><div class="value" id="statHbRtt">-</div></div>
+    <div class="stat"><div class="label">heartbeat ทั้งหมด</div><div class="value" id="statHbCount">0</div></div>
+    <div class="stat"><div class="label">RTT median (heartbeat)</div><div class="value" id="statHbMedian">-</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>4) หลายแท็บ / broadcast (เปิดหน้านี้ 2+ แท็บ ใช้ห้องเดียวกัน)</h2>
+  <div class="row">
+    <input id="room" value="lobby" />
+    <button id="joinBtn">เข้าห้อง</button>
+    <button id="sendBtn">ส่งข้อความกระจาย</button>
+    <div class="stat"><div class="label">คนในห้องตอนนี้</div><div class="value" id="statPeerCount">-</div></div>
+  </div>
+  <ul id="broadcastLog"></ul>
+</div>
+
+<div class="card">
+  <h2>5) เหตุการณ์ (connect / disconnect / reconnect)</h2>
+  <ul id="eventLog"></ul>
+</div>
+
+<div class="card">
+  <h2>6) สรุปผล (JSON — กดคัดลอกส่งกลับให้ทีมได้เลย)</h2>
+  <button id="copyBtn">คัดลอกผลสรุป</button>
+  <pre id="summary">-</pre>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsUrl = proto + '//' + location.host + '/';
+
+  var el = function (id) { return document.getElementById(id); };
+
+  var myId = null;
+  var ws = null;
+  var connectedAt = null;
+  var firstConnectedAt = null;
+  var disconnectCount = 0;
+  var reconnectDelay = 1000;
+  var reconnectTimer = null;
+  var lifetimeTimer = null;
+
+  var rttSamples = []; // first-30s dense samples
+  var hbSamples = []; // long-run heartbeat samples
+  var rttSeq = 0;
+  var rttPending = {}; // seq -> sentClientTs
+  var samplingPhase = true;
+  var samplingTimer = null;
+  var heartbeatTimer = null;
+
+  var events = [];
+  var broadcastEvents = [];
+  var currentRoom = el('room').value;
+
+  function logEvent(text, cls) {
+    events.push({ ts: Date.now(), text: text });
+    var li = document.createElement('li');
+    li.textContent = new Date().toLocaleTimeString('th-TH') + '  ' + text;
+    if (cls) li.className = cls;
+    el('eventLog').prepend(li);
+    updateSummary();
+  }
+
+  function fmtMs(ms) {
+    if (ms == null || isNaN(ms)) return '-';
+    return ms.toFixed(0) + ' ms';
+  }
+
+  function fmtDuration(ms) {
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    return (h > 0 ? h + 'ชม. ' : '') + (m > 0 || h > 0 ? m + 'นาที ' : '') + sec + 'วิ';
+  }
+
+  function percentile(arr, p) {
+    if (!arr.length) return null;
+    var sorted = arr.slice().sort(function (a, b) { return a - b; });
+    var idx = Math.ceil((p / 100) * sorted.length) - 1;
+    idx = Math.max(0, Math.min(sorted.length - 1, idx));
+    return sorted[idx];
+  }
+
+  function median(arr) { return percentile(arr, 50); }
+
+  function refreshRttStats() {
+    el('statSamples').textContent = rttSamples.length;
+    el('statMedian').textContent = fmtMs(median(rttSamples));
+    var p95 = percentile(rttSamples, 95);
+    el('statP95').textContent = fmtMs(p95);
+    if (rttSamples.length >= 2) {
+      var jitter = p95 - Math.min.apply(null, rttSamples);
+      el('statJitter').textContent = fmtMs(jitter);
+      el('statJitter').className = 'value ' + (jitter < 150 ? 'ok' : jitter < 300 ? 'warn' : 'bad');
+    }
+  }
+
+  function refreshHbStats() {
+    el('statHbCount').textContent = hbSamples.length;
+    if (hbSamples.length) {
+      el('statHbRtt').textContent = fmtMs(hbSamples[hbSamples.length - 1]);
+      el('statHbMedian').textContent = fmtMs(median(hbSamples));
+    }
+  }
+
+  function updateSummary() {
+    var now = Date.now();
+    var summary = {
+      wsUrl: wsUrl,
+      clientId: myId,
+      firstConnectedAt: firstConnectedAt,
+      currentlyConnected: !!(ws && ws.readyState === WebSocket.OPEN),
+      lifetimeMsSinceFirstConnect: firstConnectedAt ? now - firstConnectedAt : null,
+      disconnectCount: disconnectCount,
+      rtt30s: {
+        samples: rttSamples.length,
+        medianMs: median(rttSamples),
+        p95Ms: percentile(rttSamples, 95),
+        minMs: rttSamples.length ? Math.min.apply(null, rttSamples) : null,
+        maxMs: rttSamples.length ? Math.max.apply(null, rttSamples) : null,
+      },
+      heartbeat: {
+        samples: hbSamples.length,
+        medianMs: median(hbSamples),
+        p95Ms: percentile(hbSamples, 95),
+      },
+      broadcastEventsReceived: broadcastEvents.length,
+      recentEvents: events.slice(-15),
+    };
+    el('summary').textContent = JSON.stringify(summary, null, 2);
+  }
+
+  function connect() {
+    el('statStatus').textContent = 'กำลังเชื่อมต่อ...';
+    el('statStatus').className = 'value warn';
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = function () {
+      connectedAt = Date.now();
+      if (!firstConnectedAt) firstConnectedAt = connectedAt;
+      reconnectDelay = 1000;
+      el('statStatus').textContent = 'เชื่อมต่อสำเร็จ';
+      el('statStatus').className = 'value ok';
+      el('statConnectedAt').textContent = new Date(connectedAt).toLocaleTimeString('th-TH');
+      logEvent('เชื่อมต่อสำเร็จ (' + wsUrl + ')', 'ok');
+
+      ws.send(JSON.stringify({ t: 'join', room: currentRoom }));
+
+      startLifetimeClock();
+      startSamplingPhase();
+    };
+
+    ws.onmessage = function (evt) {
+      var msg;
+      try { msg = JSON.parse(evt.data); } catch (e) { return; }
+      handleMessage(msg);
+    };
+
+    ws.onclose = function (evt) {
+      disconnectCount++;
+      el('statStatus').textContent = 'หลุดการเชื่อมต่อ (code ' + evt.code + ')';
+      el('statStatus').className = 'value bad';
+      el('statDisconnectCount').textContent = disconnectCount;
+      logEvent('หลุดการเชื่อมต่อ code=' + evt.code + ' reason="' + (evt.reason || '') + '"  (อยู่ได้ ' + fmtDuration(Date.now() - connectedAt) + ')', 'bad');
+      stopTimers();
+      scheduleReconnect();
+    };
+
+    ws.onerror = function () {
+      logEvent('เกิดข้อผิดพลาดของ websocket', 'bad');
+    };
+  }
+
+  function scheduleReconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(function () {
+      logEvent('กำลังลองเชื่อมต่อใหม่...', 'warn');
+      connect();
+    }, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+  }
+
+  function startLifetimeClock() {
+    clearInterval(lifetimeTimer);
+    lifetimeTimer = setInterval(function () {
+      if (connectedAt) {
+        el('statLifetime').textContent = fmtDuration(Date.now() - connectedAt);
+      }
+    }, 1000);
+  }
+
+  function stopTimers() {
+    clearInterval(lifetimeTimer);
+    clearInterval(samplingTimer);
+    clearInterval(heartbeatTimer);
+  }
+
+  function sendRtt() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    var seq = ++rttSeq;
+    var ts = Date.now();
+    rttPending[seq] = ts;
+    ws.send(JSON.stringify({ t: 'rtt', ts: ts, seq: seq }));
+  }
+
+  function startSamplingPhase() {
+    samplingPhase = true;
+    clearInterval(samplingTimer);
+    samplingTimer = setInterval(sendRtt, 500);
+    setTimeout(function () {
+      samplingPhase = false;
+      clearInterval(samplingTimer);
+      logEvent('จบช่วง RTT sampling 30 วิ (เก็บได้ ' + rttSamples.length + ' ตัวอย่าง) — เข้าสู่ heartbeat ระยะยาว', 'ok');
+      startHeartbeatPhase();
+    }, 30000);
+  }
+
+  function startHeartbeatPhase() {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(sendRtt, 15000);
+  }
+
+  function handleMessage(msg) {
+    if (!msg || typeof msg.t !== 'string') return;
+
+    if (msg.t === 'welcome') {
+      myId = msg.id;
+      el('statId').textContent = myId;
+      return;
+    }
+
+    if (msg.t === 'rtt') {
+      var sentTs = rttPending[msg.seq];
+      delete rttPending[msg.seq];
+      if (sentTs == null) return;
+      var rtt = Date.now() - sentTs;
+      if (samplingPhase) {
+        rttSamples.push(rtt);
+        refreshRttStats();
+      } else {
+        hbSamples.push(rtt);
+        refreshHbStats();
+      }
+      updateSummary();
+      return;
+    }
+
+    if (msg.t === 'peer-count') {
+      el('statPeerCount').textContent = msg.count;
+      return;
+    }
+
+    if (msg.t === 'broadcast') {
+      broadcastEvents.push(msg);
+      var li = document.createElement('li');
+      li.textContent = new Date(msg.serverTs).toLocaleTimeString('th-TH') + '  ' +
+        (msg.self ? '(ของตัวเอง) ' : 'จาก ' + msg.from + ' ') +
+        JSON.stringify(msg.payload);
+      el('broadcastLog').prepend(li);
+      updateSummary();
+      return;
+    }
+  }
+
+  el('joinBtn').addEventListener('click', function () {
+    currentRoom = el('room').value || 'lobby';
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ t: 'join', room: currentRoom }));
+      logEvent('เข้าห้อง "' + currentRoom + '"');
+    }
+  });
+
+  el('sendBtn').addEventListener('click', function () {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        t: 'broadcast',
+        room: currentRoom,
+        payload: { text: 'สวัสดีจากแท็บ ' + (myId || '?'), ts: Date.now() },
+      }));
+    }
+  });
+
+  el('copyBtn').addEventListener('click', function () {
+    updateSummary();
+    var text = el('summary').textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        el('copyBtn').textContent = 'คัดลอกแล้ว!';
+        setTimeout(function () { el('copyBtn').textContent = 'คัดลอกผลสรุป'; }, 1500);
+      });
+    }
+  });
+
+  connect();
+  setInterval(updateSummary, 5000);
+})();
+</script>
+
+</body>
+</html>

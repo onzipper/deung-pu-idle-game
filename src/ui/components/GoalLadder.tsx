@@ -631,6 +631,28 @@ function CoreLoopCard() {
   );
 }
 
+/**
+ * M8 quest Wave C — a compact "บทที่ N: ชื่อบท" line naming the current (first
+ * not-yet-claimed) main-quest chapter, read-only (claiming happens ONLY at
+ * ผู้ใหญ่บ้าน's Quest Board panel — town-only claim entry, design decision).
+ * Reuses `questBoard.mainChapterLabel`, the SAME template the board's own
+ * main-quest card renders, so the two surfaces never drift in wording.
+ * Renders nothing once every chapter is claimed (nothing left to point at).
+ */
+function MainChapterLine() {
+  const mainChapters = useGameStore((s) => s.mainChapters);
+  const tBoard = useTranslations("questBoard");
+  const tMain = useTranslations("quest.main");
+  const activeIdx = mainChapters.findIndex((c) => !c.claimed);
+  if (activeIdx === -1) return null;
+  const chapter = mainChapters[activeIdx];
+  return (
+    <span className="text-[11px] font-semibold text-ddp-ink-muted">
+      {tBoard("mainChapterLabel", { n: activeIdx + 1, title: tMain(`${chapter.id}.title`) })}
+    </span>
+  );
+}
+
 export function GoalLadder() {
   const hero = useGameStore((s) => s.heroes[0]);
   const phase = useGameStore((s) => s.phase);
@@ -664,6 +686,7 @@ export function GoalLadder() {
           />
         ))}
       </div>
+      <MainChapterLine />
       <MilestoneCard current={current} />
       <div data-onboarding-anchor="boss-panel">
         <CoreLoopCard />

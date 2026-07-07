@@ -19,7 +19,7 @@
  */
 
 import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
-import { zoneAt } from "@/engine";
+import { isDailyComplete, mainQuestChapters, zoneAt } from "@/engine";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
@@ -50,6 +50,7 @@ import {
 } from "@/render/views/projectileView";
 import { NpcSpeechBubble } from "@/render/fx/npcSpeechBubble";
 import { TOWN_NPCS, type TownNpcId } from "@/render/townNpcs";
+import { createTownLlamaActor, type TownLlamaActor } from "@/render/environment/townLlama";
 
 /**
  * Manual play (M7.8) tap outcome: a live enemy id (monsters WIN over ground
@@ -107,6 +108,12 @@ export class GameRenderer {
    * current zone kind every `draw()`. */
   private npcViews: Map<TownNpcId, NpcView> | null = null;
   private npcSpeech: NpcSpeechBubble | null = null;
+  /** Owner's fun/off-theme pixel llama (town-only ambient decor, see
+   * `environment/townLlama.ts`). Built once, never null after `create()` even
+   * if its texture load fails/never resolves — `update()` is a cheap no-op
+   * until the load succeeds. Lives in `background` (behind every entity),
+   * NOT alongside `npcViews`. */
+  private llama: TownLlamaActor | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private startTime = 0;
   /** Real elapsed ms at the previous draw() call — used to derive a real-time
@@ -185,6 +192,15 @@ export class GameRenderer {
     }
 
     this.environment = new Environment(background);
+
+    // Owner's fun/off-theme pixel llama: a sibling of `Environment`'s own
+    // biome scenes in the SAME `background` container — `Environment` only
+    // ever adds/crossfades its own children, never clears the layer, so this
+    // static-position actor persists untouched across every biome crossfade.
+    // Being in `background` (before `entities` in z-order) is what puts it
+    // behind every hero/enemy/NPC for free, with no manual z-index needed.
+    this.llama = createTownLlamaActor();
+    background.addChild(this.llama.view);
 
     this.heroPool = new Pool(entities, createHeroView);
     this.enemyPool = new Pool(entities, createEnemyView);
@@ -303,11 +319,24 @@ export class GameRenderer {
     // lookup above already use.
     const inTown = zoneAt(state.location).kind === "town";
     if (this.npcViews) {
+      // M8 quest Wave C: ผู้ใหญ่บ้าน's "!" badge — any main-chapter reward
+      // claimable, or any daily quest complete-but-unclaimed. Pure engine
+      // reads (same one-way "render reads GameState" contract as `enemyMapId`
+      // above); cheap enough (<=6 chapters, <=3 dailies) to recompute every
+      // frame rather than caching.
+      const questBoardHasNotice =
+        mainQuestChapters(state).some((c) => c.claimable) ||
+        (state.heroes[0]?.dailies.quests.some((dq) => isDailyComplete(dq) && !dq.claimed) ?? false);
       for (const view of this.npcViews.values()) {
-        updateNpcView(view, { dt, visible: inTown });
+        updateNpcView(view, {
+          dt,
+          visible: inTown,
+          showIndicator: view.npcId === "npc:elder" ? questBoardHasNotice : false,
+        });
       }
     }
     this.npcSpeech?.update(dt);
+    this.llama?.update(dt, inTown);
 
     this.projectilePool.beginFrame();
     for (const p of state.projectiles) {
@@ -345,6 +374,9 @@ export class GameRenderer {
     }
     this.npcSpeech?.destroy();
     this.npcSpeech = null;
+
+    this.llama?.destroy();
+    this.llama = null;
 
     this.environment?.destroy();
     this.environment = null;

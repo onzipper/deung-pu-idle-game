@@ -2,7 +2,7 @@
 
 /**
  * Tiny "tap again to confirm" guard for irreversible actions on valuable gear
- * (rare/epic sell + salvage). Extracted out of `InventoryPanel.tsx`'s
+ * (rare/epic sell). Extracted out of `InventoryPanel.tsx`'s
  * `DetailCard` (UAT: ShopPanel's sell tab needs the EXACT same guard
  * semantics per-row) — one hook instance per guarded action, first tap while
  * `needsConfirm` arms it, second tap (or a call with `needsConfirm=false`)

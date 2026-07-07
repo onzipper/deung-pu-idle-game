@@ -4,12 +4,7 @@
  */
 
 import type { GearSlot } from "@/engine";
-import type {
-  InventoryItem,
-  ItemInstanceWire,
-  SalvageItemResultWire,
-  SellItemResultWire,
-} from "@/ui/gear/types";
+import type { InventoryItem, ItemInstanceWire, SellItemResultWire } from "@/ui/gear/types";
 import { toInventoryItem } from "@/ui/gear/types";
 
 /**
@@ -83,25 +78,6 @@ export function removeSoldItems(
   const gone = new Set(
     results
       .filter((r) => r.status === "sold" || r.status === "already")
-      .map((r) => r.itemId),
-  );
-  if (gone.size === 0) return items.slice();
-  return items.filter((i) => !gone.has(i.instanceId));
-}
-
-/**
- * Applies a `/api/items/salvage` batch result (M7.6 ตีบวก) to the local
- * inventory slice — same "gone means gone" rule as `removeSoldItems`:
- * `"salvaged"` (this call destroyed it) AND `"already"` (a stale local copy)
- * are both removed; `"rejected"` (equipped, or not_found) is left untouched.
- */
-export function removeSalvagedItems(
-  items: readonly InventoryItem[],
-  results: readonly SalvageItemResultWire[],
-): InventoryItem[] {
-  const gone = new Set(
-    results
-      .filter((r) => r.status === "salvaged" || r.status === "already")
       .map((r) => r.itemId),
   );
   if (gone.size === 0) return items.slice();

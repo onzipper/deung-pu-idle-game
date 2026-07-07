@@ -1,0 +1,13 @@
+{
+  "name": "dpu-ws-probe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency websocket probe - answers whether this host proxies incoming RFC6455 upgrades and holds long-lived connections (M8 party relay infra spike)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

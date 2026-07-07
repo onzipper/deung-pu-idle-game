@@ -35,7 +35,7 @@ import {
   powerFromSave,
   MAX_LIVE_CHARACTERS,
 } from "@/server/characters";
-import { CONFIG } from "@/engine";
+import { CONFIG, emptyDailies } from "@/engine";
 
 const USER = "user_owner";
 const ROW = {
@@ -197,6 +197,8 @@ describe("listCharacters + powerFromSave", () => {
       level: 1,
       xp: 0,
       tier: 1,
+      mainClaimed: [],
+      dailies: emptyDailies(),
       statPoints: 0,
       stats: base,
       mana: CONFIG.mana.base,
@@ -208,6 +210,8 @@ describe("listCharacters + powerFromSave", () => {
       level: 30,
       xp: 0,
       tier: 2,
+      mainClaimed: [],
+      dailies: emptyDailies(),
       statPoints: 0,
       stats: { ...base, dex: base.dex + 50 },
       mana: CONFIG.mana.base,

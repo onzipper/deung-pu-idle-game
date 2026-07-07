@@ -1,20 +1,24 @@
 /**
- * Drop-claim endpoint (M7 Gear & Drops).
+ * Drop-claim endpoint (M7 Gear & Drops + หินเสริมพลัง stones).
  *
- * POST { items: [{ rollId, templateId, stage }] } -> mint the active character's
- * drops. Each item is ONE tx (instance + minted event), idempotent per claimKey
- * (`<characterId>:<rollId>` — a retry can never double-mint), validated against
- * the engine drop tables, and bounded by a lifetime rate-plausibility ceiling.
+ * POST { items?: [{ rollId, templateId, stage }], stones?: [{ rollId, qty }] } ->
+ * mint the active character's gear drops AND credit enhancement stones in one batch.
+ * Each gear item is ONE tx (instance + minted event), idempotent per claimKey
+ * (`<characterId>:<rollId>`); each stone claim credits `Character.materials` in ONE
+ * tx, idempotent per the NAMESPACED key (`<characterId>:stone:<rollId>` — the same
+ * P2002 dedupe mechanism), so a kill dropping BOTH gear and stones on the same rollId
+ * credits each exactly once. Both arrays are OPTIONAL + additive: an old client
+ * posting only `{ items }` is unchanged.
  *
  * The client is untrusted: identity + active character come from httpOnly cookies
- * (never the body), templateId/stage are strictly zod-validated, and elapsed time
- * for the plausibility cap is server-stamped (mirrors the save lastSeen pattern).
+ * (never the body), templateId/stage/qty are strictly zod-validated, and elapsed time
+ * for the plausibility caps is server-stamped (mirrors the save lastSeen pattern).
  */
 
 import { NextResponse } from "next/server";
 import { getOrCreateUserId } from "@/server/identity";
 import { resolveActiveCharacterId } from "@/server/activeCharacter";
-import { claimBatch, claimBatchSchema } from "@/server/items";
+import { claimBatch, claimBatchSchema, claimStones } from "@/server/items";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +48,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const { results, unverifiedMembership } = await claimBatch(characterId, parsed.data.items);
+    const gearEntries = parsed.data.items ?? [];
+    const stoneEntries = parsed.data.stones ?? [];
+
+    const { results, unverifiedMembership } = await claimBatch(characterId, gearEntries);
     if (unverifiedMembership > 0) {
       // TODO(M7): engine drop tables are placeholder-empty for some claimed
       // stages — membership could not be verified, so these were accepted on
@@ -53,7 +60,19 @@ export async function POST(request: Request) {
         `[api/items/claim] ${unverifiedMembership} claim(s) accepted with unverifiable table membership (engine tables empty)`,
       );
     }
-    return NextResponse.json({ results });
+
+    // Stones are dormant until a client sends them (UI wave follows) — the no-stone
+    // path stays byte-identical to the pre-stone response (no extra DB work).
+    if (stoneEntries.length === 0) {
+      return NextResponse.json({ results });
+    }
+    const stones = await claimStones(characterId, stoneEntries);
+    return NextResponse.json({
+      results,
+      stoneResults: stones.results,
+      totalMaterials: stones.totalCredited,
+      materials: stones.materials,
+    });
   } catch (err) {
     console.error("[api/items/claim] POST failed:", err);
     return NextResponse.json({ error: "internal error" }, { status: 500 });

@@ -29,3 +29,25 @@ export function lootHash(salt: number, counter: number): number {
 export function lootFloat(salt: number, counter: number): number {
   return lootHash(salt, counter) / 4294967296;
 }
+
+/**
+ * Domain tag for the "หินเสริมพลัง" ENHANCEMENT-STONE drop stream (M7.6 follow-up,
+ * 2026-07-08). Stones REUSE the persisted `(lootSalt, lootCounter)` pair — the same
+ * one gear rolls off — but XOR this tag into the salt first, so `stoneFloat` and
+ * `lootFloat` are INDEPENDENT streams off the shared counter. Reusing the counter
+ * (rather than adding a second persisted counter) means the GEAR roll's tick cadence
+ * is untouched → the existing gear-drop sequence stays BYTE-IDENTICAL, and there is
+ * NO save-shape change (no SAVE_VERSION bump). splitmix32's avalanche makes a constant
+ * XOR of the input fully decorrelate the two output streams (a drop-roll grade of
+ * independence, not cryptographic). Arbitrary non-zero constant ("Ston").
+ */
+export const STONE_DOMAIN = 0x53746f6e;
+
+/**
+ * Hash the stone stream's (salt, counter) to a float in [0, 1) — independent of the
+ * gear stream `lootFloat` via `STONE_DOMAIN` (see above). Pass the SAME `lootCounter`
+ * value the gear roll uses for a kill; the stone roll consumes no counter tick of its own.
+ */
+export function stoneFloat(salt: number, counter: number): number {
+  return lootHash((salt ^ STONE_DOMAIN) >>> 0, counter) / 4294967296;
+}

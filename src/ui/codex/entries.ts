@@ -75,6 +75,8 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
   // M7.9: the SECOND evolution (tier 2 -> tier 3) at Lv.40 — new quest, 4th
   // skill, 4th auto-cast slot.
   { id: "classTier3", category: "character" },
+  // M8 quest Wave C: main/daily/board framework + the warp scroll.
+  { id: "questBoard", category: "character" },
 
   {
     id: "hero-swordsman",

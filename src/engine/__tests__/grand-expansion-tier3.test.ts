@@ -598,22 +598,24 @@ describe("M7.9 skill-4 definitions", () => {
     expect(SKILLS.sword_skyfall.kind).toBe("strike");
   });
 
-  it("every skill-4 is a tier-3 / L40 unlock with a heavy (~90-120) mana cost", () => {
-    // M7.9 archer-friction pass: archer_storm cost 120 → 90. Unlike the single-nuke
-    // skyfall/apocalypse (a lone big cast), storm is a SUSTAINED ~4s barrage meant to be
-    // re-cast often as the archer's deep-field crowd-clearer; at cost 120 it starved the
-    // dex pool (302 mana-pot/run, boss DPS collapsed → s25/s30 boss wipes). 90 keeps it a
-    // real gate (60% of the 150 tier-3 pool; 197 pot/run — mana sink INTACT, gate 5) while
-    // letting powershot fire at bosses. sword/mage skill-4 stay 120. See balance-m79.md.
+  it("every skill-4 is a tier-3 / L40 unlock with a meaningful mana cost", () => {
+    // Cost history: archer_storm 120 → 90 (M7.9 archer-friction pass) → 45; sword_skyfall
+    // 120 → 80 (mana relief pass, owner 2026-07-08, "ซื้อยามานาจนตังหมด" — sword/archer drained
+    // gold on mana potions). skyfall was sword's dominant drain and storm the only tier-3-safe
+    // archer cost (barrage/powershot fire from L8/L15 → cutting them would break s1-15
+    // byte-identical), so both were softened + the tier3PoolBonus deepened (90 → 170) to roughly
+    // HALVE potion burn (sim: sword 198 → 103, archer 210 → 112 /run) — mana stays a real sink
+    // (~100+ pot/run), not irrelevant. mage_apocalypse stays 120 (mage burn kept ~as-is).
+    // Structural gate below (tier 3 / L40) is the load-bearing invariant; costs are tunables.
     for (const id of ["sword_skyfall", "archer_storm", "mage_apocalypse"]) {
       expect(SKILLS[id].tier).toBe(3);
       expect(SKILLS[id].unlockLevel).toBe(40);
-      expect(SKILLS[id].cost).toBeGreaterThanOrEqual(90);
+      expect(SKILLS[id].cost).toBeGreaterThanOrEqual(40); // still a real mana cost, never trivial
       expect(SKILLS[id].cost).toBeLessThanOrEqual(120);
     }
-    expect(SKILLS.sword_skyfall.cost).toBe(120);
+    expect(SKILLS.sword_skyfall.cost).toBe(80);
     expect(SKILLS.mage_apocalypse.cost).toBe(120);
-    expect(SKILLS.archer_storm.cost).toBe(90);
+    expect(SKILLS.archer_storm.cost).toBe(45);
   });
 
   it("field-strike skyfall spans ~the 900px field", () => {

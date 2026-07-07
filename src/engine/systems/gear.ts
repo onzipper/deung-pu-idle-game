@@ -14,6 +14,7 @@
  * classReq must match the hero's class — a mismatch is a no-op.
  */
 
+import { CONFIG } from "@/engine/config";
 import {
   ITEM_TEMPLATES,
   bossDropTableForStage,
@@ -22,7 +23,7 @@ import {
   type GearSlot,
 } from "@/engine/config/items";
 import { clampRefine } from "@/engine/config/refine";
-import { lootFloat } from "@/engine/core/hash";
+import { lootFloat, stoneFloat } from "@/engine/core/hash";
 import { clamp } from "@/engine/core/math";
 import { heroMaxHpOf } from "@/engine/systems/stats";
 import type { Hero, Enemy, Boss } from "@/engine/entities";
@@ -94,13 +95,63 @@ export function equipItem(
 // ---------------------------------------------------------------------------
 
 /**
+ * Which of the world's ordered maps a content `stage` sits in (1-based): map1 =
+ * s1-5, map2 = s6-10, … map6 = s26-30. Clamped to the real map count so an
+ * out-of-band stage never over-scales. Drives the stone drop's depth scaling.
+ */
+function mapTierForStage(stage: number): number {
+  const maps = CONFIG.world.maps.length;
+  return Math.max(1, Math.min(maps, Math.ceil(stage / 5)));
+}
+
+/**
+ * "หินเสริมพลัง" ENHANCEMENT-STONE roll for one kill (M7.6 follow-up). INDEPENDENT of
+ * the gear roll: it hashes the stone stream (core/hash.stoneFloat) off the SAME
+ * `(lootSalt, lootCounter)` the caller is about to consume for its gear roll —
+ * WITHOUT touching the counter here (the caller owns the single tick), so the
+ * gear-drop sequence stays byte-identical. `rollId` is that shared counter value;
+ * the server claim key is `${characterId}:stone:${rollId}` (namespaced apart from
+ * gear's `${characterId}:${rollId}`) so materials credit idempotently. A boss kill
+ * (`isBoss`) grants a GUARANTEED scaled bonus; a normal kill drops on a depth-scaled
+ * chance. Whole stones only. Deterministic (hashed, no RNG draw).
+ */
+function rollStoneDrop(
+  state: GameState,
+  x: number,
+  y: number,
+  mobId: number,
+  rollId: string,
+  isBoss: boolean,
+): void {
+  const cfg = CONFIG.stoneDrops;
+  const tier = mapTierForStage(state.stage);
+  if (isBoss) {
+    const qty = cfg.bossBonusBase + (tier - 1) * cfg.bossBonusPerMapTier;
+    if (qty > 0) {
+      state.events.push({ type: "stoneDrop", rollId, qty, x, y, mobId });
+    }
+    return;
+  }
+  const chance = cfg.baseChance + (tier - 1) * cfg.chancePerMapTier;
+  if (stoneFloat(state.lootSalt, state.lootCounter) < chance) {
+    const qty = cfg.qtyBase + (tier - 1) * cfg.qtyPerMapTier;
+    state.events.push({ type: "stoneDrop", rollId, qty, x, y, mobId });
+  }
+}
+
+/**
  * Roll a FARM drop for one killed enemy. Consumes exactly one loot-counter tick
  * (monotonic, whether or not anything drops). On a hit, pushes an `itemDrop`
  * event tagged with the stable per-save `rollId` (= the counter value used); the
  * server claim key is `${characterId}:${rollId}` (docs/persistence-m7.md).
+ *
+ * Also rolls an INDEPENDENT enhancement-stone drop (rollStoneDrop) off the same
+ * `rollId` — sharing this kill's single counter tick, so the gear sequence is
+ * unchanged (the stone stream is a separate domain-tagged hash).
  */
 export function rollEnemyDrop(state: GameState, e: Enemy): void {
   const rollId = String(state.lootCounter);
+  rollStoneDrop(state, e.x, e.y, e.id, rollId, false);
   const r = lootFloat(state.lootSalt, state.lootCounter);
   state.lootCounter++;
   const table = dropTableForStage(state.stage);
@@ -129,6 +180,7 @@ export function rollEnemyDrop(state: GameState, e: Enemy): void {
  */
 export function rollBossDrop(state: GameState, boss: Boss): void {
   const rollId = String(state.lootCounter);
+  rollStoneDrop(state, boss.x, boss.y, boss.id, rollId, true);
   const r = lootFloat(state.lootSalt, state.lootCounter);
   state.lootCounter++;
   const table = bossDropTableForStage(state.stage);

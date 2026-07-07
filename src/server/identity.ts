@@ -50,3 +50,18 @@ export async function getOrCreateUserId(): Promise<string> {
   store.set(COOKIE_NAME, user.id, cookieOptions());
   return user.id;
 }
+
+/**
+ * Repoint the identity cookie at an existing `User.id` (M8 login). The target user
+ * must already be resolved/verified by the caller — this only rewrites the cookie.
+ */
+export async function setUserIdCookie(userId: string): Promise<void> {
+  const store = await cookies();
+  store.set(COOKIE_NAME, userId, cookieOptions());
+}
+
+/** Clear the identity cookie (M8 logout). Next visit mints a fresh guest. */
+export async function clearUserIdCookie(): Promise<void> {
+  const store = await cookies();
+  store.set(COOKIE_NAME, "", { ...cookieOptions(), maxAge: 0 });
+}

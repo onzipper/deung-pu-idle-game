@@ -198,6 +198,10 @@ interface SeedResult {
   zones: ZoneMetric[];
   /** M7: total drops rolled + the final equipped loadout (GEAR run). */
   drops: number;
+  /** หินเสริมพลัง (stone-drop conversion): total refine-stones dropped this run +
+   * per-map-tier breakdown (index 0..5 = map1..map6) — the salvage-income replacement. */
+  stones: number;
+  stonesByMap: number[];
   finalWeapon: string | null;
   finalArmor: string | null;
   /** M7.7: potions actually consumed (auto-use) over the run — the mana-sink check. */
@@ -253,7 +257,7 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
     location: { mapId: "map1", zoneIdx: 1 },
     unlockedZones: { map1: 2 },
     lastFarmZone: { mapId: "map1", zoneIdx: 1 },
-    consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+    consumables: { hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 },
     // M7.5: idle bots OFF by default (baseline parity — the sim never trips them).
     bot: {
       enabled: false,
@@ -281,6 +285,8 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
       mana: 60,
       autoSlots: [SIGNATURE_SKILL[cls], null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     },
     lastSeen: 0,
   };
@@ -538,6 +544,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
   let qBossFightStart: number | null = null;
   const bestOwned: OwnedBest = { weapon: null, armor: null };
   let drops = 0;
+  let stones = 0;
+  const stonesByMap = [0, 0, 0, 0, 0, 0];
   let hpPotionsUsed = 0;
   let manaPotionsUsed = 0;
 
@@ -661,6 +669,11 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
           }
         }
         if (GEAR) considerDrop(bestOwned, e.templateId, cls);
+      }
+      if (e.type === "stoneDrop") {
+        stones += e.qty;
+        const mt = Math.max(1, Math.min(6, Math.ceil(s.stage / 5)));
+        stonesByMap[mt - 1] += e.qty;
       }
       if (e.type === "consumableUsed") {
         if (e.item === "hpPotion") hpPotionsUsed++;
@@ -796,6 +809,8 @@ function runSeed(cls: HeroClass, seed: number): SeedResult {
     totalWipes,
     zones,
     drops,
+    stones,
+    stonesByMap,
     finalWeapon: s.heroes[0].equipped.weapon,
     finalArmor: s.heroes[0].equipped.armor,
     hpPotionsUsed,
@@ -948,6 +963,17 @@ function printClass(cls: HeroClass, results: SeedResult[], agg: ZoneAgg[]): void
       `  - drops: ${results.map((r) => r.drops).join(",")} | ` +
         `final gear: ${results.map((r) => `${r.finalWeapon ?? "-"}/${r.finalArmor ?? "-"}`).join(" ")}`,
     );
+    // หินเสริมพลัง stone-drop conversion: total stones/run + per-map-tier income (the
+    // salvage-income replacement — compare the total vs REFINE's `mat earned`/run).
+    const stoneRuns = results.map((r) => r.stones);
+    const stoneTot = stoneRuns.reduce((a, b) => a + b, 0);
+    const bandMean = [0, 1, 2, 3, 4, 5].map(
+      (i) => results.reduce((a, r) => a + (r.stonesByMap[i] ?? 0), 0) / n,
+    );
+    console.log(
+      `  - หินเสริมพลัง stones: ${stoneRuns.join(",")} (${(stoneTot / n).toFixed(0)}/run) | ` +
+        `by map (mean/run): ${bandMean.map((v, i) => `m${i + 1}:${v.toFixed(0)}`).join(" ")}`,
+    );
   }
   if (REFINE_ON) {
     const agg = aggRefine(results);
@@ -1067,7 +1093,7 @@ function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: 
     // Unlock every zone of every map so the boss room (idx 5) is walkable.
     unlockedZones: { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6 },
     lastFarmZone: { mapId, zoneIdx: lastFarmIdx },
-    consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3 },
+    consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3, warpScroll: 0 },
     bot: { enabled: false, sellTripEnabled: false, hpPotionTarget: 15, mpPotionTarget: 15, scrollReserve: 3, goldReserve: 0 },
     autoHunt: true,
     equipped: { weapon: g.weapon, armor: g.armor, refine: { weapon: 10, armor: 10 } },
@@ -1084,6 +1110,8 @@ function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: 
       mana: 300,
       autoSlots: [SIGNATURE_SKILL[cls], null, null, null],
       quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
     },
     lastSeen: 0,
   };

@@ -33,6 +33,17 @@ const eslintConfig = defineConfig([
     },
   },
 
+  // Standalone zero-dep Node.js probe script (not part of the app bundle) —
+  // plain CommonJS by design (see file header: must run on the barest
+  // possible Node host with nothing else installed).
+  {
+    files: ["scripts/ws-probe/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { caughtErrorsIgnorePattern: "^_" }],
+    },
+  },
+
   // Turn off formatting rules that conflict with Prettier (keep this last).
   prettier,
 

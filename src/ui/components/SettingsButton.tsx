@@ -7,12 +7,17 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SettingsPanel } from "@/ui/components/SettingsPanel";
+import { onOpenAccountSettingsRequest } from "@/ui/openSettingsSignal";
 
 export function SettingsButton() {
   const [open, setOpen] = useState(false);
   const t = useTranslations("settings");
+
+  // Friends panel's guest-state CTA ("go to My Account") asks this drawer to
+  // open itself — see `openSettingsSignal.ts`'s doc.
+  useEffect(() => onOpenAccountSettingsRequest(() => setOpen(true)), []);
 
   return (
     <>

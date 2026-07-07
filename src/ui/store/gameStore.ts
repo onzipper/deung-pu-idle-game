@@ -30,12 +30,14 @@ import type {
   BossHint,
   BotSettings,
   ConsumableCounts,
+  DailyObjectiveType,
   EquippedGear,
   GearSlot,
   HeroClass,
   HeroStats,
   ItemRarity,
   Phase,
+  QuestReward,
   ShopItemId,
   StatKey,
   TownNpcId,
@@ -46,15 +48,9 @@ import {
   applyRefineLevelChange,
   mergeClaimedItems,
   removeInstanceId,
-  removeSalvagedItems,
   removeSoldItems,
 } from "@/ui/gear/inventoryOps";
-import type {
-  InventoryItem,
-  ItemInstanceWire,
-  SalvageItemResultWire,
-  SellItemResultWire,
-} from "@/ui/gear/types";
+import type { InventoryItem, ItemInstanceWire, SellItemResultWire } from "@/ui/gear/types";
 import { ingestAnnouncements } from "@/ui/announcements/queue";
 import type { AnnouncementEntry, AnnouncementWire } from "@/ui/announcements/types";
 
@@ -123,6 +119,48 @@ export interface HeroQuestSummary {
    * actions.
    */
   bossChallengeActive: boolean;
+}
+
+/**
+ * M8 quest Wave C — one MAIN-quest chapter's display state, precomputed by
+ * the snapshot builder from the engine's `mainQuestChapters(state)` read
+ * plus its static `reward` (looked up once from `mainChapterDefs()` by id —
+ * same one-way "engine computes/resolves, store just carries it" pattern as
+ * `HeroQuestSummary`). Drives both the Quest Board panel's main-line tracker
+ * and the goal card's compact "บทที่ N" line.
+ */
+export interface MainChapterSummary {
+  id: string;
+  mapId: string;
+  complete: boolean;
+  claimed: boolean;
+  claimable: boolean;
+  reward: QuestReward;
+}
+
+/**
+ * M8 quest Wave C — one DAILY-quest roster slot's display state, precomputed
+ * by the snapshot builder: `type`/`target`/`reward` resolved once from the
+ * engine's `dailyDef(id)` catalog read, `progress`/`claimed` straight off
+ * `hero.dailies.quests`, `complete` derived (`progress >= target`). Drives
+ * the Quest Board panel's daily rows.
+ */
+export interface DailyQuestSummary {
+  id: string;
+  type: DailyObjectiveType;
+  progress: number;
+  target: number;
+  claimed: boolean;
+  complete: boolean;
+  reward: QuestReward;
+}
+
+/** M8 quest Wave C — today's daily roster (server-day label + up to
+ * `CONFIG.dailyQuests.rosterSize` slots), the Quest Board panel's daily
+ * section source. */
+export interface DailyBoardSummary {
+  serverDay: number;
+  quests: DailyQuestSummary[];
 }
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
@@ -233,15 +271,16 @@ export interface ShopSummary {
 }
 
 /**
- * Town NPCs phase 3 (final): which of the two named town actors currently has
- * its dialog panel open (`ShopPanel` for pahpu / `RefinePanel` for lungdueng),
- * or `null`. Deliberately a single-panel field (only one NPC dialog can be
- * open at once — "one mental model per feature") owned by the store so BOTH
- * the tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
+ * Town NPCs phase 3 (final; extended M8 quest Wave C): which of the three
+ * named town actors currently has its dialog panel open (`ShopPanel` for
+ * pahpu / `RefinePanel` for lungdueng / `QuestBoardPanel` for elder), or
+ * `null`. Deliberately a single-panel field (only one NPC dialog can be open
+ * at once — "one mental model per feature") owned by the store so BOTH the
+ * tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
  * own) and the refine dock shortcut (`RefineButton.tsx`) can open it, and
  * `TownNpcPanelHost.tsx` can auto-close it the instant the live snapshot's
  * `npcInRange` says the hero has walked out of range. */
-export type TownPanelId = "pahpu" | "lungdueng";
+export type TownPanelId = "pahpu" | "lungdueng" | "board";
 
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
@@ -293,6 +332,15 @@ export interface EngineSnapshot {
    * (map4 z1 isn't actually walkable yet), same one-way "engine computes, store
    * just carries it" pattern as `npcInRange`. */
   deepestUnlockedFarm: WorldLocation;
+  /** M8 quest Wave C — the solo hero's main-quest chapter chain, precomputed
+   * off `mainQuestChapters(state)` + each chapter's static reward. Drives the
+   * Quest Board panel's main-line section + the goal card's "บทที่ N" line. */
+  mainChapters: MainChapterSummary[];
+  /** M8 quest Wave C — the solo hero's today daily-quest roster, precomputed
+   * off `hero.dailies` + the `dailyDef` catalog. Drives the Quest Board
+   * panel's daily section (the `!` badge on ผู้ใหญ่บ้าน is a render-only read,
+   * not this store slice — see `GameRenderer.ts`). */
+  dailies: DailyBoardSummary;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -354,10 +402,11 @@ export interface PendingInput {
    * (SAVE v12) — the HUD button queues this and reads the current value back
    * from the snapshot's `autoHunt`, never shadow-owning it. */
   setAutoHunt: boolean | null;
-  /** Signed material-counter delta (M7.6 ตีบวก): salvage grants +, refine spends
-   * −, decided SERVER-side. SUMMED across same-frame calls (not last-wins) —
-   * same pattern as `goldCredit`, since a bulk salvage + an overlapping single
-   * refine in the same tick must never drop one. `null`/`0` = nothing pending. */
+  /** Signed material-counter delta (M7.6 ตีบวก): หินเสริมพลัง stone claims grant
+   * +, refine spends −, decided SERVER-side. SUMMED across same-frame calls
+   * (not last-wins) — same pattern as `goldCredit`, since a stone-claim credit
+   * and an overlapping single refine in the same tick must never drop one.
+   * `null`/`0` = nothing pending. */
   materialsDelta: number | null;
   /** Manual play (M7.8): tap-the-ground move order, or `null` (last-wins per
    * frame — a tap walks to exactly one x; the engine clamps it to the zone's
@@ -369,6 +418,23 @@ export interface PendingInput {
   /** Manual play (M7.8): cancel the solo hero's active move/attack command,
    * once per frame. */
   cancelCommand: boolean;
+  /** M8 quest Wave C — install/refresh today's daily roster (from a save
+   * GET/POST response's `dailies` field), or `null` (last-wins per frame —
+   * every response carries the FULL current roster, so a same-frame refeed
+   * never needs to merge). Idempotent same-day on the engine side. */
+  setDailies: { serverDay: number; questIds: string[] } | null;
+  /** M8 quest Wave C — claim a completed daily's reward by catalog id (queued
+   * ONLY after the `/api/quest/daily/claim` POST confirms — refine-flow
+   * pattern), or `null` (last-wins per frame — a tap claims exactly one). */
+  claimDaily: string | null;
+  /** M8 quest Wave C — claim a completed main-chapter's reward by chapter id
+   * (a PURE engine intent, no server round trip — design doc §5), or `null`
+   * (last-wins per frame). */
+  claimMainReward: string | null;
+  /** M8 "วาปหาเพื่อน" warp scroll — consume one held scroll to fast-travel to
+   * `target` (queued from the Friends panel's per-member warp button), or
+   * `null` (last-wins per frame; the engine no-ops it if blocked/illegal). */
+  useWarpScroll: WorldLocation | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -393,6 +459,10 @@ function emptyPendingInput(): PendingInput {
     moveTo: null,
     attackTarget: null,
     cancelCommand: false,
+    setDailies: null,
+    claimDaily: null,
+    claimMainReward: null,
+    useWarpScroll: null,
   };
 }
 
@@ -519,8 +589,9 @@ export function writeSeenPatchNotes(id: string): void {
 }
 
 /** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
- * salvage-by-rarity, extended again M7.9 "option A" for a real epic toggle) —
- * same client-preference tier as `soundMuted`/`ftueCompleted`: UI-owned, not
+ * salvage-by-rarity, extended again M7.9 "option A" for a real epic toggle;
+ * salvage RETIRED 2026-07-08 — see `AutoSellAction`'s doc) — same
+ * client-preference tier as `soundMuted`/`ftueCompleted`: UI-owned, not
  * `SaveData` (the RULES aren't game progress; the bot's ENGINE-side config,
  * `BotSettings`, is the thing that's actually save-persisted). Owner-locked
  * defaults: common "sell", rare "sell", epic "off" (existing players see NO
@@ -532,8 +603,14 @@ export function writeSeenPatchNotes(id: string): void {
  * rather than resetting every existing player's preference. */
 const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2";
 
-/** Per-rarity disposal action (M7.7 — replaces the old two booleans). */
-export type AutoSellAction = "off" | "sell" | "salvage";
+/** Per-rarity disposal action (M7.7 — replaces the old two booleans). Owner
+ * request 2026-07-08 (หินเสริมพลัง final wave): salvage is RETIRED — refine
+ * stones now drop directly from mobs, so this is a plain off/sell toggle
+ * (was a 3-way "off"|"sell"|"salvage" through M7.7-M7.9). A previously-
+ * persisted `"salvage"` value (localStorage OR `Character.uiConfig`) simply
+ * fails `isAutoSellAction` below and falls back to this rarity's default —
+ * NOT migrated to `"sell"`, per owner spec. */
+export type AutoSellAction = "off" | "sell";
 
 export interface StoredAutoSellRules {
   common: AutoSellAction;
@@ -551,7 +628,7 @@ const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
 };
 
 function isAutoSellAction(v: unknown): v is AutoSellAction {
-  return v === "off" || v === "sell" || v === "salvage";
+  return v === "off" || v === "sell";
 }
 
 /** Migrates one rarity field from either shape: v2 action string (preferred),
@@ -784,11 +861,12 @@ const emptyBossHint: BossHint = {
 };
 
 const emptyShop: ShopSummary = {
-  counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0 },
+  counts: { hpPotion: 0, manaPotion: 0, returnScroll: 0, warpScroll: 0 },
   prices: {
     hpPotion: CONFIG.shop.items.hpPotion.basePrice,
     manaPotion: CONFIG.shop.items.manaPotion.basePrice,
     returnScroll: CONFIG.shop.items.returnScroll.basePrice,
+    warpScroll: CONFIG.shop.items.warpScroll.basePrice,
   },
   stackCap: CONFIG.shop.stackCap,
   ready: { hpPotion: false, manaPotion: false },
@@ -806,6 +884,21 @@ export interface DropFeedEntry {
 /** Cap on live toasts (oldest drop first out) — a burst of kills shouldn't
  * pile up an unbounded stack. */
 const MAX_DROP_FEED = 4;
+
+/** One หินเสริมพลัง (enhancement-stone) drop toast (`DropFeed.tsx`'s
+ * `StoneToast`) — pushed straight off the raw `stoneDrop` engine event (NOT
+ * gated on the server claim confirming, unlike `DropFeedEntry` above): a
+ * stone has no rarity/identity worth waiting on a round-trip for, it's purely
+ * "you just picked some up" juice. One entry per event, uncoalesced — capped
+ * the same "oldest out first" way as `dropFeed` so a dense field can't pile up
+ * an unbounded stack. */
+export interface StoneFeedEntry {
+  id: string;
+  qty: number;
+}
+
+const MAX_STONE_FEED = 3;
+let stoneFeedSeq = 0;
 let dropFeedSeq = 0;
 
 /** A generic one-line notice toast (M7.5) — same tier/shape as `DropFeedEntry`
@@ -870,6 +963,10 @@ export interface HudState {
   tier3FrontierLocked: boolean;
   /** The hero's real progression frontier — see `EngineSnapshot.deepestUnlockedFarm`'s doc. */
   deepestUnlockedFarm: WorldLocation;
+  /** M8 quest Wave C main-chapter tracker — see `EngineSnapshot.mainChapters`'s doc. */
+  mainChapters: MainChapterSummary[];
+  /** M8 quest Wave C daily roster — see `EngineSnapshot.dailies`'s doc. */
+  dailies: DailyBoardSummary;
 
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
@@ -890,6 +987,9 @@ export interface HudState {
   /** Live drop-notification toasts (M7 juice), oldest-first, capped at
    * `MAX_DROP_FEED`. Pushed only for a freshly-minted claim result. */
   dropFeed: DropFeedEntry[];
+  /** Live หินเสริมพลัง stone-drop toasts, oldest-first, capped at
+   * `MAX_STONE_FEED` — see `StoneFeedEntry`'s doc. */
+  stoneFeed: StoneFeedEntry[];
   /** Template ids owned at BOOT (M7.5 "NEW" badge baseline) — a template not in
    * this set is "new this session" for the WHOLE session (see
    * `ui/gear/inventoryOps.ts`'s `isNewTemplate`). Set once by `GameClient.tsx`
@@ -1139,6 +1239,22 @@ export interface HudState {
   /** Queue a manual play (M7.8) cancel of the active move/attack command. */
   queueCancelCommand: () => void;
 
+  // ---- M8 quest Wave C ----
+  /** Install/refresh today's daily roster (from a save GET/POST response's
+   * `dailies` field) — see `PendingInput.setDailies`'s doc. Safe to call on
+   * every response (idempotent same-day reconcile, engine-side). */
+  queueSetDailies: (serverDay: number, questIds: string[]) => void;
+  /** Claim a completed daily's reward by catalog id — queued ONLY after the
+   * server confirms (`ui/quest/dailyClaimFlow.ts`), see
+   * `PendingInput.claimDaily`'s doc. */
+  queueClaimDaily: (questId: string) => void;
+  /** Claim a completed main-chapter's reward by chapter id — a pure engine
+   * intent, no server round trip (see `PendingInput.claimMainReward`'s doc). */
+  queueClaimMainReward: (chapterId: string) => void;
+  /** Consume a warp scroll to fast-travel to `target` (the Friends panel's
+   * per-member "🌀 วาปไปหา" button) — see `PendingInput.useWarpScroll`'s doc. */
+  queueWarpScroll: (target: WorldLocation) => void;
+
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Open `panel`'s dialog (last-wins — talking to the other NPC or the dock
    * shortcut always wins over whatever was open). */
@@ -1161,15 +1277,17 @@ export interface HudState {
   pushDropFeed: (templateId: string, rarity: ItemRarity) => void;
   /** Dismiss one toast (called by `DropFeed.tsx` after its display timer). */
   dismissDropFeed: (id: string) => void;
+  /** Push a หินเสริมพลัง stone-drop toast (`StoneFeedEntry`'s doc) — capped,
+   * oldest evicted first. */
+  pushStoneFeed: (qty: number) => void;
+  /** Dismiss one stone toast (called by `DropFeed.tsx` after its display timer). */
+  dismissStoneFeed: (id: string) => void;
   /** Boot-only (M7.5 "NEW" badge baseline): set once from the boot payload's
    * inventory templateIds — see `sessionKnownTemplateIds`'s doc. */
   setSessionKnownTemplateIds: (ids: string[]) => void;
   /** Remove sold instances from the inventory slice (M7.5, manual + auto-sell
    * flows — see `gear/inventoryOps.ts`'s `removeSoldItems`). */
   removeSoldFromInventory: (results: SellItemResultWire[]) => void;
-  /** Remove salvaged instances from the inventory slice (M7.6 ตีบวก — see
-   * `gear/inventoryOps.ts`'s `removeSalvagedItems`). */
-  removeSalvagedFromInventory: (results: SalvageItemResultWire[]) => void;
   /** Patch one instance's refine +level after a non-destroying refine outcome
    * (M7.6 ตีบวก — see `gear/inventoryOps.ts`'s `applyRefineLevelChange`). */
   setInventoryRefineLevel: (instanceId: string, refineLevel: number) => void;
@@ -1256,13 +1374,16 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoHunt: true,
   unlockedZones: {},
   materials: 0,
-  npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+  npcInRange: { "npc:pahpu": false, "npc:lungdueng": false, "npc:elder": false },
   tier3FrontierLocked: false,
   deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
+  mainChapters: [],
+  dailies: { serverDay: 0, quests: [] },
   activeTownPanel: null,
 
   inventory: [],
   dropFeed: [],
+  stoneFeed: [],
   sessionKnownTemplateIds: [],
   notices: [],
   fastTravelChannel: null,
@@ -1487,6 +1608,18 @@ export const useGameStore = create<HudState>((set, get) => ({
   queueCancelCommand: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
 
+  queueSetDailies: (serverDay, questIds) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, setDailies: { serverDay, questIds } } })),
+
+  queueClaimDaily: (questId) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, claimDaily: questId } })),
+
+  queueClaimMainReward: (chapterId) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, claimMainReward: chapterId } })),
+
+  queueWarpScroll: (target) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, useWarpScroll: target } })),
+
   openTownPanel: (panel) => set({ activeTownPanel: panel }),
   closeTownPanel: () => set({ activeTownPanel: null }),
 
@@ -1504,12 +1637,19 @@ export const useGameStore = create<HudState>((set, get) => ({
   dismissDropFeed: (id) =>
     set((s) => ({ dropFeed: s.dropFeed.filter((d) => d.id !== id) })),
 
+  pushStoneFeed: (qty) =>
+    set((s) => ({
+      stoneFeed: [...s.stoneFeed, { id: `stone-${++stoneFeedSeq}`, qty }].slice(
+        -MAX_STONE_FEED,
+      ),
+    })),
+  dismissStoneFeed: (id) =>
+    set((s) => ({ stoneFeed: s.stoneFeed.filter((d) => d.id !== id) })),
+
   setSessionKnownTemplateIds: (ids) =>
     set({ sessionKnownTemplateIds: [...new Set(ids)] }),
   removeSoldFromInventory: (results) =>
     set((s) => ({ inventory: removeSoldItems(s.inventory, results) })),
-  removeSalvagedFromInventory: (results) =>
-    set((s) => ({ inventory: removeSalvagedItems(s.inventory, results) })),
   setInventoryRefineLevel: (instanceId, refineLevel) =>
     set((s) => ({
       inventory: applyRefineLevelChange(s.inventory, instanceId, refineLevel),
@@ -1618,7 +1758,20 @@ export const useGameStore = create<HudState>((set, get) => ({
       const merged: UiConfig = { ...selectUiConfig(s) };
       for (const key of Object.keys(cfg) as (keyof UiConfig)[]) {
         const v = cfg[key];
-        if (v !== undefined) (merged[key] as UiConfig[typeof key]) = v;
+        if (v === undefined) continue;
+        // A legacy `Character.uiConfig` row (server, pre-2026-07-08) may still
+        // carry the RETIRED "salvage" action — the server's own schema stays
+        // backward-compatible and doesn't reject it, so guard it here too: an
+        // invalid action is simply skipped, leaving whatever this rarity's
+        // CURRENT value is untouched (never migrated to "sell", per owner spec —
+        // see `AutoSellAction`'s doc).
+        if (
+          (key === "autoSellCommon" || key === "autoSellRare" || key === "autoSellEpic") &&
+          !isAutoSellAction(v)
+        ) {
+          continue;
+        }
+        (merged[key] as UiConfig[typeof key]) = v;
       }
       // Write-through so the legacy mount-effect hydrations (which read their own
       // keys) pick up the winning value instead of re-applying a stale local one.

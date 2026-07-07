@@ -46,6 +46,10 @@ describe("parseSaveData — accepts", () => {
         autoSlots: [SIGNATURE_SKILL.archer, null, null],
         // SAVE v7: tier-2 hero -> no class-change quest (consumed / none applicable).
         quest: null,
+        // SAVE v17: main/daily quest state omitted in the payload -> migrate
+        // backfills empty (no already-completed chapters to mark done).
+        mainClaimed: [],
+        dailies: { serverDay: 0, quests: [] },
       });
     }
   });

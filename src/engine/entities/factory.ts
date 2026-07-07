@@ -11,6 +11,8 @@ import type { Rng } from "@/engine/core/rng";
 import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
 import type {
   Hero,
+  HeroConfig,
+  HeroDailies,
   Enemy,
   Boss,
   BossBehavior,
@@ -20,6 +22,30 @@ import type {
   EnemyKind,
   SkillId,
 } from "@/engine/entities";
+
+/** A fresh (empty) daily-quest block (M8 Wave A) — no roster until the server feeds one. */
+export function emptyDailies(): HeroDailies {
+  return { serverDay: 0, quests: [] };
+}
+
+/**
+ * A fresh per-hero automation config (M8 party P1b), seeded to the SAME defaults the
+ * global fields carried: auto-cast/allocate OFF, auto-hunt ON, auto-potions + their
+ * thresholds from `CONFIG.shop.autoDefaults`. In solo these are immediately overwritten
+ * each step by `syncPrimaryHeroConfig` (store-mirror); a cohort hero keeps them until a
+ * `setHeroConfig` intent arrives. See `HeroConfig`.
+ */
+export function defaultHeroConfig(): HeroConfig {
+  return {
+    autoCast: false,
+    autoAllocate: false,
+    autoHunt: true,
+    autoHpPotion: CONFIG.shop.autoDefaults.hpPotion,
+    autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
+    autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
+    autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
+  };
+}
 
 /**
  * How many auto-cast slots a hero of `tier` HOLDS (its `autoSlots` array LENGTH).
@@ -58,6 +84,9 @@ export function makeHero(
   autoSlots: (SkillId | null)[] = defaultAutoSlots(cls, tier),
   quest: HeroQuest | null = null,
   equipped: EquippedGear = emptyEquipped(),
+  config: HeroConfig = defaultHeroConfig(),
+  mainClaimed: string[] = [],
+  dailies: HeroDailies = emptyDailies(),
 ): Hero {
   const t = HERO_TYPES[cls];
   // Max HP folds in equipped armor's flat HP (0 for an unarmored hero, so a fresh
@@ -98,6 +127,10 @@ export function makeHero(
     stats,
     autoSlots,
     quest,
+    // M8 Wave A: main-quest claim log + daily roster carry forward across battlefield
+    // resets/loads (like `quest`). Fresh hero = no claims, empty roster.
+    mainClaimed: [...mainClaimed],
+    dailies: { serverDay: dailies.serverDay, quests: dailies.quests.map((q) => ({ ...q })) },
     equipped: {
       weapon: equipped.weapon,
       armor: equipped.armor,
@@ -105,6 +138,12 @@ export function makeHero(
     },
     // Manual command (M7.8) — a fresh hero is on AUTO (no command). Transient.
     command: null,
+    // Shadow-body flag (M8 party P2) — a fresh/loaded hero is LIVE, never a shadow.
+    // Flipped only by the replicated setShadowed intent in a cohort. Transient.
+    shadowed: false,
+    // Per-hero automation config (M8 party P1b) — solo mirrors the globals each step;
+    // cohort sets it via setHeroConfig. Transient.
+    config,
     // Combat aim (render-only facing observer) — re-derived each step. Transient.
     aimX: null,
   };

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { GameClient } from "@/app/(game)/GameClient";
-import { hasResolvableActiveCharacter } from "@/app/characterGate";
+import { hasIdentityCookie, hasResolvableActiveCharacter } from "@/app/characterGate";
 
 export default async function Home() {
   // M5 Character Pivot: the game is now per-character. Gate the whole page
@@ -9,7 +9,11 @@ export default async function Home() {
   // character server helpers (which may try to WRITE a cookie, unsupported
   // during a plain page render).
   if (!(await hasResolvableActiveCharacter())) {
-    redirect("/characters");
+    // M8 Phase 0: a brand-new visitor (no identity cookie at all) picks a
+    // lane on /welcome (guest/login/register) instead of landing directly on
+    // the character roster; an existing guest/account with 0 resolvable
+    // characters keeps today's behavior exactly.
+    redirect((await hasIdentityCookie()) ? "/characters" : "/welcome");
   }
 
   return (
