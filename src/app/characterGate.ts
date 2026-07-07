@@ -61,3 +61,23 @@ export async function hasResolvableActiveCharacter(): Promise<boolean> {
     return true;
   }
 }
+
+/**
+ * Returns true if the visitor has ANY identity cookie at all (guest or
+ * registered — this doesn't distinguish the two). Used by `page.tsx` /
+ * `characters/page.tsx` (M8 Phase 0) to tell a brand-new visitor (never
+ * touched the app, no cookie yet) from an existing guest/account who simply
+ * has 0 resolvable characters right now — the former should land on
+ * `/welcome` (pick a lane: guest/login/register), the latter goes straight
+ * to `/characters` (today's behavior, unchanged). Read-only, same
+ * fail-open posture as `hasResolvableActiveCharacter` above.
+ */
+export async function hasIdentityCookie(): Promise<boolean> {
+  try {
+    const store = await cookies();
+    return Boolean(store.get(USER_COOKIE)?.value);
+  } catch (err) {
+    console.error("[characterGate] read failed, failing open:", err);
+    return true;
+  }
+}

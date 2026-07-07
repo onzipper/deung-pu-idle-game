@@ -702,6 +702,62 @@
       "genericError": "Couldn't create the character — try again"
     }
   },
+  "auth": {
+    "welcome": {
+      "title": "ดึ๋งปุ๊ Idle Game",
+      "subtitle": "A solo MMORPG-lite adventure — hunt monsters, level up, and climb the ranks",
+      "guestButton": "Play now",
+      "guestLoading": "Entering the game...",
+      "guestHint": "Jump straight in, no sign-up needed. Progress is saved to this device — you can register later in Settings to unlock friend features (coming soon)",
+      "guestError": "Couldn't enter the game — try again",
+      "dividerLabel": "or",
+      "loginTab": "Log in",
+      "registerTab": "Register"
+    },
+    "login": {
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "Your password",
+      "submitButton": "Log in",
+      "submitting": "Logging in...",
+      "badCredentials": "Incorrect email or password",
+      "genericError": "Couldn't log in — try again"
+    },
+    "register": {
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "Choose a password",
+      "displayNameLabel": "Display name (optional)",
+      "displayNamePlaceholder": "Your nickname",
+      "displayNameHint": "Shown to friends in the friend system (coming soon)",
+      "submitButton": "Register",
+      "submitting": "Registering...",
+      "emailTaken": "That email is already registered",
+      "alreadyRegistered": "This account is already registered",
+      "genericError": "Couldn't register — try again"
+    },
+    "account": {
+      "groupTitle": "My account",
+      "loading": "Loading account info...",
+      "loadError": "Couldn't load account info",
+      "retryButton": "Retry",
+      "emailLabel": "Email",
+      "displayNameLabel": "Display name",
+      "friendCodeLabel": "Friend code",
+      "copyButton": "Copy",
+      "copied": "Copied!",
+      "logoutButton": "Log out",
+      "logoutWarning": "Logging out returns this device to a fresh guest — if you haven't registered yet, your current progress won't follow you",
+      "logoutCancel": "Cancel",
+      "logoutConfirm": "Confirm log out",
+      "loggingOut": "Logging out...",
+      "guestPitch": "You're playing as a guest — register to unlock friend features (coming soon). Your current progress binds to the new account right away, nothing is lost",
+      "switchAccountHint": "Already have an account? You can log in with it instead — but any unregistered progress on this device won't follow unless you register first",
+      "switchAccountLink": "Log in with another account"
+    }
+  },
   "world": {
     "zoneFarm": "Zone {stage}",
     "zoneTown": "Town",
