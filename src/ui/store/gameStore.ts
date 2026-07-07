@@ -38,6 +38,7 @@ import type {
   Phase,
   ShopItemId,
   StatKey,
+  TownNpcId,
   WorldLocation,
   ZoneKind,
 } from "@/engine";
@@ -231,6 +232,17 @@ export interface ShopSummary {
   ready: { hpPotion: boolean; manaPotion: boolean };
 }
 
+/**
+ * Town NPCs phase 3 (final): which of the two named town actors currently has
+ * its dialog panel open (`ShopPanel` for pahpu / `RefinePanel` for lungdueng),
+ * or `null`. Deliberately a single-panel field (only one NPC dialog can be
+ * open at once — "one mental model per feature") owned by the store so BOTH
+ * the tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
+ * own) and the refine dock shortcut (`RefineButton.tsx`) can open it, and
+ * `TownNpcPanelHost.tsx` can auto-close it the instant the live snapshot's
+ * `npcInRange` says the hero has walked out of range. */
+export type TownPanelId = "pahpu" | "lungdueng";
+
 /** The throttled snapshot shape pushed by the integration loop. */
 export interface EngineSnapshot {
   gold: number;
@@ -261,6 +273,26 @@ export interface EngineSnapshot {
    * transactions; the engine just carries the count, see `HudState.materials`'s
    * doc). */
   materials: number;
+  /** Town NPCs phase 3 (final): per-NPC "is the solo hero within talk range"
+   * read, straight off the engine's pure `npcInRange(state, id)` — see
+   * `GameClient.tsx`'s `buildSnapshot`. Drives the tap-to-talk pointer flow's
+   * approach-vs-talk branch is decided LIVE off engine state (not this
+   * throttled copy), but this is what the HUD (`TownNpcPanelHost.tsx`'s
+   * auto-close watch, `RefineButton.tsx`'s dock shortcut) reads every sync. */
+  npcInRange: Record<TownNpcId, boolean>;
+  /** Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — read straight
+   * off the engine's pure `tier3FrontierLocked(state)`: the solo hero holds
+   * the tier-3 quest but the tundra grant isn't enterable yet (map3's boss
+   * room not persist-unlocked). Drives the quest card's locked kill-row copy
+   * (`GoalLadder.tsx`'s `ClassQuestCard`) and the guide-me gated branch
+   * (`ui/questGuide.ts`). Always `false` outside that one narrow window. */
+  tier3FrontierLocked: boolean;
+  /** The solo hero's deepest PERSIST-unlocked farm zone — read straight off
+   * the engine's pure `deepestUnlockedFarm(state)`, the player's REAL
+   * progression frontier. Guide-me routes here while `tier3FrontierLocked`
+   * (map4 z1 isn't actually walkable yet), same one-way "engine computes, store
+   * just carries it" pattern as `npcInRange`. */
+  deepestUnlockedFarm: WorldLocation;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -832,6 +864,20 @@ export interface HudState {
   unlockedZones: Record<string, number>;
   /** M7.6 ตีบวก material counter — see `EngineSnapshot.materials`'s doc. */
   materials: number;
+  /** Town NPCs phase 3 (final) — see `EngineSnapshot.npcInRange`'s doc. */
+  npcInRange: Record<TownNpcId, boolean>;
+  /** Tier-3 frontier gate — see `EngineSnapshot.tier3FrontierLocked`'s doc. */
+  tier3FrontierLocked: boolean;
+  /** The hero's real progression frontier — see `EngineSnapshot.deepestUnlockedFarm`'s doc. */
+  deepestUnlockedFarm: WorldLocation;
+
+  // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
+  /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
+   * doc. Set by the tap-to-talk pointer flow (`GameClient.tsx`) or the refine
+   * dock shortcut (`RefineButton.tsx`); auto-cleared by `TownNpcPanelHost.tsx`
+   * the instant the throttled snapshot says the hero left that NPC's range
+   * (or left town outright). */
+  activeTownPanel: TownPanelId | null;
 
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
@@ -869,6 +915,29 @@ export interface HudState {
    * always displays `announcementQueue[0]` and shifts it off after its
    * display timer. Capped at `MAX_ANNOUNCEMENT_QUEUE`. */
   announcementQueue: AnnouncementEntry[];
+
+  // ---- mid-session "new patch deployed" banner (owner-approved feature) —
+  // see `ui/updateBanner.ts` for the pure decision logic + `UpdateBanner.tsx`
+  // for the presentation. Transport is the existing autosave/boot save-route
+  // responses (no extra requests, no websockets — see `@/server/buildId`). ----
+  /** The server's build id, as read off the latest `/api/save` response
+   * (GET at boot, POST on the autosave cadence), or `null` before the first
+   * one has landed. Compared against this client's own inlined
+   * `CLIENT_BUILD_ID` by `resolveUpdateBannerDecision`. */
+  serverBuildId: string | null;
+  /** Dismiss bookkeeping for the update banner — `null`/`null` if never
+   * dismissed. Scoped to the SPECIFIC mismatched server build id so a NEWER
+   * deploy landing during the cooldown always shows immediately (see
+   * `resolveUpdateBannerDecision`'s doc). */
+  updateBannerDismissedAt: number | null;
+  updateBannerDismissedForId: string | null;
+  /** One-shot intent (same "the UI dispatches, `GameClient`'s loop drains it"
+   * shape as `pendingInput`, generalized to this app-level browser action):
+   * flipped by the update banner's button tap; `GameClient.tsx` subscribes to
+   * this transition to flush a final save (via the SAME sendBeacon path used
+   * on tab-hide) and THEN `location.reload()` — never reload without the
+   * flush. Never reset back to `false` (the page reloads immediately after). */
+  updateReloadRequested: boolean;
 
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted UI preference,
   // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
@@ -1070,6 +1139,14 @@ export interface HudState {
   /** Queue a manual play (M7.8) cancel of the active move/attack command. */
   queueCancelCommand: () => void;
 
+  // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
+  /** Open `panel`'s dialog (last-wins — talking to the other NPC or the dock
+   * shortcut always wins over whatever was open). */
+  openTownPanel: (panel: TownPanelId) => void;
+  /** Close whichever NPC dialog is open (✕ button, or `TownNpcPanelHost.tsx`'s
+   * auto-close-on-walk-away watch). No-op if already `null`. */
+  closeTownPanel: () => void;
+
   // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
   // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
   // above) ----
@@ -1120,6 +1197,17 @@ export interface HudState {
    * display timer, advancing to the next queued one (if any). */
   shiftAnnouncementQueue: () => void;
 
+  // ---- mid-session "new patch deployed" banner ----
+  /** `GameClient.tsx`-only: record the build id off a fresh `/api/save`
+   * response (GET or POST). */
+  setServerBuildId: (id: string | null) => void;
+  /** `UpdateBanner.tsx`-only: dismiss the banner for the CURRENT mismatched
+   * server build id (see `updateBannerDismissedForId`'s doc). */
+  dismissUpdateBanner: (forId: string) => void;
+  /** `UpdateBanner.tsx`-only: request the flush-then-reload (see
+   * `updateReloadRequested`'s doc). */
+  requestReload: () => void;
+
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
   setAutoSellCommon: (action: AutoSellAction) => void;
   setAutoSellRare: (action: AutoSellAction) => void;
@@ -1168,6 +1256,10 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoHunt: true,
   unlockedZones: {},
   materials: 0,
+  npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+  tier3FrontierLocked: false,
+  deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
+  activeTownPanel: null,
 
   inventory: [],
   dropFeed: [],
@@ -1177,6 +1269,11 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   myCharacterId: null,
   announcementQueue: [],
+
+  serverBuildId: null,
+  updateBannerDismissedAt: null,
+  updateBannerDismissedForId: null,
+  updateReloadRequested: false,
 
   // Safe defaults pre-hydration; a mount effect (`SettingsPanel`'s bot/auto-sell
   // section) applies the persisted values once via `hydrateAutoSellRules` —
@@ -1390,6 +1487,9 @@ export const useGameStore = create<HudState>((set, get) => ({
   queueCancelCommand: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
 
+  openTownPanel: (panel) => set({ activeTownPanel: panel }),
+  closeTownPanel: () => set({ activeTownPanel: null }),
+
   setInventory: (items) => set({ inventory: items }),
   mergeInventory: (claimed) =>
     set((s) => ({ inventory: mergeClaimedItems(s.inventory, claimed) })),
@@ -1449,6 +1549,11 @@ export const useGameStore = create<HudState>((set, get) => ({
     }),
   shiftAnnouncementQueue: () =>
     set((s) => ({ announcementQueue: s.announcementQueue.slice(1) })),
+
+  setServerBuildId: (id) => set({ serverBuildId: id }),
+  dismissUpdateBanner: (forId) =>
+    set({ updateBannerDismissedAt: Date.now(), updateBannerDismissedForId: forId }),
+  requestReload: () => set({ updateReloadRequested: true }),
 
   setAutoSellCommon: (action) =>
     set((s) => {

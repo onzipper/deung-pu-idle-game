@@ -88,6 +88,16 @@ export {
   // surfaces without a persisted unlock.
   questGrantsZoneAccess,
   effectiveUnlockedZones,
+  // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ"): `tier3FrontierLocked` is the UI
+  // read for "quest held but the tundra grant isn't enterable yet" (map3 boss room not
+  // persist-unlocked) — the quest card shows "ไต่แมพ 3 ให้ถึงประตูบอสก่อน" and guide-me routes to
+  // `deepestUnlockedFarm` (the player's real progression frontier) instead of warping to map4.
+  tier3FrontierLocked,
+  deepestUnlockedFarm,
+  // "Quest leads" routing (M7.95): the single derivation every idle-automation path
+  // (death auto-return, bot town-trip return, auto-advance guard) uses to prefer the
+  // active evolution quest's granted frontier over the ordinary lastFarmZone.
+  botFarmTarget,
   firstFarmLocation,
   type Zone,
   type WorldNav,
@@ -110,6 +120,11 @@ export {
 // pure reads. The bots run ONLY through `step()` (deterministic, engine-side); the
 // mutator is the `setBotSettings` FrameInput intent, so it stays internal.
 export { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
+
+// Town NPC anchors (M6 town NPCs phase 2): the ENGINE owns the geometry (CONFIG.townNpcs)
+// so render derives its rigs from `townNpcConfig` and phase-3 UI gates tap-to-talk on the
+// pure `npcInRange(state, id)` read — the layer rule holds (engine never imports render).
+export { npcInRange, townNpcConfig, type TownNpcAnchor } from "@/engine/systems/townNpcs";
 
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure

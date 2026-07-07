@@ -50,6 +50,7 @@ export function useContextualTips(): ContextualTipController {
   const autoCast = useGameStore((s) => s.autoCast);
   const autoAllocate = useGameStore((s) => s.autoAllocate);
   const autoHunt = useGameStore((s) => s.autoHunt);
+  const inTown = useGameStore((s) => s.world.kind === "town");
   const heroes = useGameStore((s) => s.heroes);
 
   const snapshot = toOnboardingSnapshot({
@@ -60,6 +61,7 @@ export function useContextualTips(): ContextualTipController {
     autoCast,
     autoAllocate,
     autoHunt,
+    inTown,
     heroes,
   });
   const prevSnapshotRef = useRef<OnboardingSnapshot>(snapshot);
@@ -95,6 +97,7 @@ export function useContextualTips(): ContextualTipController {
     autoCast,
     autoAllocate,
     autoHunt,
+    inTown,
     heroes,
     hasSyncedOnce,
     ftueCompleted,

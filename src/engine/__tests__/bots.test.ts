@@ -13,6 +13,8 @@ import {
   shopStageOf,
   shopPriceAt,
   heroMaxHpOf,
+  npcInRange,
+  townNpcConfig,
   type FrameInput,
   type GameState,
 } from "@/engine";
@@ -194,22 +196,21 @@ describe("potion-restock bot", () => {
   it("warps with a held return scroll (scroll-else-walk branch)", () => {
     const s = farmingBot();
     s.consumables.returnScroll = 2;
-    // With a scroll held the trip warps instantly (no botWalkSeconds transit): the
-    // scroll is consumed and town is reached within a couple of steps.
-    let usedScrollTownStep = -1;
-    for (let i = 0; i < 200; i++) {
-      const before = s.consumables.returnScroll;
-      step(s, {});
-      if (s.events.some((e) => e.type === "townArrived")) {
-        // The scroll was spent to warp (one consumed), then the trip topped it back
-        // up toward scrollReserve (3) during the same town step.
-        expect(before).toBeLessThan(3); // warp had consumed one before arrival buying
-        usedScrollTownStep = i;
-        break;
-      }
-    }
-    expect(usedScrollTownStep).toBeGreaterThanOrEqual(0);
-    expect(s.consumables.returnScroll).toBe(3); // restocked to reserve
+    // With a scroll held the trip warps instantly to town (no botWalkSeconds transit) —
+    // the scroll is consumed on departure. It then WALKS to the merchant (town NPCs
+    // phase 2) before transacting, so townArrived fires once the hero reaches ป้าปุ๊.
+    const arrived = runUntilInput(
+      s,
+      {},
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      600,
+    );
+    expect(arrived).toBe(true);
+    // The warp had consumed one scroll before the top-up buy at the NPC restocks it.
+    expect(s.consumables.returnScroll).toBe(3); // restocked to reserve at the merchant
+    // The transaction opened AT the merchant (npcTrade), in range of ป้าปุ๊.
+    expect(s.events.some((e) => e.type === "npcTrade")).toBe(true);
+    expect(npcInRange(s, "npc:pahpu")).toBe(true);
   });
 
   it("walks (no scroll) when none is held", () => {
@@ -444,10 +445,18 @@ describe("sell-trip bot (inventoryCount trigger)", () => {
     const s = sellBotState();
     stepCounting(s, 6000, INVENTORY_CAP); // latched
     expect(s.sellTripWatermark).toBe(INVENTORY_CAP);
-    // The settings intent clears the latch EARLY in the same step, so with a
-    // scroll held the re-trip warps + arrives within this very step.
+    // The settings intent clears the latch EARLY in this step, so with a scroll held the
+    // re-trip warps to town this very step; the hero then WALKS to the merchant (town NPCs
+    // phase 2) before townArrived fires. The trip resumes — the latch is not permanent.
     step(s, { inventoryCount: INVENTORY_CAP, setBotSettings: {} });
-    expect(s.events.some((e) => e.type === "townArrived")).toBe(true);
+    expect(s.sellTripWatermark).toBeNull(); // latch cleared
+    const retripped = runUntilInput(
+      s,
+      { inventoryCount: INVENTORY_CAP },
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      600,
+    );
+    expect(retripped).toBe(true);
   });
 });
 
@@ -545,6 +554,110 @@ describe("opportunistic sell sweep (all enabled chores per trip)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Bot walk to the merchant NPC (M6 town NPCs phase 2)
+// ---------------------------------------------------------------------------
+
+describe("bot walks to the merchant before transacting (town NPCs phase 2)", () => {
+  /** A restock-bot farmer with a scroll held (so the trip WARPS to town, isolating the
+   * in-town walk from the to-town transit). */
+  function warpRestockBot(): GameState {
+    const s = initGameState(1, soloSave("swordsman", 3));
+    unlockAll(s);
+    s.gold = 100_000;
+    s.bot = { ...defaultBotSettings(), enabled: true, hpPotionTarget: 15, mpPotionTarget: 15, scrollReserve: 3 };
+    s.consumables.returnScroll = 2; // warp branch — arrives in town, then walks
+    return s;
+  }
+
+  it("arrives in town, walks to ป้าปุ๊, and only THEN arms transactions", () => {
+    const s = warpRestockBot();
+    // Reach town via the warp; the in-town walk begins (botWalk set, no chores yet).
+    const inTown = runUntilInput(s, {}, (st) => st.botWalk !== null, 600);
+    expect(inTown).toBe(true);
+    expect(zoneAt(s.location).kind).toBe("town");
+    // Placed at the town entry (right gate), OUTSIDE the merchant's radius.
+    expect(npcInRange(s, "npc:pahpu")).toBe(false);
+    expect(s.consumables.hpPotion).toBe(0); // NO restock while still walking
+    expect(s.events.some((e) => e.type === "townArrived")).toBe(false);
+
+    // As it walks, hero.x approaches the anchor and NO transaction arms mid-walk.
+    const startX = s.heroes[0].x;
+    for (let i = 0; i < 5; i++) step(s, {});
+    expect(s.heroes[0].x).toBeLessThan(startX); // walked left toward x=230
+    expect(s.events.some((e) => e.type === "townArrived")).toBe(false); // still not armed
+
+    // The walk completes: within the radius the window opens (npcTrade + townArrived +
+    // restock), and the walk state is cleared.
+    const armed = runUntilInput(
+      s,
+      {},
+      (st) => st.events.some((e) => e.type === "npcTrade"),
+      600,
+    );
+    expect(armed).toBe(true);
+    expect(npcInRange(s, "npc:pahpu")).toBe(true);
+    expect(s.botWalk).toBeNull();
+    const trade = s.events.find((e) => e.type === "npcTrade");
+    expect(trade && "npcId" in trade && trade.npcId).toBe("npc:pahpu");
+    expect(s.events.some((e) => e.type === "townArrived")).toBe(true);
+    expect(s.consumables.hpPotion).toBe(15); // restocked at the NPC
+  });
+
+  it("the walk fits comfortably: town-entry -> anchor takes only a few seconds", () => {
+    const s = warpRestockBot();
+    runUntilInput(s, {}, (st) => st.botWalk !== null, 600);
+    let walkSteps = 0;
+    while (s.botWalk !== null && walkSteps < 600) {
+      step(s, {});
+      walkSteps++;
+    }
+    expect(s.botWalk).toBeNull();
+    // Right gate (876) -> within x=230±42 at huntSpeed 175 ≈ 3.5s. A comfortable margin
+    // under any trip budget; documents the added trip cost.
+    expect(walkSteps).toBeLessThan(240); // < 4s
+    expect(walkSteps).toBeGreaterThan(120); // a real, visible walk (> 2s)
+  });
+
+  it("completes the whole trip (walk -> restock -> home) with no stall", () => {
+    const s = warpRestockBot();
+    const home = runUntilInput(
+      s,
+      {},
+      (st) => st.consumables.hpPotion === 15 && st.traveling === null && zoneAt(st.location).kind === "farm",
+      3000,
+    );
+    expect(home).toBe(true);
+  });
+
+  it("a manual command issued mid-trip does not wedge the walk (trip still completes)", () => {
+    const s = warpRestockBot();
+    runUntilInput(s, {}, (st) => st.botWalk !== null, 600); // walking in town
+    // Spam a manual moveTo the OTHER way + a cancel every step while the bot walks — the
+    // town phase never applies commands, and the bot walk drives hero.x directly, so the
+    // trip must complete regardless (no wedged botWalk state).
+    const armed = runUntilInput(
+      s,
+      { moveTo: { x: townNpcConfig("npc:pahpu").x + 400 }, cancelCommand: true },
+      (st) => st.events.some((e) => e.type === "npcTrade"),
+      600,
+    );
+    expect(armed).toBe(true);
+    expect(npcInRange(s, "npc:pahpu")).toBe(true);
+    expect(s.consumables.hpPotion).toBe(15);
+  });
+
+  it("refine smith ลุงดึ๋ง is never a bot target (merchant only)", () => {
+    const s = warpRestockBot();
+    const armed = runUntilInput(s, {}, (st) => st.events.some((e) => e.type === "npcTrade"), 600);
+    expect(armed).toBe(true);
+    // The bot stopped at the merchant, not the smith (x=560).
+    const trade = s.events.find((e) => e.type === "npcTrade");
+    expect(trade && "npcId" in trade && trade.npcId).toBe("npc:pahpu");
+    expect(npcInRange(s, "npc:lungdueng")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Fast travel
 // ---------------------------------------------------------------------------
 
@@ -589,10 +702,10 @@ describe("fast travel", () => {
     expect(ev && "reason" in ev && ev.reason).toBe("locked");
   });
 
-  it("rejects when a mob is engaging the hero (blocked: aggro)", () => {
+  it("STARTS the channel even while a mob is engaged (permissive — owner UX 2026-07-08)", () => {
     const s = initGameState(1, soloSave("swordsman", 3));
     unlockAll(s);
-    // Seat an engaged mob adjacent to the hero.
+    // Seat an engaged mob adjacent to the hero — no longer blocks the channel.
     s.enemies = [
       {
         id: 999,
@@ -616,25 +729,70 @@ describe("fast travel", () => {
     ];
     s.spawnPaused = true;
     step(s, { fastTravel: { mapId: "map1", zoneIdx: 5 } });
-    expect(s.fastTravelCast).toBeNull();
-    const ev = s.events.find((e) => e.type === "fastTravelBlocked");
-    expect(ev && "reason" in ev && ev.reason).toBe("aggro");
+    expect(s.fastTravelCast).not.toBeNull(); // channel began under threat
+    expect(s.events.some((e) => e.type === "fastTravelCastStart")).toBe(true);
+    expect(s.events.some((e) => e.type === "fastTravelBlocked")).toBe(false);
   });
 
-  it("cancels the channel when the hero takes damage (blocked: damaged)", () => {
+  it("does NOT cancel the channel when the hero takes damage — it plays out and warps", () => {
     const s = initGameState(1, soloSave("swordsman", 3));
     unlockAll(s);
     s.spawnPaused = true;
     s.enemies = [];
     step(s, { fastTravel: { mapId: "map1", zoneIdx: 5 } });
     expect(s.fastTravelCast).not.toBeNull();
-    // Damage the hero mid-channel.
-    s.heroes[0].hp -= 10;
+    // Chip the hero every step during the channel — must NOT interrupt the warp.
+    const done = runUntilInput(
+      s,
+      {},
+      (st) => {
+        st.heroes[0].hp = Math.max(1, st.heroes[0].hp - 3); // survive, keep taking hits
+        return st.fastTravelCast === null;
+      },
+      500,
+    );
+    expect(done).toBe(true);
+    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 5 }); // arrived despite damage
+    expect(s.events.some((e) => e.type === "fastTravelArrive")).toBe(true);
+    expect(s.events.some((e) => e.type === "fastTravelBlocked")).toBe(false);
+  });
+
+  it("cancels cleanly (blocked: dead, no stuck cast) if the hero DIES mid-channel", () => {
+    const s = initGameState(1, soloSave("swordsman", 3));
+    unlockAll(s);
+    s.spawnPaused = true;
+    s.enemies = [];
+    step(s, { fastTravel: { mapId: "map1", zoneIdx: 5 } });
+    expect(s.fastTravelCast).not.toBeNull();
+    // Seat a lethal engaged mob that lands its blow this step.
+    s.heroes[0].hp = 1;
+    s.enemies = [
+      {
+        id: 998,
+        kind: "normal",
+        x: s.heroes[0].x + 5,
+        y: 200,
+        hp: 100,
+        maxHp: 100,
+        atk: 9999,
+        speed: 0,
+        size: 1,
+        behavior: "melee",
+        range: 40,
+        cd: 0,
+        engageOffset: 0,
+        homeX: s.heroes[0].x + 5,
+        aggressive: false,
+        aggroRadius: 0,
+        engaged: true,
+      },
+    ];
     step(s, {});
-    expect(s.fastTravelCast).toBeNull();
-    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 3 }); // did NOT travel
+    expect(s.fastTravelCast).toBeNull(); // no stuck channel state
+    expect(s.heroes[0].dead).toBe(true);
+    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 3 }); // did NOT warp
     const ev = s.events.find((e) => e.type === "fastTravelBlocked");
-    expect(ev && "reason" in ev && ev.reason).toBe("damaged");
+    expect(ev && "reason" in ev && ev.reason).toBe("dead");
   });
 
   it("rejects a boss-room / same-zone / mid-transit target", () => {

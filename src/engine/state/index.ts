@@ -40,6 +40,8 @@ import {
   farmLocationForStage,
   unlockUpTo,
   zoneAt,
+  isZoneUnlocked,
+  deepestUnlockedFarm,
   type TravelState,
 } from "@/engine/systems/world";
 import type { GameEvent } from "@/engine/state/events";
@@ -158,6 +160,16 @@ export interface GameState {
    */
   botPending: { restock: boolean; sell: boolean } | null;
   /**
+   * An in-town bot WALK to the merchant NPC (M6 town NPCs phase 2), or null. After a
+   * bot town TRIP arrives, the hero is placed at the town entry and walks (deterministic,
+   * huntSpeed) to ป้าปุ๊'s anchor before ANY transaction arms — `restock`/`sell` carry the
+   * trip's chores until the hero is within the NPC's interaction radius, at which point
+   * `doBotBusiness` runs (restock + sell sweep, `npcTrade` + `townArrived`). Transient —
+   * NEVER persisted (a reload standing mid-walk simply resumes in `location`, no chores
+   * lost that matter). See systems/bots.ts.
+   */
+  botWalk: { restock: boolean; sell: boolean } | null;
+  /**
    * A SELL trip's in-town dwell (M7.5 anti-warp-loop fix), or null. While
    * non-null the bot stands in town waiting for the client's async sell to
    * shrink the fed `inventoryCount` below the cap (then returns early) or for
@@ -180,15 +192,15 @@ export interface GameState {
   sellTripWatermark: number | null;
   /**
    * An in-flight FAST-TRAVEL channel (M7.5), or null. The hero stands still while it
-   * counts down; damage cancels it, completion warps to the target's gate-side x.
-   * `lastHp` tracks the hero's HP to detect a mid-channel hit. Transient — NEVER
-   * persisted (a reload resumes standing in `location`).
+   * counts down. Owner UX (2026-07-08): the channel is NOT damage-cancellable — it
+   * plays out and warps unless the hero DIES mid-channel; completion warps to the
+   * target's gate-side x. Transient — NEVER persisted (a reload resumes standing in
+   * `location`).
    */
   fastTravelCast: {
     targetMapId: string;
     targetZoneIdx: number;
     timer: number;
-    lastHp: number;
   } | null;
   /**
    * Held NPC-consumable stack counts (M6 "เมืองหลัก"). Persisted (SAVE v9).
@@ -492,6 +504,7 @@ export function initGameState(
     // (unchanged behaviour for a fresh/pre-v12 start).
     autoHunt: typeof save?.autoHunt === "boolean" ? save.autoHunt : true,
     botPending: null,
+    botWalk: null,
     botDwell: null,
     sellTripWatermark: null,
     fastTravelCast: null,
@@ -576,6 +589,24 @@ export function initGameState(
     // tier-3 hero has no quest; a saved accepted quest is validated against the tier's
     // current quest def (unknown/foreign or un-accepted -> re-offer by leaving it null).
     h.quest = normalizeHeroQuest(h.cls, h.tier, save.hero.quest);
+
+    // Boot-time strand guard (owner rule 2026-07-07 "ห้ามข้ามแมพ"): the tier-3 tundra grant
+    // now requires map3's boss room to be persist-unlocked. A save written under the OLDER,
+    // looser grant could sit the hero in the map4 frontier while map3 isn't cleared — now a
+    // no-longer-accessible zone. Relocate such a hero to a reachable farm (their real frontier
+    // via `deepestUnlockedFarm`, else lastFarmZone) so it can never strand. No SAVE bump: this
+    // is a load-time normalisation of a transient position, exactly like `normalizeLocation`.
+    if (!isZoneUnlocked(state, state.location)) {
+      const back = state.lastFarmZone;
+      const safe =
+        zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)
+          ? back
+          : deepestUnlockedFarm(state);
+      state.location = { mapId: safe.mapId, zoneIdx: safe.zoneIdx };
+      state.stage = zoneAt(safe).stage;
+      state.lastFarmZone = { mapId: safe.mapId, zoneIdx: safe.zoneIdx };
+      state.kills = save.zoneKills?.[`${safe.mapId}:${safe.zoneIdx}`] ?? 0;
+    }
   }
   return state;
 }

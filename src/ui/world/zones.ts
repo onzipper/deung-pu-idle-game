@@ -99,6 +99,14 @@ export function firstFarmZone(mapId: string): UiZone | null {
   return farms.length > 0 ? farms[0] : null;
 }
 
+/** Looks up the full `UiZone` (kind/stage) for a bare `{mapId, zoneIdx}`
+ * address — e.g. the engine's `WorldLocation` shape (`deepestUnlockedFarm`).
+ * `null` only if the address doesn't resolve to any known zone (shouldn't
+ * normally happen for an engine-derived, always-valid location). */
+export function zoneByLocation(loc: { mapId: string; zoneIdx: number }): UiZone | null {
+  return UI_WORLD_ZONES.find((z) => z.mapId === loc.mapId && z.zoneIdx === loc.zoneIdx) ?? null;
+}
+
 /** The highest UNLOCKED farm zone of `mapId` (or `null` if none are unlocked
  * yet). Used to guide a player toward a KILL quest objective — the deepest
  * zone they can already reach, so the guide never sends them somewhere

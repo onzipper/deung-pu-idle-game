@@ -198,6 +198,11 @@ function ClassQuestCard({
   const pushNotice = useGameStore((s) => s.pushNotice);
   const world = useGameStore((s) => s.world);
   const unlockedZones = useGameStore((s) => s.unlockedZones);
+  // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — read-only
+  // engine derivations, same self-contained store-read pattern as `world`/
+  // `unlockedZones` above. See `EngineSnapshot.tier3FrontierLocked`'s doc.
+  const frontierLocked = useGameStore((s) => s.tier3FrontierLocked);
+  const deepestFarm = useGameStore((s) => s.deepestUnlockedFarm);
   const channeling = useGameStore((s) => s.fastTravelChannel !== null);
   const challengeBoss = useGameStore((s) => s.challengeBoss);
   const acceptQuest = useGameStore((s) => s.acceptQuest);
@@ -272,9 +277,14 @@ function ClassQuestCard({
   // from where the hero is currently standing — explain WHY (re-fight an
   // earlier map's boss) rather than just saying "go there".
   const isBacktrack = quest.bossMapId !== null && quest.bossMapId !== world.mapId;
-  const killHint = quest.killMapId
-    ? tq("guideKillScoped", { map: mapLabel(quest.killMapId) })
-    : tq("guideKillAny");
+  // Tier-3 frontier GATE override (owner rule 2026-07-07): while gated, the
+  // kill row's location line ignores the normal scoped/unscoped copy — map4
+  // z1 isn't actually walkable yet (kills stay 0 anyway, see module doc).
+  const killHint = frontierLocked
+    ? tq("guideKillGatedTier3")
+    : quest.killMapId
+      ? tq("guideKillScoped", { map: mapLabel(quest.killMapId) })
+      : tq("guideKillAny");
   const bossGuideHint = isTier3BossQuest
     ? tq("guideBossTier3Hint")
     : isBacktrack
@@ -337,6 +347,8 @@ function ClassQuestCard({
     boss: { mapId: quest.bossMapId, done: quest.bossDone },
     currentMapId: world.mapId,
     unlockedZones,
+    frontierLocked,
+    deepestFarm,
   });
   // Priority: the shared dead/channeling/traveling chain first (audit #4 —
   // "disabled reasons matching RefinePanel's pattern"), then the guide-
@@ -350,6 +362,7 @@ function ClassQuestCard({
     queueFastTravel({ mapId: guideTarget.zone.mapId, zoneIdx: guideTarget.zone.zoneIdx });
     if (guideTarget.kind === "boss") pushNotice("guideBossDoor");
     else if (guideTarget.kind === "bossTier3") pushNotice("guideBossTier3");
+    else if (guideTarget.kind === "gated") pushNotice("guideGatedTier3Frontier");
   };
 
   // M7.9b challenge affordance: queues the SAME `challengeBoss` intent as the
@@ -626,7 +639,12 @@ export function GoalLadder() {
 
   const { current, rungs } = buildGoalLadder({
     hero: hero
-      ? { tier: hero.tier, quest: hero.quest ? { complete: hero.quest.complete } : null }
+      ? {
+          tier: hero.tier,
+          quest: hero.quest
+            ? { accepted: hero.quest.accepted, complete: hero.quest.complete }
+            : null,
+        }
       : null,
     phase,
     bossReady,

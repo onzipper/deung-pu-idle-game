@@ -157,6 +157,18 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
         (h, i) => h.unlockedSlots >= 4 && (prev.heroes[i]?.unlockedSlots ?? 0) < 4,
       ),
   },
+  /**
+   * `townNpcTapHint` (Town NPCs phase 3, final): the first time the player
+   * arrives in town after this feature ships — explains that ป้าปุ๊/ลุงดึ๋ง are
+   * now tap-again-to-talk (approach on the first tap, dialog opens on the
+   * second) instead of an always-open panel. No anchor (points at the town
+   * NPCs on the canvas itself, not a HUD control — same as `manualPlayHint`).
+   */
+  {
+    id: "townNpcTapHint",
+    mood: "excited",
+    trigger: (prev, next) => !prev.inTown && next.inTown,
+  },
 ];
 
 /**

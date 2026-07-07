@@ -92,6 +92,9 @@ function makeSnapshot(
     autoHunt: true,
     unlockedZones: {},
     materials: 0,
+    npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+    tier3FrontierLocked: false,
+    deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
   };
 }
 

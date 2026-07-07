@@ -54,6 +54,7 @@ import {
   canUseConsumable,
   combatPower,
   createAccumulator,
+  deepestUnlockedFarm,
   drainAccumulator,
   evolutionQuestFor,
   initGameState,
@@ -61,13 +62,16 @@ import {
   isTier3BossObjectiveActive,
   learnedSkills,
   migrate,
+  npcInRange,
   repairHeroClass,
   primaryStat,
   shopPriceAt,
   shopStageOf,
   skillCdOf,
   step,
+  tier3FrontierLocked,
   toSaveData,
+  townNpcConfig,
   unlockedAutoSlotCount,
   worldNav,
   effectiveUnlockedZones,
@@ -77,6 +81,7 @@ import {
   type Hero,
   type HeroClass,
   type SaveData,
+  type TownNpcId,
 } from "@/engine";
 import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
@@ -102,6 +107,7 @@ import {
   type HeroSummary,
   type ShopSummary,
   type SkillSummary,
+  type TownPanelId,
   type UiConfig,
 } from "@/ui/store/gameStore";
 import { resolveCatchUp } from "./catchUp";
@@ -115,6 +121,11 @@ const MAX_CLAIM_BATCH = 64;
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
+
+/** Town NPCs phase 3 (final): how many rotating greeting lines each NPC has
+ * (`townNpc.<id>.greetings.greeting1..N` in messages/*.json) — kept as one
+ * shared constant since both NPCs carry the same count. */
+const NPC_GREETING_COUNT = 3;
 
 /**
  * Clamp per-frame elapsed wall time (tab-away, debugger pauses, dropped
@@ -185,6 +196,13 @@ async function waitForNonZeroSize(el: HTMLElement, maxFrames = 10): Promise<void
     if (el.clientWidth > 0 && el.clientHeight > 0) return;
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   }
+}
+
+/** Town NPCs phase 3 (final): maps the engine's `TownNpcId` union onto the
+ * store's shorter `TownPanelId` (which panel a given NPC opens — pahpu ->
+ * ShopPanel, lungdueng -> RefinePanel). */
+function townPanelOf(id: TownNpcId): TownPanelId {
+  return id === "npc:pahpu" ? "pahpu" : "lungdueng";
 }
 
 /** Precompute the learned-skill kit's display state (M5 skill framework v2). */
@@ -358,6 +376,18 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // M7.6 ตีบวก material counter — same one-way "engine carries it, store just
     // reflects it" pattern as `gold`.
     materials: state.materials,
+    // Town NPCs phase 3 (final): per-NPC talk-range read, straight off the
+    // engine's pure `npcInRange` — see `EngineSnapshot.npcInRange`'s doc.
+    npcInRange: {
+      "npc:pahpu": npcInRange(state, "npc:pahpu"),
+      "npc:lungdueng": npcInRange(state, "npc:lungdueng"),
+    },
+    // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — pure engine
+    // reads, same one-way "engine computes, store just carries it" pattern as
+    // `npcInRange`. Drives the quest card's locked kill-row copy + the guide-me
+    // gated branch (`ui/questGuide.ts`).
+    tier3FrontierLocked: tier3FrontierLocked(state),
+    deepestUnlockedFarm: deepestUnlockedFarm(state),
   };
 }
 
@@ -474,6 +504,14 @@ export function GameClient() {
   const tRef = useRef(t);
   tRef.current = t;
 
+  // Town NPCs phase 3 (final): rotating greeting/flavor lines for the
+  // tap-to-talk speech bubble + the bot's npcTrade flavor bubble. Same
+  // ref-captured pattern as `tRef` above (a mid-session locale switch must
+  // still pick up the right language without re-running the boot effect).
+  const tTownNpc = useTranslations("townNpc");
+  const tTownNpcRef = useRef(tTownNpc);
+  tTownNpcRef.current = tTownNpc;
+
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
   // log but this never does, React never hydrated even though scripts ran.
@@ -549,7 +587,21 @@ export function GameClient() {
     let botPrevTravelReason: string | null = null;
     let botPrevDwell = false;
     let botTownActivityUntil = 0;
+    // Town NPCs phase 3 (final): rotating greeting-line index per NPC (2-3
+    // lines each, see messages/*.json's `townNpc.<id>.greetings`) — bumped
+    // every tap-to-talk so repeat conversations don't feel like a broken
+    // record. Plain closure counters (cosmetic UI text pick only; never reads
+    // the engine's seeded RNG stream — CLAUDE.md reserves that for wave
+    // composition).
+    const npcGreetingIndex: Record<TownNpcId, number> = {
+      "npc:pahpu": 0,
+      "npc:lungdueng": 0,
+    };
     let autosaveTimer: ReturnType<typeof setInterval> | undefined;
+    // Mid-session "new patch deployed" banner: unsubscribe handle for the
+    // `updateReloadRequested` store subscription (registered once boot
+    // succeeds, alongside the other event listeners below).
+    let unsubscribeReload: (() => void) | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
@@ -846,6 +898,12 @@ export function GameClient() {
         } else if (ev.type === "fastTravelBlocked") {
           useGameStore.getState().clearFastTravelChannel();
           useGameStore.getState().pushNotice(`fastTravelBlocked.${ev.reason}`);
+        } else if (ev.type === "npcTrade") {
+          // Town NPCs phase 3 (final): flavor-only — the bot's transaction
+          // itself is already engine-side (systems/bots.ts); this NEVER opens
+          // `activeTownPanel` (the panel is a PLAYER dialog, not a ledger view).
+          const key = ev.npcId === "npc:pahpu" ? "pahpu" : "lungdueng";
+          renderer.showNpcSpeech(ev.npcId, tTownNpcRef.current(`${key}.botFlavor`));
         }
       }
 
@@ -887,13 +945,23 @@ export function GameClient() {
         keepalive: true,
       })
         .then((res) =>
-          res.ok ? (res.json() as Promise<{ announcements?: AnnouncementWire[] }>) : null,
+          res.ok
+            ? (res.json() as Promise<{
+                announcements?: AnnouncementWire[];
+                /** Mid-session "new patch deployed" banner — see the GET boot
+                 * handler above / `@/server/buildId` / `@/ui/updateBanner`. */
+                buildId?: string | null;
+              }>)
+            : null,
         )
         .then((json) => {
           // M7.9: the polling piggyback — every autosave response carries any
           // recent server-wide high-refine landing (no websockets this phase).
           if (json?.announcements) {
             useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
+          if (json?.buildId) {
+            useGameStore.getState().setServerBuildId(json.buildId);
           }
         })
         .catch(() => {
@@ -950,6 +1018,31 @@ export function GameClient() {
         });
     }
 
+    // Best-effort synchronous flush via `sendBeacon` — guaranteed to fire
+    // during unload where a normal `fetch` may be killed. Shared by the
+    // tab-hide handler below AND the mid-session update banner's "อัปเดตเลย"
+    // reload button (owner spec: "never reload without the flush" — see the
+    // `updateReloadRequested` subscription further down).
+    function flushSaveBeacon(): void {
+      const blob = new Blob([JSON.stringify(serializeWithUiConfig())], {
+        type: "application/json",
+      });
+      navigator.sendBeacon("/api/save", blob);
+
+      // Best-effort drop-claim flush via the same fire-and-forget beacon
+      // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
+      // accepted v1 loss (no response to merge into the inventory slice even
+      // if it lands) — documented tradeoff, see this function's doc comment.
+      if (pendingClaims.length > 0) {
+        const claimBlob = new Blob(
+          [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
+          { type: "application/json" },
+        );
+        navigator.sendBeacon("/api/items/claim", claimBlob);
+        pendingClaims = [];
+      }
+    }
+
     // On tab-hide (covers most real "closing the game" cases): sendBeacon is
     // guaranteed to flush during unload where a normal fetch may be killed.
     // ALSO doubles as the backgrounded-tab catch-up's hide/show boundary
@@ -958,23 +1051,7 @@ export function GameClient() {
     function onVisibility(): void {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
-        const blob = new Blob([JSON.stringify(serializeWithUiConfig())], {
-          type: "application/json",
-        });
-        navigator.sendBeacon("/api/save", blob);
-
-        // Best-effort drop-claim flush via the same fire-and-forget beacon
-        // mechanism. UNLIKE the save beacon, a lost claim beacon here is an
-        // accepted v1 loss (no response to merge into the inventory slice even
-        // if it lands) — documented tradeoff, see this function's doc comment.
-        if (pendingClaims.length > 0) {
-          const claimBlob = new Blob(
-            [JSON.stringify({ items: pendingClaims.slice(0, MAX_CLAIM_BATCH) })],
-            { type: "application/json" },
-          );
-          navigator.sendBeacon("/api/items/claim", claimBlob);
-          pendingClaims = [];
-        }
+        flushSaveBeacon();
         return;
       }
       if (document.visibilityState === "visible") handleReturnFromBackground();
@@ -998,6 +1075,19 @@ export function GameClient() {
     }
     arenaEl.addEventListener("pointerdown", onPointerDown);
 
+    // ---- Town NPCs phase 3 (final): tap-again-to-talk ------------------------
+    // A greeting-line bubble + opens that NPC's dialog panel (pahpu -> shop,
+    // lungdueng -> refine) via the store's `activeTownPanel` — see
+    // `TownNpcPanelHost.tsx`. Rotates through 2-3 i18n lines per NPC
+    // (`npcGreetingIndex` above) so repeat taps don't feel canned.
+    function talkToNpc(id: TownNpcId): void {
+      useGameStore.getState().openTownPanel(townPanelOf(id));
+      const key = id === "npc:pahpu" ? "pahpu" : "lungdueng";
+      const idx = npcGreetingIndex[id];
+      npcGreetingIndex[id] = (idx + 1) % NPC_GREETING_COUNT;
+      renderer.showNpcSpeech(id, tTownNpcRef.current(`${key}.greetings.greeting${idx + 1}`));
+    }
+
     // ---- M7.8 Manual Play: RO-style tap-to-move / tap-to-attack -------------
     // `click` normalizes a mouse click AND a touch tap (fires once, after
     // pointerup) — deliberately NOT hooked on `pointerdown` (that's the
@@ -1006,14 +1096,33 @@ export function GameClient() {
     // (`hitTestPointer`); this handler is the integration seam that turns the
     // result into a store intent, same as every other player input in this
     // file (drained once/frame above, never applied directly).
+    //
+    // Town NPCs phase 3 (final): `hitTestNpc` is checked FIRST while standing
+    // in town (a live enemy never coexists with the town zone, so there's no
+    // ordering ambiguity with `hitTestPointer`'s monster-wins-over-ground
+    // rule). Tap-again-to-talk: out of `npcInRange` -> approach (the same
+    // `moveTo` intent + ground-ping juice a plain ground tap gets, walking
+    // toward the NPC's anchor x); already in range (including a tap that
+    // lands in-range while mid-walk toward them) -> talk. The range check
+    // reads LIVE off the closure's `state` (not the throttled store snapshot)
+    // so it's never a frame stale.
     function onArenaClick(e: MouseEvent): void {
       if (!arenaEl) return;
       const rect = arenaEl.getBoundingClientRect();
-      const hit = renderer.hitTestPointer(
-        e.clientX - rect.left,
-        e.clientY - rect.top,
-        state,
-      );
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
+
+      const npcHit = renderer.hitTestNpc(canvasX, canvasY, state);
+      if (npcHit) {
+        if (npcInRange(state, npcHit.id)) {
+          talkToNpc(npcHit.id);
+        } else {
+          useGameStore.getState().queueMoveTo(townNpcConfig(npcHit.id).x);
+        }
+        return;
+      }
+
+      const hit = renderer.hitTestPointer(canvasX, canvasY, state);
       if (!hit) return;
       if (hit.kind === "monster") useGameStore.getState().queueAttackTarget(hit.id);
       else useGameStore.getState().queueMoveTo(hit.x);
@@ -1087,6 +1196,11 @@ export function GameClient() {
              * (last 5 min, LIMIT 10, newest-first) — same shape the autosave
              * POST response carries every ~30s thereafter. */
             announcements?: AnnouncementWire[];
+            /** Mid-session "new patch deployed" banner: the server's build id
+             * (see `@/server/buildId`), present on this boot response too —
+             * compared against this client's own inlined `CLIENT_BUILD_ID`
+             * (`@/ui/updateBanner`). */
+            buildId?: string | null;
           };
           // Server already migrated; pass through migrate() again defensively —
           // never trust a received save's shape/version (CLAUDE.md rule).
@@ -1105,6 +1219,9 @@ export function GameClient() {
           }
           if (json.announcements) {
             useGameStore.getState().ingestAnnouncementFeed(json.announcements);
+          }
+          if (json.buildId) {
+            useGameStore.getState().setServerBuildId(json.buildId);
           }
           if (json.offline) {
             offlineSeconds = json.offline.creditedSeconds;
@@ -1184,6 +1301,19 @@ export function GameClient() {
       document.addEventListener("visibilitychange", onVisibility);
       window.addEventListener("pageshow", onPageShow);
 
+      // Mid-session "new patch deployed" banner: the update button's ONLY
+      // entry point into this effect's closure — `UpdateBanner.tsx` just
+      // flips `updateReloadRequested` via a store action; this is the one
+      // place with access to `flushSaveBeacon`/the live engine state, same
+      // "UI dispatches an intent, the integration loop drains it" shape as
+      // `pendingInput`. Zustand's `subscribe` fires synchronously on `set()`.
+      unsubscribeReload = useGameStore.subscribe((next, prev) => {
+        if (next.updateReloadRequested && !prev.updateReloadRequested) {
+          flushSaveBeacon();
+          window.location.reload();
+        }
+      });
+
       lastTime = performance.now();
       lastActiveAt = Date.now();
       rafId = requestAnimationFrame(frame);
@@ -1202,6 +1332,7 @@ export function GameClient() {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
+      unsubscribeReload?.();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       arenaEl.removeEventListener("pointerdown", onPointerDown);

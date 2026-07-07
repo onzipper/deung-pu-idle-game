@@ -353,8 +353,8 @@ export function step(state: GameState, input: FrameInput = {}): GameState {
   if (!channeling) updateHeroes(state);
   updateProjectiles(state);
   resolveDeaths(state); // enemy kills / boss kill / death->town respawn / bossReady
-  checkZoneUnlock(state); // farm-zone quota met -> unlock the next zone (M6)
-  maybeAutoAdvance(state); // toggle-gated auto walk into the next unlocked farm zone
+  const unlockedNextFarm = checkZoneUnlock(state); // farm-zone quota met -> unlock next (M6)
+  maybeAutoAdvance(state, unlockedNextFarm); // frontier-only auto walk into the fresh zone
   // Fast-travel channel tick (M7.5): after combat so this step's damage cancels it;
   // completion warps to the target zone's gate-side x.
   tickFastTravel(state);

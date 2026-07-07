@@ -86,4 +86,22 @@ describe("selectQuestGuideTarget", () => {
     });
     expect(target).toBeNull();
   });
+
+  it("tier-3 frontier GATE: routes to the deepest unlocked farm zone (never null) instead of the normal kill/boss branches", () => {
+    const target = selectQuestGuideTarget({
+      // Both objectives incomplete AND unreachable (map4 z1 isn't actually
+      // walkable yet) — the normal branches below would resolve to null
+      // (unlockedZones has no map4 entry) if this gate didn't short-circuit.
+      kill: { mapId: "map4", done: false },
+      boss: { mapId: "map4", done: false },
+      currentMapId: "map4",
+      unlockedZones: { map3: 3 },
+      frontierLocked: true,
+      deepestFarm: { mapId: "map3", zoneIdx: 2 },
+    });
+    expect(target).toEqual({
+      zone: { mapId: "map3", zoneIdx: 2, kind: "farm", stage: expect.any(Number) },
+      kind: "gated",
+    });
+  });
 });

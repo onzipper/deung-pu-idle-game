@@ -30,7 +30,7 @@ import { FIXED_DT } from "@/engine/core/loop";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { creditGold } from "@/engine/systems/economy";
 import { heroMaxHpOf, heroMaxManaOf } from "@/engine/systems/stats";
-import { tier3QuestId, isTier3BossObjectiveActive } from "@/engine/systems/quests";
+import { tier3QuestId, isTier3BossObjectiveActive, isQuestComplete } from "@/engine/systems/quests";
 import type { WorldLocation, ZoneKind } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
@@ -187,16 +187,74 @@ function tier3BossRoomZone(): WorldLocation | null {
   return z ? { mapId: z.mapId, zoneIdx: z.zoneIdx } : null;
 }
 
+/**
+ * The boss room whose PERSIST-unlock GATES the tier-3 frontier grant (owner rule 2026-07-07,
+ * "ห้ามข้ามแมพ"): the boss room of the map immediately BEFORE the quest's kill-map — one
+ * global step to the left of the map4 preview field, i.e. map3's boss room. The tundra
+ * preview is only ENTERABLE once THIS room is persist-unlocked, which happens exactly when
+ * the player has cleared ALL of map3's farm-zone quotas themselves (checkZoneUnlock opens the
+ * boss room after the last farm zone) — no zone-skipping via the "พาไปเลย" quest grant. Pure,
+ * config-derived; null if no preceding boss room resolves (then the gate defaults OPEN). */
+function tier3GateZone(): WorldLocation | null {
+  const preview = tier3PreviewZone();
+  if (!preview) return null;
+  const gi = globalIndex(preview);
+  const prev = gi > 0 ? WORLD_ZONES[gi - 1] : undefined;
+  return prev && prev.kind === "boss" ? { mapId: prev.mapId, zoneIdx: prev.zoneIdx } : null;
+}
+
+/** Whether the tier-3 frontier grant is currently ENTERABLE — its gate boss room (map3's) is
+ * PERSIST-unlocked (the player climbed map3 to the boss door). Defaults OPEN if the gate can't
+ * be resolved (defensive: a config without a preceding boss room must never strand). Pure. */
+export function tier3GateCleared(state: GameState): boolean {
+  const gate = tier3GateZone();
+  return gate ? isZonePersistUnlocked(state, gate) : true;
+}
+
+/**
+ * UI read (owner rule 2026-07-07): the solo hero HOLDS the tier-3 quest but its tundra
+ * frontier grant is NOT yet enterable — map3's boss room isn't persist-unlocked. The quest
+ * can be accepted early at Lv40 (the card says "ไต่แมพ 3 ให้ถึงประตูบอสก่อน"); only ACCESS waits.
+ * While true, "guide-me" should route to the player's REAL frontier (`deepestUnlockedFarm`),
+ * never warp into map4. Pure state derivation (no RNG / wall-clock).
+ */
+export function tier3FrontierLocked(state: GameState): boolean {
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return false;
+  return !tier3GateCleared(state);
+}
+
+/**
+ * The deepest (highest global index) farm zone the player has PERSIST-unlocked — their real
+ * progression frontier. Used to relocate a hero booted into a no-longer-accessible zone (a
+ * tundra-stranded save from the older looser grant) without yanking them back to map1, and as
+ * the "guide-me" fallback while the tier-3 frontier is gated. Falls back to the first farm zone.
+ */
+export function deepestUnlockedFarm(state: GameState): WorldLocation {
+  for (let i = WORLD_ZONES.length - 1; i >= 0; i--) {
+    const z = WORLD_ZONES[i];
+    const loc = { mapId: z.mapId, zoneIdx: z.zoneIdx };
+    if (z.kind === "farm" && isZonePersistUnlocked(state, loc)) return loc;
+  }
+  return firstFarmLocation();
+}
+
 /** Whether the solo hero's ACTIVE tier-3 quest grants derived access to `loc`. Grants:
  *  - map4 ZONE 1 (the frontier field) — whenever the quest is held (both objectives);
  *  - the map4 BOSS ROOM — ONLY once the kill objective is banked (boss objective active),
  *    so the "young Sovereign" arena opens for the second objective.
  * Zones 2-5 are NEVER granted (they stay gated behind the s15 boss). The boss-room grant
- * revokes the instant the boss objective completes / the quest is consumed on evolve. */
+ * revokes the instant the boss objective completes / the quest is consumed on evolve.
+ *
+ * OWNER RULE 2026-07-07: BOTH grants are additionally GATED on `tier3GateCleared` — the tundra
+ * preview only becomes enterable once map3's boss room is persist-unlocked (the player climbed
+ * map3 to its end themselves). Accepting the quest at Lv40 mid-map3 is fine; only ACCESS waits. */
 export function questGrantsZoneAccess(state: GameState, loc: WorldLocation): boolean {
   const hero = state.heroes[0];
   const q = hero?.quest;
   if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return false;
+  if (!tier3GateCleared(state)) return false;
   const preview = tier3PreviewZone();
   if (preview && preview.mapId === loc.mapId && preview.zoneIdx === loc.zoneIdx) return true;
   const bossRoom = tier3BossRoomZone();
@@ -240,11 +298,53 @@ export function effectiveUnlockedZones(state: GameState): Record<string, number>
   const out: Record<string, number> = { ...state.unlockedZones };
   const hero = state.heroes[0];
   const q = hero?.quest;
-  if (q && q.accepted && q.id === tier3QuestId(hero!.cls)) {
+  // OWNER RULE 2026-07-07: the preview only folds in once its gate (map3's boss room) is
+  // persist-unlocked — otherwise a held-but-not-yet-enterable quest must read map4 as locked.
+  if (q && q.accepted && q.id === tier3QuestId(hero!.cls) && tier3GateCleared(state)) {
     const preview = tier3PreviewZone();
     if (preview) out[preview.mapId] = Math.max(out[preview.mapId] ?? 0, preview.zoneIdx + 1);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// "Quest leads" routing (M7.95, owner "เควสนำมาก่อน" 2026-07-08). While the solo hero
+// holds an evolution quest with a MAP-SCOPED objective still open, ALL idle automation
+// (death auto-return, bot town-trip return, auto-advance guard) prefers the quest's
+// granted frontier field over the hero's ordinary lastFarmZone — so a "พาไปเลย" guide
+// jump can't be immediately re-routed back to ordinary farming.
+// ---------------------------------------------------------------------------
+
+/**
+ * The frontier field a HELD evolution quest pins the automation to, or null when no
+ * quest leads. Only the TIER-3 quest has map-scoped objectives (both scoped to
+ * killMapId = map4), so only it pins — through BOTH the kill phase and the boss-
+ * objective phase (a quest still not fully complete). The tier-1 class-change quest's
+ * objectives are UNSCOPED (count anywhere) so it never pins: routing stays on
+ * lastFarmZone (unchanged pre-M7.95 behavior — s1-15 byte-identical). Reuses
+ * `questGrantsZoneAccess` so a target the hero can't actually enter falls through to
+ * null (defensive). Pure state derivation (no RNG / wall-clock).
+ */
+function questFarmZone(state: GameState): WorldLocation | null {
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return null;
+  if (isQuestComplete(hero!)) return null; // fully done -> about to evolve; no pin
+  const preview = tier3PreviewZone();
+  if (!preview || !questGrantsZoneAccess(state, preview)) return null;
+  return preview;
+}
+
+/**
+ * The zone ALL idle automation treats as the solo hero's "home" farm: the quest-led
+ * frontier while an evolution quest pins it (see `questFarmZone`), else the ordinary
+ * `state.lastFarmZone`. Every auto-routing path funnels through this ONE derivation —
+ * death/scroll auto-return (`arriveAtZone`), the bot town-trip return
+ * (`systems/bots.botReturnToFarm`), and the auto-advance guard (`maybeAutoAdvance`) —
+ * so "quest leads" holds everywhere with no per-path special-casing. Pure.
+ */
+export function botFarmTarget(state: GameState): WorldLocation {
+  return questFarmZone(state) ?? state.lastFarmZone;
 }
 
 /** Per-map unlocked counts covering every global zone up to (and incl.) `loc`. */
@@ -495,7 +595,9 @@ export function arriveAtZone(
     // Toggle-gated for live play ("รอที่เมือง"); the offline replay forces it on so
     // idle never stalls. A plain "walk" into town (manual visit) stays put.
     if ((reason === "death" || reason === "scroll") && state.autoReturn) {
-      const back = state.lastFarmZone;
+      // QUEST LEADS: return to the quest's frontier field while an evolution quest
+      // pins the hero (else the ordinary lastFarmZone) — see `botFarmTarget`.
+      const back = botFarmTarget(state);
       if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
         beginTransit(state, back, CONFIG.world.transitSeconds, "walk");
       }
@@ -506,6 +608,30 @@ export function arriveAtZone(
     state.events.push({ type: "bossRoomEntered", mapId: zone.mapId, stage: zone.stage });
   }
   return zone;
+}
+
+/**
+ * Resolve a tier-3 QUEST-boss (young Glacial Sovereign) WIN by returning the solo hero to
+ * the frontier field instead of stranding them in the boss room. M7.95 SOFT-LOCK FIX:
+ * `boss.onBossKilled` skips `onBossRoomCleared` for the quest boss (it must not unlock the
+ * next map), and the boss-room access grant revokes the instant the killBoss objective
+ * fills — so leaving the hero in the now-inaccessible boss room on a paused "victory"
+ * dead-ends the UI (nothing tappable). Instead reuse the fast-travel arrival machinery:
+ * `arriveAtZone(..., "fasttravel")` sets phase="battle", respawns the frontier field,
+ * full-heals, and emits `zoneEntered` (the clean arrival render/UI already understand);
+ * the hero enters at the field's left edge like any warp. The now-complete quest then
+ * surfaces its reachable "เปลี่ยนคลาส!" (evolve) affordance on the quest card. Destination
+ * is derived from CONFIG (`tier3PreviewZone`), NOT `botFarmTarget`, because a COMPLETE
+ * quest no longer pins a zone. Returns false (state untouched) if it can't resolve the
+ * frontier. Deterministic (no RNG / wall-clock).
+ */
+export function returnToQuestFrontier(state: GameState): boolean {
+  const frontier = tier3PreviewZone();
+  if (!frontier) return false;
+  arriveAtZone(state, frontier, "fasttravel");
+  const h = state.heroes[0];
+  if (h) h.x = gateX(frontier.mapId, "left");
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -531,27 +657,33 @@ export function respawnToTown(state: GameState): void {
  * the old per-stage boss reward (xp/gold parity, no per-zone boss); unlocking the
  * BOSS ROOM grants nothing (the boss room pays out itself). Backtracking a cleared
  * zone re-grants nothing (next already unlocked). Called from step after combat.
+ *
+ * RETURNS true iff THIS call just transitioned the next FARM zone locked->unlocked
+ * (the fresh-frontier moment) — the deterministic same-step signal `maybeAutoAdvance`
+ * gates on (owner 2026-07-08: auto-advance fires ONLY at the progression frontier, not
+ * when parked in an already-cleared zone). A boss-room unlock returns false (never an
+ * auto-advance target). No persisted flag — the signal is threaded through step().
  */
-export function checkZoneUnlock(state: GameState): void {
-  if (state.traveling || state.phase !== "battle") return;
+export function checkZoneUnlock(state: GameState): boolean {
+  if (state.traveling || state.phase !== "battle") return false;
   const zone = zoneAt(state.location);
-  if (zone.kind !== "farm") return;
+  if (zone.kind !== "farm") return false;
   // A tier-3 quest PREVIEW zone (map4 z1, only quest-GRANTED, not persist-unlocked)
   // must NEVER cascade a real unlock to its neighbour — that would permanently open
   // map4 without the s15 boss kill (the redesign's core invariant). Only a
   // persist-unlocked farm zone advances the frontier.
-  if (!isZonePersistUnlocked(state, state.location)) return;
-  if (state.kills < CONFIG.killGoal(zone.stage)) return;
+  if (!isZonePersistUnlocked(state, state.location)) return false;
+  if (state.kills < CONFIG.killGoal(zone.stage)) return false;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
-  if (!next || next.mapId !== zone.mapId) return;
+  if (!next || next.mapId !== zone.mapId) return false;
   // Boss-gate arming (2026-07-07 fix, moved here from combat.ts): the challenge
   // affordance lights up ONLY where enterBossRoom can actually work — quota met
   // AT the map's LAST farm zone (the next zone is this map's boss room). The old
   // combat-side check armed on quota alone, so any cleared zone (kills persist
   // per-zone since SAVE v13) showed a glowing button that walked nowhere.
   if (next.kind === "boss" && !state.bossReady) state.bossReady = true;
-  if (next.zoneIdx < (state.unlockedZones[next.mapId] ?? 0)) return; // already unlocked
+  if (next.zoneIdx < (state.unlockedZones[next.mapId] ?? 0)) return false; // already unlocked
 
   state.unlockedZones[next.mapId] = next.zoneIdx + 1;
   state.events.push({ type: "zoneUnlocked", mapId: next.mapId, zoneIdx: next.zoneIdx });
@@ -559,28 +691,43 @@ export function checkZoneUnlock(state: GameState): void {
   if (next.kind === "farm") {
     creditGold(state, CONFIG.goldPerBoss(zone.stage));
     grantKillXp(state, CONFIG.leveling.xpPerBossKill(zone.stage));
+    return true; // fresh farm-zone unlock this step -> the auto-advance frontier moment
   }
+  return false; // a boss-room unlock is a player beat, never an auto-advance target
 }
 
 /**
- * Auto next-zone (owner request 2026-07-07, UI toggle `state.autoAdvance`):
- * once the CURRENT farm zone's quota is met and the next FARM zone in the same
- * map is unlocked, walk forward automatically. Never auto-enters a boss room
- * (the challenge is a player beat) and never crosses maps (that requires the
- * boss anyway). No-op mid-travel/cast/boss/death or in town.
+ * Auto next-zone (owner request 2026-07-07, UI toggle `state.autoAdvance`): on the step
+ * the next FARM zone just unlocked from farming HERE, walk forward automatically.
+ *
+ * FRONTIER-ONLY (owner 2026-07-08): gated on `justUnlockedNextFarm` — the same-step
+ * signal from `checkZoneUnlock`. A hero PARKED in an already-cleared zone (its next was
+ * unlocked on arrival, a deliberate free-farm spot) produces NO unlock transition, so it
+ * NEVER chain-walks toward the frontier. Never auto-enters a boss room (the challenge is
+ * a player beat — a boss unlock returns false above) and never crosses maps. No-op
+ * mid-travel/cast/boss/death or in town.
  */
-export function maybeAutoAdvance(state: GameState): void {
+export function maybeAutoAdvance(state: GameState, justUnlockedNextFarm: boolean): void {
   if (!state.autoAdvance) return;
+  // FRONTIER-ONLY: only the fresh locked->unlocked transition (this step) advances.
+  if (!justUnlockedNextFarm) return;
   if (state.traveling || state.fastTravelCast || state.phase !== "battle") return;
   const cur = zoneAt(state.location);
   if (cur.kind !== "farm") return;
   const hero = state.heroes[0];
   if (!hero || hero.dead) return;
-  if (state.kills < CONFIG.killGoal(cur.stage)) return;
+  // QUEST LEADS (owner "เควสนำมาก่อน"): while an evolution quest pins the hero to a
+  // frontier field, never auto-advance OUT of it — advancing abandons the map-scoped
+  // objective and the automation must never creep toward the boss room (the player
+  // taps the challenge button; automation stays dumb). A quest PREVIEW zone never
+  // triggers `justUnlockedNextFarm` (it isn't persist-unlocked), so this is
+  // defense-in-depth that also covers a really-unlocked map4 while the quest is held.
+  const pinned = questFarmZone(state);
+  if (pinned && pinned.mapId === cur.mapId && pinned.zoneIdx === cur.zoneIdx) return;
   const gi = globalIndex(state.location);
   const next = gi >= 0 ? WORLD_ZONES[gi + 1] : undefined;
   if (!next || next.kind !== "farm" || next.mapId !== cur.mapId) return;
-  if (next.zoneIdx >= (state.unlockedZones[next.mapId] ?? 0)) return; // locked
+  if (next.zoneIdx >= (state.unlockedZones[next.mapId] ?? 0)) return; // locked (defensive)
   walkToZone(state, { mapId: next.mapId, zoneIdx: next.zoneIdx });
 }
 
@@ -609,42 +756,32 @@ export function onBossRoomCleared(state: GameState): void {
 }
 
 // ---------------------------------------------------------------------------
-// Fast travel (M7.5 "Fast travel") — a short damage-cancellable channel then an
-// instant, FREE hop to any UNLOCKED (non-boss) zone. The return scroll keeps its
-// value: it warps INSTANTLY even while swarmed, whereas fast travel demands a clear
-// standoff (no engaged/aggro mob) and can be interrupted by damage. Deterministic
-// (no RNG, no wall-clock) — the channel is a fixed-dt timer.
+// Fast travel (M7.5 "Fast travel") — a short channel then an instant, FREE hop to
+// any UNLOCKED (non-boss) zone. Owner UX (2026-07-08): the channel is permissive —
+// it may START while mobs are engaged/wailing on the hero and is NOT interrupted by
+// damage; it always plays out and warps unless the hero DIES mid-channel. The return
+// scroll keeps its edge: it warps INSTANTLY (no channel), whereas fast travel makes
+// you stand and eat hits for the cast time. Deterministic (no RNG, no wall-clock) —
+// the channel is a fixed-dt timer.
 // ---------------------------------------------------------------------------
 
 /** Reasons a fast-travel intent is rejected (mirrors the `fastTravelBlocked` event). */
 type FastTravelBlockedReason =
   | "locked"
-  | "aggro"
   | "dead"
   | "same"
   | "traveling"
   | "boss"
-  | "invalid"
-  | "damaged";
-
-/** Whether any mob is currently a threat to the hero (engaged, or an aggressive mob
- * inside its aggro radius) — the fast-travel standoff guard. */
-function heroUnderThreat(state: GameState): boolean {
-  const h = state.heroes[0];
-  if (!h) return false;
-  for (const e of state.enemies) {
-    if (e.hp <= 0) continue;
-    if (e.engaged) return true;
-    if (e.aggressive && Math.abs(e.x - h.x) <= e.aggroRadius) return true;
-  }
-  return false;
-}
+  | "invalid";
 
 /**
  * Begin a fast-travel channel to `target`. Rejected (emits `fastTravelBlocked` with
  * a reason, returns false) if a channel is already running, the hero is dead / mid
  * transit / in the boss phase, the target is invalid / a boss room / locked /
- * already-current, or a mob is engaging the hero. On success emits
+ * already-current. Owner UX (2026-07-08): fast travel is deliberately permissive —
+ * the channel may START while mobs are wailing on the hero (no under-threat guard)
+ * and it is NEVER interrupted by damage; it plays out and warps unless the hero
+ * DIES mid-channel (handled in `tickFastTravel`). On success emits
  * `fastTravelCastStart` and sets the channel; completion happens in `tickFastTravel`.
  */
 export function startFastTravel(state: GameState, target: WorldLocation): boolean {
@@ -664,12 +801,10 @@ export function startFastTravel(state: GameState, target: WorldLocation): boolea
   if (target.mapId === state.location.mapId && target.zoneIdx === state.location.zoneIdx) {
     return blocked("same");
   }
-  if (heroUnderThreat(state)) return blocked("aggro");
   state.fastTravelCast = {
     targetMapId: target.mapId,
     targetZoneIdx: target.zoneIdx,
     timer: CONFIG.travel.fastTravelCastSeconds,
-    lastHp: h.hp,
   };
   state.events.push({
     type: "fastTravelCastStart",
@@ -682,11 +817,13 @@ export function startFastTravel(state: GameState, target: WorldLocation): boolea
 }
 
 /**
- * Tick an in-flight fast-travel channel one fixed step. Cancels (emits
- * `fastTravelBlocked` "damaged") if the hero took damage since the last tick; on
- * completion performs the instant hop (arrives at the target's LEFT gate x — the
+ * Tick an in-flight fast-travel channel one fixed step. Owner UX (2026-07-08): the
+ * channel is NOT damage-cancellable — the hero keeps taking hits during it. The ONLY
+ * cancel is death: if the hero died mid-channel (resolveDeaths ran first this step)
+ * the channel is dropped and `fastTravelBlocked` "dead" fires, leaving no stuck cast.
+ * On completion performs the instant hop (arrives at the target's LEFT gate x — the
  * entrance side) and emits `fastTravelArrive`. A no-op with no channel. Called from
- * step() after combat so this step's damage is already reflected in the hero's HP.
+ * step() after combat so this step's death is already reflected in the hero.
  */
 export function tickFastTravel(state: GameState): void {
   const c = state.fastTravelCast;
@@ -697,12 +834,6 @@ export function tickFastTravel(state: GameState): void {
     state.events.push({ type: "fastTravelBlocked", reason: "dead" });
     return;
   }
-  if (h.hp < c.lastHp) {
-    state.fastTravelCast = null;
-    state.events.push({ type: "fastTravelBlocked", reason: "damaged" });
-    return;
-  }
-  c.lastHp = h.hp; // allow healing during the channel without spuriously cancelling
   c.timer -= FIXED_DT;
   if (c.timer > 0) return;
 

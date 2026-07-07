@@ -16,6 +16,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     autoCast: false,
     autoAllocate: false,
     autoHunt: true,
+    inTown: false,
     heroes: [
       {
         skillCd: 0,

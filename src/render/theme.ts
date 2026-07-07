@@ -171,6 +171,32 @@ export const PALETTE = {
   warCryAura: 0xe8283e,
   warCryCore: 0xff9a5c,
   warCryDark: 0x4a0810,
+
+  // ---- Town NPCs (render task: ป้าปุ๊/ลุงดึ๋ง real actors) ----
+  /** ป้าปุ๊'s apron + market-stall awning — a warm, saturated rust-orange so
+   * she pops off the desaturated town scenery per the art-direction rule. */
+  npcApron: 0xd9823f,
+  npcApronShade: 0x8a4a1f,
+  /** Stall wood posts/counter (neutral warm brown, NOT the awning accent). */
+  npcStallWood: 0x6b4a2a,
+  /** Basket weave accent sitting on the stall counter. */
+  npcBasket: 0xb8823f,
+  /** ลุงดึ๋ง's tunic + anvil-adjacent skin tones (cool soot-grey so the ember
+   * accent below reads as the warm contrast, per the smith brief). */
+  npcSmithTunic: 0x5a6270,
+  npcSmithTunicShade: 0x33394a,
+  /** Anvil body (near-black worked iron) + its top-face highlight. */
+  npcAnvil: 0x2a2a30,
+  npcAnvilHighlight: 0x555a66,
+  /** Hammer-strike spark — a bright ember accent, flat/solid (footgun 10:
+   * normal blend, never additive over the daytime town sky). */
+  npcEmberSpark: 0xffb14a,
+  /** Soft pulsing "แตะได้" (tappable) affordance ring at an NPC's feet —
+   * deliberately distinct from every combat/order/travel accent so it never
+   * reads as a quest marker or a hit cue, just a gentle invitation. */
+  npcAffordance: 0xffd76b,
+  /** Shared warm skin tone for both town NPCs' head/hands. */
+  npcSkin: 0xe0b48a,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

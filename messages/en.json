@@ -85,6 +85,7 @@
       "objectiveBossYoungSovereign": "👑 Defeat the young Glacial Sovereign",
       "guideKillScoped": "Head to {map} to hunt",
       "guideKillAny": "Keep hunting in your current zone — it counts anywhere",
+      "guideKillGatedTier3": "🔒 Climb map 3 to the boss gate first — the tundra will open up to raid",
       "guideBossBacktrack": "Walk back to the {map} boss room — the boss respawns for a re-fight",
       "guideBossAny": "Beat the boss of the map you're currently farming",
       "guideBossTier3Hint": "You've reached the frontier — hit the challenge button when you're ready",
@@ -285,6 +286,10 @@
       "skill4Unlocked": {
         "title": "4th skill slot unlocked!",
         "body": "Class Tier 3 opened a new auto-cast slot for your ultimate skill. Tap \"+ Auto\" under it to fill the new slot."
+      },
+      "townNpcTapHint": {
+        "title": "Tap an NPC to talk",
+        "body": "Tap an NPC to walk over and talk — buying/refining happens right there with them now. First tap walks over, tap again once you arrive to open the shop/refine station."
       }
     }
   },
@@ -785,6 +790,12 @@
     "firstToCap": "🏆 {charName} is the first player to reach Lv.{level}!",
     "rankOne": "👑 {charName} has claimed the #1 Combat Power throne!"
   },
+  "updateBanner": {
+    "message": "🚀 New patch available!",
+    "button": "Update now",
+    "buttonTooltip": "Already saved — go ahead",
+    "closeButton": "Close"
+  },
   "notices": {
     "autoSellDone": "Bot auto-sold {count} item(s) +{gold} gold",
     "autoSalvageDone": "Bot auto-salvaged {count} item(s) +{materials} material(s)",
@@ -796,6 +807,8 @@
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
     "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
+    "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
+    "walkToLungdueng": "Walk over to Uncle Dueng first",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -839,6 +852,24 @@
       "unknown_template": "Unknown item",
       "network": "Network error — try again",
       "unknown": "Something went wrong — try again"
+    }
+  },
+  "townNpc": {
+    "pahpu": {
+      "greetings": {
+        "greeting1": "Want to buy something?",
+        "greeting2": "HP and mana potions in stock, friend!",
+        "greeting3": "Come back and shop with me anytime"
+      },
+      "botFlavor": "Selling some stuff~"
+    },
+    "lungdueng": {
+      "greetings": {
+        "greeting1": "Want to refine something?",
+        "greeting2": "Bring it here, I'll strike it good and solid",
+        "greeting3": "Materials ready — let's get to it"
+      },
+      "botFlavor": "Dropping some stuff off~"
     }
   },
   "patchNotes": {
@@ -900,6 +931,17 @@
           "refineSmooth": "🔨 Smoother refining: hammer away, tap to skip the reveal, your selection never slips",
           "facing": "🏹 Archers/mages stopped spinning when surrounded and now face their target while kiting — looks so much better",
           "epicBot": "✨ The bot can manage epic drops now (opt-in) — with an always-on keep-your-good-gear guard"
+        }
+      },
+      "2026-07-08b": {
+        "items": {
+          "npc": "🏘 Town is alive! Pah Pu (potions·sell·salvage) and Uncle Dueng (refining) are real now — tap to walk over, tap again to talk and trade; the bot walks up to them too",
+          "warpEasy": "🌀 Warping is way easier: channel mid-combat, and taking hits no longer cancels it",
+          "questClimb": "🧗 Tier-3 quest: climb map 3 to the boss door yourself before the tundra opens — no zone-skipping shortcuts",
+          "questLead": "🧭 While on a quest, every bot route leads back to the quest zone — Guide Me can't be hijacked anymore",
+          "freeFarm": "🌾 Farming an old zone on purpose? The bot respects it — no more dragging you forward (it only advances on a fresh unlock)",
+          "softLockFix": "🔧 Fixed the freeze after defeating the young Glacial Sovereign — you now warp back to the frontier with the change-class button ready",
+          "updateBanner": "🚀 New patch deployed while you play? The game tells you — one tap saves and updates"
         }
       }
     }

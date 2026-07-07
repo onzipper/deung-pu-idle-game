@@ -31,12 +31,19 @@ import {
 } from "@/engine/systems/consumables";
 import {
   beginTransit,
+  botFarmTarget,
+  gateX,
   isZoneUnlocked,
   townLocation,
   zoneAt,
 } from "@/engine/systems/world";
-import type { BotSettings } from "@/engine/entities";
+import { npcInRange, townNpcConfig } from "@/engine/systems/townNpcs";
+import type { BotSettings, TownNpcId } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
+
+/** The town NPC the idle bot transacts with (buy/sell/salvage). The refine smith
+ * (ลุงดึ๋ง) is deliberately PLAYER-ONLY — refine is never botted (M6 town NPCs ph.2). */
+const MERCHANT: TownNpcId = "npc:pahpu";
 
 /** A fresh BotSettings block (both bots OFF — cold-start / sim parity). */
 export function defaultBotSettings(): BotSettings {
@@ -96,6 +103,15 @@ export function setBotSettings(state: GameState, patch: Partial<BotSettings>): v
  * doesn't track it) — the sell-trip trigger.
  */
 export function updateBots(state: GameState, inventoryCount?: number): void {
+  // In-town WALK to the merchant (M6 town NPCs phase 2): after a bot trip arrives, the
+  // hero walks to ป้าปุ๊'s anchor before ANY transaction arms. Runs BEFORE the dwell /
+  // enabled gates (like the dwell below): even if the player toggles the bot off
+  // mid-walk, the trip still completes its chores + walks home (no wedged trip state).
+  if (state.botWalk !== null) {
+    tickBotWalk(state);
+    return;
+  }
+
   // In-town SELL-trip dwell (anti-warp-loop, 2026-07-06): stand in town until the
   // client's async sell shrinks the fed count below the cap (success — return
   // early) or the dwell times out (give up — latch the watermark so a
@@ -207,11 +223,79 @@ function tickSellDwell(state: GameState, inventoryCount?: number): void {
   }
 }
 
+/**
+ * One fixed-dt tick of the in-town walk to the merchant (M6 town NPCs phase 2). The bot
+ * walks the hero from the town entry toward ป้าปุ๊'s anchor at hunt speed; once the hero
+ * is within the NPC's interaction radius the trip's transactions ARM (`doBotBusiness`).
+ * Deterministic (fixed anchor + fixed speed, no RNG). A manual command can't wedge it —
+ * the walk drives `hero.x` directly and completes regardless of `hero.command` (which the
+ * town phase never applies anyway). A force-move (death / manual transit) drops the walk.
+ */
+function tickBotWalk(state: GameState): void {
+  const walk = state.botWalk;
+  if (!walk) return;
+  const hero = state.heroes[0];
+  // Defensive: a walk only means something while standing in town with a live hero.
+  if (!hero || state.traveling || zoneAt(state.location).kind !== "town") {
+    state.botWalk = null;
+    return;
+  }
+  // Arm the instant the hero is within the merchant's radius (already-there or landing).
+  if (npcInRange(state, MERCHANT)) {
+    state.botWalk = null;
+    doBotBusiness(state, walk);
+    return;
+  }
+  const target = townNpcConfig(MERCHANT).x;
+  const stepPx = CONFIG.hunt.huntSpeed * FIXED_DT;
+  const d = target - hero.x;
+  hero.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
+  if (npcInRange(state, MERCHANT)) {
+    state.botWalk = null;
+    doBotBusiness(state, walk);
+  }
+}
+
+/**
+ * Run the bot's town chores AT the merchant (M6 town NPCs phase 2): restock + the
+ * opportunistic sell/salvage sweep, emit `npcTrade` (the transaction window opened) then
+ * `townArrived` (the client fires the sell API off it), and either dwell for the async
+ * sell or walk straight home. Called ONLY once the hero has reached ป้าปุ๊'s radius. The
+ * chore logic itself is unchanged from the pre-phase-2 `onBotTownArrival` (owner call
+ * 2026-07-07: every trip runs ALL enabled chores) — only its TRIGGER moved to the anchor.
+ */
+function doBotBusiness(state: GameState, pending: { restock: boolean; sell: boolean }): void {
+  // Opportunistic top-up: ANY bot trip restocks while at the shop (restock bot must be ON).
+  if (pending.restock || state.bot.enabled) botRestock(state);
+
+  // Opportunistic dispose: ANY bot trip runs the sell/salvage sweep when the sell bot is
+  // ON. `pending.sell` alone marks a GENUINE full-bag trigger; `sellTriggered` carries
+  // that to the client (it only shows the "nothing to dispose" notice for real sell trips).
+  const doSell = pending.sell || state.bot.sellTripEnabled;
+  const reason: "restock" | "sell" | "restockSell" =
+    pending.restock && doSell ? "restockSell" : doSell ? "sell" : "restock";
+
+  state.events.push({ type: "npcTrade", npcId: MERCHANT });
+  state.events.push({ type: "townArrived", reason, sellTriggered: pending.sell });
+
+  if (doSell) {
+    // The sell is a CLIENT-side async API call fired off townArrived — dwell in town for
+    // it instead of walking home this same step (see tickSellDwell). An opportunistic
+    // sweep that finds a below-cap bag ends the dwell next tick, so a tidy potions trip
+    // still walks home promptly.
+    state.botDwell = { timer: CONFIG.bot.sellDwellSeconds, lastCount: null, returnAfter: true };
+    return;
+  }
+  botReturnToFarm(state);
+}
+
 /** Walk home to the last farm zone (shared by restock-only arrival + dwell end).
  * Depth-scaled like the to-town walk (owner call 2026-07-06): returning to a
  * deep farm zone takes botWalkSeconds x zoneIdx, symmetric with the trip out. */
 function botReturnToFarm(state: GameState): void {
-  const back = state.lastFarmZone;
+  // QUEST LEADS: return to the quest's frontier field while an evolution quest pins
+  // the hero, else the ordinary lastFarmZone (see `world.botFarmTarget`).
+  const back = botFarmTarget(state);
   if (zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)) {
     const depth = Math.max(1, back.zoneIdx);
     beginTransit(state, back, CONFIG.travel.botWalkSeconds * depth, "walk");
@@ -243,44 +327,24 @@ function beginBotTrip(state: GameState, restock: boolean, sell: boolean): void {
 
 /**
  * Town arrival for a bot trip (called from step when a "bot" transit reaches town).
- * EVERY trip performs ALL enabled chores (owner call 2026-07-07): it restocks AND
- * runs the sell/salvage sweep opportunistically, so a potions-only trip clears the
- * bag too instead of buying and walking home with it still full — mirroring the
- * long-standing opportunistic restock. Emits `townArrived` (the client fires the
- * sell API off it when selling is involved), then dwells for the async sell (or
- * walks straight home to the last farm zone). Always returns to farming.
+ *
+ * M6 town NPCs phase 2 (owner: "the BOT must auto-walk to the NPC and do its business
+ * normally"): the bot no longer transacts on arrival. It places the hero at the town
+ * ENTRY (the right gate — where a returning-from-the-world hero comes in, so the walk is
+ * deterministic regardless of the pre-transit farm x) and hands the trip's chores to the
+ * in-town WALK (`tickBotWalk`). The transactions (restock + sell sweep) + `townArrived` +
+ * `npcTrade` only fire once the hero reaches ป้าปุ๊'s radius (`doBotBusiness`). Every trip
+ * still performs ALL enabled chores (owner call 2026-07-07) — only the trigger moved to
+ * the anchor. No teleport-to-shop; the walk is a real, deterministic transit.
  */
 export function onBotTownArrival(state: GameState): void {
   const pending = state.botPending ?? { restock: false, sell: false };
   state.botPending = null;
-
-  // Opportunistic top-up: ANY bot trip restocks while it's standing at the shop
-  // anyway (the restock bot must be ON — a sell-only player who left it off
-  // clearly doesn't want gold auto-spent on potions).
-  if (pending.restock || state.bot.enabled) botRestock(state);
-
-  // Opportunistic dispose (mirrors the restock precedent): ANY bot trip runs the
-  // sell/salvage sweep when the sell-trip bot is ON, so a potions-only trip empties
-  // the bag too. `pending.sell` alone means a GENUINE full-bag trigger; the extra
-  // `sellTriggered` flag carries that distinction to the client (it only surfaces
-  // the "nothing to dispose" notice for real sell trips, not tidy-bag potions runs).
-  const doSell = pending.sell || state.bot.sellTripEnabled;
-
-  const reason: "restock" | "sell" | "restockSell" =
-    pending.restock && doSell ? "restockSell" : doSell ? "sell" : "restock";
-  state.events.push({ type: "townArrived", reason, sellTriggered: pending.sell });
-
-  if (doSell) {
-    // The sell is a CLIENT-side async API call fired off the townArrived event —
-    // dwell in town for it instead of walking home in this same step (the
-    // original walk-home-immediately behavior warp-looped: bag never shrank
-    // before the next full-bag trigger back at the farm). An opportunistic sweep
-    // that finds a below-cap bag ends the dwell on the very next tick (see
-    // tickSellDwell), so a tidy potions trip still walks home promptly.
-    state.botDwell = { timer: CONFIG.bot.sellDwellSeconds, lastCount: null, returnAfter: true };
-    return;
-  }
-  botReturnToFarm(state);
+  // Place the hero at the town entry (right gate) so the walk to the merchant is a
+  // fixed, deterministic distance (independent of where the trip started on the field).
+  const hero = state.heroes[0];
+  if (hero) hero.x = gateX(state.location.mapId, "right");
+  state.botWalk = { restock: pending.restock, sell: pending.sell };
 }
 
 /** Buy potions up to their targets, then scrolls up to the reserve, all within the

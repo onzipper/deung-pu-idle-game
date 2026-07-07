@@ -1,11 +1,17 @@
 "use client";
 
 /**
- * NPC shop panel (M6 "เมืองหลัก + NPC shops") — rendered ONLY while the hero is in
- * the town zone (the NPC is there — GDD). Simple buy rows: icon + name, the
+ * NPC shop panel (M6 "เมืองหลัก + NPC shops"; converted to ป้าปุ๊'s tap-again-to-talk
+ * dialog by Town NPCs phase 3, final) — simple buy rows: icon + name, the
  * stage-scaled price, the owned/cap count, and +1 / +5 buy buttons. The buy queues
  * a `buyShopItem` intent (drained once per frame by GameClient); the engine no-ops
  * an unaffordable / over-cap purchase, so the buttons just grey out to match.
+ *
+ * Same modal shell convention as `RefinePanel.tsx` (fixed overlay via
+ * `ModalPortal`, sim never pauses behind it) — opened ONLY by talking to ป้าปุ๊
+ * (`GameClient.tsx`'s `talkToNpc`), never rendered unconditionally anymore; see
+ * `TownNpcPanelHost.tsx` for the open/auto-close wiring. `onClose` is called both
+ * by the ✕ button and by that host's walk-away watch.
  *
  * Icons are pre-2015 emoji (❤ / 💧 / 📜) so Windows 10 renders them (no Unicode-13+
  * glyphs — see CLAUDE.md footgun #4).
@@ -13,6 +19,7 @@
 
 import { useTranslations } from "next-intl";
 import type { ShopItemId } from "@/engine";
+import { ModalPortal } from "@/ui/components/ModalPortal";
 import { useGameStore } from "@/ui/store/gameStore";
 
 const SHOP_ORDER: ShopItemId[] = ["hpPotion", "manaPotion", "returnScroll"];
@@ -104,28 +111,56 @@ function BuyRow({ item }: { item: ShopItemId }) {
   );
 }
 
-export function ShopPanel() {
+export interface ShopPanelProps {
+  onClose: () => void;
+}
+
+export function ShopPanel({ onClose }: ShopPanelProps) {
+  // Defensive second guard (mirrors `RefinePanel`'s own town-only belt-and-
+  // suspenders) — `TownNpcPanelHost` already closes this the instant the
+  // hero leaves town/range, but a stray render in between should never show
+  // buy rows outside town.
   const inTown = useGameStore((s) => s.world.kind === "town");
   const t = useTranslations("shop");
+  const tInv = useTranslations("inventory");
 
   if (!inTown) return null;
 
   return (
-    <div className="flex flex-col gap-2 rounded-(--ddp-radius-lg) border border-ddp-gold/40 bg-ddp-panel px-3 py-2.5 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
-      <div className="flex items-center gap-1.5">
-        <span aria-hidden className="text-sm">
-          🏠
-        </span>
-        <span className="text-sm font-bold tracking-wide text-ddp-gold-bright">
-          {t("title")}
-        </span>
-        <span className="text-xs text-ddp-ink-muted">{t("subtitle")}</span>
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-70 flex items-center justify-center p-3"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("title")}
+      >
+        <button
+          type="button"
+          aria-label={tInv("closeButton")}
+          onClick={onClose}
+          className="absolute inset-0 bg-black/70"
+        />
+        <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-gold/40 bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-base font-extrabold text-ddp-gold-bright">
+              <span aria-hidden>🏠</span> {t("title")}
+            </h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
+            >
+              ✕ {tInv("closeButton")}
+            </button>
+          </div>
+          <span className="text-xs text-ddp-ink-muted">{t("subtitle")}</span>
+          <div className="flex flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
+            {SHOP_ORDER.map((item) => (
+              <BuyRow key={item} item={item} />
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="flex flex-col gap-1.5">
-        {SHOP_ORDER.map((item) => (
-          <BuyRow key={item} item={item} />
-        ))}
-      </div>
-    </div>
+    </ModalPortal>
   );
 }
