@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CONFIG,
   initGameState,
+  makeHero,
   npcInRange,
   step,
   toSaveData,
@@ -324,5 +325,70 @@ describe("manual play in town (UAT round-3 regression)", () => {
     // still standing) — the town walk honours the channeling gate.
     if (s.fastTravelCast) expect(s.heroes[0].x).toBe(x0);
     else expect(s.location).toEqual({ mapId: "map1", zoneIdx: 1 });
+  });
+});
+
+/**
+ * M8 party cohort REGRESSION: in town, tickTownManualWalk hardcoded heroes[0], so
+ * only the first cohort member ever walked to a tap. Every hero must honour its
+ * OWN per-lane MOVE command (each member's tap lands on heroes[myCohortIndex] via
+ * applyManualCommand). Driven through step() IN TOWN via a PartyInput lane array.
+ */
+describe("manual play in town — party cohort (M8)", () => {
+  const TOWN = { mapId: "map1", zoneIdx: 0 };
+
+  /** A two-hero (sword + archer) party parked in town at the entry side. */
+  function townParty(): GameState {
+    const s = initGameState(1);
+    s.location = { ...TOWN };
+    s.heroes = [makeHero(1, "swordsman"), makeHero(2, "archer")];
+    s.nextId = 3;
+    s.heroes[0].x = 100;
+    s.heroes[1].x = 100;
+    return s;
+  }
+
+  it("hero[1]'s move command walks hero[1] while hero[0] (no command) stands still", () => {
+    const s = townParty();
+    const [h0, h1] = s.heroes;
+    const goal = 400;
+
+    step(s, [{}, { moveTo: { x: goal } }]); // lane 1 drives heroes[1]
+    expect(h0.command).toBeNull();
+    expect(h1.command).toEqual({ kind: "move", x: goal });
+
+    for (let i = 0; i < 400 && h1.command; i++) step(s, {});
+    expect(h1.command).toBeNull(); // arrived
+    expect(Math.abs(h1.x - goal)).toBeLessThanOrEqual(CONFIG.manual.arriveEps);
+    expect(h0.x).toBe(100); // never moved — no command of its own
+  });
+
+  it("both heroes walk independently to their own commanded x", () => {
+    const s = townParty();
+    const [h0, h1] = s.heroes;
+
+    step(s, [{ moveTo: { x: 300 } }, { moveTo: { x: 550 } }]);
+    expect(h0.command).toEqual({ kind: "move", x: 300 });
+    expect(h1.command).toEqual({ kind: "move", x: 550 });
+
+    for (let i = 0; i < 400 && (h0.command || h1.command); i++) step(s, {});
+    expect(h0.command).toBeNull();
+    expect(h1.command).toBeNull();
+    expect(Math.abs(h0.x - 300)).toBeLessThanOrEqual(CONFIG.manual.arriveEps);
+    expect(Math.abs(h1.x - 550)).toBeLessThanOrEqual(CONFIG.manual.arriveEps);
+  });
+
+  it("solo (one hero) town walk is unchanged", () => {
+    const s = initGameState(1);
+    s.location = { ...TOWN };
+    const hero = s.heroes[0];
+    hero.x = 100;
+    const goal = 400;
+
+    step(s, { moveTo: { x: goal } });
+    expect(hero.command).toEqual({ kind: "move", x: goal });
+    for (let i = 0; i < 400 && hero.command; i++) step(s, {});
+    expect(hero.command).toBeNull();
+    expect(Math.abs(hero.x - goal)).toBeLessThanOrEqual(CONFIG.manual.arriveEps);
   });
 });

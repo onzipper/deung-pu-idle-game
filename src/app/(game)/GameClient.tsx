@@ -141,7 +141,7 @@ import {
   type PartyConnStatus,
 } from "./partySession";
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
-import { buildFrameInput } from "./buildFrameInput";
+import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
 import { TimeDirector } from "./timeDirector";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
@@ -752,7 +752,21 @@ export function GameClient() {
       handshake = null;
       cohortActive = true;
       myCohortIndex = lastCohortSlots.indexOf(myTicketSlot);
+      // Fix C: force the SHARED navigation globals OFF in a cohort — zone changes only ever
+      // happen via item-3's leave-cohort path, never by an auto-return/auto-advance mutating
+      // the shared location under everyone (that'd be the whole-party-drag class of bug). The
+      // per-frame writes of these are gated to solo (see the frame loop), so once cleared here
+      // they stay cleared for the cohort's lifetime. `autoHunt`/`bot` are per-hero config from
+      // the handshake and stay as-is (in-zone bot behaviour is legit and per-owner).
+      state.autoReturn = false;
+      state.autoAdvance = false;
       cohortEngine = new CohortTurnEngine(lastCohortSlots.length, myCohortIndex, performance.now());
+      // Seed the scheduler's shadowed set: a member can ALREADY be shadowed when this fresh
+      // handshake completes (fix A.1) — translate each shadowed ticket slot to its cohort index.
+      for (const ticketSlot of shadowedTicketSlots) {
+        const idx = lastCohortSlots.indexOf(ticketSlot);
+        if (idx >= 0) cohortEngine.setSlotShadowed(idx, true);
+      }
       cohortPrevWaiting = false;
       renderer.setPovHeroIndex(myCohortIndex);
       refreshCohortStatus();
@@ -845,6 +859,9 @@ export function GameClient() {
       const leader = liveTicketSlots.length ? electLeader(liveTicketSlots) : myTicketSlot;
       const affectedIndex = lastCohortSlots.indexOf(ticketSlot);
       if (affectedIndex < 0) return; // not (or no longer) part of this cohort
+      // Fix A.1: unblock the turn scheduler from waiting on a shadowed member's (now
+      // absent) lanes — it auto-fills `{}` for this index until it's un-shadowed.
+      cohortEngine?.setSlotShadowed(affectedIndex, shadowed);
       const currentTurn = cohortEngine?.turn ?? 0;
       const msg = synthesizeShadowMessage(leader, myTicketSlot, affectedIndex, shadowed, currentTurn);
       if (msg) partySession.send(msg);
@@ -1051,11 +1068,19 @@ export function GameClient() {
       // — nothing here needs its own snapshot/restore.
       const botOn = store.autoHunt;
 
-      // UI-owned flags the engine reads directly (not part of FrameInput).
-      state.autoCast = botOn && store.autoCast;
-      state.autoAllocate = botOn && store.autoAllocate;
-      state.autoReturn = botOn && store.autoReturn;
-      state.autoAdvance = botOn && store.autoAdvance;
+      // UI-owned flags the engine reads directly (not part of FrameInput). Fix C: these
+      // mirror MY store onto SHARED globals, so in a cohort they'd diverge per client —
+      // and `autoReturn`/`autoAdvance` would self-navigate the shared location (the
+      // whole-party-drag class). Gate to SOLO: in a cohort each hero's config is the
+      // canonical replicated `setHeroConfig`, and nav is forced off at activateCohort.
+      // (`autoCast`/`autoAllocate` are inert in a cohort anyway — `syncPrimaryHeroConfig`
+      // only mirrors them at heroes.length===1 — but gating keeps the intent explicit.)
+      if (!cohortActive) {
+        state.autoCast = botOn && store.autoCast;
+        state.autoAllocate = botOn && store.autoAllocate;
+        state.autoReturn = botOn && store.autoReturn;
+        state.autoAdvance = botOn && store.autoAdvance;
+      }
       // Auto-use potion toggles + thresholds (M6), same UI-owned pattern.
       state.autoHpPotion = botOn && store.autoHpPotion;
       state.autoManaPotion = botOn && store.autoManaPotion;
@@ -1086,6 +1111,17 @@ export function GameClient() {
       // fixed-step accumulator. `simElapsed` (TimeDirector-shaped) is intentionally
       // UNUSED there — hit-stop/slow-mo stay render-side for a cohort. The solo path
       // stays byte-for-byte unchanged.
+      // Fix B: a zone-change intent (warp / fast-travel / walk / return-scroll / advance)
+      // means I'm LEAVING the cohort to roam solo — a member's move must NOT drag the whole
+      // party (design §3, free-roam). PEEK the store's pending intent WITHOUT draining; if it
+      // carries a zone change, collapse to solo FIRST so the `cohortActive` branch below is
+      // skipped and THIS frame's solo path drains + applies the move normally. The resulting
+      // `state.location` change then broadcasts a fresh zone beat (block after draw), and my
+      // peers re-derive their cohort without me. Instant moves drop me next beat; a channelled
+      // fast-travel/warp updates the beat only on ARRIVAL (peers briefly hold — waiting chip
+      // covers it), the accepted tradeoff of beat-driven re-derivation.
+      if (cohortActive && hasZoneChangeIntent(store.pendingInput)) collapseToSolo();
+
       let frameEvents: GameEvent[];
       if (cohortActive && cohortEngine) {
         const collected: GameEvent[] = [];
@@ -1098,7 +1134,9 @@ export function GameClient() {
           },
           send: (msg) => partySession.send(msg),
           runSubStep: (lanes) => {
-            step(state, lanes);
+            // Defense-in-depth (fix B): strip any zone-change field from EVERY lane before
+            // step() — identical on all clients, so a stale peer build can't drag the party.
+            step(state, sanitizeLanes(lanes));
             collected.push(...state.events);
           },
         };
@@ -1475,9 +1513,28 @@ export function GameClient() {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
         flushSaveBeacon();
+        // Fix A.2: a hidden tab PAUSES rAF, so this client stops issuing lanes while its
+        // socket stays open — the relay never sees a drop, never fires grace/shadow, and the
+        // whole cohort freezes waiting on lanes that will never come. Actively LEAVE the
+        // session so peers get grace -> member-shadowed (their scheduler then auto-fills my
+        // lanes, fix A.1). Collapse my own sim to solo FIRST so the return catch-up replays
+        // the hidden gap through the ordinary solo offline path (it can't replay a cohort —
+        // there are no peer lanes for the hidden interval). Composes with the existing
+        // >5s-hidden catch-up: `handleReturnFromBackground` replays the now-solo `state`.
+        if (useGameStore.getState().party) {
+          collapseToSolo(); // no-op if not in an active cohort
+          partySession.teardown(); // closes the socket -> relay grace -> peers shadow me
+        }
         return;
       }
-      if (document.visibilityState === "visible") handleReturnFromBackground();
+      if (document.visibilityState === "visible") {
+        handleReturnFromBackground();
+        // Re-join with a FRESH ticket (teardown forgot the partyId): re-mints, re-beats my
+        // zone, re-handshakes into a cohort if peers are still here. `setParty` is idempotent
+        // when already live, so a hide that never actually tore down is a safe no-op.
+        const party = useGameStore.getState().party;
+        if (party) partySession.setParty(party);
+      }
     }
 
     // bfcache restore (mobile back/forward navigation, some screen-fold cases)
@@ -1487,7 +1544,13 @@ export function GameClient() {
     // when `hiddenAt` is unset (see its doc comment). Idempotent if both fire
     // (`hiddenAt` is cleared after the first call).
     function onPageShow(e: PageTransitionEvent): void {
-      if (e.persisted) handleReturnFromBackground();
+      if (e.persisted) {
+        handleReturnFromBackground();
+        // Same rejoin as the visible path — a bfcache restore may have torn the session down
+        // (or frozen the socket) while away. `setParty` is idempotent if still connected.
+        const party = useGameStore.getState().party;
+        if (party) partySession.setParty(party);
+      }
     }
 
     // Browsers block audio output until a real user gesture — resume() is

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildFrameInput } from "../buildFrameInput";
+import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "../buildFrameInput";
 import type { PendingInput } from "@/ui/store/gameStore";
+import type { FrameInput } from "@/engine";
 
 function emptyPending(): PendingInput {
   return {
@@ -117,5 +118,57 @@ describe("buildFrameInput hero-index remap", () => {
       useWarpScroll: pending.useWarpScroll,
     };
     expect(buildFrameInput(pending, 7, 0)).toEqual(legacy);
+  });
+});
+
+describe("hasZoneChangeIntent (fix B — leave the cohort on a zone change)", () => {
+  it("false for an empty pending", () => {
+    expect(hasZoneChangeIntent(emptyPending())).toBe(false);
+  });
+
+  it.each<[string, Partial<PendingInput>]>([
+    ["fastTravel", { fastTravel: { mapId: "map2", zoneIdx: 1 } }],
+    ["walkToZone", { walkToZone: { mapId: "map1", zoneIdx: 3 } }],
+    ["useWarpScroll", { useWarpScroll: { mapId: "map3", zoneIdx: 0 } }],
+    ["useReturnScroll", { useReturnScroll: true }],
+    ["advanceStage", { advanceStage: true }],
+  ])("true when %s is set", (_label, patch) => {
+    expect(hasZoneChangeIntent({ ...emptyPending(), ...patch })).toBe(true);
+  });
+
+  it("false for challengeBoss / moveTo (co-op boss entry STAYS shared; non-nav intents ignored)", () => {
+    const p = emptyPending();
+    p.challengeBoss = true;
+    p.moveTo = { x: 5 };
+    p.allocateStat = { str: 2 };
+    expect(hasZoneChangeIntent(p)).toBe(false);
+  });
+});
+
+describe("sanitizeLanes (fix B defense-in-depth — strip zone-change fields from all lanes)", () => {
+  it("strips every zone-change field from all lanes while keeping the rest (incl. challengeBoss)", () => {
+    const lanes: FrameInput[] = [
+      { fastTravel: { mapId: "map2", zoneIdx: 1 }, moveTo: { x: 10 } },
+      {
+        walkToZone: { mapId: "map1", zoneIdx: 2 },
+        useWarpScroll: { mapId: "map3", zoneIdx: 0 },
+        challengeBoss: true,
+      },
+      { useReturnScroll: true, advanceStage: true, allocateStat: { str: 1 } },
+    ];
+    const out = sanitizeLanes(lanes);
+    expect(out[0]).toEqual({ moveTo: { x: 10 } });
+    expect(out[1]).toEqual({ challengeBoss: true });
+    expect(out[2]).toEqual({ allocateStat: { str: 1 } });
+  });
+
+  it("returns the SAME array reference when no lane carries a zone-change field", () => {
+    const lanes: FrameInput[] = [{ moveTo: { x: 1 } }, {}, { challengeBoss: true }];
+    expect(sanitizeLanes(lanes)).toBe(lanes);
+  });
+
+  it("no-ops an empty lane array (a turn's idle sub-steps 1..5)", () => {
+    const empty: FrameInput[] = [];
+    expect(sanitizeLanes(empty)).toBe(empty);
   });
 });

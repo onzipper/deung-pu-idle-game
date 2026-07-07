@@ -163,6 +163,18 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08g.items.social",
     ],
   },
+  // Live-test round 3: cohort no longer stalls on a hidden tab (shadow lane
+  // auto-fill + proactive leave/rejoin), warp leaves the cohort solo, town
+  // walking works for every member.
+  {
+    id: "2026-07-08h",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08h.items.stallFix",
+      "releases.2026-07-08h.items.warpSolo",
+      "releases.2026-07-08h.items.townWalk",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

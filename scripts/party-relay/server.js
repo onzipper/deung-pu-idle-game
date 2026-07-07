@@ -381,7 +381,11 @@ function createRelay(opts = {}) {
   }
 
   /** A joined socket died (close/error/heartbeat miss/flood). Start the grace->shadow
-   *  timer if peers remain; tear the room down if this was the last live socket. */
+   *  timer if peers remain; tear the room down if this was the last live socket. A
+   *  CLEAN client-initiated close (RFC6455 close-frame code 1000 — e.g. the client
+   *  deliberately closing on tab-hidden) skips the grace entirely and shadows right
+   *  away, since there is nothing to wait for a same-slot rejoin during. Abnormal
+   *  deaths (no close frame, TCP reset, ping timeout, other codes) keep GRACE_MS. */
   function onSocketDead(conn) {
     const room = conn.room;
     if (!room || conn.slot == null) return;
@@ -391,6 +395,11 @@ function createRelay(opts = {}) {
 
     if (liveSocketCount(room) === 0) {
       destroyRoom(room);
+      return;
+    }
+    if (conn.clientCleanClose) {
+      s.status = "shadowed";
+      fan(room, { t: "member-shadowed", slot: conn.slot });
       return;
     }
     s.graceTimer = setTimeout(() => {
@@ -512,6 +521,7 @@ function createRelay(opts = {}) {
       joined: false,
       closed: false,
       awaitingPong: false,
+      clientCleanClose: false, // set true iff the client's OWN close frame carried code 1000
       msgTimes: [],
     };
     conns.add(conn);
@@ -540,9 +550,17 @@ function createRelay(opts = {}) {
         case OPCODE.PONG:
           conn.awaitingPong = false;
           break;
-        case OPCODE.CLOSE:
+        case OPCODE.CLOSE: {
+          // RFC6455 §5.5.1: the close frame's payload, if present, is a 2-byte
+          // big-endian status code the CLIENT chose. Only an explicit clean 1000
+          // (deliberate close, e.g. tab-hidden teardown) skips the grace period —
+          // any other code, or no payload at all, is treated as an abnormal death.
+          const code =
+            frame.payload && frame.payload.length >= 2 ? frame.payload.readUInt16BE(0) : null;
+          if (code === 1000) conn.clientCleanClose = true;
           closeConn(conn, 1000, "");
           break;
+        }
         default:
           break;
       }
