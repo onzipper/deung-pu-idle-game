@@ -204,21 +204,98 @@ describe("M8 party P1b — one hero's death does not stall the others", () => {
   });
 });
 
-describe("M8 party P1b — exp/gold share hook is inert (solo-identical) at default", () => {
-  it("each present hero banks the FULL per-kill xp + the party credits full gold (mult 1)", () => {
+describe("M8 cohort exp — the share/buff math (config curves)", () => {
+  const P = CONFIG.party;
+  it("solo (size 1) is IDENTITY on every cohort curve (byte-identical gate)", () => {
+    expect(P.expKillMult(1, 1)).toBe(1);
+    expect(P.expKillMult(1, 3)).toBe(1); // size dominates — solo is always 1
+    expect(P.expBuff(1)).toBe(1);
+    expect(P.spawnMaxAliveScale(1)).toBe(1);
+    expect(P.goldShareMult(1)).toBe(1);
+  });
+  it("expBuff adds expBuffPerMember per EXTRA member", () => {
+    expect(P.expBuff(2)).toBeCloseTo(1 + P.expBuffPerMember, 12);
+    expect(P.expBuff(3)).toBeCloseTo(1 + 2 * P.expBuffPerMember, 12);
+  });
+  it("expKillMult = buff × equal share of (killer 1.0 + others expShareRate)", () => {
+    const r = P.expShareRate;
+    // 2 alive: (1 + 1·r)/2 × buff(2); 3 alive: (1 + 2·r)/3 × buff(3).
+    expect(P.expKillMult(2, 2)).toBeCloseTo(P.expBuff(2) * ((1 + r) / 2), 12);
+    expect(P.expKillMult(3, 3)).toBeCloseTo(P.expBuff(3) * ((1 + 2 * r) / 3), 12);
+    // A dead teammate (alive < size): the buff keys off cohort SIZE, the share off ALIVE.
+    expect(P.expKillMult(3, 2)).toBeCloseTo(P.expBuff(3) * ((1 + r) / 2), 12);
+    expect(P.expKillMult(3, 1)).toBeCloseTo(P.expBuff(3) * 1, 12); // lone survivor → buff only
+  });
+  it("goldShareMult stays INERT (gold is personal per owner)", () => {
+    expect([P.goldShareMult(1), P.goldShareMult(2), P.goldShareMult(3)]).toEqual([1, 1, 1]);
+  });
+  it("spawnMaxAliveScale grows per extra member (density, not killGoal)", () => {
+    expect(P.spawnMaxAliveScale(2)).toBeCloseTo(1 + P.spawnScalePerMember, 12);
+    expect(P.spawnMaxAliveScale(3)).toBeCloseTo(1 + 2 * P.spawnScalePerMember, 12);
+  });
+});
+
+describe("M8 cohort exp — credited to every alive hero; gold stays personal", () => {
+  it("2-hero cohort: each ALIVE hero banks perKill × expKillMult(2,2); gold is full", () => {
     const s = twoHeroParty(3);
     s.spawnPaused = true;
     s.enemies = [makeStubEnemy(1, s.heroes[0].x + 20, 1)]; // 1 hp → dies to the first swing
     const xp0 = s.heroes.map((h) => h.xp);
     const goldBefore = s.gold;
-    // Step until the enemy is reaped (heroes are level 1 with signature basic attacks).
     for (let i = 0; i < 300 && s.enemies.length; i++) step(s, [{}, {}]);
     expect(s.enemies.length).toBe(0);
-    const perKill = CONFIG.leveling.xpPerKill(s.stage);
-    // Both ALIVE heroes gained exactly one kill's worth of xp (share mult === 1).
-    expect(s.heroes[0].xp).toBe(xp0[0] + perKill);
-    expect(s.heroes[1].xp).toBe(xp0[1] + perKill);
+    const each = CONFIG.leveling.xpPerKill(s.stage) * CONFIG.party.expKillMult(2, 2);
+    // Both ALIVE heroes gained the cohort per-kill amount (share + buff), applied equally.
+    expect(s.heroes[0].xp).toBeCloseTo(xp0[0] + each, 9);
+    expect(s.heroes[1].xp).toBeCloseTo(xp0[1] + each, 9);
+    // Gold is PERSONAL (goldShareMult inert): the kill credits one full goldPerKill.
     expect(s.gold).toBe(goldBefore + CONFIG.goldPerKill(s.stage));
+  });
+
+  it("a DEAD cohort member earns nothing; the share divides by the ALIVE count", () => {
+    const s = twoHeroParty(3);
+    s.spawnPaused = true;
+    s.heroes[1].dead = true; // archer down → only the swordsman is alive
+    s.heroes[1].hp = 0;
+    s.heroes[1].reviveTimer = 100; // keep it down across the whole kill window
+    s.enemies = [makeStubEnemy(1, s.heroes[0].x + 20, 1)];
+    const xp1before = s.heroes[1].xp;
+    const xp0before = s.heroes[0].xp;
+    for (let i = 0; i < 300 && s.enemies.length; i++) step(s, [{}, {}]);
+    expect(s.enemies.length).toBe(0);
+    // Lone survivor in a size-2 cohort: buff(2) only (share pot = just the killer).
+    const each = CONFIG.leveling.xpPerKill(s.stage) * CONFIG.party.expKillMult(2, 1);
+    expect(s.heroes[0].xp).toBeCloseTo(xp0before + each, 9);
+    expect(s.heroes[1].xp).toBe(xp1before); // dead → no xp
+  });
+
+  it("slot-order invariance: xp credit is symmetric across the two lanes", () => {
+    // Same seed/stage, heroes swapped between lanes → identical TOTAL xp banked (the
+    // credit is per-alive-hero, independent of which slot lands the killing blow).
+    const a = twoHeroParty(7);
+    const b = twoHeroParty(7);
+    a.spawnPaused = b.spawnPaused = true;
+    a.enemies = [makeStubEnemy(1, a.heroes[0].x + 20, 1)];
+    b.enemies = [makeStubEnemy(1, b.heroes[0].x + 20, 1)];
+    for (let i = 0; i < 300 && (a.enemies.length || b.enemies.length); i++) {
+      if (a.enemies.length) step(a, [{}, {}]);
+      if (b.enemies.length) step(b, [{}, {}]);
+    }
+    const totalA = a.heroes.reduce((t, h) => t + h.xp, 0);
+    const totalB = b.heroes.reduce((t, h) => t + h.xp, 0);
+    expect(totalA).toBeCloseTo(totalB, 9);
+  });
+});
+
+describe("M8 cohort exp — a 1-hero state is byte-identical (solo gate)", () => {
+  it("grantKillXp on a solo state grants the FULL perKill (no cohort scaling)", () => {
+    const s = initGameState(5, soloSave("swordsman", 3));
+    s.spawnPaused = true;
+    s.enemies = [makeStubEnemy(1, s.heroes[0].x + 20, 1)];
+    const xp0 = s.heroes[0].xp;
+    for (let i = 0; i < 300 && s.enemies.length; i++) step(s, {});
+    expect(s.enemies.length).toBe(0);
+    expect(s.heroes[0].xp).toBe(xp0 + CONFIG.leveling.xpPerKill(s.stage)); // exact integer
   });
 });
 

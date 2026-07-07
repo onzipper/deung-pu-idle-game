@@ -525,3 +525,96 @@ s20/s25 organic clears, **s30 boss soft-wall intact** (organic 0/5, BOSSISO wins
 stalls to the frontier, mana relief + stone income unchanged. **This is the new baseline.** No
 curve was retuned; no SAVE bump. Vitest 1069/1069 green (+13 dmath/guard tests), `tsc` + eslint
 clean.
+
+## Cohort exp pass (M8 P4 era) — same-zone party reward — 2026-07-07
+
+**Goal (owner, `docs/party-design-m8.md` §3 + answers):** farming TOGETHER in the SAME zone is
+rewarded (exp buff + shared exp); different zones = nothing; **drops + gold stay personal**
+("จอใครจอมัน"). Activate the three inert P1b hooks (`CONFIG.party.*`) and tune so 2-3p same-zone
+progression is meaningfully faster **per member** than solo (~1.2-1.5× xp/hr, an incentive) but
+NOT a mandatory meta (<1.6×), with no starvation and the s15/s30 walls intact.
+
+### Mechanics wired (engine, no SAVE bump — all curves transient config)
+- **Shared xp** (`systems/leveling.grantKillXp`): every ALIVE cohort hero banks a kill's xp ×
+  `party.expKillMult(size, alive)`. The engine does NOT attribute a kill to one hero (no
+  `lastHitBy`), so this credits the design §5 **equal-to-all-present** form = the mean-field of
+  "killer 1.0 + others share" (identical in aggregate when heroes kill at equal rates). True
+  per-killer anti-leech attribution needs a structural `applyDamage` change → **flagged for
+  `game-engine-specialist`** (out of a balance-tuning scope).
+- **Density** (`systems/hunt.updateSpawns`): `maxAlive` × `party.spawnMaxAliveScale(size)`.
+  Scales the field cap only — NOT `killGoal` (zone-unlock quotas stay personal/unchanged) and NOT
+  the seeded spawn draw order.
+- **Gold**: `party.goldShareMult` kept **INERT** (identity) per owner — gold is personal.
+
+### Knobs chosen (drafts → tuned)
+| knob | draft | shipped | per-size effect |
+|---|---|---|---|
+| `PARTY_EXP_SHARE_RATE` | 0.5 | **0.6** | non-killer present hero's share of a kill's xp |
+| `PARTY_EXP_BUFF_PER_MEMBER` | +0.10 | **+0.04** | cohort xp buff: 2p ×1.04, 3p ×1.08 |
+| `PARTY_SPAWN_SCALE_PER_MEMBER` | — | **+0.50** | maxAlive: 2p ×1.5, 3p ×2.0 |
+
+Net per-hero-per-kill xp multiplier `expKillMult`: 2p ×0.832, 3p ×0.792 (below 1 — a present
+non-killer gets a *fraction* of a kill they didn't land; the per-member GAIN comes from the extra
+kills happening in the shared field + faster survival, not a raw >1 multiplier).
+
+### Results (1800s × 5 seeds, per-member xp/hr vs a size-1 baseline through the same runner)
+| class | 2p xp/hr× | 3p xp/hr× | 2p kills/hero/min | 3p kills/hero/min |
+|---|---|---|---|---|
+| swordsman | **×1.25** | **×1.26** | 64% of solo | 45% |
+| archer | ×1.57 ⚠ | ×1.66 ⚠ | 78% | 56% |
+| mage | **×1.32** | **×1.34** | 68% | 47% |
+| mixed[sw,ar,mg] | — | **×1.46** | — | 51% |
+
+Sword + mage land squarely in the 1.2-1.5 incentive band; **mixed 3p = ×1.46**. Deaths PER BODY
+drop sharply in a cohort (e.g. archer solo 45/run → 28 across 2 bodies / 16 across 3) — the co-op
+survival benefit is the dominant driver of the net gain (fewer respawns → deeper reach → xp/kill
+compounds geometrically), which is why the fixed-horizon xp/hr multiplier is larger than the raw
+`expKillMult`.
+
+### The buff-vs-ceiling structural finding
+Solving "sword-2p ≥ 1.2 **and** archer-3p < 1.6" simultaneously forces `expBuffPerMember ×
+expShareRate → 0`: a *per-member* buff hands a 3p cohort **2×** the boost of a 2p one, colliding
+with the archer's already-high 3p snowball. So the buff is held to +0.04 (genuinely live, but
+small). If the owner wants a bigger, safe buff, make it **flat per-cohort** (same at 2p/3p)
+instead of per-member — a design change, not a tune.
+
+### Open flags (owner decisions — nothing silently changed)
+1. **⚠ Archer runs hot (×1.57/1.66).** This is a *denominator artifact* of the known solo-archer
+   frontier death-spiral (this doc's "Archer friction pass"): solo archer walls at s15 with ~45
+   deaths, so grouping rescues it disproportionately. Options: (a) accept — party rescuing the
+   frontier-friction class is arguably good; (b) fix solo-archer survivability further (class task,
+   not party); (c) flat-buff. **Not fixed here** — flagged.
+2. **⚠ Kills/hero/min = 45-65% of solo (below the ~70% "no starvation" goal).** Root cause is NOT
+   mob scarcity — it's **auto-hunt TARGET-CLUSTERING**: both heroes chase the *nearest* mob and
+   converge, capping cohort TOTAL throughput at ~1.1× (2p) regardless of density (raising
+   `maxAlive` ×1.4→×2.0 barely moved it). Real fix = spatial target-spreading in auto-hunt
+   (**structural, `game-engine-specialist`**). The reward is carried by SHARED xp, so per-member
+   *progression* is still clearly ahead despite the lower personal kill rate.
+3. **⚠ Bosses melt at headcount.** s5/s10 clear in **0.05-0.54× solo time** at 2-3 bodies (s15/s20
+   likewise once the faster-levelling cohort arrives); the sim doesn't reach s25/s30 in 1800s but
+   the melt is monotonic in body count, so the deep soft-walls would melt to 2-3 *maxed* bodies
+   too. **Boss HP-per-headcount scaling is a DESIGN decision for the owner** — NOT silently
+   applied (per the task's "flag loudly, don't silently buff boss HP"). Note the walls that matter
+   for gating (personal drops/gold, personal zone-unlock quotas) are untouched; only shared XP
+   accelerates leveling.
+
+### Quota semantics in a cohort (documented, NOT redesigned)
+`state.kills` (the farm-zone unlock counter) and `zoneKills` (persisted per-zone progress) are
+**shared-state, single counters** incremented **once per mob kill** in `resolveDeaths`
+(`state.kills++`), regardless of how many heroes are present — P1b swept quests/economy to hero
+*loops* but left these as one shared tally. So a cohort fills a zone's `killGoal` at the COHORT's
+combined kill rate (faster wall-clock), but the QUOTA VALUE (`killGoal(n)`) is unchanged and NOT
+scaled by headcount — i.e. the zone-unlock requirement stays "personal-sized" and is reached
+sooner simply because more bodies kill faster. `spawnMaxAliveScale` deliberately scales density
+only, never `killGoal`, so quotas are never inflated by party size. (Class-change / tier-3 kill
+quests are per-hero `hero.quest.progress`, advanced per hero in `advanceQuestObjective`.)
+
+### Gates
+- **Solo canonical sim BYTE-IDENTICAL** (diff of `pnpm sim` before/after = empty): the size-1 fast
+  path returns identity on every cohort curve (`expKillMult(1,·)=1`, `spawnMaxAliveScale(1)=1`).
+- Engine vitest **549** green, full repo **1238** green; `tsc --noEmit` + eslint clean. New tests
+  (`party.test.ts`): share/buff config math, alive-count division (dead member earns nothing),
+  slot-order xp symmetry, and the 1-hero solo-identical guard.
+- Harness: `PARTY=2|3` (+ `PARTY_MIX=1`) cohort mode added to `balance-sim.ts` (per-hero input
+  lanes; per-member xp/hr, kills/hero/min, deaths, farm/boss clear vs a size-1 baseline). Dev
+  `PSHARE`/`PBUFF`/`PSCALE` env override for sweeps (sim-only, like `applyRefineCombo`).
