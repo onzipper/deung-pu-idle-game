@@ -340,3 +340,31 @@ describe("maybeAutoAdvance", () => {
     expect(s.bossReady).toBe(true);
   });
 });
+
+describe("fast travel during the victory pause (owner live report, 2026-07-08)", () => {
+  // Regression: `phase === "victory"` early-returns step() BEFORE tickFastTravel,
+  // but the fastTravel intent is accepted by the navigation block ABOVE it — the
+  // channel started (cast bar showed) and then never counted down. Same bug class
+  // as the 2026-07-06 town early-return; the victory branch now ticks the channel.
+  it("a warp tapped on the victory screen completes and dismisses the victory pause", () => {
+    const s = initGameState(6, soloSave("swordsman", 3));
+    unlockAll(s);
+    s.phase = "victory"; // as set by the boss win (boss.ts) — see leveling/evolution tests
+    step(s, { fastTravel: { mapId: "map1", zoneIdx: 0 } }); // town
+    expect(s.fastTravelCast).not.toBeNull(); // channel started on the victory screen
+    const casts = Math.ceil(CONFIG.travel.fastTravelCastSeconds * 60) + 2;
+    for (let i = 0; i < casts; i++) step(s, {});
+    expect(s.fastTravelCast).toBeNull(); // channel completed (was: stuck forever)
+    expect(s.location).toEqual({ mapId: "map1", zoneIdx: 0 });
+    expect(s.phase).toBe("battle"); // arriveAtZone dismissed the victory pause
+  });
+
+  it("victory without a channel still pauses the sim (no behavior drift)", () => {
+    const s = initGameState(7, soloSave("swordsman", 3));
+    s.phase = "victory";
+    const before = s.time;
+    for (let i = 0; i < 10; i++) step(s, {});
+    expect(s.phase).toBe("victory");
+    expect(s.time).toBe(before); // the pause still freezes sim time
+  });
+});
