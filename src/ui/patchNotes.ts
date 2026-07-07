@@ -107,6 +107,13 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08b.items.updateBanner",
     ],
   },
+  // Town manual-play hotfix (owner UAT report): tap-to-move + NPC approach were
+  // dead in town — the step() town early-return dropped every move command.
+  {
+    id: "2026-07-08c",
+    date: "2026-07-08",
+    items: ["releases.2026-07-08c.items.townWalkFix", "releases.2026-07-08c.items.shopSell"],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

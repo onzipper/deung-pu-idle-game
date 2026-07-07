@@ -7,13 +7,16 @@
  * now — `RefinePanel.tsx` and the bot's auto-dispose sweep, `ui/gear/autoSell.ts`
  * — this display layer reads `inventory` directly). Default sort is
  * BEST → WORST: tier desc, then refine +level desc, then rarity (epic > rare
- * > common) desc, then flat primary-stat total desc (`inventorySortRank`).
+ * > common) desc, then flat primary-stat total desc (`ui/gear/sortRank.ts`'s
+ * `compareInventoryItems` — extracted so `ShopPanel.tsx`'s sell tab shares the
+ * exact same ranking).
  * Every tile action (equip/sell/salvage) now targets exactly ONE instance id —
  * no more "sell all of this stack" bulk action at the tile level (the
  * inventory-wide "sell all common"/"salvage junk common" bulk buttons above
- * the grid are unchanged, they already scan `inventory` directly). Same modal
- * shell convention as `SettingsPanel.tsx`/`CodexPanel.tsx` (fixed overlay, sim
- * never pauses behind it).
+ * the grid are unchanged, they already scan `inventory` directly — also in
+ * `sortRank.ts`, shared with `ShopPanel.tsx`). Same modal shell convention as
+ * `SettingsPanel.tsx`/`CodexPanel.tsx` (fixed overlay, sim never pauses
+ * behind it).
  *
  * EQUIP FLOW (unchanged from M7): POST `/api/items/equip`|`unequip` FIRST —
  * only on success do we optimistically patch the local `inventory` slice AND
@@ -34,18 +37,22 @@ import { useMemo, useState } from "react";
 import {
   ITEM_TEMPLATES,
   INVENTORY_CAP,
-  refinedStat,
   salvageYield,
   type GearSlot,
   type HeroClass,
-  type ItemRarity,
-  type ItemTemplate,
 } from "@/engine";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
 import { executeSalvage } from "@/ui/gear/salvageFlow";
 import { executeSell } from "@/ui/gear/sellFlow";
-import { computeStatDelta, type StatBlock } from "@/ui/gear/statDelta";
+import {
+  compareInventoryItems,
+  refinedStatsOf,
+  sellAllCommonIds,
+  salvageJunkCommonIds,
+} from "@/ui/gear/sortRank";
+import { computeStatDelta } from "@/ui/gear/statDelta";
+import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import { toInventoryItem, type InventoryItem } from "@/ui/gear/types";
 import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
@@ -63,49 +70,6 @@ const SLOT_ORDER: readonly GearSlot[] = ["weapon", "armor"];
 
 function tierBorder(tier: number): string {
   return TIER_BORDER_COLORS[tier] ?? TIER_BORDER_COLORS[6];
-}
-
-/** The template's flat stat block, refined to `refineLevel` (M7.6 ตีบวก — a
- * +0 item is byte-identical to its base template). */
-function refinedStatsOf(template: ItemTemplate, refineLevel: number): StatBlock {
-  return {
-    atk: template.stats.atk ? refinedStat(template.stats.atk, refineLevel) : undefined,
-    def: template.stats.def ? refinedStat(template.stats.def, refineLevel) : undefined,
-    hp: template.stats.hp ? refinedStat(template.stats.hp, refineLevel) : undefined,
-  };
-}
-
-/** Flat refined stat total (M7.6 ตีบวก) — used by the "salvage junk common"
- * bulk affordance to compare a candidate against what's equipped in its slot,
- * and (M7.9) as the last tie-break of the default inventory sort below. */
-function statSumOf(template: ItemTemplate, refineLevel: number): number {
-  const s = refinedStatsOf(template, refineLevel);
-  return (s.atk ?? 0) + (s.def ?? 0) + (s.hp ?? 0);
-}
-
-/** M7.9 "no stacking" default sort — BEST → WORST: tier desc, then refine
- * +level desc, then rarity (epic > rare > common) desc, then flat primary-stat
- * total desc. A missing/retired template sorts to the very bottom. */
-const RARITY_RANK: Record<ItemRarity, number> = { epic: 2, rare: 1, common: 0 };
-
-function inventorySortRank(item: InventoryItem): [number, number, number, number] {
-  const template = ITEM_TEMPLATES[item.templateId];
-  if (!template) return [-1, -1, -1, -1];
-  return [
-    template.tier,
-    item.refineLevel,
-    RARITY_RANK[template.rarity],
-    statSumOf(template, item.refineLevel),
-  ];
-}
-
-function compareInventoryItems(a: InventoryItem, b: InventoryItem): number {
-  const ra = inventorySortRank(a);
-  const rb = inventorySortRank(b);
-  for (let i = 0; i < ra.length; i++) {
-    if (ra[i] !== rb[i]) return rb[i] - ra[i]; // descending
-  }
-  return 0;
 }
 
 function GridCell({
@@ -253,8 +217,8 @@ function DetailCard({
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
   const template = ITEM_TEMPLATES[item.templateId];
-  const [confirmingSell, setConfirmingSell] = useState(false);
-  const [confirmingSalvage, setConfirmingSalvage] = useState(false);
+  const sellGuard = useConfirmGuard();
+  const salvageGuard = useConfirmGuard();
   if (!template) return null;
 
   const equipped = item.equippedSlot !== null;
@@ -268,21 +232,11 @@ function DetailCard({
   const prestigeCls = prestigeNameClass(item.refineLevel);
 
   function handleSell(): void {
-    if (needsConfirm && !confirmingSell) {
-      setConfirmingSell(true);
-      return;
-    }
-    setConfirmingSell(false);
-    onSell(item);
+    sellGuard.trigger(needsConfirm, () => onSell(item));
   }
 
   function handleSalvage(): void {
-    if (needsConfirm && !confirmingSalvage) {
-      setConfirmingSalvage(true);
-      return;
-    }
-    setConfirmingSalvage(false);
-    onSalvage(item);
+    salvageGuard.trigger(needsConfirm, () => onSalvage(item));
   }
 
   return (
@@ -352,7 +306,7 @@ function DetailCard({
             onClick={handleSell}
             className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-amber-400/60 bg-amber-400/10 px-3 text-xs font-bold text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {confirmingSell ? t("confirmSell") : t("sellButton")}
+            {sellGuard.confirming ? t("confirmSell") : t("sellButton")}
           </button>
         )}
       </div>
@@ -367,7 +321,7 @@ function DetailCard({
             className="flex min-h-11 flex-1 items-center justify-center gap-1 rounded-(--ddp-radius-md) border border-violet-400/50 bg-violet-400/10 px-3 text-xs font-bold text-violet-300 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <MaterialIcon className="h-3.5 w-3.5" />
-            {confirmingSalvage ? t("confirmSalvage") : t("salvageButton", { yield: perItemYield })}
+            {salvageGuard.confirming ? t("confirmSalvage") : t("salvageButton", { yield: perItemYield })}
           </button>
         </div>
       )}
@@ -453,10 +407,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   }
 
   async function handleSellAllCommon(): Promise<void> {
-    const ids = inventory
-      .filter((i) => i.equippedSlot === null)
-      .filter((i) => ITEM_TEMPLATES[i.templateId]?.rarity === "common")
-      .map((i) => i.instanceId);
+    const ids = sellAllCommonIds(inventory);
     if (ids.length === 0) return;
     setBusy(true);
     await executeSell(ids);
@@ -471,26 +422,10 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   }
 
   /** M7.6 ตีบวก bulk affordance: "ย่อยของ common ทั้งหมดที่ต่ำกว่าของที่ใส่" —
-   * every UNEQUIPPED common item whose refined stat total does not beat what's
-   * currently worn in its slot (an empty slot keeps everything eligible, same
-   * as the sell-side keep-guard's "nothing worn yet" case). */
+   * see `sortRank.ts`'s `salvageJunkCommonIds` for the exact eligibility rule
+   * (shared with `ShopPanel.tsx`'s sell tab). */
   async function handleSalvageJunkCommon(): Promise<void> {
-    const equippedSumBySlot = new Map<GearSlot, number>();
-    for (const it of inventory) {
-      if (!it.equippedSlot) continue;
-      const tpl = ITEM_TEMPLATES[it.templateId];
-      if (tpl) equippedSumBySlot.set(it.equippedSlot, statSumOf(tpl, it.refineLevel));
-    }
-    const ids = inventory
-      .filter((i) => i.equippedSlot === null)
-      .filter((i) => ITEM_TEMPLATES[i.templateId]?.rarity === "common")
-      .filter((i) => {
-        const tpl = ITEM_TEMPLATES[i.templateId];
-        if (!tpl) return false;
-        const baseline = equippedSumBySlot.get(tpl.slot);
-        return baseline === undefined || statSumOf(tpl, i.refineLevel) <= baseline;
-      })
-      .map((i) => i.instanceId);
+    const ids = salvageJunkCommonIds(inventory);
     if (ids.length === 0) return;
     setBusy(true);
     await executeSalvage(ids);

@@ -726,6 +726,9 @@
   "shop": {
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
+    "tabBuy": "Buy",
+    "tabSell": "Sell & Salvage",
+    "sellEmptyHint": "Bag's empty — nothing to sell.",
     "owned": "{count}/{cap} held",
     "buyAria": "Buy {qty} {name}",
     "quickUseLabel": "Items",
@@ -942,6 +945,12 @@
           "freeFarm": "🌾 Farming an old zone on purpose? The bot respects it — no more dragging you forward (it only advances on a fresh unlock)",
           "softLockFix": "🔧 Fixed the freeze after defeating the young Glacial Sovereign — you now warp back to the frontier with the change-class button ready",
           "updateBanner": "🚀 New patch deployed while you play? The game tells you — one tap saves and updates"
+        }
+      },
+      "2026-07-08c": {
+        "items": {
+          "townWalkFix": "🚶 Town bugfix: tap-to-walk works in town again, and tapping Pah Pu / Uncle Dueng actually walks you over — move orders used to vanish in town, making NPCs untalkable",
+          "shopSell": "💰 Pah Pu now buys back: sell and salvage gear right from her shop dialog, no need to open the inventory separately"
         }
       }
     }
