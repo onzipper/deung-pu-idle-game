@@ -870,14 +870,18 @@ export const CONFIG = {
     // The signature-cast guarantee is untouched (baseRegen alone sustains it).
     regenPerIntPoint: 0.05, // +mana/sec per INT point above base (caster identity)
     // ---- M7.9 "Grand Expansion" tier-3 mana-pool bonus ----
-    // Tier 3 grants a FLAT pool bump (systems/stats `heroMaxMana`, tier 3 only) so the
-    // grander tier-3 skill-4 (cost ~120) is CASTABLE but still GATING — same philosophy
-    // as the tier-2 ultimates (see sword_quake / archer_barrage: cost≈pool so a cast
-    // nearly empties it). A str/dex class sits on the flat base pool (60); +90 -> 150
-    // lets it afford the 120 skill-4 with ~30 to spare, so a cast drains the pool and
-    // the next waits on regen (mana potions stay a real sink). The INT-fed mage already
-    // has the deepest pool; this lifts its ceiling in step. Applied on evolve to tier 3.
-    tier3PoolBonus: 90,
+    // Tier 3 grants a FLAT pool bump (systems/stats `heroMaxMana`, tier 3 only). A str/dex
+    // class sits on the flat base pool (60 + a small INT-share contribution); this bonus is
+    // what makes the grander tier-3 skill-4 castable and deepens the reservoir that a mana
+    // potion refills (potion restore = restoreFrac × MAX mana).
+    // Mana relief pass (owner request 2026-07-08, "มานาใช้เยอะไป ซื้อยามานาจนตังหมด"): raised
+    // 90 → 170. This is a DELIBERATELY ASYMMETRIC lever — an ADDITIVE bump is a large % of the
+    // shallow str/dex pools (~250 → ~330, +30% restore/potion) but a tiny % of the mage's deep
+    // INT-fed pool (~615 → ~695, +13%), so it relieves the flat-pool classes the owner flagged
+    // while leaving the mage ~unchanged (sim: mage 94 → 87 pot/run, −7%). Tier-3 ONLY — heroes
+    // are tier 1/2 through s15, so s1-15 stays byte-identical. See docs/balance-m79.md
+    // "Mana relief pass". The INT-fed mage already has the deepest pool; this lifts it in step.
+    tier3PoolBonus: 170,
   },
 
   // ---- auto-cast slots (M5 "skill framework v2") ----
@@ -1410,12 +1414,15 @@ const SKILL_LIST = [
   // SKYFALL BLADE (tier-3 skill-4 "ดาบฟ้าผ่าสนาม") — a FIELD-WIDE sky-strike: an instant
   // AoE (reuses the `strike` quake/field mechanism, r500 spans the ~900px field) at a
   // grander mult than the quake. The time-freeze/flash beat is timeDirector/render's
-  // job — the engine only emits the skillCast event + the damage. cost 120 needs the
-  // tier-3 mana bonus (str pool 60+90=150) to be castable; it nearly empties the pool,
-  // so it's a hard gate (mana potions bite). Learned at tier 3 + level 40.
+  // job — the engine only emits the skillCast event + the damage. Learned at tier 3 + level
+  // 40. Mana relief pass (owner 2026-07-08): cost 120 → 80. At 120 sword burned ~198 mana
+  // pot/run (owner "ซื้อยามานาจนตังหมด"); skyfall was its dominant drain (8.6 mana/s on a
+  // 14s cd). 80 (+ the deeper tier3PoolBonus 170) roughly HALVES that (sim: 198 → 103/run,
+  // −48%) while staying ≥ the tier-2 quake (50) and a real cost — mana stays a sink, not
+  // irrelevant. Tier-3 skill-4 only (auto-slot 4, tier-gated) → s1-15 byte-identical.
   {
     id: "sword_skyfall", cls: "swordsman", tier: 3, unlockLevel: 40, kind: "strike",
-    cost: 120, cd: 14, radius: 500, mult: 10.0, targets: 0, projSpeed: 0, range: 540,
+    cost: 80, cd: 14, radius: 500, mult: 10.0, targets: 0, projSpeed: 0, range: 540,
     buffMult: 1, buffDuration: 0,
   },
 
@@ -1448,11 +1455,16 @@ const SKILL_LIST = [
   // whose LANDINGS SPREAD over ~4s of real time via spawn-height stagger (`stormOffsets`,
   // a wide 20-row table with a TALL ry ramp). Reuses the rainArrow fall — NO new
   // ProjectileKind. The DELIBERATELY slow projSpeed (260) is what stretches the ry
-  // stagger into the ~4s window (see stormOffsets). cost 120 gates it on the tier-3 pool.
-  // Learned at tier 3 + level 40. `targets` MUST equal stormOffsets.length.
+  // stagger into the ~4s window (see stormOffsets). Learned at tier 3 + level 40. `targets`
+  // MUST equal stormOffsets.length. Cost history: 120 (launch) → 90 (M7.9 archer friction
+  // pass) → 45 (mana relief pass, owner 2026-07-08). Archer was the HIGHEST burner (210
+  // pot/run) and — unlike sword — its other big drains (barrage/powershot) fire from L8/L15,
+  // so cutting them would break the s1-15 byte-identical gate; storm (the only tier-3-safe
+  // archer cost) + the deeper tier3PoolBonus 170 carry the relief (sim: 210 → 112/run, −47%;
+  // storm deaths also fell 478 → 360 as the sustained barrage stopped starving powershot).
   {
     id: "archer_storm", cls: "archer", tier: 3, unlockLevel: 40, kind: "rain",
-    cost: 90, cd: 13, radius: 95, mult: 2.0, targets: 20, projSpeed: 260, range: 900,
+    cost: 45, cd: 13, radius: 95, mult: 2.0, targets: 20, projSpeed: 260, range: 900,
     buffMult: 1, buffDuration: 0,
   },
 

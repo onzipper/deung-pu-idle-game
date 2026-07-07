@@ -347,3 +347,91 @@ s20, after the boss fight — "may shift later than s16" per owner) — HELD. s1
 (`bossSlamTelegraph/Land`, `bossChargeTelegraph/Hit`, `bossEnraged`, `bossDefeated`, …). The
 render `bossVariety`/CHARGE fx key off `mapId` (map4 → ice-tundra + charge visuals), NOT boss
 stats, so the scaled boss draws identically. The render side needs NOTHING new.
+
+---
+
+## Mana relief pass (owner request 2026-07-08)
+
+Owner: **"มานาใช้เยอะไป ซื้อยามานาจนตังหมด"** — mana burn is too aggressive; the flat-pool
+str/dex classes (esp. sword mid-late + the owner's own run) drain gold on mana potions. Goal:
+roughly **halve** sword/archer mana-potion burn, keep the mage ~as-is (already tiny), and hold
+every M7.9 gate. Mana stays a real sink (owner: don't make it irrelevant) — just not bankrupting.
+
+### Diagnosis
+
+Potion count ≈ (mana consumed beyond regen, over the frontier where the sink bites) ÷ (restore
+per potion = `restoreFrac 0.45 × MAX mana`). Candidate levers, judged for the "keep mage as-is"
+constraint:
+
+- **baseRegen / regenPerIntPoint up** — rejected: both cut the mage's burn as much as (or more
+  than) the flat classes' (mage sits near regen break-even on a deep pool), so they can't relieve
+  sword/archer without also slashing the mage. Not mage-neutral.
+- **manaPotion.restoreFrac up** — rejected: a uniform % restore boost cuts ALL classes equally,
+  so it would drop the mage by the same fraction. Not mage-neutral.
+- **tier3PoolBonus up (chosen)** — an ADDITIVE pool bump is a large % restore for the shallow
+  str/dex pools (~250) but a tiny % for the mage's deep INT pool (~615). Asymmetric by
+  construction, and tier-3-only → s1-15 untouched.
+- **Per-skill cost down, tier-3 skill-4 ONLY (chosen)** — cutting consumption directly. Only
+  `sword_skyfall` / `archer_storm` qualify: they unlock at L40 and auto-cast solely from the
+  tier-gated slot 4 (evolve ~s16), so they touch ONLY s16+. The other big archer drains
+  (`archer_barrage` L15, `archer_powershot` L8) and sword's `sword_quake` (L15) fire from ~s6+,
+  so cutting them would break the s1-15 byte-identical gate — left untouched. The mage kit is
+  left 100% byte-identical (relief comes only from its share of the pool bump).
+
+### Knobs changed (before → after)
+
+| knob (`config/index.ts`) | before | after | scope |
+|---|---|---|---|
+| `mana.tier3PoolBonus` | 90 | **170** | tier-3 only (evolve ~s16); mage-light by design |
+| `SKILLS.sword_skyfall.cost` | 120 | **80** | tier-3 skill-4, s16+ only |
+| `SKILLS.archer_storm.cost` | 90 | **45** | tier-3 skill-4, s16+ only |
+
+`mage_apocalypse` / `mage_cataclysm` / all tier-1/2 skills / all farm+boss curves: **unchanged.**
+No `mana.base`, `baseRegen`, `regenPerIntPoint`, `restoreFrac`, or `autoAllocRatio` touched (those
+would hit s1-15 and/or the mage). No SAVE-shape change.
+
+### Before / after (organic, 5 seeds × 5400s, GEAR+REFINE — the canonical mode)
+
+Mana-potion burn (the sink) and deaths:
+
+| class | mana pot/run before | after | Δ | deaths before | after |
+|---|---|---|---|---|---|
+| swordsman | 198 | **103** | **−48%** | 657 | 543 |
+| archer | 210 | **112** | **−47%** | 478 | 360 |
+| mage | 94 | **87** | −7% (as-is) | 38 | 49 |
+
+Gold spent on mana tracks the count at the stage-scaled price (`45 × 1.12^(stage-1)`, bought
+mostly at the frontier) — so gold-on-mana falls ~in step with the count (≈halved for sword/archer).
+Deaths IMPROVED for both flagged classes vs baseline (the deeper pool + cheaper storm also cut
+archer's wasteful boss-spam death loop, 478 → 360; sword 657 → 543); mage deaths flat (38 → 49).
+
+Time-to-clear (mean s) — s1-15 **byte-identical** (diff empty; all three levers are tier-3 /
+L40-gated); s16-30 modestly faster from the extra skill uptime, never trivialised:
+
+| stage | sword b→a | archer b→a | mage b→a |
+|---|---|---|---|
+| 20 | 142→140 | 143→140 | 193→182 |
+| 25 | 184→173 | 209→193 | 182→190 |
+| 30 | 261→256 | 407→306 | 299→235 |
+
+(archer s30 407→306 is the biggest single gain — the storm relief eases the hard-mode class's
+deep-farm grind; s30 boss still walls.)
+
+### Gate checklist (all HELD)
+
+1. **s1-15 byte-identical** — HELD. Farm-time diff s1-15 is EMPTY; every changed knob is tier-3 /
+   L40-gated (heroes are tier 1/2 through s15). s5/s10/s15 boss = 5/5 all classes.
+2. **class-change ~s5** — HELD (s5, 5/5 all classes/seeds).
+3. **tier-3 quest reached, no stall** — HELD (tier3 @ s16 all; young-Sovereign quest boss won
+   5/5 all classes at ~20-25s; all reach map6/s30).
+4. **s16-25 climb + s20/s25 bosses** — HELD (s20 5/5, s25 5/5 all classes; farm times monotonic,
+   modestly faster, not trivial).
+5. **s30 soft-wall** — HELD (s30 boss 0/5 all classes; reached by all).
+6. **Mana a real sink** — HELD. Sword 103 / archer 112 / mage 87 pot/run — a felt gold sink for
+   all three, just no longer bankrupting. skyfall 80 ≥ the tier-2 quake (50); storm 45 stays a
+   real chunk; the sink SPIRIT (mana matters, isn't irrelevant) is intact even though the
+   individual "ultimate nearly empties the pool" gating softens by owner intent.
+
+**Tests / typecheck.** `grand-expansion-tier3.test.ts` "meaningful mana cost" updated to the new
+exact costs (80 / 45) with a `≥40` floor guard (never trivial); the tier-3/L40 STRUCTURAL gate
+asserts are untouched. 1044/1044 vitest green, `tsc --noEmit` clean. No SAVE bump.
