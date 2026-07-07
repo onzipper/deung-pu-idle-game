@@ -161,6 +161,27 @@ export type GameEvent =
       y: number;
       mobId: number;
     }
+  // "หินเสริมพลัง" ENHANCEMENT-STONE drop (systems/gear): a kill dropped `qty` refine
+  // stones that auto-collect into `Character.materials` — the SAME counter salvage
+  // feeds (owner 2026-07-08: stones drop from mobs directly so salvage stops being the
+  // only material source). `rollId` is the SAME per-save monotonic loot-counter value
+  // as this kill's gear roll (they share the tick — see systems/gear.rollEnemyDrop),
+  // but the stone stream is a SEPARATE domain-tagged hash (core/hash.stoneFloat) so it
+  // stays independent of the gear-drop sequence. The server claim key is
+  // `${characterId}:stone:${rollId}` (namespaced apart from gear's `${characterId}:
+  // ${rollId}`) so materials are credited idempotently. `qty` is whole stones (≥1; more
+  // at deeper maps + a boss bonus). One-way (render pops a pickup; ui queues a claim +
+  // toasts). Deterministic (hashed, no RNG draw — the seeded stream stays wave-only).
+  // NB (footgun #6): this new event kind needs a render/audio + toast entry in the UI
+  // wave; unhandled it falls to the FxController/audio DEFAULT (a safe no-op), no crash.
+  | {
+      type: "stoneDrop";
+      rollId: string;
+      qty: number;
+      x: number;
+      y: number;
+      mobId: number;
+    }
   // Manual play (M7.8 "Manual Play"): the player issued a tap command. One-way like
   // every event — the engine NEVER reads these back (the command state lives on the
   // hero); render adds consumers (a ground click-marker at `moveOrdered.x`, a lock

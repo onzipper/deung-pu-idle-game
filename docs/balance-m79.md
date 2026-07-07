@@ -435,3 +435,61 @@ deep-farm grind; s30 boss still walls.)
 **Tests / typecheck.** `grand-expansion-tier3.test.ts` "meaningful mana cost" updated to the new
 exact costs (80 / 45) with a `≥40` floor guard (never trivial); the tier-3/L40 STRUCTURAL gate
 asserts are untouched. 1044/1044 vitest green, `tsc --noEmit` clean. No SAVE bump.
+
+---
+
+## หินเสริมพลัง drop conversion (M7.6 follow-up, owner 2026-07-08)
+
+**Ask.** Refine materials came ONLY from SALVAGING gear (M7.6: server-minted into
+`Character.materials` on the salvage endpoint). Owner found salvage cumbersome → enhancement
+**stones now DROP from mobs directly and auto-collect into the SAME `materials` counter**. Salvage
+stays a source for now; a later server/UI wave removes it (existing stockpiles survive = the
+compensation). Engine-side only here.
+
+**Mechanism / stream choice.** A stone roll rides every kill's gear roll (`systems/gear`
+`rollEnemyDrop`/`rollBossDrop`). It hashes a SEPARATE domain-tagged stream (`core/hash.stoneFloat`
+= `lootHash(salt ^ STONE_DOMAIN, counter)`) off the **same persisted `(lootSalt, lootCounter)`** the
+gear roll uses — **reusing the counter, consuming NO extra tick**. So the gear-drop cadence is
+untouched → the existing gear sequence is byte-identical, and there is **no SAVE-shape change / no
+`SAVE_VERSION` bump** (a second persisted counter would have forced one; it buys nothing since
+`splitmix32`'s avalanche fully decorrelates the two streams off a constant XOR). Never the wave RNG.
+
+**Claim contract (server agent).** New per-step event `stoneDrop { rollId, qty, x, y, mobId }`.
+`rollId` = the kill's loot-counter value (SAME id as that kill's gear `itemDrop`, if any). The
+server credits `Character.materials += qty`, **idempotent on claim key `${characterId}:stone:${rollId}`**
+— namespaced apart from gear's `${characterId}:${rollId}` so a kill that drops both never collides.
+Monotonic + save/load-disjoint like gear (no re-credit on reload/offline replay). Follows the gear
+claim idiom exactly; the `:stone:` prefix keeps the server change additive. (Render/UI wave: this
+event kind needs a toast + fx map entry — footgun #6; unhandled it falls to the safe FX default.)
+
+**Config (`CONFIG.stoneDrops`, all sweepable).** `mapTier` = ceil(stage/5) clamped to 6.
+- Normal kill: drop chance `baseChance 0.18 + (mapTier-1)*chancePerMapTier 0.02` (→ 0.18…0.28);
+  qty `qtyBase 2 + (mapTier-1)*qtyPerMapTier 1` (→ 2,3,4,5,6,7).
+- Boss kill: GUARANTEED `bossBonusBase 8 + (mapTier-1)*bossBonusPerMapTier 4` (→ 8…28).
+
+**Rate tuning — income before/after vs salvage-era** (canonical sim: `GEAR=1 REFINE=1`, 5 seeds ×
+5400s, full climb to s30). Target = the salvage-era material BANK, ±20%, never a nerf.
+
+| class | salvage-era `mat earned`/run | หินเสริมพลัง stones/run | Δ |
+|---|---|---|---|
+| swordsman | 9008 | 8633 | −4.2% |
+| archer | 8533 | 8575 | +0.5% |
+| mage | 8441 | 8625 | +2.2% |
+
+All within ±5% — a clean match (materials were never the binding refine constraint anyway: banked
+~9000 vs spent ~4000-5000, GOLD gates refining, so `+N`-reached / attempts are unchanged). Stone
+income is deep-weighted like salvage — mean stones/run by map: **m1 ~122 · m2 ~402 · m3 ~811 ·
+m4 ~1471 · m5 ~2300 · m6 ~3504** (deeper maps trickle bigger stacks, matching salvage's own
+tier-weighted yield and the tier-scaled refine cost).
+
+**Gates (all HELD, byte-identical s1-15 gear drops).** Gear `drops`/run byte-identical to the
+pre-stone baseline (sword seed1/2 `572,537` = baseline `572,537`; archer `573,536`; mage `572,544`)
++ a unit test proves the whole `itemDrop` sequence matches a pure gear-only recompute off
+`(salt,counter)`. Class-change **s5** (5/5 all classes), tier-3 quest reached **s16** + young
+Sovereign won 5/5, s20/s25 cleared, **s30 boss soft-wall intact** (0/5). Refine attempts/breaks
+unchanged (119-133 attempts, 4-7 breaks / ~550 drops).
+
+**Tests / typecheck.** +7 tests (`stone-drops.test.ts`: stream primitive independence, drop
+determinism, qty depth-scaling, **stream isolation** = gear byte-identical + one-tick-per-kill,
+claim-key uniqueness/idempotence + save-load disjointness). **1051/1051** vitest green,
+`tsc --noEmit` clean, eslint clean. No SAVE bump.

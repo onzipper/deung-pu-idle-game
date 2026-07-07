@@ -296,6 +296,45 @@ export const CONFIG = {
     },
   },
 
+  // ---- "หินเสริมพลัง" enhancement-stone drops (M7.6 follow-up, owner 2026-07-08) ----
+  // Refine materials used to come ONLY from SALVAGING gear (cumbersome — owner's word).
+  // Stones now DROP from mob kills directly and AUTO-COLLECT into the SAME materials
+  // counter salvage feeds (server credits Character.materials idempotently by claimKey).
+  // The roll is a STATELESS, domain-tagged hash off the SAME (lootSalt, lootCounter) the
+  // gear roll uses (core/hash.stoneFloat) — it consumes NO extra counter tick, so the
+  // GEAR-drop sequence is byte-identical and there is no SAVE-shape change. NEVER the
+  // wave RNG (reserved for wave composition). All knobs sim-tuned so material income per
+  // run ≈ the salvage-era bank (docs/balance-m79.md "หินเสริมพลัง drop conversion").
+  //
+  // Per NORMAL kill: drop with `dropChance(stage)` = baseChance + (mapTier-1) *
+  //   chancePerMapTier (deeper maps drop a touch more often), yielding
+  //   qtyBase + (mapTier-1)*qtyPerMapTier whole stones (deeper maps — where refine costs
+  //   scale by tier — trickle bigger stacks, matching salvage's own deep-weighted income).
+  //   `mapTier` = which of the 6 maps the stage sits in (ceil(stage/5), clamped to count).
+  // Per BOSS kill: a GUARANTEED bonus of `bossBonusBase + (mapTier-1)*bossBonusPerMapTier`
+  //   stones (a chunky milestone, like the guaranteed boss gear drop) — rolled off the
+  //   stone stream but not gated on the drop chance.
+  //
+  // Tuned (docs/balance-m79.md "หินเสริมพลัง drop conversion"): total stones/run ≈ the
+  // salvage-era material BANK (sim: ~8500-9000/run, matched within ±20%). Materials were
+  // never the binding refine constraint anyway (banked ~8900 vs spent ~4500 — GOLD gates
+  // refining), so refine pacing (+N reached, attempts) is unchanged; this just removes the
+  // salvage chore. Deep-weighted like salvage (m1 ~150/run → m6 ~3300/run).
+  stoneDrops: {
+    /** Per-NORMAL-kill base drop probability at map tier 1 (s1-5). */
+    baseChance: 0.18,
+    /** Added to the drop probability per map tier deeper (mapTier 2..6). */
+    chancePerMapTier: 0.02,
+    /** Whole stones granted per NORMAL drop at map tier 1. */
+    qtyBase: 2,
+    /** +this stones per drop per map tier deeper (tier→qty: 2,3,4,5,6,7). */
+    qtyPerMapTier: 1,
+    /** GUARANTEED stones a boss drops at map tier 1. */
+    bossBonusBase: 8,
+    /** Added to the boss stone bonus per map tier deeper. */
+    bossBonusPerMapTier: 4,
+  },
+
   // ---- idle bots + fast travel (M7.5 "Sell, Bots & Inventory UX") ----
   // Engine-side, DETERMINISTIC automations (same pattern as autoReturn/auto-potion,
   // no RNG, no wall-clock): a potion-restock bot + a sell-trip bot make a town round
