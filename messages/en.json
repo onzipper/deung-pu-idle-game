@@ -85,6 +85,7 @@
       "objectiveBossYoungSovereign": "👑 Defeat the young Glacial Sovereign",
       "guideKillScoped": "Head to {map} to hunt",
       "guideKillAny": "Keep hunting in your current zone — it counts anywhere",
+      "guideKillGatedTier3": "🔒 Climb map 3 to the boss gate first — the tundra will open up to raid",
       "guideBossBacktrack": "Walk back to the {map} boss room — the boss respawns for a re-fight",
       "guideBossAny": "Beat the boss of the map you're currently farming",
       "guideBossTier3Hint": "You've reached the frontier — hit the challenge button when you're ready",
@@ -806,6 +807,7 @@
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
     "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
+    "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",

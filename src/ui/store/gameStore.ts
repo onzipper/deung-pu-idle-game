@@ -280,6 +280,19 @@ export interface EngineSnapshot {
    * throttled copy), but this is what the HUD (`TownNpcPanelHost.tsx`'s
    * auto-close watch, `RefineButton.tsx`'s dock shortcut) reads every sync. */
   npcInRange: Record<TownNpcId, boolean>;
+  /** Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — read straight
+   * off the engine's pure `tier3FrontierLocked(state)`: the solo hero holds
+   * the tier-3 quest but the tundra grant isn't enterable yet (map3's boss
+   * room not persist-unlocked). Drives the quest card's locked kill-row copy
+   * (`GoalLadder.tsx`'s `ClassQuestCard`) and the guide-me gated branch
+   * (`ui/questGuide.ts`). Always `false` outside that one narrow window. */
+  tier3FrontierLocked: boolean;
+  /** The solo hero's deepest PERSIST-unlocked farm zone — read straight off
+   * the engine's pure `deepestUnlockedFarm(state)`, the player's REAL
+   * progression frontier. Guide-me routes here while `tier3FrontierLocked`
+   * (map4 z1 isn't actually walkable yet), same one-way "engine computes, store
+   * just carries it" pattern as `npcInRange`. */
+  deepestUnlockedFarm: WorldLocation;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -853,6 +866,10 @@ export interface HudState {
   materials: number;
   /** Town NPCs phase 3 (final) — see `EngineSnapshot.npcInRange`'s doc. */
   npcInRange: Record<TownNpcId, boolean>;
+  /** Tier-3 frontier gate — see `EngineSnapshot.tier3FrontierLocked`'s doc. */
+  tier3FrontierLocked: boolean;
+  /** The hero's real progression frontier — see `EngineSnapshot.deepestUnlockedFarm`'s doc. */
+  deepestUnlockedFarm: WorldLocation;
 
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
@@ -1240,6 +1257,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   unlockedZones: {},
   materials: 0,
   npcInRange: { "npc:pahpu": false, "npc:lungdueng": false },
+  tier3FrontierLocked: false,
+  deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
   activeTownPanel: null,
 
   inventory: [],

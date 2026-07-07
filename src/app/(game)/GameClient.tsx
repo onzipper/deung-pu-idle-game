@@ -54,6 +54,7 @@ import {
   canUseConsumable,
   combatPower,
   createAccumulator,
+  deepestUnlockedFarm,
   drainAccumulator,
   evolutionQuestFor,
   initGameState,
@@ -68,6 +69,7 @@ import {
   shopStageOf,
   skillCdOf,
   step,
+  tier3FrontierLocked,
   toSaveData,
   townNpcConfig,
   unlockedAutoSlotCount,
@@ -380,6 +382,12 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       "npc:pahpu": npcInRange(state, "npc:pahpu"),
       "npc:lungdueng": npcInRange(state, "npc:lungdueng"),
     },
+    // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — pure engine
+    // reads, same one-way "engine computes, store just carries it" pattern as
+    // `npcInRange`. Drives the quest card's locked kill-row copy + the guide-me
+    // gated branch (`ui/questGuide.ts`).
+    tier3FrontierLocked: tier3FrontierLocked(state),
+    deepestUnlockedFarm: deepestUnlockedFarm(state),
   };
 }
 

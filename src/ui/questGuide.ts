@@ -26,13 +26,28 @@
  *    destination) with a distinct `"bossTier3"` kind, so the caller can show
  *    "you're at the frontier, hit the challenge button" instead of the
  *    normal "walk into the boss door" toast.
+ *  - EXCEPTION (tier-3 frontier GATE, owner rule 2026-07-07 "ห้ามข้ามแมพ"):
+ *    while `frontierLocked` (engine `tier3FrontierLocked`), BOTH tier-3
+ *    objectives are unreachable no matter their `done` state — the quest's
+ *    map4 z1 grant isn't enterable yet (map3's boss room isn't
+ *    persist-unlocked), so `effectiveUnlockedZones` hides it and the normal
+ *    kill/boss branches below would resolve to `null` (a dead button). This
+ *    branch instead routes to the player's REAL frontier (`deepestFarm`,
+ *    engine `deepestUnlockedFarm`) with a distinct `"gated"` kind, checked
+ *    FIRST (before the objective branches) since it overrides them entirely.
  *
  * Objective order always mirrors `QuestDef.objectives` (kill first, then
  * killBoss — see `engine/systems/quests.ts`), so "first incomplete" checks
  * kill before boss.
  */
 
-import { firstFarmZone, highestUnlockedFarmZone, lastFarmZone, type UiZone } from "@/ui/world/zones";
+import {
+  firstFarmZone,
+  highestUnlockedFarmZone,
+  lastFarmZone,
+  zoneByLocation,
+  type UiZone,
+} from "@/ui/world/zones";
 
 /** One objective's guide-relevant state: its map scope (`null` = unscoped,
  * counts anywhere) and whether it's already satisfied. */
@@ -47,9 +62,17 @@ export interface QuestGuideInput {
   /** The hero's current map (used to resolve unscoped objectives). */
   currentMapId: string;
   unlockedZones: Record<string, number>;
+  /** Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ") — the engine's
+   * `tier3FrontierLocked(state)` read. Optional/defaults `false` so existing
+   * (non-tier-3) callers/tests are unaffected. See the module doc's third
+   * bullet for why this overrides the normal kill/boss branches entirely. */
+  frontierLocked?: boolean;
+  /** The hero's real progression frontier (engine `deepestUnlockedFarm`) —
+   * only read while `frontierLocked`. */
+  deepestFarm?: { mapId: string; zoneIdx: number };
 }
 
-export type QuestGuideKind = "kill" | "boss" | "bossTier3";
+export type QuestGuideKind = "kill" | "boss" | "bossTier3" | "gated";
 
 export interface QuestGuideTarget {
   zone: UiZone;
@@ -63,6 +86,10 @@ export interface QuestGuideTarget {
  * kill objective's map has no unlocked farm zone yet — shouldn't normally
  * happen, since reaching a map's grind implies it's already unlocked). */
 export function selectQuestGuideTarget(input: QuestGuideInput): QuestGuideTarget | null {
+  if (input.frontierLocked && input.deepestFarm) {
+    const zone = zoneByLocation(input.deepestFarm);
+    return zone ? { zone, kind: "gated" } : null;
+  }
   if (!input.kill.done) {
     const mapId = input.kill.mapId ?? input.currentMapId;
     const zone = highestUnlockedFarmZone(mapId, input.unlockedZones);
