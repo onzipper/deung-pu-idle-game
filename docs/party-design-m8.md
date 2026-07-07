@@ -75,17 +75,26 @@ shared sim**: วันนี้ `autoCast`/`autoAllocate`/`autoReturn`/`autoHpP
 state** (`hero.config.autoCast` ฯลฯ) เปลี่ยนผ่าน replicated intent `setHeroConfig`;
 ผู้เล่นแก้ได้เฉพาะฮีโร่ตัวเอง; shadow body ใช้ config ล่าสุดของเจ้าของ.
 
-### 3. โซน = property ของ "ห้อง" ไม่ใช่ของฮีโร่รายคน
+### 3. โซนแบบ free-roam + "same-zone cohort" (เจ้าของ OVERRULE ดราฟต์แรก 2026-07-08)
 
-**ตัดสินใจ**: ปาร์ตี้อยู่ **โซนเดียวร่วมกัน**; `location`/`traveling`/
-`fastTravelCast`/spawn pool/`rngState`/`enemies`/`boss`/`time` เป็น **shared room
-state**. การเดินข้ามโซนของแต่ละคนขณะอยู่ปาร์ตี้ = **ตัดออกจาก v1** (cut line).
-การไปโซนถัดไป (หรือเข้าห้องบอส) = **party-level action** → ทำ **deterministic
-re-seed** เหมือน join (ข้อ 4): ทุกเครื่อง rebuild สนามใหม่ที่โซนใหม่พร้อมกัน.
+> ดราฟต์แรกเสนอ "ทั้งปาร์ตี้ล็อกโซนเดียวกัน ย้ายพร้อมกัน" — **เจ้าของไม่เอา**:
+> อยากได้ free style สมาชิกใครอยากฟาร์มโซนไหนก็ไป.
 
-**เหตุผล**: ตัด per-hero world position ข้ามโซนทิ้ง → multi-hero state เหลือแค่
-"3 ฮีโร่ในโซนเดียว, ต่างกันแค่ x ในสนาม" — ลดความซับซ้อนมหาศาลและตรงกับ GDD
-("party-only rooms, one shared zone").
+**ตัดสินใจ (ตามเจ้าของ)**: ปาร์ตี้ = **social container** (สถานะ/emoji/invite ไหล
+ผ่านห้องตลอด) แต่ **shared sim เกิดเฉพาะ "cohort" = สมาชิกที่อยู่โซนเดียวกัน**:
+
+- สมาชิกที่อยู่คนเดียวในโซน → รัน **solo sim ปกติทุกประการ** (โค้ดเดิม ไม่มี
+  lockstep overhead, ไม่มี input delay) — คนเล่นเดี่ยวในตี้ไม่รู้สึกอะไรเลย.
+- สมาชิก ≥2 คนในโซนเดียวกัน → โซนนั้นเป็น **cohort sim ร่วม** (lockstep ตาม
+  ข้อ 1): เห็นตัวกันจริง ช่วยกันตี. เกิด/เลิก cohort เมื่อสมาชิกเข้า/ออกโซน →
+  **deterministic re-seed** ที่ zone boundary (กลไกเดียวกับ join ข้อ 4).
+- **รางวัลปาร์ตี้ได้เฉพาะใน cohort เดียวกัน**: exp buff + แชร์ exp (ดูข้อ 5).
+  อยู่คนละโซน = ไม่มี buff ไม่มีรางวัลร่วมใด ๆ — เป็นแรงจูงใจให้มาฟาร์มด้วยกัน
+  โดยไม่บังคับ.
+
+**เหตุผล**: โครงนี้เก็บ solo path เดิมไว้ byte-identical (ลดความเสี่ยง regression
+มหาศาล), lockstep จ่ายราคาเฉพาะตอนได้ของแลก (เห็นเพื่อน+buff), และ re-seed
+boundary เดิมรองรับ cohort เกิด/สลายได้โดยไม่ต้องมี snapshot transfer.
 
 ### 4. Join / leave / mid-session join: **join-at-zone-boundary, ไม่มี snapshot transfer**
 
@@ -246,13 +255,15 @@ input ที่ผ่าน guard แต่ไม่ควรเกิด → en
 
 ---
 
-## ❓ คำถามที่ต้องให้เจ้าของ/ทีมเคาะ
+## ✅ คำตอบเจ้าของ (2026-07-08)
 
-1. **ย้ายโซนในปาร์ตี้ = ใครสั่ง?** leader-only / โหวต / follow-the-leader (v1 แนะ
-   leader-only + re-seed).
-2. **แชร์ exp+gold = ได้เต็มทุกคน หรือหาร partySize?** (balance flag — sim เคาะ).
-3. **mob density / killGoal ต่อจำนวนคน** = คำถาม sim-harness (ยังไม่ตั้งเลข).
-4. **turn length เริ่มที่ 100ms** โอเคไหม (ปรับ adaptive ได้จากผล probe RTT).
-5. **shadow-body income** ยืนยันว่า = offline-idle capped ปกติ (ไม่ cross-credit)?
-</content>
-</invoke>
+1. **ย้ายโซน**: ไม่มีคำสั่งกลาง — **free-roam** ใครอยากไปไหนไป (ดูข้อ 3 ฉบับแก้).
+   ประตูห้องบอสยังกติกาเดิมรายคน; ตี bosses ด้วยกันได้เมื่ออยู่ cohort เดียวกัน.
+2. **รางวัล**: อยู่โซนเดียวกัน = **exp buff + แชร์ exp กัน**; คนละโซน = ไม่มี
+   buff/รางวัลร่วมเลย. (ตัวเลข buff/สูตรแชร์ = คำถาม sim-harness, ยังไม่ตั้งเลข —
+   รวมถึง mob density/killGoal ต่อหัวใน cohort.)
+3. **turn length 100ms** — เจ้าของ ok.
+4. **shadow-body income** — เจ้าของยังไม่เข้าใจคำถาม; อธิบายใหม่แล้วรอเคาะ
+   (ประเด็น: ตัวเงา AI ที่ตีต่อหลังเราหลุด/ออฟไลน์ ควรได้รายได้แบบไหน —
+   เข้า pool offline-idle ที่มี cap เดิม หรือได้เต็มเหมือนออนไลน์).
+
