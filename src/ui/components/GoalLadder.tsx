@@ -40,7 +40,8 @@ import {
   type GoalRungId,
   type GoalRungState,
 } from "@/ui/goalLadder";
-import { useGameStore } from "@/ui/store/gameStore";
+import { selectQuestGuideTarget } from "@/ui/questGuide";
+import { useGameStore, type HeroQuestSummary } from "@/ui/store/gameStore";
 
 const RUNG_ICON: Record<GoalRungId, string> = {
   levelUp: "⭐",
@@ -94,13 +95,202 @@ function RungPill({ rung, onClick }: { rung: GoalRungState; onClick?: () => void
   );
 }
 
+/** One objective ROW of the full quest card (owner-approved quest UX
+ * upgrade): icon + label + its own progress bar (kill objectives, goal > 1)
+ * or a plain ✓/✗ chip (boss objectives, goal 1) — plus, only while
+ * incomplete, a plain-words location line underneath. Generalizes over both
+ * objective types purely off `goal` so it never needs to know which one it's
+ * rendering. */
+function QuestObjectiveRow({
+  icon,
+  label,
+  progress,
+  goal,
+  done,
+  locationHint,
+}: {
+  icon: string;
+  label: string;
+  progress: number;
+  goal: number;
+  done: boolean;
+  locationHint: string | null;
+}) {
+  const pct = goal > 0 ? Math.min(100, (progress / goal) * 100) : 0;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2 text-[12px] font-semibold text-ddp-ink-muted">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden>{icon}</span>
+          <span className="truncate">{label}</span>
+        </span>
+        <span
+          className={`shrink-0 font-bold tabular-nums ${done ? "text-emerald-400" : "text-ddp-ink"}`}
+        >
+          {goal > 1 ? `${Math.min(progress, goal)}/${goal}` : done ? "✓" : "✗"}
+        </span>
+      </div>
+      {goal > 1 && (
+        <div className="h-2 w-full overflow-hidden rounded-full bg-black/40 ring-1 ring-ddp-border-soft ring-inset">
+          <div
+            className={`h-full rounded-full transition-[width] duration-300 ${done ? "bg-emerald-400" : "bg-ddp-gold"}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+      {!done && locationHint && (
+        <span className="text-[11px] text-ddp-ink-muted/80">{locationHint}</span>
+      )}
+    </div>
+  );
+}
+
+/** The full quest card — replaces the old one-line progress readout. Renders
+ * a PRE-ACCEPT preview (full objectives + reward, next to the existing
+ * "รับเควส" button in `SkillBar.tsx`) while offered, or the per-objective
+ * progress + location-guidance + "พาไปเลย" (Guide me) button once accepted.
+ * Reads the hero/world state itself (same self-contained pattern as
+ * `CoreLoopCard`). */
+function ClassQuestCard({
+  quest,
+  tier,
+  cls,
+}: {
+  quest: HeroQuestSummary;
+  tier: 1 | 2 | 3;
+  cls: string;
+}) {
+  const t = useTranslations("ladder");
+  const tq = useTranslations("panels.classQuest");
+  const tContent = useTranslations("content");
+  const queueFastTravel = useGameStore((s) => s.queueFastTravel);
+  const pushNotice = useGameStore((s) => s.pushNotice);
+  const world = useGameStore((s) => s.world);
+  const unlockedZones = useGameStore((s) => s.unlockedZones);
+  const channeling = useGameStore((s) => s.fastTravelChannel !== null);
+
+  // "{map name} (แมพ N)" — matches the codex's "บอสประจำ<map>" naming voice
+  // while still surfacing the numbered map players already navigate by.
+  const mapLabel = (mapId: string) =>
+    `${tContent(`maps.${mapId}.name`)} (${t("mapNumberLabel", { n: mapId.replace(/^map/, "") })})`;
+
+  const killDone = quest.kills >= quest.killGoal;
+  const killLabel = quest.killMapId
+    ? tq("objectiveKillScoped", { map: mapLabel(quest.killMapId) })
+    : tq("objectiveKillAny");
+  const bossLabel = quest.bossMapId
+    ? tq("objectiveBossScoped", { map: mapLabel(quest.bossMapId) })
+    : tq("objectiveBossAny");
+
+  // "backtrack" hint (M7.9 tier-3 quest): the boss objective's map differs
+  // from where the hero is currently standing — explain WHY (re-fight an
+  // earlier map's boss) rather than just saying "go there".
+  const isBacktrack = quest.bossMapId !== null && quest.bossMapId !== world.mapId;
+  const killHint = quest.killMapId
+    ? tq("guideKillScoped", { map: mapLabel(quest.killMapId) })
+    : tq("guideKillAny");
+  const bossGuideHint = isBacktrack
+    ? tq("guideBossBacktrack", { map: mapLabel(quest.bossMapId as string) })
+    : tq("guideBossAny");
+
+  const heroName = tContent(`classes.${cls}.${tier === 2 ? "evolvedName" : "name"}`);
+  const nextClassName = tContent(
+    `classes.${cls}.${tier === 1 ? "evolvedName" : "tier3Name"}`,
+  );
+  const rewardLine =
+    tier === 1
+      ? tq("rewardLine", { cls: nextClassName })
+      : tq("rewardLineTier3", { cls: nextClassName });
+
+  // Pre-accept: full preview only — the accept button itself lives in
+  // `SkillBar.tsx`'s `ClassQuestAffordance` (no second control here).
+  if (quest.offered) {
+    return (
+      <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-2.5">
+        <span className="text-[12px] font-bold text-ddp-ink">
+          {tq("cardTitlePreAccept")}
+        </span>
+        <QuestObjectiveRow
+          icon="🗡"
+          label={killLabel}
+          progress={0}
+          goal={quest.killGoal}
+          done={false}
+          locationHint={null}
+        />
+        <QuestObjectiveRow
+          icon="👑"
+          label={bossLabel}
+          progress={0}
+          goal={1}
+          done={false}
+          locationHint={null}
+        />
+        <span className="text-[11px] font-semibold text-ddp-gold-bright">
+          {rewardLine}
+        </span>
+      </div>
+    );
+  }
+
+  const guideTarget = selectQuestGuideTarget({
+    kill: { mapId: quest.killMapId, done: killDone },
+    boss: { mapId: quest.bossMapId, done: quest.bossDone },
+    currentMapId: world.mapId,
+    unlockedZones,
+  });
+  const guideDisabled = channeling || world.traveling || !guideTarget;
+
+  const handleGuide = () => {
+    if (!guideTarget) return;
+    queueFastTravel({ mapId: guideTarget.zone.mapId, zoneIdx: guideTarget.zone.zoneIdx });
+    if (guideTarget.kind === "boss") pushNotice("guideBossDoor");
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-2.5">
+      <QuestObjectiveRow
+        icon="🗡"
+        label={killLabel}
+        progress={quest.kills}
+        goal={quest.killGoal}
+        done={killDone}
+        locationHint={killDone ? null : killHint}
+      />
+      <QuestObjectiveRow
+        icon="👑"
+        label={bossLabel}
+        progress={quest.bossDone ? 1 : 0}
+        goal={1}
+        done={quest.bossDone}
+        locationHint={quest.bossDone ? null : bossGuideHint}
+      />
+      <span
+        className={`text-[11px] font-semibold ${quest.complete ? "text-emerald-300" : "text-ddp-gold-bright"}`}
+      >
+        {quest.complete ? t("classQuest.readyHint") : rewardLine}
+      </span>
+      {!quest.complete && (
+        <button
+          type="button"
+          disabled={guideDisabled}
+          onClick={handleGuide}
+          aria-label={tq("ariaGuide", { heroName })}
+          className="min-h-9 w-full rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 px-3 text-[12px] font-bold text-sky-200 transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
+        >
+          🧭 {tq("guideButton")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Optional milestone detail card — only rendered while `levelUp`/`classQuest`
  * is the current rung (see module doc). Read-only progress; the actual
  * accept/change-class buttons live in `SkillBar.tsx`. */
 function MilestoneCard({ current }: { current: GoalRungId }) {
   const hero = useGameStore((s) => s.heroes[0]);
   const t = useTranslations("ladder");
-  const tq = useTranslations("panels.classQuest");
   if (!hero || (current !== "levelUp" && current !== "classQuest")) return null;
 
   if (current === "levelUp") {
@@ -127,19 +317,7 @@ function MilestoneCard({ current }: { current: GoalRungId }) {
 
   const quest = hero.quest;
   if (!quest) return null;
-  return (
-    <div className="flex items-center justify-between gap-2 text-[13px] text-ddp-ink-muted">
-      <span>
-        {quest.complete
-          ? t("classQuest.readyHint")
-          : tq("progress", {
-              kills: quest.kills,
-              goal: quest.killGoal,
-              boss: quest.bossDone ? "✓" : "✗",
-            })}
-      </span>
-    </div>
-  );
+  return <ClassQuestCard quest={quest} tier={hero.tier} cls={hero.cls} />;
 }
 
 /** The always-rendered core-loop card — the direct `BossPanel` replacement. */

@@ -52,7 +52,8 @@
       "victoryHint": "Walk into the next map to keep growing stronger."
     },
     "powerRatioLabel": "Power {pct}%",
-    "bossStatsLabel": "Boss HP {hp} · ATK {atk}"
+    "bossStatsLabel": "Boss HP {hp} · ATK {atk}",
+    "mapNumberLabel": "Map {n}"
   },
   "panels": {
     "skillsLabel": "Skills",
@@ -77,7 +78,20 @@
       "changeButton": "Change class!",
       "confirmLabel": "Confirm?",
       "confirmHint": "Tap again to confirm",
-      "ariaChange": "{heroName}: change class{state, select, confirm { (tap again to confirm)} other {}}"
+      "ariaChange": "{heroName}: change class{state, select, confirm { (tap again to confirm)} other {}}",
+      "cardTitlePreAccept": "Class-change quest — what you'll do",
+      "objectiveKillScoped": "🗡 Hunt monsters in {map}",
+      "objectiveKillAny": "🗡 Hunt monsters (anywhere)",
+      "objectiveBossScoped": "👑 Defeat the {map} boss",
+      "objectiveBossAny": "👑 Defeat any map boss once",
+      "guideKillScoped": "Head to {map} to hunt",
+      "guideKillAny": "Keep hunting in your current zone — it counts anywhere",
+      "guideBossBacktrack": "Walk back to the {map} boss room — the boss respawns for a re-fight",
+      "guideBossAny": "Beat the boss of the map you're currently farming",
+      "rewardLine": "Reward: become {cls} · a big power jump + a new skill",
+      "rewardLineTier3": "Reward: become {cls} · a big power jump + a new skill + 4th skill + 4th auto-cast slot",
+      "guideButton": "Guide me",
+      "ariaGuide": "{heroName}: guide me to the next quest objective"
     },
     "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})"
   },
@@ -735,6 +749,7 @@
     "botReturning": "🏃 Bot is heading back to the farm...",
     "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
+    "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",

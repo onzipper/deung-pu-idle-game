@@ -99,6 +99,15 @@ export interface HeroQuestSummary {
   killGoal: number;
   /** Boss-defeat objective satisfied (✓/✗). */
   bossDone: boolean;
+  /**
+   * Map scope of each objective (owner-approved quest UX upgrade), straight
+   * off `QuestObjective.mapId` — `null` means the objective counts ANYWHERE
+   * (the tier-1 class-change quest's kill/boss objectives). The tier-3 quest
+   * scopes kills to `"map3"` and the boss re-kill to `"map2"`. Drives the
+   * full quest card's per-objective location line + the "พาไปเลย" guide
+   * button's fast-travel target (`ui/questGuide.ts`). */
+  killMapId: string | null;
+  bossMapId: string | null;
 }
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */
@@ -491,7 +500,11 @@ function isAutoSellAction(v: unknown): v is AutoSellAction {
 /** Migrates one rarity field from either shape: v2 action string (preferred),
  * v1.1 boolean (`true` → "sell", `false` → "off"), or missing/corrupt → the
  * default. */
-function migrateAction(actionField: unknown, boolField: unknown, fallback: AutoSellAction): AutoSellAction {
+function migrateAction(
+  actionField: unknown,
+  boolField: unknown,
+  fallback: AutoSellAction,
+): AutoSellAction {
   if (isAutoSellAction(actionField)) return actionField;
   if (typeof boolField === "boolean") return boolField ? "sell" : "off";
   return fallback;
@@ -1129,7 +1142,8 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
-  queueMoveTo: (x) => set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
+  queueMoveTo: (x) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
 
   queueAttackTarget: (id) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, attackTarget: { id } } })),

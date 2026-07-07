@@ -220,7 +220,18 @@ function buildQuestSummary(h: Hero): HeroQuestSummary | null {
   const accepted = q?.accepted ?? false;
   const complete =
     accepted && def.objectives.every((o, i) => (q?.progress[i] ?? 0) >= o.count);
-  return { offered, accepted, complete, kills, killGoal, bossDone };
+  const killMapId = killIdx >= 0 ? (def.objectives[killIdx].mapId ?? null) : null;
+  const bossMapId = bossIdx >= 0 ? (def.objectives[bossIdx].mapId ?? null) : null;
+  return {
+    offered,
+    accepted,
+    complete,
+    kills,
+    killGoal,
+    bossDone,
+    killMapId,
+    bossMapId,
+  };
 }
 
 function buildSnapshot(state: GameState): EngineSnapshot {

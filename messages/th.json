@@ -52,7 +52,8 @@
       "victoryHint": "เดินเข้าแมพถัดไปเพื่อลุยต่อ"
     },
     "powerRatioLabel": "พลัง {pct}%",
-    "bossStatsLabel": "HP บอส {hp} · โจมตี {atk}"
+    "bossStatsLabel": "HP บอส {hp} · โจมตี {atk}",
+    "mapNumberLabel": "แมพ {n}"
   },
   "panels": {
     "skillsLabel": "สกิล",
@@ -77,7 +78,20 @@
       "changeButton": "เปลี่ยนคลาส!",
       "confirmLabel": "ยืนยัน?",
       "confirmHint": "แตะอีกครั้งเพื่อยืนยัน",
-      "ariaChange": "{heroName}: เปลี่ยนคลาส{state, select, confirm { (แตะอีกครั้งเพื่อยืนยัน)} other {}}"
+      "ariaChange": "{heroName}: เปลี่ยนคลาส{state, select, confirm { (แตะอีกครั้งเพื่อยืนยัน)} other {}}",
+      "cardTitlePreAccept": "เควสเปลี่ยนคลาส — สิ่งที่ต้องทำ",
+      "objectiveKillScoped": "🗡 ล่ามอนใน{map}",
+      "objectiveKillAny": "🗡 ล่ามอนสะสม (ที่ไหนก็ได้)",
+      "objectiveBossScoped": "👑 ล้มบอสประจำ{map}",
+      "objectiveBossAny": "👑 ล้มบอส (แมพไหนก็ได้ 1 ครั้ง)",
+      "guideKillScoped": "ไปล่ามอนที่{map}",
+      "guideKillAny": "ล่ามอนต่อในโซนที่กำลังฟาร์มอยู่ได้เลย นับได้ทุกที่",
+      "guideBossBacktrack": "เดินย้อนกลับไปห้องบอส{map} — บอสเกิดใหม่ให้ตีได้",
+      "guideBossAny": "ล้มบอสประจำแมพที่กำลังฟาร์มอยู่ตอนนี้ได้เลย",
+      "rewardLine": "สำเร็จ: เปลี่ยนเป็น{cls} · พลังก้าวกระโดด + สกิลใหม่",
+      "rewardLineTier3": "สำเร็จ: เปลี่ยนเป็น{cls} · พลังก้าวกระโดด + สกิลใหม่ + สกิลที่ 4 + ช่องออโต้ที่ 4",
+      "guideButton": "พาไปเลย",
+      "ariaGuide": "{heroName}: พาไปยังเป้าหมายเควสถัดไป"
     },
     "autoSlotNextUnlockTier3": "ปลดช่องที่ 4 เมื่อเปลี่ยนคลาสขั้น 3 (Lv.{level})"
   },
@@ -735,6 +749,7 @@
     "botReturning": "🏃 บอทกำลังเดินกลับไปฟาร์ม...",
     "autoEquipDone": "บอทสวมของที่ดีกว่าให้ {count} ชิ้น",
     "autoSellNothing": "กระเป๋าเต็มแต่กฎขายอัตโนมัติไม่ตรงกับของชิ้นไหนเลย — ปรับกฎในตั้งค่า หรือขายเอง บอทจะพักวาปขายไว้ก่อน",
+    "guideBossDoor": "🚪 เดินเข้าประตูห้องบอสด้านขวาเพื่อท้าบอส!",
     "fastTravelBlocked": {
       "locked": "โซนนั้นยังไม่ปลด",
       "aggro": "มีมอนติดพันอยู่ วาร์ปไม่ได้",
