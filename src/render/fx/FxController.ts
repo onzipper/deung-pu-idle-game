@@ -62,6 +62,7 @@ import { SkyDarkenOverlay } from "@/render/fx/skyDarken";
 import { SoulWispPool } from "@/render/fx/soulWisp";
 import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
 import { TravelPortalController } from "@/render/fx/travelPortal";
+import { WarCryAuraController } from "@/render/fx/warCryAura";
 import { WeaponTrailController, type WeaponTrailFrame } from "@/render/fx/weaponTrail";
 import { gateX, isBossZoneIdx } from "@/render/environment/zoneGates";
 import { enemyColorFor } from "@/render/views/enemySpecies";
@@ -95,6 +96,11 @@ const EVENT_TEXT_CAP = 16;
 const HERO_TOP_Y = GROUND_Y - 70; // just above the hero's head / HP bar
 const HERO_MID_Y = GROUND_Y - 30; // rough body-center, for cast bursts/rings
 const BOSS_CY = GROUND_Y - 30; // matches bossView's CY
+
+/** Owner request: War Cry buff aura fades out over the buff's final ~0.5s
+ * instead of vanishing the instant `atkBuffTimer` hits 0 (see
+ * `updateWarCryFx()`/`fx/warCryAura.ts`). */
+const WARCRY_FADE_WINDOW = 0.5;
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -711,6 +717,12 @@ export class FxController {
    * own. See `updateGearFx()`. */
   private readonly refinePrestige: RefinePrestigeFx;
 
+  /** Owner request: on-character aura while a hero's War Cry ATK buff
+   * (`hero.atkBuffTimer`) is active — same continuous-per-frame convention as
+   * `gearAura`/`gearSparkle` above, but keyed off the buff timer instead of
+   * equipped-gear tier/rarity. See `updateWarCryFx()`. */
+  private readonly warCryAura: WarCryAuraController;
+
   // ---- M7.7 "Skill Spectacle" per-class skill fx additions -----------------
   // Ground cracks (sword whirl/quake) live in the CORPSE layer (ground decals,
   // bottom of the fx stack, same as `scorches`/`portals`); the rain-curtain
@@ -751,6 +763,11 @@ export class FxController {
    * allocation), same convention as `tipScratch` above. */
   private readonly weaponAnchorScratch = { x: 0, y: 0 };
   private readonly armorAnchorScratch = { x: 0, y: 0 };
+  /** Reused every frame by `updateWarCryFx()` — same chest anchor
+   * (`getArmorAnchorPos()`) the armor sparkle already reads, kept as its own
+   * scratch point (not reused) so the two effects never stomp each other's
+   * in-flight value within the same frame. */
+  private readonly warCryAnchorScratch = { x: 0, y: 0 };
 
   /** Last-seen "does a boss currently exist" — `state.boss` transitions
    * null -> object with no dedicated event (the player's `challengeBoss`
@@ -863,6 +880,7 @@ export class FxController {
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
+    this.warCryAura = new WarCryAuraController(this.heroFxLayer);
     this.arrowSwarm = new ArrowSwarmPool(this.heroFxLayer);
     this.travelPortal = new TravelPortalController(this.heroFxLayer);
     // Manual play (M7.8): the persistent target-lock reticle lives in the
@@ -1143,6 +1161,7 @@ export class FxController {
     this.updatePendingFieldFx(dt);
     this.detectBossEntrance(state);
     this.updateGearFx(dt, state);
+    this.updateWarCryFx(dt, state);
     this.updateTargetLock(dt, state);
     this.travelPortal.update(dt);
     this.arrowSwarm.update(dt);
@@ -1172,6 +1191,7 @@ export class FxController {
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
+    this.warCryAura.destroy();
     this.arrowSwarm.destroy();
     this.travelPortal.destroy();
     this.impactFilters.destroy();
@@ -1273,6 +1293,32 @@ export class FxController {
     });
     this.gearAura.update(dt);
     this.gearSparkle.update(dt);
+  }
+
+  /** Owner request: a visible on-character effect while a hero's War Cry ATK
+   * buff (`hero.atkBuffMult`/`atkBuffTimer`) is active — continuous per-frame
+   * read, same convention as `updateGearFx()`. Applies to EVERY living hero
+   * (party-ready), since the engine now applies the buff to all living heroes,
+   * not just the caster. Intensity ramps down over the buff's final
+   * `WARCRY_FADE_WINDOW` seconds instead of a hard cutoff at 0 (see
+   * `fx/warCryAura.ts`'s module doc). */
+  private updateWarCryFx(dt: number, state: GameState): void {
+    state.heroes.forEach((h, slot) => {
+      const view = h.dead ? null : this.lookupHeroView(h.id);
+      let intensity = 0;
+      if (view && h.atkBuffTimer > 0) {
+        intensity =
+          h.atkBuffTimer <= WARCRY_FADE_WINDOW ? h.atkBuffTimer / WARCRY_FADE_WINDOW : 1;
+      }
+      const anchorOk = intensity > 0 && getArmorAnchorPos(view!, this.warCryAnchorScratch);
+      this.warCryAura.setSlot(
+        slot,
+        anchorOk ? intensity : 0,
+        this.warCryAnchorScratch.x,
+        this.warCryAnchorScratch.y,
+      );
+    });
+    this.warCryAura.update(dt);
   }
 
   /** Manual play (M7.8): tap-the-ground order — a small "sonar ping" of 3

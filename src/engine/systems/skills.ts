@@ -147,9 +147,15 @@ function applySkillEffect(
 ): void {
   switch (def.kind) {
     case "buff": {
-      // War cry: refresh the self ATK buff (no damage).
-      hero.atkBuffMult = def.buffMult;
-      hero.atkBuffTimer = def.buffDuration;
+      // War cry: refresh the ATK buff (no damage) on EVERY living allied hero —
+      // solo play this is exactly the old self-buff (one hero in state.heroes),
+      // but it's party-ready by construction (owner ask 2026-07-08: team-wide
+      // buff once M8 lockstep lands). Deterministic: plain state iteration.
+      for (const ally of state.heroes) {
+        if (ally.dead) continue;
+        ally.atkBuffMult = def.buffMult;
+        ally.atkBuffTimer = def.buffDuration;
+      }
       return;
     }
     case "nova": {

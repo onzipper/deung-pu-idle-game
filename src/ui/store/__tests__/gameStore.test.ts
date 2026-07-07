@@ -29,7 +29,10 @@ const emptyBossHint: BossHint = {
 
 /** Builds a minimal, type-valid `EngineSnapshot` — only `heroes` varies per
  * test (the field under test). */
-function makeSnapshot(statPoints: number): EngineSnapshot {
+function makeSnapshot(
+  statPoints: number,
+  buff: { mult: number; timer: number } = { mult: 1, timer: 0 },
+): EngineSnapshot {
   return {
     gold: 0,
     stage: 1,
@@ -44,6 +47,8 @@ function makeSnapshot(statPoints: number): EngineSnapshot {
         hp: 100,
         maxHp: 100,
         skillCd: 0,
+        atkBuffMult: buff.mult,
+        atkBuffTimer: buff.timer,
         mana: 10,
         maxMana: 10,
         skills: [],
@@ -165,5 +170,32 @@ describe("gameStore: allocateStat batch accumulation (M7.9 stat-tap-fix)", () =>
       0,
     );
     expect(s.heroes[0].statPoints - totalPending).toBe(8);
+  });
+});
+
+describe("gameStore: War Cry buff chip snapshot threading (owner request)", () => {
+  it("threads atkBuffMult/atkBuffTimer through syncFromEngine untouched", () => {
+    const { syncFromEngine } = useGameStore.getState();
+    syncFromEngine(makeSnapshot(0, { mult: 1.5, timer: 4.2 }));
+    const hero = useGameStore.getState().heroes[0];
+    expect(hero.atkBuffMult).toBe(1.5);
+    expect(hero.atkBuffTimer).toBeCloseTo(4.2);
+  });
+
+  it("defaults to no-buff (mult 1, timer 0) when the engine reports none active", () => {
+    const { syncFromEngine } = useGameStore.getState();
+    syncFromEngine(makeSnapshot(0));
+    const hero = useGameStore.getState().heroes[0];
+    expect(hero.atkBuffMult).toBe(1);
+    expect(hero.atkBuffTimer).toBe(0);
+  });
+
+  it("a later snapshot with the buff expired overwrites a previously-active one", () => {
+    const { syncFromEngine } = useGameStore.getState();
+    syncFromEngine(makeSnapshot(0, { mult: 1.5, timer: 6 }));
+    expect(useGameStore.getState().heroes[0].atkBuffTimer).toBe(6);
+    syncFromEngine(makeSnapshot(0, { mult: 1, timer: 0 }));
+    expect(useGameStore.getState().heroes[0].atkBuffTimer).toBe(0);
+    expect(useGameStore.getState().heroes[0].atkBuffMult).toBe(1);
   });
 });

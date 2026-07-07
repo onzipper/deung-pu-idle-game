@@ -262,6 +262,9 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       maxHp: h.maxHp,
       // Signature skill cooldown (onboarding's "you cast a skill" detector).
       skillCd: skillCdOf(h, SIGNATURE_SKILL[h.cls]),
+      // Owner request: War Cry buff status chip — raw values, no engine math.
+      atkBuffMult: h.atkBuffMult,
+      atkBuffTimer: h.atkBuffTimer,
       mana: h.mana,
       maxMana: h.maxMana,
       skills: buildSkillSummaries(h),

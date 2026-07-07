@@ -135,6 +135,13 @@ export interface HeroSummary {
    * kit lives in `skills` below.
    */
   skillCd: number;
+  /** War Cry ATK buff (`hero.atkBuffMult`/`atkBuffTimer`, engine skill
+   * `sword_warcry` — applies to every living hero, not just the caster).
+   * `atkBuffTimer` is the raw remaining seconds (0 = no buff active); the
+   * HUD chip (`SkillBar.tsx`) interpolates its own smooth countdown between
+   * throttled snapshots off this value, same convention as `skillCd`. */
+  atkBuffMult: number;
+  atkBuffTimer: number;
   /** Current mana + pool (M5 "mana"). Drives the mana bar. */
   mana: number;
   maxMana: number;
