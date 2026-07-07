@@ -26,6 +26,7 @@ import {
   canEvolveHero,
   isEvolutionQuestOffered,
   tier3QuestId,
+  tier3FrontierLocked,
   learnedSkills,
   unlockedAutoSlotCount,
   worldNav,
@@ -381,7 +382,19 @@ function navInput(s: GameState, ctx: NavCtx): Partial<FrameInput> {
   const map4Unlocked = 0 < (s.unlockedZones[preview.mapId] ?? 0);
   const townLoc: WorldLocation = { mapId: CONFIG.world.townMapId, zoneIdx: 0 };
 
-  if (hero.tier === 2 && hero.quest?.accepted && hero.quest.id === tier3QuestId(hero.cls)) {
+  // OWNER RULE 2026-07-07 ("ห้ามข้ามแมพ"): the tundra frontier grant is only ENTERABLE once
+  // map3's boss room is persist-unlocked (all map3 farm quotas cleared). While the quest is
+  // ACCEPTED but the grant isn't enterable yet (`tier3FrontierLocked`), skip the preview
+  // routing and fall through to the ordinary forward march below — the tier-2 hero climbs
+  // map3 to the boss DOOR. The instant that door persist-unlocks the gate opens, this block
+  // engages (funnel to town → fast-travel into map4 z1), so the hero never walks the real s15
+  // boss as a tier-2. This preserves the s1-15 fresh-run trajectory byte-for-byte.
+  if (
+    hero.tier === 2 &&
+    hero.quest?.accepted &&
+    hero.quest.id === tier3QuestId(hero.cls) &&
+    !tier3FrontierLocked(s)
+  ) {
     if ((hero.quest.progress[0] ?? 0) < q3.kills) {
       if (inPreview) return {}; // farm the frontier to bank quest kills
       if (nav.current.kind === "town") return { fastTravel: preview };

@@ -187,16 +187,74 @@ function tier3BossRoomZone(): WorldLocation | null {
   return z ? { mapId: z.mapId, zoneIdx: z.zoneIdx } : null;
 }
 
+/**
+ * The boss room whose PERSIST-unlock GATES the tier-3 frontier grant (owner rule 2026-07-07,
+ * "ห้ามข้ามแมพ"): the boss room of the map immediately BEFORE the quest's kill-map — one
+ * global step to the left of the map4 preview field, i.e. map3's boss room. The tundra
+ * preview is only ENTERABLE once THIS room is persist-unlocked, which happens exactly when
+ * the player has cleared ALL of map3's farm-zone quotas themselves (checkZoneUnlock opens the
+ * boss room after the last farm zone) — no zone-skipping via the "พาไปเลย" quest grant. Pure,
+ * config-derived; null if no preceding boss room resolves (then the gate defaults OPEN). */
+function tier3GateZone(): WorldLocation | null {
+  const preview = tier3PreviewZone();
+  if (!preview) return null;
+  const gi = globalIndex(preview);
+  const prev = gi > 0 ? WORLD_ZONES[gi - 1] : undefined;
+  return prev && prev.kind === "boss" ? { mapId: prev.mapId, zoneIdx: prev.zoneIdx } : null;
+}
+
+/** Whether the tier-3 frontier grant is currently ENTERABLE — its gate boss room (map3's) is
+ * PERSIST-unlocked (the player climbed map3 to the boss door). Defaults OPEN if the gate can't
+ * be resolved (defensive: a config without a preceding boss room must never strand). Pure. */
+export function tier3GateCleared(state: GameState): boolean {
+  const gate = tier3GateZone();
+  return gate ? isZonePersistUnlocked(state, gate) : true;
+}
+
+/**
+ * UI read (owner rule 2026-07-07): the solo hero HOLDS the tier-3 quest but its tundra
+ * frontier grant is NOT yet enterable — map3's boss room isn't persist-unlocked. The quest
+ * can be accepted early at Lv40 (the card says "ไต่แมพ 3 ให้ถึงประตูบอสก่อน"); only ACCESS waits.
+ * While true, "guide-me" should route to the player's REAL frontier (`deepestUnlockedFarm`),
+ * never warp into map4. Pure state derivation (no RNG / wall-clock).
+ */
+export function tier3FrontierLocked(state: GameState): boolean {
+  const hero = state.heroes[0];
+  const q = hero?.quest;
+  if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return false;
+  return !tier3GateCleared(state);
+}
+
+/**
+ * The deepest (highest global index) farm zone the player has PERSIST-unlocked — their real
+ * progression frontier. Used to relocate a hero booted into a no-longer-accessible zone (a
+ * tundra-stranded save from the older looser grant) without yanking them back to map1, and as
+ * the "guide-me" fallback while the tier-3 frontier is gated. Falls back to the first farm zone.
+ */
+export function deepestUnlockedFarm(state: GameState): WorldLocation {
+  for (let i = WORLD_ZONES.length - 1; i >= 0; i--) {
+    const z = WORLD_ZONES[i];
+    const loc = { mapId: z.mapId, zoneIdx: z.zoneIdx };
+    if (z.kind === "farm" && isZonePersistUnlocked(state, loc)) return loc;
+  }
+  return firstFarmLocation();
+}
+
 /** Whether the solo hero's ACTIVE tier-3 quest grants derived access to `loc`. Grants:
  *  - map4 ZONE 1 (the frontier field) — whenever the quest is held (both objectives);
  *  - the map4 BOSS ROOM — ONLY once the kill objective is banked (boss objective active),
  *    so the "young Sovereign" arena opens for the second objective.
  * Zones 2-5 are NEVER granted (they stay gated behind the s15 boss). The boss-room grant
- * revokes the instant the boss objective completes / the quest is consumed on evolve. */
+ * revokes the instant the boss objective completes / the quest is consumed on evolve.
+ *
+ * OWNER RULE 2026-07-07: BOTH grants are additionally GATED on `tier3GateCleared` — the tundra
+ * preview only becomes enterable once map3's boss room is persist-unlocked (the player climbed
+ * map3 to its end themselves). Accepting the quest at Lv40 mid-map3 is fine; only ACCESS waits. */
 export function questGrantsZoneAccess(state: GameState, loc: WorldLocation): boolean {
   const hero = state.heroes[0];
   const q = hero?.quest;
   if (!q || !q.accepted || q.id !== tier3QuestId(hero!.cls)) return false;
+  if (!tier3GateCleared(state)) return false;
   const preview = tier3PreviewZone();
   if (preview && preview.mapId === loc.mapId && preview.zoneIdx === loc.zoneIdx) return true;
   const bossRoom = tier3BossRoomZone();
@@ -240,7 +298,9 @@ export function effectiveUnlockedZones(state: GameState): Record<string, number>
   const out: Record<string, number> = { ...state.unlockedZones };
   const hero = state.heroes[0];
   const q = hero?.quest;
-  if (q && q.accepted && q.id === tier3QuestId(hero!.cls)) {
+  // OWNER RULE 2026-07-07: the preview only folds in once its gate (map3's boss room) is
+  // persist-unlocked — otherwise a held-but-not-yet-enterable quest must read map4 as locked.
+  if (q && q.accepted && q.id === tier3QuestId(hero!.cls) && tier3GateCleared(state)) {
     const preview = tier3PreviewZone();
     if (preview) out[preview.mapId] = Math.max(out[preview.mapId] ?? 0, preview.zoneIdx + 1);
   }

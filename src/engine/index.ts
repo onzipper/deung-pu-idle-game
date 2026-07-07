@@ -88,6 +88,12 @@ export {
   // surfaces without a persisted unlock.
   questGrantsZoneAccess,
   effectiveUnlockedZones,
+  // Tier-3 frontier GATE (owner rule 2026-07-07 "ห้ามข้ามแมพ"): `tier3FrontierLocked` is the UI
+  // read for "quest held but the tundra grant isn't enterable yet" (map3 boss room not
+  // persist-unlocked) — the quest card shows "ไต่แมพ 3 ให้ถึงประตูบอสก่อน" and guide-me routes to
+  // `deepestUnlockedFarm` (the player's real progression frontier) instead of warping to map4.
+  tier3FrontierLocked,
+  deepestUnlockedFarm,
   // "Quest leads" routing (M7.95): the single derivation every idle-automation path
   // (death auto-return, bot town-trip return, auto-advance guard) uses to prefer the
   // active evolution quest's granted frontier over the ordinary lastFarmZone.

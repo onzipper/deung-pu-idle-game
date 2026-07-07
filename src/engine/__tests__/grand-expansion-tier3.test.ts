@@ -28,11 +28,14 @@ import {
   isZoneUnlocked,
   questGrantsZoneAccess,
   effectiveUnlockedZones,
+  tier3FrontierLocked,
   isTier3BossObjectiveActive,
   worldNav,
+  zoneAt,
   type GameState,
   type Hero,
   type HeroClass,
+  type SaveData,
 } from "@/engine";
 import { soloSave, makeStubEnemy, runUntil } from "./helpers";
 
@@ -57,6 +60,10 @@ function tierHero(cls: HeroClass, tier: 1 | 2 | 3, level: number): { s: GameStat
   h.hp = h.maxHp;
   h.maxMana = heroMaxManaOf(h);
   h.mana = h.maxMana;
+  // OWNER RULE 2026-07-07 ("ห้ามข้ามแมพ"): the tundra frontier grant only becomes enterable once
+  // map3's boss room is persist-unlocked (map3 count = 6). These access/boss tests assume the
+  // hero HAS climbed map3 to the boss door; the gate itself is covered in its own block below.
+  s.unlockedZones.map3 = 6;
   s.spawnPaused = true;
   return { s, h };
 }
@@ -376,6 +383,102 @@ describe("M7.9 tier-3 quest — map4-z1 PREVIEW access (REDESIGN)", () => {
     // (h is the quest holder; sanity that the grant is still only z1.)
     expect(isZoneUnlocked(s, PREVIEW)).toBe(true);
     void h;
+  });
+});
+
+describe("M7.9c tier-3 frontier GATE (owner rule 2026-07-07 ห้ามข้ามแมพ)", () => {
+  const PREVIEW = { mapId: "map4", zoneIdx: 0 };
+  const BOSS_ROOM = { mapId: "map4", zoneIdx: 5 };
+
+  /** A tier-2 L40 quest holder whose map3 is NOT yet climbed to the boss door. */
+  function frontierGated(cls: HeroClass): { s: GameState; h: Hero } {
+    const s = initGameState(1, soloSave(cls, 12)); // stage 12 => map3, boss room NOT unlocked
+    const h = s.heroes[0];
+    h.tier = 2;
+    h.level = CONFIG.evolution.tier3.levelRequired;
+    h.maxHp = heroMaxHpOf(h);
+    h.hp = h.maxHp;
+    s.spawnPaused = true;
+    step(s, { acceptQuest: 0 });
+    return { s, h };
+  }
+
+  it("accepting is fine, but the grant is NOT enterable until map3's boss room persist-unlocks", () => {
+    const { s, h } = frontierGated("swordsman");
+    expect(h.quest!.accepted).toBe(true); // quest ACCEPTED at Lv40 mid-map3 (card says keep climbing)
+    expect((s.unlockedZones.map3 ?? 0) < 6).toBe(true); // map3 boss room not yet reached
+    expect(tier3FrontierLocked(s)).toBe(true);
+    expect(questGrantsZoneAccess(s, PREVIEW)).toBe(false);
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(false);
+    expect(effectiveUnlockedZones(s).map4 ?? 0).toBe(0);
+
+    // Climb map3 to the boss door (persist-unlock the boss room) -> grant becomes enterable.
+    s.unlockedZones.map3 = 6;
+    expect(tier3FrontierLocked(s)).toBe(false);
+    expect(questGrantsZoneAccess(s, PREVIEW)).toBe(true);
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(true);
+    expect(effectiveUnlockedZones(s).map4).toBe(1);
+  });
+
+  it("the boss-room grant also waits on the gate even with the kill objective banked", () => {
+    const { s, h } = frontierGated("archer");
+    h.quest!.progress[0] = tier3QuestFor("archer").objectives[0].count; // kills banked
+    expect(isTier3BossObjectiveActive(s)).toBe(true);
+    // Gate still shut (map3 boss room not reached) -> boss room stays inaccessible.
+    expect(questGrantsZoneAccess(s, BOSS_ROOM)).toBe(false);
+    expect(isZoneUnlocked(s, BOSS_ROOM)).toBe(false);
+    s.unlockedZones.map3 = 6;
+    expect(questGrantsZoneAccess(s, BOSS_ROOM)).toBe(true);
+  });
+
+  it("tier3FrontierLocked is false with no tier-3 quest held (nothing to gate)", () => {
+    const { s } = tierHero("mage", 2, 40); // accepted-less; map3 unlocked in helper
+    expect(s.heroes[0].quest).toBeNull();
+    expect(tier3FrontierLocked(s)).toBe(false);
+  });
+
+  it("boot-time guard RELOCATES a hero stranded in the tundra by the older looser grant", () => {
+    // A save written under the OLD grant: hero standing in map4 z0 (frontier) while holding the
+    // tier-3 quest, but map3's boss room is NOT persist-unlocked (map3 count 3 < 6). Post-rule
+    // that zone is no longer enterable — initGameState must relocate the hero to a reachable
+    // farm (here the persisted lastFarmZone) rather than strand them. No SAVE bump.
+    const base = soloSave("swordsman", 12);
+    const stranded: SaveData = {
+      ...base,
+      hero: {
+        ...base.hero,
+        tier: 2,
+        level: 40,
+        quest: { id: tier3QuestId("swordsman"), accepted: true, progress: [0, 0] },
+      },
+      location: { mapId: "map4", zoneIdx: 0 },
+      lastFarmZone: { mapId: "map3", zoneIdx: 2 },
+      unlockedZones: { map1: 7, map2: 6, map3: 3 }, // map3 boss room NOT reached
+    };
+    const s = initGameState(7, stranded);
+    expect(s.location).not.toEqual({ mapId: "map4", zoneIdx: 0 }); // not left in the locked frontier
+    expect(isZoneUnlocked(s, s.location)).toBe(true); // wherever it lands IS reachable
+    expect(zoneAt(s.location).kind).toBe("farm");
+    expect(s.location).toEqual({ mapId: "map3", zoneIdx: 2 }); // the persisted real frontier
+    expect(s.stage).toBe(zoneAt(s.location).stage); // stage re-derived from the safe zone
+  });
+
+  it("does NOT relocate a hero whose tundra grant IS enterable (map3 cleared)", () => {
+    const base = soloSave("archer", 12);
+    const ok: SaveData = {
+      ...base,
+      hero: {
+        ...base.hero,
+        tier: 2,
+        level: 40,
+        quest: { id: tier3QuestId("archer"), accepted: true, progress: [0, 0] },
+      },
+      location: { mapId: "map4", zoneIdx: 0 },
+      lastFarmZone: { mapId: "map4", zoneIdx: 0 },
+      unlockedZones: { map1: 7, map2: 6, map3: 6 }, // map3 boss room reached -> grant enterable
+    };
+    const s = initGameState(7, ok);
+    expect(s.location).toEqual({ mapId: "map4", zoneIdx: 0 }); // stays in the granted frontier
   });
 });
 

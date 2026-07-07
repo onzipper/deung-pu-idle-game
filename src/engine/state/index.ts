@@ -40,6 +40,8 @@ import {
   farmLocationForStage,
   unlockUpTo,
   zoneAt,
+  isZoneUnlocked,
+  deepestUnlockedFarm,
   type TravelState,
 } from "@/engine/systems/world";
 import type { GameEvent } from "@/engine/state/events";
@@ -587,6 +589,24 @@ export function initGameState(
     // tier-3 hero has no quest; a saved accepted quest is validated against the tier's
     // current quest def (unknown/foreign or un-accepted -> re-offer by leaving it null).
     h.quest = normalizeHeroQuest(h.cls, h.tier, save.hero.quest);
+
+    // Boot-time strand guard (owner rule 2026-07-07 "ห้ามข้ามแมพ"): the tier-3 tundra grant
+    // now requires map3's boss room to be persist-unlocked. A save written under the OLDER,
+    // looser grant could sit the hero in the map4 frontier while map3 isn't cleared — now a
+    // no-longer-accessible zone. Relocate such a hero to a reachable farm (their real frontier
+    // via `deepestUnlockedFarm`, else lastFarmZone) so it can never strand. No SAVE bump: this
+    // is a load-time normalisation of a transient position, exactly like `normalizeLocation`.
+    if (!isZoneUnlocked(state, state.location)) {
+      const back = state.lastFarmZone;
+      const safe =
+        zoneAt(back).kind === "farm" && isZoneUnlocked(state, back)
+          ? back
+          : deepestUnlockedFarm(state);
+      state.location = { mapId: safe.mapId, zoneIdx: safe.zoneIdx };
+      state.stage = zoneAt(safe).stage;
+      state.lastFarmZone = { mapId: safe.mapId, zoneIdx: safe.zoneIdx };
+      state.kills = save.zoneKills?.[`${safe.mapId}:${safe.zoneIdx}`] ?? 0;
+    }
   }
   return state;
 }

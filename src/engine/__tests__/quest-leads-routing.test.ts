@@ -44,6 +44,10 @@ function questHero(cls: HeroClass = "swordsman"): GameState {
   s.spawnPaused = true;
   s.enemies = [];
   step(s, { acceptQuest: 0 }); // seats the tier-3 quest
+  // OWNER RULE 2026-07-07 ("ห้ามข้ามแมพ"): the frontier grant is only ENTERABLE once map3's boss
+  // room is persist-unlocked. These routing tests exercise a hero who HAS climbed map3 to the
+  // boss door; the gate-blocked fallback is covered in its own test below.
+  s.unlockedZones.map3 = 6;
   s.spawnPaused = true;
   s.enemies = [];
   return s;
@@ -99,6 +103,17 @@ describe("botFarmTarget — quest leads", () => {
     s.heroes[0].quest!.progress = def.objectives.map((o) => o.count); // all objectives met
     s.lastFarmZone = { mapId: "map3", zoneIdx: 4 };
     expect(botFarmTarget(s)).toEqual({ mapId: "map3", zoneIdx: 4 });
+  });
+
+  it("falls back to lastFarmZone while the frontier grant is GATED (map3 not yet cleared)", () => {
+    // Owner rule 2026-07-07: quest accepted at Lv40 but map3's boss room isn't persist-unlocked,
+    // so the frontier is NOT enterable — the automation must route to the ordinary lastFarmZone,
+    // never warp into map4. (questHero unlocks map3; here we RE-LOCK it to model the mid-map3 hero.)
+    const s = questHero("swordsman");
+    s.unlockedZones.map3 = 3; // boss room NOT reached (< 6) -> grant not enterable
+    s.lastFarmZone = { mapId: "map3", zoneIdx: 2 };
+    expect(botFarmTarget(s)).toEqual({ mapId: "map3", zoneIdx: 2 });
+    expect(isZoneUnlocked(s, PREVIEW)).toBe(false); // frontier stays locked
   });
 });
 
