@@ -172,11 +172,40 @@ function stripExt(name: string): string {
   return name.replace(/\.(png|webp)$/i, "");
 }
 
+/** Virtual group key, always available whenever more than one frame is
+ * loaded — see `loadLibrary()`'s doc comment for why this exists (owner
+ * bug report: arbitrarily-named uploads with no shared numbered prefix each
+ * land in their own singleton group, so the default experience never
+ * animates). Parenthesized so it visually stands out from real filename-
+ * derived group keys in the picker dropdown. */
+export const ALL_FRAMES_GROUP_KEY = "(รวมทุกไฟล์)";
+
+/** True when every REAL (non-virtual) group has at most one frame while more
+ * than one frame is loaded overall — i.e. per-file grouping produced nothing
+ * useful and the picker should default to `ALL_FRAMES_GROUP_KEY` instead of
+ * an arbitrary still-image singleton (`LabScreen`'s `refreshLibrary`). */
+export function shouldAutoSelectAllFramesGroup(groups: Record<string, string[]>): boolean {
+  const realKeys = Object.keys(groups).filter((k) => k !== ALL_FRAMES_GROUP_KEY);
+  if (realKeys.length === 0) return false;
+  const total = realKeys.reduce((n, k) => n + (groups[k]?.length ?? 0), 0);
+  if (total <= 1) return false;
+  return realKeys.every((k) => (groups[k]?.length ?? 0) <= 1);
+}
+
 /** Merge the server's permanent list with whatever this device's IndexedDB
- * cache already knows about, then group by `groupKeyOf`. Server-known files
- * are always `permanent: true`; anything IndexedDB-only is a leftover
- * session upload (prod, or a failed dev POST) — still offered, flagged not
- * permanent. */
+ * cache already knows about, then group by `groupKeyOf` — PLUS always offer
+ * `ALL_FRAMES_GROUP_KEY` (every loaded frame, natural-sorted) whenever more
+ * than one frame exists, regardless of how per-file grouping shook out. This
+ * is the actual fix for "/lab shows a still image, never animates": an
+ * upload batch with arbitrary/Thai/symbol-heavy names (e.g. `ลามะ (1).png`)
+ * sanitizes down to a bare-digit stem (`"1"`) with no shared letters, so
+ * `groupKeyOf` can't pair it with its siblings — each becomes its own
+ * one-frame group. `shouldAutoSelectAllFramesGroup()` + `LabScreen`'s
+ * `refreshLibrary` default the picker straight to this virtual group in that
+ * exact situation, so the FIRST thing the owner sees already animates.
+ * Server-known files are always `permanent: true`; anything IndexedDB-only is
+ * a leftover session upload (prod, or a failed dev POST) — still offered,
+ * flagged not permanent. */
 export async function loadLibrary(): Promise<{
   entries: LabLibraryEntry[];
   groups: Record<string, string[]>;
@@ -200,6 +229,9 @@ export async function loadLibrary(): Promise<{
     (groups[key] ??= []).push(e.name);
   }
   for (const key of Object.keys(groups)) groups[key] = naturalSort(groups[key]);
+  if (entries.length > 1) {
+    groups[ALL_FRAMES_GROUP_KEY] = naturalSort(entries.map((e) => e.name));
+  }
   return { entries, groups };
 }
 
@@ -215,6 +247,71 @@ export interface IngestResult {
   name: string;
   permanent: boolean;
   error?: string;
+}
+
+/** Client-side mirror of `src/app/api/lab/assets/route.ts`'s own
+ * `sanitizeStem` (that route is server-only Node `fs`, unreachable from this
+ * browser module — duplicated by hand on purpose; keep the two in sync if
+ * the server's algorithm ever changes). Used only to PREVIEW what stem an
+ * upload would sanitize down to, so `prepareFriendlyUpload()` can catch a
+ * degenerate result before the round trip, not to replace the server's own
+ * (authoritative) sanitizing. */
+export function previewSanitizedStem(rawName: string): string {
+  const noExt = rawName.replace(/\.[^./\\]+$/, "");
+  return noExt
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/** A stem with no actual letters left (an all-Thai/symbol/space filename like
+ * `"ลามะ (1).png"` sanitizes to bare `"1"`) can never form a stable,
+ * recognizable animation-group prefix — every such upload collapses to its
+ * own singleton group (`groupKeyOf`), which was the root cause behind an
+ * owner bug report ("/lab never animates"). `""` (fully stripped) counts too
+ * — the server's own fallback there is `frame_<timestamp>`, which doesn't
+ * preserve upload order either. */
+export function isDegenerateStem(stem: string): boolean {
+  return stem === "" || /^[0-9_]+$/.test(stem);
+}
+
+/** Deterministic, zero-padded fallback name (`frame_01.ext`, `frame_02.ext`,
+ * …) — ordered by the LOWEST unused index against whatever `frame_NN` names
+ * already exist in the library, so ingesting one degenerate file at a time
+ * across separate drops/sessions still lands in one continuous, animatable
+ * sequence instead of colliding or restarting at 01 every time. */
+export function nextDegenerateFrameName(existingNames: readonly string[], ext: string): string {
+  const used = new Set<number>();
+  for (const n of existingNames) {
+    const m = /^frame_(\d+)\.(?:png|webp)$/i.exec(n);
+    if (m) used.add(Number(m[1]));
+  }
+  let idx = 1;
+  while (used.has(idx)) idx++;
+  return `frame_${String(idx).padStart(2, "0")}.${ext}`;
+}
+
+/** Renames `file` to a `frame_NN`-style name BEFORE upload if (and only if)
+ * its sanitized stem would be degenerate (see `isDegenerateStem`'s doc
+ * comment) — never silently rejects or lets two unrelated uploads collide.
+ * `existingNames` should be the library's current name list (fetched once
+ * per ingestion batch by the caller, `LabScreen.ingestFiles`); this function
+ * itself does not touch the network/IndexedDB. Returns `renamed: true` (and
+ * the original name) so the caller can surface a Thai toast pointing at the
+ * recommended naming convention. */
+export function prepareFriendlyUpload(
+  file: File,
+  existingNames: readonly string[],
+): { file: File; renamed: boolean; originalName: string } {
+  const stem = previewSanitizedStem(file.name);
+  if (!isDegenerateStem(stem)) return { file, renamed: false, originalName: file.name };
+  const ext = file.type === "image/webp" ? "webp" : "png";
+  const newName = nextDegenerateFrameName(existingNames, ext);
+  return {
+    file: new File([file], newName, { type: file.type }),
+    renamed: true,
+    originalName: file.name,
+  };
 }
 
 /** Cache + (attempt to) permanently upload one dropped/picked file. Client-side

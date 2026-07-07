@@ -14,16 +14,19 @@
  * untouched.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createLabStage, type LabStage } from "@/lab/stage";
 import {
+  ALL_FRAMES_GROUP_KEY,
   applyScaleMode,
   groupKeyOf,
   hasUnsavedSessionFrames,
   ingestFile,
   loadFrameSet,
   loadLibrary,
+  prepareFriendlyUpload,
   removeFrame,
+  shouldAutoSelectAllFramesGroup,
   type FrameSet,
 } from "@/lab/frames";
 import { LAB_EXPERIMENTS, type LabScene } from "@/lab/registry";
@@ -124,6 +127,13 @@ export function LabScreen() {
     setGroupKey((prev) => {
       if (preferGroup && g[preferGroup]) return preferGroup;
       if (prev && g[prev]) return prev;
+      // Owner bug report ("/lab never animates"): per-file grouping can
+      // degrade to nothing but singleton groups (arbitrary/Thai/symbol-heavy
+      // upload names with no shared numbered prefix) — default straight to
+      // the "combine everything" virtual group instead of an arbitrary still
+      // image in that case (see `shouldAutoSelectAllFramesGroup`'s doc
+      // comment in `@/lab/frames`).
+      if (shouldAutoSelectAllFramesGroup(g)) return ALL_FRAMES_GROUP_KEY;
       return keys[0] ?? "";
     });
     setUnsavedSession(await hasUnsavedSessionFrames());
@@ -181,23 +191,38 @@ export function LabScreen() {
       const list = Array.from(files);
       if (list.length === 0) return;
       setBusy(true);
+      // Fresh snapshot ONCE per batch (not per-file) — `prepareFriendlyUpload`
+      // needs the current `frame_NN` high-water mark so a rename never
+      // collides with an earlier ingestion session's own renamed files.
+      const { entries: knownEntries } = await loadLibrary();
+      const knownNames = knownEntries.map((e) => e.name);
       let lastGroup: string | undefined;
       let okCount = 0;
+      let renamedCount = 0;
       const errors: string[] = [];
       for (const file of list) {
-        const result = await ingestFile(file);
+        const prepared = prepareFriendlyUpload(file, knownNames);
+        if (prepared.renamed) {
+          renamedCount++;
+          knownNames.push(prepared.file.name); // reserve it for the rest of this loop
+        }
+        const result = await ingestFile(prepared.file);
         if (result.error) {
-          errors.push(`${file.name}: ${result.error}`);
+          errors.push(`${prepared.originalName}: ${result.error}`);
         } else {
           okCount++;
           lastGroup = groupKeyOf(result.name.replace(/\.(png|webp)$/i, ""));
         }
       }
       setBusy(false);
+      const renameNote =
+        renamedCount > 0
+          ? ` — เปลี่ยนชื่อไฟล์ที่ไม่มีตัวอักษร (เช่น ภาษาไทย/สัญลักษณ์ที่ถูกตัดออกหมด) ${renamedCount} ไฟล์เป็น frame_01, frame_02, ... ให้อัตโนมัติ (ครั้งหน้าแนะนำตั้งชื่อเช่น llama_walk_01.png เพื่อจัดกลุ่มอนิเมชันได้เอง)`
+          : "";
       setStatusMsg(
-        errors.length > 0
+        (errors.length > 0
           ? `เพิ่ม ${okCount} ไฟล์ / ผิดพลาด ${errors.length}: ${errors.join(", ")}`
-          : `เพิ่ม ${okCount} ไฟล์เรียบร้อย`,
+          : `เพิ่ม ${okCount} ไฟล์เรียบร้อย`) + renameNote,
       );
       await refreshLibrary(lastGroup);
     },
@@ -231,6 +256,16 @@ export function LabScreen() {
   const experiment = LAB_EXPERIMENTS.find((e) => e.id === experimentId) ?? LAB_EXPERIMENTS[0];
   const groupNames = Object.keys(groups).sort();
   const currentFrames = groups[groupKey] ?? [];
+
+  // Best-effort fps readout from whatever the mounted experiment's own
+  // player exposes (duck-typed — not every experiment's `controls` bag has
+  // one, e.g. ⑥ town preview has no single `FramePlayer`) — a diagnostic
+  // convenience only, never load-bearing.
+  const mountedFps = useMemo(() => {
+    const ctrl = mounted?.scene.controls as { player?: { getFps?: () => number } } | undefined;
+    const fps = ctrl?.player?.getFps?.();
+    return typeof fps === "number" ? fps : null;
+  }, [mounted]);
 
   return (
     <div className="flex min-h-screen w-full flex-col gap-3 bg-slate-950 p-3 text-slate-100 md:flex-row md:p-4">
@@ -309,6 +344,18 @@ export function LabScreen() {
             />
             <span>คมชัดแบบพิกเซล (nearest-neighbor)</span>
           </label>
+          {groupKey && (
+            <p className="text-[11px] text-slate-400">
+              ชุดนี้มี {currentFrames.length} เฟรม
+              {mountedFps !== null ? ` @ fps ${mountedFps}` : ""}
+            </p>
+          )}
+          {groupKey && currentFrames.length === 1 && (
+            <p className="text-[11px] text-amber-300">
+              มีเฟรมเดียวจึงไม่ขยับ — เลือกชุด &quot;{ALL_FRAMES_GROUP_KEY}&quot; หรือครั้งหน้าตั้งชื่อไฟล์ลงท้ายเลข
+              เช่น llama_walk_01.png
+            </p>
+          )}
           {currentFrames.length > 0 && (
             <ul className="flex max-h-32 flex-col gap-1 overflow-y-auto text-xs">
               {currentFrames.map((name) => (

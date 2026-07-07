@@ -39,10 +39,14 @@ import { animPlayerExperiment } from "@/lab/experiments/animPlayer";
 import { inBiomeExperiment } from "@/lab/experiments/inBiome";
 import { sideBySideExperiment } from "@/lab/experiments/sideBySide";
 import { juiceExperiment } from "@/lab/experiments/juice";
+import { playgroundExperiment } from "@/lab/experiments/playground";
+import { townPreviewExperiment } from "@/lab/experiments/townPreview";
 
 export const LAB_EXPERIMENTS: readonly LabExperiment[] = [
   animPlayerExperiment,
   inBiomeExperiment,
   sideBySideExperiment,
   juiceExperiment,
+  playgroundExperiment,
+  townPreviewExperiment,
 ];

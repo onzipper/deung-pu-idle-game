@@ -98,7 +98,9 @@ describe("TownLlamaActor — sit-only set behaves (never transitions to stand)",
     const actor = new TownLlamaActor();
     await actor.load(partialLoader(false, true));
 
-    expect(actor.view.children.length).toBe(1);
+    // sit sprite + the (always-present-once-enabled) hearts layer — see the
+    // tap-reaction describe block below.
+    expect(actor.view.children.length).toBe(2);
     actor.update(0, true);
     expect(actor.view.visible).toBe(true);
 
@@ -117,6 +119,79 @@ describe("TownLlamaActor — sit-only set behaves (never transitions to stand)",
     expect(actor.view.visible).toBe(true);
     actor.update(1 / 60, false);
     expect(actor.view.visible).toBe(false);
+    actor.destroy();
+  });
+});
+
+describe("TownLlamaActor — tap reaction (owner request)", () => {
+  it("a tap enters a hop + spawns 1-3 heart pips, both resolve back to idle", async () => {
+    const actor = new TownLlamaActor();
+    await actor.load(partialLoader(false, false));
+    actor.update(0, true); // establish the visible/enabled baseline
+
+    expect(actor.isHopping).toBe(false);
+    expect(actor.activeHeartCount).toBe(0);
+
+    actor.handleTap();
+    expect(actor.isHopping).toBe(true);
+    expect(actor.activeHeartCount).toBeGreaterThanOrEqual(1);
+    expect(actor.activeHeartCount).toBeLessThanOrEqual(3);
+
+    // Advance well past both the hop duration and the heart lifetime.
+    for (let i = 0; i < 120; i++) actor.update(1 / 60, true);
+    expect(actor.isHopping).toBe(false);
+    expect(actor.activeHeartCount).toBe(0);
+    expect(actor.view.scale.x).toBeCloseTo(1);
+    expect(actor.view.scale.y).toBeCloseTo(1);
+
+    actor.destroy();
+  });
+
+  it("cooldown blocks tap-spam: a second immediate tap doesn't restart the hop or add hearts", async () => {
+    const actor = new TownLlamaActor();
+    await actor.load(partialLoader(false, false));
+    actor.update(0, true);
+
+    actor.handleTap();
+    actor.update(0.1, true);
+    const heartsAfterFirst = actor.activeHeartCount;
+    const hoppingAfterFirst = actor.isHopping;
+
+    actor.handleTap(); // still within TAP_COOLDOWN_S — must no-op
+    expect(actor.isHopping).toBe(hoppingAfterFirst);
+    expect(actor.activeHeartCount).toBe(heartsAfterFirst);
+
+    actor.destroy();
+  });
+
+  it("a tap on a disabled actor (both sets missing) is a safe no-op", async () => {
+    const actor = new TownLlamaActor();
+    await actor.load(rejectingLoader);
+
+    actor.handleTap();
+    expect(actor.isHopping).toBe(false);
+    expect(actor.activeHeartCount).toBe(0);
+
+    actor.destroy();
+  });
+
+  it("disabled actor never registers pointer interaction (no eventMode/hitArea wired)", async () => {
+    const actor = new TownLlamaActor();
+    await actor.load(rejectingLoader);
+
+    expect(actor.view.eventMode).not.toBe("static");
+    expect(actor.view.hitArea).toBeFalsy();
+
+    actor.destroy();
+  });
+
+  it("an enabled actor DOES wire up eventMode/hitArea for interaction", async () => {
+    const actor = new TownLlamaActor();
+    await actor.load(partialLoader(false, false));
+
+    expect(actor.view.eventMode).toBe("static");
+    expect(actor.view.hitArea).not.toBeNull();
+
     actor.destroy();
   });
 });

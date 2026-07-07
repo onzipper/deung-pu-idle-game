@@ -31,16 +31,42 @@
  *
  * Footgun compliance (CLAUDE.md / render/README.md): nearest-neighbor
  * `scaleMode` on every loaded texture so the pixel art stays crisp (never
- * smoothed/blurred); no hand-built canvas gradients; no `Graphics` radius (no
- * `Graphics` at all — pure sprite); no `pivot`-based rotation (only
+ * smoothed/blurred); no hand-built canvas gradients; the base actor has no
+ * `Graphics` radius at all (pure sprite; the tap-reaction heart pips below are
+ * the one exception, `safeRadius`-clamped); no `pivot`-based rotation (only
  * `position.x` shuffle + a `scale.x` flip toward movement + a tiny sine bob,
  * so footgun #1's pivot/path-coordinate trap never applies); solid sprite on
  * the DEFAULT blend mode (never `"add"`) so it never white-outs against the
  * bright town sky (footgun #10).
+ *
+ * **Tap reaction (owner request)**: once the actor is enabled (at least one
+ * frame set loaded), `view.eventMode = "static"` + a generous `hitArea`
+ * (>=44px touch target) make it tappable — `handleTap()` (also the direct
+ * entry point headless tests use, since simulating Pixi's real hit-testing
+ * pipeline in plain Node isn't worth the complexity) plays a happy hop
+ * (squash on takeoff/landing + a parabolic vertical arc, layered onto
+ * `view`'s own scale/position ON TOP of the existing shuffle/bob — the
+ * underlying sit/stand state machine keeps running underneath, not frozen,
+ * since both its loops read identically either way) and spawns 1-3 tiny pink
+ * heart pips (a small fixed pool of pre-built `Graphics` circles, DEFAULT
+ * blend — footgun #10) that drift up and fade. A short cooldown
+ * (`TAP_COOLDOWN_S`) blocks tap-spam. **Pointer-plumbing note**: wired
+ * entirely inside this module's own `view` — no `GameRenderer`/`GameClient`
+ * change. Pixi's federated events hit-test independently of `GameClient`'s
+ * own DOM canvas listener that turns a ground-tap into `moveTo`; a tap on the
+ * llama will ALSO register as a ground tap and walk the hero over there. That
+ * is an accepted, charming side effect — there is no shared "consumed" flag
+ * between the two systems and this module intentionally never reaches for
+ * one. No SFX: nothing in `render/audio` fits a "cute/happy" beat without a
+ * new synth recipe, and every existing cue is wired through `GameEvent`s
+ * (`AudioController`/`sfxMap.ts`), which this decorative, engine-free tap has
+ * none of — reusing a mismatched cue would hurt its legibility elsewhere.
+ * Skipped by design; visual reaction only.
  */
 
-import { AnimatedSprite, Assets, Container, type Texture } from "pixi.js";
+import { AnimatedSprite, Assets, Container, Graphics, Rectangle, type Texture } from "pixi.js";
 import { GROUND_Y } from "@/render/layout";
+import { safeRadius } from "@/render/theme";
 
 // ---- knobs ------------------------------------------------------------
 const FRAME_BASE = "/lab-assets/";
@@ -81,8 +107,54 @@ const BOB_AMPLITUDE_SIT = 0.8; // calmer while sitting
  * slightly smaller per the task spec. */
 const SPRITE_SCALE = 0.5;
 
+// ---- tap-reaction knobs (owner request) --------------------------------
+/** Hit-test rectangle in `view`-local (unscaled) coordinates — sized well
+ * past the ~50px-tall sprite so it clears the "44px min touch target" bar
+ * comfortably on mobile. */
+const TAP_HIT_HALF_WIDTH = 32;
+const TAP_HIT_TOP = -70;
+const TAP_HIT_BOTTOM = 6;
+
+const TAP_COOLDOWN_S = 0.4;
+
+const HOP_DURATION_S = 0.4;
+const HOP_HEIGHT_PX = 14;
+/** Squash amount at takeoff/landing only — mid-air stays neutral (1,1). */
+const HOP_SQUASH_SX = 0.18;
+const HOP_SQUASH_SY = 0.16;
+const HOP_SQUASH_WINDOW = 0.12; // fraction of HOP_DURATION_S at each end
+
+const HEART_POOL_SIZE = 9; // a few taps' worth can overlap before all expire
+const HEART_MIN_COUNT = 1;
+const HEART_MAX_COUNT = 3;
+const HEART_RADIUS = 3.2;
+const HEART_COLOR = 0xff5f8f; // solid pink, DEFAULT blend (footgun #10)
+const HEART_SPAWN_Y = -46; // roughly head height, view-local
+const HEART_X_JITTER = 10;
+const HEART_RISE_DISTANCE = 26;
+const HEART_LIFETIME_S = 0.9;
+
 function rand(min: number, max: number): number {
   return min + Math.random() * (max - min);
+}
+
+/** Hop's vertical arc — a plain 0..1..0 parabola peaking at `p = 0.5`. */
+function hopArc(p: number): number {
+  return 4 * p * (1 - p);
+}
+
+/** Hop's squash/stretch — only at takeoff/landing (each
+ * `HOP_SQUASH_WINDOW` fraction of the hop); neutral (1,1) mid-air. */
+function hopSquash(p: number): { sx: number; sy: number } {
+  if (p < HOP_SQUASH_WINDOW) {
+    const k = p / HOP_SQUASH_WINDOW;
+    return { sx: 1 + HOP_SQUASH_SX * k, sy: 1 - HOP_SQUASH_SY * k };
+  }
+  if (p > 1 - HOP_SQUASH_WINDOW) {
+    const k = (1 - p) / HOP_SQUASH_WINDOW;
+    return { sx: 1 + HOP_SQUASH_SX * k, sy: 1 - HOP_SQUASH_SY * k };
+  }
+  return { sx: 1, sy: 1 };
 }
 
 interface LoadedFrames {
@@ -151,9 +223,27 @@ export class TownLlamaActor {
   private sitFrameT = 0;
   private standFrameT = 0;
 
+  // ---- tap-reaction state (owner request) ----
+  /** `null` = not hopping; else elapsed seconds into `HOP_DURATION_S`. */
+  private hopT: number | null = null;
+  private tapCooldownRemaining = 0;
+  private readonly heartsLayer = new Container();
+  private readonly heartPips: {
+    g: Graphics;
+    active: boolean;
+    t: number;
+    x0: number;
+  }[] = Array.from({ length: HEART_POOL_SIZE }, () => {
+    const g = new Graphics().circle(0, 0, safeRadius(HEART_RADIUS)).fill(HEART_COLOR);
+    g.visible = false;
+    return { g, active: false, t: 0, x0: 0 };
+  });
+  private nextHeartSlot = 0;
+
   constructor() {
     this.view.position.set(PATCH_CENTER_X, GROUND_Y);
     this.view.visible = false; // hidden until BOTH textures resolve and we're in town
+    for (const pip of this.heartPips) this.heartsLayer.addChild(pip.g);
   }
 
   /** Kick off the async texture load. Safe to call at most once (idempotent
@@ -178,6 +268,55 @@ export class TownLlamaActor {
     if (this.state === "stand") this.pickShuffleTarget();
     this.enabled = true;
     this.syncVisibleSprite();
+
+    // Tap reaction — wired up ONLY on this success path, so a permanently
+    // disabled actor (both sets absent) never registers a listener or gets a
+    // hitArea (see the class doc comment + `townLlama.test.ts`).
+    this.view.addChild(this.heartsLayer);
+    this.view.eventMode = "static";
+    this.view.cursor = "pointer";
+    this.view.hitArea = new Rectangle(
+      -TAP_HIT_HALF_WIDTH,
+      TAP_HIT_TOP,
+      TAP_HIT_HALF_WIDTH * 2,
+      TAP_HIT_BOTTOM - TAP_HIT_TOP,
+    );
+    this.view.on("pointerdown", () => this.handleTap());
+  }
+
+  /** Whether a happy-hop is currently playing — test/observability hook. */
+  get isHopping(): boolean {
+    return this.hopT !== null;
+  }
+
+  /** Number of currently-fading heart pips — test/observability hook. */
+  get activeHeartCount(): number {
+    return this.heartPips.reduce((n, p) => n + (p.active ? 1 : 0), 0);
+  }
+
+  /** Tap/click reaction entry point — also wired directly to the `view`'s own
+   * `pointerdown` listener above. Public (rather than private) so headless
+   * tests can trigger it without simulating Pixi's real hit-testing pipeline
+   * (see the class doc comment). No-ops while disabled or on cooldown. */
+  handleTap(): void {
+    if (!this.enabled || this.tapCooldownRemaining > 0) return;
+    this.tapCooldownRemaining = TAP_COOLDOWN_S;
+    this.hopT = 0;
+    this.spawnHearts();
+  }
+
+  private spawnHearts(): void {
+    const count = HEART_MIN_COUNT + Math.floor(rand(0, HEART_MAX_COUNT - HEART_MIN_COUNT + 1));
+    for (let i = 0; i < count; i++) {
+      const pip = this.heartPips[this.nextHeartSlot];
+      this.nextHeartSlot = (this.nextHeartSlot + 1) % this.heartPips.length;
+      pip.active = true;
+      pip.t = 0;
+      pip.x0 = rand(-HEART_X_JITTER, HEART_X_JITTER);
+      pip.g.position.set(pip.x0, HEART_SPAWN_Y);
+      pip.g.alpha = 1;
+      pip.g.visible = true;
+    }
   }
 
   /** `inTown`: same "only while standing in the town zone" gate
@@ -186,8 +325,18 @@ export class TownLlamaActor {
    * BOTH the load resolved successfully AND the zone is town. */
   update(dt: number, inTown: boolean): void {
     this.view.visible = this.enabled && inTown;
-    if (!this.enabled || !inTown) return;
+    if (!this.enabled || !inTown) {
+      // Cancel any in-flight tap reaction so a much-later return to town
+      // never resumes a stale mid-hop pose.
+      this.hopT = null;
+      this.view.scale.set(1, 1);
+      this.view.position.y = GROUND_Y;
+      return;
+    }
     const d = Math.max(0, dt);
+
+    if (this.tapCooldownRemaining > 0) this.tapCooldownRemaining -= d;
+    this.updateTapReaction(d);
 
     this.phaseT += d;
     if (this.phaseT >= this.phaseDuration) this.advancePhase();
@@ -215,6 +364,41 @@ export class TownLlamaActor {
       this.standFrameT += d;
       this.standSprite.currentFrame =
         Math.floor(this.standFrameT * STAND_ANIM_FPS) % this.standSprite.totalFrames;
+    }
+  }
+
+  /** Advances the hop (squash on takeoff/landing + a parabolic vertical arc,
+   * applied to `view`'s own scale/position — layered ON TOP of the shuffle/
+   * bob above, which keeps running underneath unmodified) and steps every
+   * active heart pip (rise + fade), deactivating ones past their lifetime.
+   * `heartsLayer` is counter-scaled against `view`'s hop-squash so the pips
+   * never visually distort along with the squash. */
+  private updateTapReaction(d: number): void {
+    if (this.hopT !== null) {
+      this.hopT += d;
+      const p = Math.min(1, this.hopT / HOP_DURATION_S);
+      const { sx, sy } = hopSquash(p);
+      this.view.scale.set(sx, sy);
+      this.view.position.y = GROUND_Y - HOP_HEIGHT_PX * hopArc(p);
+      if (p >= 1) {
+        this.hopT = null;
+        this.view.scale.set(1, 1);
+        this.view.position.y = GROUND_Y;
+      }
+    }
+    this.heartsLayer.scale.set(1 / this.view.scale.x, 1 / this.view.scale.y);
+
+    for (const pip of this.heartPips) {
+      if (!pip.active) continue;
+      pip.t += d;
+      if (pip.t >= HEART_LIFETIME_S) {
+        pip.active = false;
+        pip.g.visible = false;
+        continue;
+      }
+      const p = pip.t / HEART_LIFETIME_S;
+      pip.g.position.set(pip.x0, HEART_SPAWN_Y - HEART_RISE_DISTANCE * p);
+      pip.g.alpha = 1 - p;
     }
   }
 
