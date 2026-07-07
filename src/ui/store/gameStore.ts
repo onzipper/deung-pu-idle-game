@@ -467,13 +467,15 @@ export function writeSeenPatchNotes(id: string): void {
 }
 
 /** localStorage-persisted auto-dispose rules (M7.5, extended M7.7 for
- * salvage-by-rarity) — same client-preference tier as `soundMuted`/
- * `ftueCompleted`: UI-owned, not `SaveData` (the RULES aren't game progress;
- * the bot's ENGINE-side config, `BotSettings`, is the thing that's actually
- * save-persisted). Owner-locked defaults: common "sell", rare "sell", epic
- * never (no field — see `ui/gear/autoSell.ts`), keep-guard ON (don't dispose
- * of a stat upgrade over what's equipped). SAME storage key as the old v1.1
- * boolean shape — deliberately NOT bumped, so `readStoredAutoSellRules`
+ * salvage-by-rarity, extended again M7.9 "option A" for a real epic toggle) —
+ * same client-preference tier as `soundMuted`/`ftueCompleted`: UI-owned, not
+ * `SaveData` (the RULES aren't game progress; the bot's ENGINE-side config,
+ * `BotSettings`, is the thing that's actually save-persisted). Owner-locked
+ * defaults: common "sell", rare "sell", epic "off" (existing players see NO
+ * behavior change — epic used to be hard-locked never-dispose), keep-guard ON
+ * for common/rare (epic's own "กันของดี" protection is FORCED ON regardless of
+ * this flag, see `ui/gear/autoSell.ts`'s `isGuarded`). SAME storage key as the
+ * old v1.1 boolean shape — deliberately NOT bumped, so `readStoredAutoSellRules`
  * migrates old `{sellCommon, sellRare}` booleans → `"sell"/"off"` in place
  * rather than resetting every existing player's preference. */
 const AUTO_SELL_STORAGE_KEY = "ddp-auto-sell-rules.v2";
@@ -484,12 +486,15 @@ export type AutoSellAction = "off" | "sell" | "salvage";
 export interface StoredAutoSellRules {
   common: AutoSellAction;
   rare: AutoSellAction;
+  /** M7.9 "option A" — epic's own real toggle, default "off" (keep). */
+  epic: AutoSellAction;
   keepBetterStat: boolean;
 }
 
 const DEFAULT_AUTO_SELL_RULES: StoredAutoSellRules = {
   common: "sell",
   rare: "sell", // catalog rarity tracks tier: t3-5 = all rare (see ui/gear/autoSell.ts)
+  epic: "off", // owner default: keep, no behavior change for existing players
   keepBetterStat: true,
 };
 
@@ -522,6 +527,7 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
     const p = parsed as {
       common?: unknown;
       rare?: unknown;
+      epic?: unknown;
       sellCommon?: unknown;
       sellRare?: unknown;
       keepBetterStat?: unknown;
@@ -529,6 +535,9 @@ export function readStoredAutoSellRules(): StoredAutoSellRules {
     return {
       common: migrateAction(p.common, p.sellCommon, DEFAULT_AUTO_SELL_RULES.common),
       rare: migrateAction(p.rare, p.sellRare, DEFAULT_AUTO_SELL_RULES.rare),
+      // No pre-v3 boolean shape existed for epic (it was hard-locked, no field
+      // at all) — a missing/corrupt value always falls back to "off".
+      epic: migrateAction(p.epic, undefined, DEFAULT_AUTO_SELL_RULES.epic),
       keepBetterStat:
         typeof p.keepBetterStat === "boolean"
           ? p.keepBetterStat
@@ -706,6 +715,8 @@ export interface HudState {
   // same tier as `soundMuted` — see `readStoredAutoSellRules`'s doc comment) ----
   autoSellCommon: AutoSellAction;
   autoSellRare: AutoSellAction;
+  /** M7.9 "option A" — epic's own real toggle (default "off" = keep). */
+  autoSellEpic: AutoSellAction;
   autoSellKeepBetterStat: boolean;
   /** M7.5 auto-equip executor toggle (localStorage-persisted, default ON). */
   autoEquip: boolean;
@@ -931,6 +942,7 @@ export interface HudState {
   // ---- M7.5→M7.7 auto-dispose rules (localStorage-persisted) ----
   setAutoSellCommon: (action: AutoSellAction) => void;
   setAutoSellRare: (action: AutoSellAction) => void;
+  setAutoSellEpic: (action: AutoSellAction) => void;
   toggleAutoSellKeepBetterStat: () => void;
   /** Mount-effect-only: apply the persisted rules once, post-hydration (same
    * "don't re-persist on mount" rule as `setSoundMuted`). */
@@ -982,6 +994,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   // same two-step pattern as `soundMuted`/`setSoundMuted`.
   autoSellCommon: DEFAULT_AUTO_SELL_RULES.common,
   autoSellRare: DEFAULT_AUTO_SELL_RULES.rare,
+  autoSellEpic: DEFAULT_AUTO_SELL_RULES.epic,
   autoSellKeepBetterStat: DEFAULT_AUTO_SELL_RULES.keepBetterStat,
   autoEquip: true,
 
@@ -1216,6 +1229,7 @@ export const useGameStore = create<HudState>((set, get) => ({
       writeAutoSellRules({
         common: action,
         rare: s.autoSellRare,
+        epic: s.autoSellEpic,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
       return { autoSellCommon: action };
@@ -1225,9 +1239,20 @@ export const useGameStore = create<HudState>((set, get) => ({
       writeAutoSellRules({
         common: s.autoSellCommon,
         rare: action,
+        epic: s.autoSellEpic,
         keepBetterStat: s.autoSellKeepBetterStat,
       });
       return { autoSellRare: action };
+    }),
+  setAutoSellEpic: (action) =>
+    set((s) => {
+      writeAutoSellRules({
+        common: s.autoSellCommon,
+        rare: s.autoSellRare,
+        epic: action,
+        keepBetterStat: s.autoSellKeepBetterStat,
+      });
+      return { autoSellEpic: action };
     }),
   toggleAutoSellKeepBetterStat: () =>
     set((s) => {
@@ -1235,6 +1260,7 @@ export const useGameStore = create<HudState>((set, get) => ({
       writeAutoSellRules({
         common: s.autoSellCommon,
         rare: s.autoSellRare,
+        epic: s.autoSellEpic,
         keepBetterStat: autoSellKeepBetterStat,
       });
       return { autoSellKeepBetterStat };
@@ -1243,6 +1269,7 @@ export const useGameStore = create<HudState>((set, get) => ({
     set({
       autoSellCommon: rules.common,
       autoSellRare: rules.rare,
+      autoSellEpic: rules.epic,
       autoSellKeepBetterStat: rules.keepBetterStat,
     }),
   toggleAutoEquip: () =>

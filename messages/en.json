@@ -150,7 +150,8 @@
       "title": "Auto-dispose drops",
       "commonLabel": "Common",
       "rareLabel": "Rare",
-      "epicHint": "Epic: always kept (locked off)",
+      "epicLabel": "Epic",
+      "epicHint": "Epic protection is always forced on: the bot can only sell/salvage an epic that's worse than what's equipped and isn't the best piece for an empty slot — even with \"Protect good gear\" off",
       "actionOff": "Off",
       "actionSell": "Sell",
       "actionSalvage": "Salvage",
@@ -671,7 +672,8 @@
     "fastTravelTitle": "Fast Travel",
     "fastTravelClose": "Close",
     "fastTravelCurrent": "You're here",
-    "fastTravelChanneling": "Warping to {map}…"
+    "fastTravelChanneling": "Warping to {map}…",
+    "fastTravelStageRange": "Stage {min}–{max}"
   },
   "shop": {
     "title": "Town Shop",
@@ -723,13 +725,11 @@
     "classOnlyToggle": "My class only",
     "capacityLabel": "{count}/{cap} slots",
     "sellTownOnly": "Can only sell in town",
-    "sellOneButton": "Sell one",
-    "sellAllButton": "Sell all ({count})",
+    "sellButton": "Sell",
     "sellAllCommonButton": "Sell all common",
     "confirmSell": "Confirm sell?",
     "refinePlus": "+{level}",
-    "salvageOneButton": "Salvage (+{yield})",
-    "salvageAllButton": "Salvage all ({count}) (+{yield})",
+    "salvageButton": "Salvage (+{yield})",
     "salvageJunkCommonButton": "Salvage junk common",
     "confirmSalvage": "Confirm salvage?"
   },

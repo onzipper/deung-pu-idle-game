@@ -150,7 +150,8 @@
       "title": "จัดการของดรอปอัตโนมัติ",
       "commonLabel": "ของธรรมดา",
       "rareLabel": "ของหายาก",
-      "epicHint": "ของตำนาน: เก็บไว้เสมอ (ล็อกปิด)",
+      "epicLabel": "ของตำนาน",
+      "epicHint": "ของตำนานถูกกันไว้เสมอ: บอทขาย/ย่อยของตำนานได้เฉพาะชิ้นที่ด้อยกว่าของที่ใส่อยู่ และไม่ใช่ชิ้นดีสุดของช่องที่ยังว่าง — แม้ปิด \"กันของดีไว้ให้\" ก็ตาม",
       "actionOff": "ปิด",
       "actionSell": "ขาย",
       "actionSalvage": "ย่อย",
@@ -671,7 +672,8 @@
     "fastTravelTitle": "วาร์ปข้ามโซน",
     "fastTravelClose": "ปิด",
     "fastTravelCurrent": "อยู่ตรงนี้",
-    "fastTravelChanneling": "กำลังวาร์ปไปยัง {map}…"
+    "fastTravelChanneling": "กำลังวาร์ปไปยัง {map}…",
+    "fastTravelStageRange": "ด่าน {min}–{max}"
   },
   "shop": {
     "title": "ร้านค้าในเมือง",
@@ -723,13 +725,11 @@
     "classOnlyToggle": "ใส่ได้เฉพาะคลาสฉัน",
     "capacityLabel": "{count}/{cap} ช่อง",
     "sellTownOnly": "ขายได้เฉพาะในเมือง",
-    "sellOneButton": "ขายชิ้นนี้",
-    "sellAllButton": "ขายทั้งหมด ({count})",
+    "sellButton": "ขาย",
     "sellAllCommonButton": "ขาย common ทั้งหมด",
     "confirmSell": "ยืนยันขาย?",
     "refinePlus": "+{level}",
-    "salvageOneButton": "ย่อยชิ้นนี้ (+{yield})",
-    "salvageAllButton": "ย่อยทั้งหมด ({count}) (+{yield})",
+    "salvageButton": "ย่อย (+{yield})",
     "salvageJunkCommonButton": "ย่อยของเก่า common",
     "confirmSalvage": "ยืนยันย่อย?"
   },

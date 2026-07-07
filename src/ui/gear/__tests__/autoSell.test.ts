@@ -7,6 +7,7 @@ const TEMPLATES: Record<string, SellableTemplate> = {
   common_sword: { rarity: "common", slot: "weapon", stats: { atk: 3 } },
   rare_sword: { rarity: "rare", slot: "weapon", stats: { atk: 8 } },
   epic_sword: { rarity: "epic", slot: "weapon", stats: { atk: 22 } },
+  epic_dagger: { rarity: "epic", slot: "weapon", stats: { atk: 2 } }, // weaker epic (M7.9 epic-toggle tests)
   common_armor: { rarity: "common", slot: "armor", stats: { def: 1, hp: 20 } },
 };
 
@@ -261,6 +262,67 @@ describe("selectAutoSellSalvageIds", () => {
     // Equipped gear is never disposed.
     expect(sellIds).not.toContain("eqW");
     expect(sellIds).not.toContain("eqA");
+  });
+
+  it("epic option A: default (epic field omitted) still keeps epic, even with everything else permissive", () => {
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(
+      [item({ instanceId: "a", templateId: "epic_sword" })],
+      TEMPLATES,
+      { common: "salvage", rare: "salvage", keepBetterStat: false },
+    );
+    expect(sellIds).toEqual([]);
+    expect(salvageIds).toEqual([]);
+  });
+
+  it("epic option A: toggling epic ON disposes only non-upgrade epics (kept-guard forced ON)", () => {
+    const items = [
+      item({ instanceId: "equipped", templateId: "rare_sword", equippedSlot: "weapon" }), // atk 8
+      item({ instanceId: "weakEpic", templateId: "epic_dagger" }), // atk 2 < 8 -> disposable
+      item({ instanceId: "strongEpic", templateId: "epic_sword" }), // atk 22 > 8 -> upgrade, kept
+    ];
+    // Global keepBetterStat is OFF, but epic protection must still apply.
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "sell",
+      epic: "sell",
+      keepBetterStat: false,
+    });
+    expect(sellIds).toEqual(["weakEpic"]);
+    expect(salvageIds).toEqual([]);
+  });
+
+  it("epic option A: protection cannot be bypassed by the global keepBetterStat toggle", () => {
+    const items = [
+      item({ instanceId: "equipped", templateId: "rare_sword", equippedSlot: "weapon" }),
+      item({ instanceId: "strongEpic", templateId: "epic_sword" }), // atk 22, an upgrade
+    ];
+    for (const keepBetterStat of [true, false]) {
+      const { sellIds, salvageIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+        common: "sell",
+        rare: "sell",
+        epic: "salvage",
+        keepBetterStat,
+      });
+      expect(sellIds).toEqual([]);
+      expect(salvageIds).toEqual([]);
+    }
+  });
+
+  it("epic option A: a t10-class best-backup epic for an EMPTY slot is never disposed", () => {
+    // No gear equipped in the weapon slot at all — the epic is the strongest
+    // candidate and must be kept as the best-backup pick, common still sells.
+    const items = [
+      item({ instanceId: "commonSword", templateId: "common_sword" }),
+      item({ instanceId: "bestEpic", templateId: "epic_sword" }),
+    ];
+    const { sellIds, salvageIds } = selectAutoSellSalvageIds(items, TEMPLATES, {
+      common: "sell",
+      rare: "sell",
+      epic: "salvage",
+      keepBetterStat: false, // forced protection must still hold the epic back
+    });
+    expect(sellIds).toEqual(["commonSword"]);
+    expect(salvageIds).toEqual([]);
   });
 
   it("skips an unknown/retired template defensively", () => {

@@ -397,6 +397,7 @@ async function performAutoSell(suppressNothingNotice = false): Promise<void> {
     {
       common: store.autoSellCommon,
       rare: store.autoSellRare,
+      epic: store.autoSellEpic,
       keepBetterStat: store.autoSellKeepBetterStat,
     },
     store.heroes[0]?.cls, // scope the empty-slot best-backup pick to wearable gear
