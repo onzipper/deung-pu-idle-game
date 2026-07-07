@@ -38,19 +38,20 @@ vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
 import { Prisma } from "@prisma/client";
 import {
   deriveClaimKey,
+  deriveStoneClaimKey,
   plausibleDropCeiling,
+  plausibleStoneCeiling,
   classifyClaim,
   claimBatchSchema,
   equipSchema,
   sellSchema,
   claimBatch,
+  claimStones,
   equipItem,
   unequipItem,
   destroyItem,
   sellItems,
-  salvageItems,
   refineItem,
-  salvageSchema,
   refineSchema,
   loadBuyback,
   buybackItem,
@@ -61,7 +62,7 @@ import {
   KILLS_PER_SEC_CEILING,
   MAX_CLAIM_BATCH,
   MAX_SELL_BATCH,
-  MAX_SALVAGE_BATCH,
+  MAX_STONE_QTY_PER_CLAIM,
   ANNOUNCE_MIN_REFINE_LEVEL,
   recentAnnouncements,
 } from "@/server/items";
@@ -70,7 +71,7 @@ import {
   vendorPriceForTemplate,
   INVENTORY_CAP,
 } from "@/engine/config/items";
-import { REFINE, refineCost, salvageYield } from "@/engine/config/refine";
+import { REFINE, refineCost } from "@/engine/config/refine";
 
 const CHAR = "char_1";
 
@@ -154,7 +155,7 @@ describe("claimBatchSchema / equipSchema", () => {
       items: [{ rollId: 7, templateId: "w_sword_t1_rusty", stage: 1 }],
     });
     expect(r.success).toBe(true);
-    if (r.success) expect(r.data.items[0].rollId).toBe("7");
+    if (r.success) expect(r.data.items?.[0].rollId).toBe("7");
   });
   it("rejects an empty batch, an over-cap batch, and extra keys", () => {
     expect(claimBatchSchema.safeParse({ items: [] }).success).toBe(false);
@@ -478,81 +479,136 @@ describe("sellSchema", () => {
   });
 });
 
-describe("salvageItems — refine materials (M7.6)", () => {
+describe("claimStones — หินเสริมพลัง material credit (idempotent, namespaced key)", () => {
   beforeEach(() => {
-    mockPrisma.itemEvent.createMany.mockResolvedValue({ count: 0 });
+    mockPrisma.character.findUnique.mockResolvedValue({ createdAt: new Date(), materials: 0 });
+    mockPrisma.itemInstance.count.mockResolvedValue(0);
+    mockPrisma.itemEvent.create.mockResolvedValue({});
   });
 
-  function stockFindMany(rows: Record<string, unknown>[]): void {
-    mockPrisma.itemInstance.findMany.mockResolvedValue(
-      rows.map((r) => ({ id: "item_1", deletedAt: null, ...r })),
+  it("namespaces the stone key apart from the gear key for the same rollId", () => {
+    expect(deriveStoneClaimKey(CHAR, "42")).toBe("char_1:stone:42");
+    expect(deriveStoneClaimKey(CHAR, "42")).not.toBe(deriveClaimKey(CHAR, "42"));
+  });
+
+  it("plausibleStoneCeiling is the grace allowance at zero elapsed and scales up", () => {
+    expect(plausibleStoneCeiling(0)).toBe(CLAIM_GRACE);
+    expect(plausibleStoneCeiling(-5)).toBe(CLAIM_GRACE);
+    expect(plausibleStoneCeiling(3600)).toBeGreaterThan(CLAIM_GRACE);
+  });
+
+  it("credits materials in one tx (receipt instance + stoneClaimed event + increment)", async () => {
+    mockPrisma.itemInstance.create.mockResolvedValue({ id: "receipt_1" });
+    mockPrisma.character.update.mockResolvedValue({ materials: 5 });
+    const now = new Date("2026-07-06T00:00:00Z").getTime();
+    const { results, totalCredited, materials } = await claimStones(
+      CHAR,
+      [{ rollId: "1", qty: 5 }],
+      now,
     );
-  }
-
-  it("salvages an unequipped item: atomic soft-delete + salvaged event + material credit", async () => {
-    stockFindMany([{ templateId: "w_sword_t3_knight", equippedSlot: null }]);
-    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
-    mockPrisma.character.update.mockResolvedValue({ materials: 12 });
-    const gained = salvageYield(3, "rare"); // knight = tier 3, rare
-    const now = new Date("2026-07-06T00:00:00Z");
-    const { results, totalMaterials, materials } = await salvageItems(CHAR, ["item_1"], now);
-
-    expect(results[0]).toEqual({ itemId: "item_1", status: "salvaged", yield: gained });
-    expect(totalMaterials).toBe(gained);
-    expect(materials).toBe(12);
-    // conditional check-and-set guarded by deletedAt:null + equippedSlot:null
-    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+    expect(results[0]).toEqual({ status: "credited", rollId: "1", qty: 5 });
+    expect(totalCredited).toBe(5);
+    expect(materials).toBe(5);
+    // born-dead receipt on the SHARED unique claimKey column, namespaced key.
+    expect(mockPrisma.itemInstance.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: "item_1", deletedAt: null, equippedSlot: null }),
-        data: { deletedAt: now },
+        data: expect.objectContaining({
+          ownerId: CHAR,
+          origin: "stone",
+          claimKey: "char_1:stone:1",
+          deletedAt: new Date(now),
+        }),
       }),
     );
-    // authoritative counter credited by the WON set in the same tx
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "stoneClaimed",
+          meta: JSON.stringify({ qty: 5, rollId: "1" }),
+        }),
+      }),
+    );
     expect(mockPrisma.character.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { materials: { increment: gained } } }),
-    );
-    expect(mockPrisma.itemEvent.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: [expect.objectContaining({ type: "salvaged" })] }),
+      expect.objectContaining({ data: { materials: { increment: 5 } } }),
     );
   });
 
-  it("rejects an equipped item (reason equipped) — never auto-unequips, no materials", async () => {
-    stockFindMany([{ equippedSlot: "weapon" }]);
-    const { results, totalMaterials } = await salvageItems(CHAR, ["item_1"]);
-    expect(results[0]).toEqual({ itemId: "item_1", status: "rejected", reason: "equipped" });
-    expect(totalMaterials).toBe(0);
-    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
-    expect(mockPrisma.character.update).not.toHaveBeenCalled();
-  });
-
-  it("does not double-credit an already-deleted item (status already, yield 0)", async () => {
-    stockFindMany([{ equippedSlot: null, deletedAt: new Date("2026-01-01T00:00:00Z") }]);
-    mockPrisma.character.findUnique.mockResolvedValue({ materials: 5 });
-    const { results, totalMaterials, materials } = await salvageItems(CHAR, ["item_1"]);
-    expect(results[0]).toEqual({ itemId: "item_1", status: "already", yield: 0 });
-    expect(totalMaterials).toBe(0);
+  it("is idempotent: a claimKey collision credits nothing (status existing, replay-safe)", async () => {
+    mockPrisma.itemInstance.create.mockRejectedValue(p2002("claimKey"));
+    mockPrisma.character.findUnique.mockResolvedValue({ createdAt: new Date(), materials: 5 });
+    const { results, totalCredited, materials } = await claimStones(
+      CHAR,
+      [{ rollId: "1", qty: 5 }],
+      Date.now(),
+    );
+    expect(results[0]).toEqual({ status: "existing", rollId: "1", qty: 5 });
+    expect(totalCredited).toBe(0); // replay does NOT double-credit
     expect(materials).toBe(5);
     expect(mockPrisma.character.update).not.toHaveBeenCalled();
   });
 
-  it("credits at most once when the atomic write loses the race (count 0 → already)", async () => {
-    stockFindMany([{ templateId: "w_sword_t1_rusty", equippedSlot: null }]);
-    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // concurrent salvager won
-    mockPrisma.character.findUnique.mockResolvedValue({ materials: 0 });
-    const { results, totalMaterials } = await salvageItems(CHAR, ["item_1"]);
-    expect(results[0]).toEqual({ itemId: "item_1", status: "already", yield: 0 });
-    expect(totalMaterials).toBe(0);
+  it("rejects an absurd per-claim qty (reason qty), crediting nothing", async () => {
+    const { results, totalCredited } = await claimStones(
+      CHAR,
+      [{ rollId: "9", qty: MAX_STONE_QTY_PER_CLAIM + 1 }],
+      Date.now(),
+    );
+    expect(results[0]).toEqual({ status: "rejected", reason: "qty", rollId: "9" });
+    expect(totalCredited).toBe(0);
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
     expect(mockPrisma.character.update).not.toHaveBeenCalled();
   });
 
-  it("dedupes ids: a duplicated id salvages/credits exactly once", async () => {
-    stockFindMany([{ templateId: "w_sword_t1_rusty", equippedSlot: null }]);
-    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 });
-    mockPrisma.character.update.mockResolvedValue({ materials: 1 });
-    const { results, totalMaterials } = await salvageItems(CHAR, ["item_1", "item_1", "item_1"]);
-    expect(results).toHaveLength(1);
-    expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
-    expect(totalMaterials).toBe(salvageYield(1, "common")); // rusty = tier 1 common
+  it("rejects claims beyond the lifetime rate ceiling (reason rate), not an idempotent retry", async () => {
+    // createdAt = now → ceiling = CLAIM_GRACE; existing receipts already at ceiling.
+    mockPrisma.character.findUnique.mockResolvedValue({ createdAt: new Date(), materials: 0 });
+    mockPrisma.itemInstance.count.mockResolvedValue(CLAIM_GRACE);
+    mockPrisma.itemInstance.findUnique.mockResolvedValue(null);
+    const { results, totalCredited } = await claimStones(
+      CHAR,
+      [{ rollId: "999", qty: 3 }],
+      Date.now(),
+    );
+    expect(results[0]).toEqual({ status: "rejected", reason: "rate", rollId: "999" });
+    expect(totalCredited).toBe(0);
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+
+  it("empty stone list returns the current balance, no DB writes", async () => {
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 7 });
+    const { results, totalCredited, materials } = await claimStones(CHAR, []);
+    expect(results).toEqual([]);
+    expect(totalCredited).toBe(0);
+    expect(materials).toBe(7);
+    expect(mockPrisma.itemInstance.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("dual gear + stone claim on the SAME rollId (namespaced, both credit once)", () => {
+  it("a kill dropping gear + stones yields two distinct claimKeys → each lands once", async () => {
+    mockPrisma.character.findUnique.mockResolvedValue({ createdAt: new Date(), materials: 4 });
+    mockPrisma.itemInstance.count.mockResolvedValue(0);
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+    // gear mint
+    mockPrisma.itemInstance.create
+      .mockResolvedValueOnce(instanceRow({ id: "gear_1" })) // claimBatch mint
+      .mockResolvedValueOnce({ id: "receipt_1" }); // claimStones receipt
+    mockPrisma.character.update.mockResolvedValue({ materials: 6 });
+
+    const gear = await claimBatch(
+      CHAR,
+      [{ rollId: "77", templateId: "w_sword_t1_rusty", stage: 1 }],
+      Date.now(),
+    );
+    const stones = await claimStones(CHAR, [{ rollId: "77", qty: 2 }], Date.now());
+
+    expect(gear.results[0].status).toBe("minted");
+    expect(stones.results[0]).toEqual({ status: "credited", rollId: "77", qty: 2 });
+    // gear used the bare key, stone used the namespaced key — no collision.
+    const gearCreate = mockPrisma.itemInstance.create.mock.calls[0][0];
+    const stoneCreate = mockPrisma.itemInstance.create.mock.calls[1][0];
+    expect(gearCreate.data.claimKey).toBe("char_1:77");
+    expect(stoneCreate.data.claimKey).toBe("char_1:stone:77");
   });
 });
 
@@ -955,20 +1011,46 @@ describe("buybackItem — atomic re-mint (M-buyback)", () => {
   });
 });
 
-describe("salvageSchema / refineSchema", () => {
-  it("salvageSchema accepts a batch and rejects empty/over-cap/extra", () => {
-    expect(salvageSchema.safeParse({ itemIds: ["a", "b"] }).success).toBe(true);
-    expect(salvageSchema.safeParse({ itemIds: [] }).success).toBe(false);
-    expect(
-      salvageSchema.safeParse({
-        itemIds: Array.from({ length: MAX_SALVAGE_BATCH + 1 }, (_, i) => `i${i}`),
-      }).success,
-    ).toBe(false);
-    expect(salvageSchema.safeParse({ itemIds: ["a"], hacked: true }).success).toBe(false);
-  });
-  it("refineSchema requires one non-empty itemId and rejects extras", () => {
+describe("refineSchema", () => {
+  it("requires one non-empty itemId and rejects extras", () => {
     expect(refineSchema.safeParse({ itemId: "item_1" }).success).toBe(true);
     expect(refineSchema.safeParse({ itemId: "" }).success).toBe(false);
     expect(refineSchema.safeParse({ itemId: "a", extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("claimBatchSchema — additive stones (old gear-only payloads still validate)", () => {
+  it("still accepts a legacy gear-only payload with no stones key", () => {
+    const r = claimBatchSchema.safeParse({
+      items: [{ rollId: 7, templateId: "w_sword_t1_rusty", stage: 1 }],
+    });
+    expect(r.success).toBe(true);
+  });
+  it("accepts a combined gear + stones batch and coerces both rollIds to strings", () => {
+    const r = claimBatchSchema.safeParse({
+      items: [{ rollId: 7, templateId: "w_sword_t1_rusty", stage: 1 }],
+      stones: [{ rollId: 7, qty: 3 }],
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.items?.[0].rollId).toBe("7");
+      expect(r.data.stones?.[0].rollId).toBe("7");
+    }
+  });
+  it("accepts a stone-only batch (a cycle with stones but no gear drop)", () => {
+    expect(claimBatchSchema.safeParse({ stones: [{ rollId: 1, qty: 2 }] }).success).toBe(true);
+  });
+  it("rejects a wholly empty batch (no items, no stones)", () => {
+    expect(claimBatchSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(claimBatchSchema.safeParse({}).success).toBe(false);
+  });
+  it("rejects a non-positive / non-integer stone qty and an over-cap stones array", () => {
+    expect(claimBatchSchema.safeParse({ stones: [{ rollId: 1, qty: 0 }] }).success).toBe(false);
+    expect(claimBatchSchema.safeParse({ stones: [{ rollId: 1, qty: 1.5 }] }).success).toBe(false);
+    expect(
+      claimBatchSchema.safeParse({
+        stones: Array.from({ length: MAX_CLAIM_BATCH + 1 }, (_, i) => ({ rollId: i, qty: 1 })),
+      }).success,
+    ).toBe(false);
   });
 });
