@@ -131,7 +131,7 @@
 - [x] ประกาศ server-wide: คนแรกแตะ 90 (exactly-once ผ่าน singleton unique) / แซงอันดับ 1 power (dedupe 24 ชม.) + patch notes 2026-07-08
 - [x] QA + sim sanity: บอร์ด read-only จาก save ยืนยันแล้ว (sim byte-identical ทุกเวฟ) — 930/930
 
-> **M7.95 CLOSED (2026-07-08)** + UAT round-2 polish ในรอบเดียวกัน: เควสคลาส 3 โฉมใหม่ (ทุ่งทุนดรา 90 + Glacial Sovereign ร่างเยาว์) · บอทสวิตช์เดียว + ตั้งค่ารวม + config ติดตัวละคร (Character.uiConfig) · มอน 12 สายพันธุ์แมพ 4-6 · aim-driven facing · ตีบวก tap-to-skip · เมนูวาปธีม · inventory unstack+sort · การ์ดเควสรวมปุ่ม · ⓘ ทุกสกิล · war-cry aura+chip (บัฟทั้งทีม party-ready) · กวาดซาก wave (state.wave/waveGap/waveLabel ตาย, waves.ts→hunt.ts) · UX-fix 10 ข้อจาก audit เต็ม · /proto-shaders ทดลองแล้วเจ้าของไม่เอา (ลบแล้ว กู้ได้จาก history) — **ค้างฝั่งเจ้าของ: `npx prisma db push` (additive announcements schema) + playtest + confirm merge**
+> **M7.95 CLOSED (2026-07-08)** + UAT round-2 polish ในรอบเดียวกัน: เควสคลาส 3 โฉมใหม่ (ทุ่งทุนดรา 90 + Glacial Sovereign ร่างเยาว์) · บอทสวิตช์เดียว + ตั้งค่ารวม + config ติดตัวละคร (Character.uiConfig) · มอน 12 สายพันธุ์แมพ 4-6 · aim-driven facing · ตีบวก tap-to-skip · เมนูวาปธีม · inventory unstack+sort · การ์ดเควสรวมปุ่ม · ⓘ ทุกสกิล · war-cry aura+chip (บัฟทั้งทีม party-ready) · กวาดซาก wave (state.wave/waveGap/waveLabel ตาย, waves.ts→hunt.ts) · UX-fix 10 ข้อจาก audit เต็ม · /proto-shaders ทดลองแล้วเจ้าของไม่เอา (ลบแล้ว กู้ได้จาก history) — merge เข้า main แล้ว (PR #12, 2026-07-08) + เจ้าของรัน `prisma db push` แล้ว (schema sync ครบ) — เหลือ playtest ตามอัธยาศัย
 
 ## M8 — Party
 
