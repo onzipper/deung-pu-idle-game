@@ -625,6 +625,103 @@ function writeAutoSellRules(rules: StoredAutoSellRules): void {
   }
 }
 
+/**
+ * Cross-device UI/automation config (owner request 2026-07-07). The browser-
+ * localStorage-owned automation PREFERENCES that used to reset on a phone↔PC
+ * switch; now persisted PER CHARACTER server-side (`Character.uiConfig`, see
+ * `src/server/uiConfig.ts`) so they FOLLOW THE CHARACTER. This is the exact set
+ * of fields synced — deliberately EXCLUDING the engine-persisted config (bot
+ * targets / gold reserve, SAVE v11; autoHunt, SAVE v12), whose single source of
+ * truth stays the engine save blob.
+ *
+ * localStorage stays as a WRITE-THROUGH offline fallback (this unified key +
+ * the legacy per-feature keys), so nothing regresses if the boot API fails: on
+ * boot the client hydrates from localStorage first, then the SERVER value (when
+ * present) WINS and is written through so any late mount-effect hydration reads
+ * the fresh value.
+ */
+export interface UiConfig {
+  autoCast: boolean;
+  autoAllocate: boolean;
+  autoReturn: boolean;
+  autoAdvance: boolean;
+  autoHpPotion: boolean;
+  autoManaPotion: boolean;
+  autoHpThreshold: number;
+  autoManaThreshold: number;
+  autoSellCommon: AutoSellAction;
+  autoSellRare: AutoSellAction;
+  autoSellEpic: AutoSellAction;
+  autoSellKeepBetterStat: boolean;
+  autoEquip: boolean;
+}
+
+const UI_CONFIG_STORAGE_KEY = "ddp-ui-config.v1";
+
+/** Read the write-through localStorage mirror (offline fallback), or null if
+ * absent/blocked/corrupt. Loosely narrowed — an unknown key is dropped, a
+ * missing/mistyped field is omitted so `hydrateUiConfig`'s merge keeps the
+ * current default for it. */
+export function readStoredUiConfig(): Partial<UiConfig> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(UI_CONFIG_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const p = parsed as Record<string, unknown>;
+    const out: Partial<UiConfig> = {};
+    if (typeof p.autoCast === "boolean") out.autoCast = p.autoCast;
+    if (typeof p.autoAllocate === "boolean") out.autoAllocate = p.autoAllocate;
+    if (typeof p.autoReturn === "boolean") out.autoReturn = p.autoReturn;
+    if (typeof p.autoAdvance === "boolean") out.autoAdvance = p.autoAdvance;
+    if (typeof p.autoHpPotion === "boolean") out.autoHpPotion = p.autoHpPotion;
+    if (typeof p.autoManaPotion === "boolean") out.autoManaPotion = p.autoManaPotion;
+    if (typeof p.autoHpThreshold === "number" && Number.isFinite(p.autoHpThreshold))
+      out.autoHpThreshold = p.autoHpThreshold;
+    if (typeof p.autoManaThreshold === "number" && Number.isFinite(p.autoManaThreshold))
+      out.autoManaThreshold = p.autoManaThreshold;
+    if (isAutoSellAction(p.autoSellCommon)) out.autoSellCommon = p.autoSellCommon;
+    if (isAutoSellAction(p.autoSellRare)) out.autoSellRare = p.autoSellRare;
+    if (isAutoSellAction(p.autoSellEpic)) out.autoSellEpic = p.autoSellEpic;
+    if (typeof p.autoSellKeepBetterStat === "boolean")
+      out.autoSellKeepBetterStat = p.autoSellKeepBetterStat;
+    if (typeof p.autoEquip === "boolean") out.autoEquip = p.autoEquip;
+    return out;
+  } catch {
+    return null; // storage blocked/corrupt — server value / defaults still apply
+  }
+}
+
+export function writeUiConfig(cfg: UiConfig): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(UI_CONFIG_STORAGE_KEY, JSON.stringify(cfg));
+  } catch {
+    /* storage blocked — the config just won't survive offline across reloads */
+  }
+}
+
+/** Build the current uiConfig snapshot from the store — the exact object the
+ * autosave POST body carries and the write-through mirror stores. */
+export function selectUiConfig(s: UiConfig): UiConfig {
+  return {
+    autoCast: s.autoCast,
+    autoAllocate: s.autoAllocate,
+    autoReturn: s.autoReturn,
+    autoAdvance: s.autoAdvance,
+    autoHpPotion: s.autoHpPotion,
+    autoManaPotion: s.autoManaPotion,
+    autoHpThreshold: s.autoHpThreshold,
+    autoManaThreshold: s.autoManaThreshold,
+    autoSellCommon: s.autoSellCommon,
+    autoSellRare: s.autoSellRare,
+    autoSellEpic: s.autoSellEpic,
+    autoSellKeepBetterStat: s.autoSellKeepBetterStat,
+    autoEquip: s.autoEquip,
+  };
+}
+
 const emptyBossHint: BossHint = {
   stage: 1,
   bossHp: 0,
@@ -1016,6 +1113,15 @@ export interface HudState {
   /** Mount-effect-only: apply the persisted auto-equip preference once. */
   hydrateAutoEquip: (on: boolean) => void;
 
+  /** Apply a cross-device uiConfig blob (owner request 2026-07-07) — used for
+   * BOTH the localStorage fallback and the server (server WINS, applied last on
+   * boot). Only DEFINED fields are applied (a partial keeps the current default
+   * for a missing field); the merged full config is written THROUGH to
+   * localStorage (unified + legacy auto-sell/auto-equip keys) so any later
+   * mount-effect hydration reads the fresh value rather than clobbering it.
+   * See `UiConfig`'s doc + `GameClient.tsx`'s boot/autosave wiring. */
+  hydrateUiConfig: (cfg: Partial<UiConfig>) => void;
+
   /** Integration-loop-only: pop + clear the pending intents for this frame. */
   drainPendingInput: () => PendingInput;
 }
@@ -1381,6 +1487,28 @@ export const useGameStore = create<HudState>((set, get) => ({
       return { autoEquip };
     }),
   hydrateAutoEquip: (on) => set({ autoEquip: on }),
+
+  hydrateUiConfig: (cfg) =>
+    set((s) => {
+      // Merge only DEFINED fields over the current config so a partial blob
+      // never wipes a field to `undefined`.
+      const merged: UiConfig = { ...selectUiConfig(s) };
+      for (const key of Object.keys(cfg) as (keyof UiConfig)[]) {
+        const v = cfg[key];
+        if (v !== undefined) (merged[key] as UiConfig[typeof key]) = v;
+      }
+      // Write-through so the legacy mount-effect hydrations (which read their own
+      // keys) pick up the winning value instead of re-applying a stale local one.
+      writeUiConfig(merged);
+      writeAutoSellRules({
+        common: merged.autoSellCommon,
+        rare: merged.autoSellRare,
+        epic: merged.autoSellEpic,
+        keepBetterStat: merged.autoSellKeepBetterStat,
+      });
+      writeAutoEquip(merged.autoEquip);
+      return merged;
+    }),
 
   drainPendingInput: () => {
     const pending = get().pendingInput;

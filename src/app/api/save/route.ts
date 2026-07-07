@@ -21,6 +21,7 @@ import {
   loadMaterials,
   recentAnnouncements,
 } from "@/server/items";
+import { loadUiConfig } from "@/server/uiConfig";
 
 // This route reads/writes cookies and the DB per request — never static.
 export const dynamic = "force-dynamic";
@@ -40,6 +41,9 @@ export async function GET() {
         inventory: [],
         equipped: { weapon: null, armor: null, refine: { weapon: 0, armor: 0 } },
         materials: 0,
+        // Cross-device UI config: no character yet → nothing stored; the client
+        // keeps its own localStorage/defaults (see @/server/uiConfig).
+        uiConfig: null,
         // M7.9: still worth surfacing even pre-character (a fresh login lands
         // here for a beat before a character is selected) — see the POST
         // branch's doc for the feed shape.
@@ -52,19 +56,24 @@ export async function GET() {
     // client must hydrate gear from `inventory`/`equipped` here, not from the
     // save's own copy (an item is not re-derivable from the save; persistence-m7).
     const userId2 = userId; // (identity already resolved above)
-    const [{ save, offline }, inventory, character, materials, announcements] = await Promise.all([
-      loadSave(characterId),
-      loadInventory(characterId),
-      getOwnedLiveCharacterClass(userId2, characterId),
-      // M7.6 ตีบวก: the AUTHORITATIVE material balance (DB column, not the save
-      // blob) — the client seeds its `materials` mirror from this on boot, same as
-      // `equipped` is seeded from the DB ledger over the save's cache.
-      loadMaterials(characterId),
-      // M7.9: a fresh login should see a recent server-wide high-refine
-      // landing too, not just players who happen to be online across an
-      // autosave tick — see `recentAnnouncements`'s doc (last 5 min, LIMIT 10).
-      recentAnnouncements(),
-    ]);
+    const [{ save, offline }, inventory, character, materials, uiConfig, announcements] =
+      await Promise.all([
+        loadSave(characterId),
+        loadInventory(characterId),
+        getOwnedLiveCharacterClass(userId2, characterId),
+        // M7.6 ตีบวก: the AUTHORITATIVE material balance (DB column, not the save
+        // blob) — the client seeds its `materials` mirror from this on boot, same as
+        // `equipped` is seeded from the DB ledger over the save's cache.
+        loadMaterials(characterId),
+        // Cross-device UI config (owner request 2026-07-07): the per-character
+        // preference blob. `null` for a pre-existing/fresh character → the client
+        // keeps its own localStorage/defaults; a stored blob WINS over localStorage.
+        loadUiConfig(characterId),
+        // M7.9: a fresh login should see a recent server-wide high-refine
+        // landing too, not just players who happen to be online across an
+        // autosave tick — see `recentAnnouncements`'s doc (last 5 min, LIMIT 10).
+        recentAnnouncements(),
+      ]);
     // `baseClass` is the AUTHORITATIVE class (immutable at creation) — the
     // client must correct/seed the save's `hero.cls` from it (the 2026-07-06
     // "everyone is a swordsman" repair; see engine `repairHeroClass`).
@@ -76,6 +85,7 @@ export async function GET() {
       inventory,
       equipped: equippedLoadoutFrom(inventory),
       materials,
+      uiConfig,
       announcements,
     });
   } catch (err) {
@@ -102,7 +112,23 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    const result = await persistSave(characterId, userId, body);
+    // Cross-device UI config rides the SAME autosave POST body as an OPTIONAL
+    // sibling `uiConfig` key (owner request 2026-07-07). Split it off BEFORE the
+    // save reaches `parseSaveData` — the save schema is `.strict()` and would
+    // otherwise reject the extra key. Absent → `undefined` → the stored config is
+    // left untouched (old clients don't wipe it). `persistSave` validates it and
+    // never lets a bad one fail the save.
+    let uiConfig: unknown;
+    let saveBody: unknown = body;
+    if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+      const rec = body as Record<string, unknown>;
+      if ("uiConfig" in rec) {
+        const { uiConfig: uc, ...rest } = rec;
+        uiConfig = uc;
+        saveBody = rest;
+      }
+    }
+    const result = await persistSave(characterId, userId, saveBody, new Date(), uiConfig);
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }

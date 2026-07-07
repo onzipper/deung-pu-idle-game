@@ -93,11 +93,15 @@ import { toInventoryItem } from "@/ui/gear/types";
 import type { ClaimItemResultWire, ItemInstanceWire } from "@/ui/gear/types";
 import {
   useGameStore,
+  readStoredUiConfig,
+  selectUiConfig,
+  writeUiConfig,
   type EngineSnapshot,
   type HeroQuestSummary,
   type HeroSummary,
   type ShopSummary,
   type SkillSummary,
+  type UiConfig,
 } from "@/ui/store/gameStore";
 import { resolveCatchUp } from "./catchUp";
 import { TimeDirector } from "./timeDirector";
@@ -858,11 +862,22 @@ export function GameClient() {
       return toSaveData(state);
     }
 
+    // Cross-device UI config (owner request 2026-07-07): the autosave POST body
+    // carries the current preference snapshot as a sibling `uiConfig` key (the
+    // server splits it off before the strict save-schema validation). ALSO
+    // write-through to localStorage on the same cadence so the offline fallback
+    // stays current with mid-session toggles.
+    function serializeWithUiConfig(): SaveData & { uiConfig: UiConfig } {
+      const uiConfig = selectUiConfig(useGameStore.getState());
+      writeUiConfig(uiConfig);
+      return { ...serialize(), uiConfig };
+    }
+
     function autosave(): void {
       void fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(serialize()),
+        body: JSON.stringify(serializeWithUiConfig()),
         keepalive: true,
       })
         .then((res) =>
@@ -937,7 +952,7 @@ export function GameClient() {
     function onVisibility(): void {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
-        const blob = new Blob([JSON.stringify(serialize())], {
+        const blob = new Blob([JSON.stringify(serializeWithUiConfig())], {
           type: "application/json",
         });
         navigator.sendBeacon("/api/save", blob);
@@ -1021,6 +1036,12 @@ export function GameClient() {
     // (React Strict Mode's dev mount/unmount/mount) by tearing the renderer
     // back down instead of leaking an orphaned canvas.
     const boot = async (): Promise<void> => {
+      // ---- cross-device UI config: seed from the localStorage FALLBACK first
+      // (owner request 2026-07-07) so a boot with a dead/slow API still restores
+      // the last-known preferences; the SERVER value (below) then WINS. ----
+      const localUiConfig = readStoredUiConfig();
+      if (localUiConfig) useGameStore.getState().hydrateUiConfig(localUiConfig);
+
       // ---- load the server-authoritative save (before initGameState) ----
       let loaded: SaveData | undefined;
       let bootClass: HeroClass | undefined; // fresh-character first boot class
@@ -1044,6 +1065,11 @@ export function GameClient() {
              * overwrites the save blob's own mirror, same precedence rule as
              * `equipped` below. */
             materials?: number;
+            /** Cross-device UI config (owner request 2026-07-07): the
+             * per-character preference blob, or null (pre-existing/fresh
+             * character → keep the localStorage fallback/defaults). When present
+             * it WINS over localStorage — see `UiConfig`'s doc. */
+            uiConfig?: Partial<UiConfig> | null;
             /** Authoritative character class (Character.baseClass) — corrects
              * a save whose hero.cls drifted + seeds a first boot (2026-07-06
              * "everyone is a swordsman" fix). */
@@ -1078,6 +1104,10 @@ export function GameClient() {
             offlineSeconds = json.offline.creditedSeconds;
             offlineCapped = json.offline.capped;
           }
+          // Cross-device UI config: the SERVER value WINS over the localStorage
+          // fallback seeded above (applied last). Null (pre-existing/fresh
+          // character) → keep whatever the fallback/defaults gave us.
+          if (json.uiConfig) useGameStore.getState().hydrateUiConfig(json.uiConfig);
           // M7: the DB `ItemInstance` ledger is AUTHORITATIVE over the save
           // blob's own `equipped` cache (precedence documented at the API) —
           // overwrite it BEFORE `initGameState` derives max HP from it below.
