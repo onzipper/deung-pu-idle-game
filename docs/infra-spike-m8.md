@@ -1,5 +1,11 @@
 # M8 Infra Spike — Websocket relay สำหรับ Lockstep Party
 
+> **สถานะ 2026-07-08:** ซัพพอร์ต Hostinger ตอบเป็นลายลักษณ์อักษรว่า Business/Cloud Node.js
+> hosting **ไม่ proxy incoming WebSocket upgrade**, ไม่รองรับ inbound ค้างสาย 10+ นาที,
+> ไม่การันตี single persistent instance (ชี้ไป VPS สำหรับงานแบบนี้) — แต่**เจ้าของขอ
+> ทดลอง deploy probe บน hosting จริงก่อน** (เผื่อได้) · ถ้าผลจริง NO-GO ค่อยวางแผน VPS
+> กันอีกรอบ — ยังไม่เคาะอะไรจนกว่าจะเห็นผล probe บน host จริง
+
 คำถามที่ต้องตอบก่อนเริ่มพาร์ตี้จริง (GDD.md §3, ROADMAP.md M8): เกมนี้ต้องการ Node
 websocket server รันต่อเนื่อง (persistent process, bind port, รับ incoming
 connection จากผู้เล่นสูงสุด 3 คนต่อห้อง) เพื่อทำ lockstep input-sync บน
