@@ -135,6 +135,15 @@
 
 > **UAT round-3 CLOSED (2026-07-08, หลัง PR #12):** เมือง NPC ครบวงจร (ป้าปุ๊/ลุงดึ๋ง, แตะซ้ำเพื่อคุย, panel เปิดผ่าน NPC เท่านั้น, บอทเดินไปหาเอง ~3.5 วิ/ทริป, anchors ใน CONFIG.townNpcs) · วาปง่าย (ตัด aggro block + damage interrupt, ตายกลางร่ายเท่านั้นที่ยกเลิก, บอสยังล็อก) · เควสคลาส 3 กติกาไต่ก่อน (tier3GateCleared = ต้องปลดห้องบอสแมพ 3 เอง, ไม่มีข้ามโซน, strand guard ตอน boot, guide-me พาไปหน้าด่านจริงระหว่างไต่) · เควสนำทุกเส้นทางบอท (botFarmTarget) · auto-advance เฉพาะ fresh unlock (free-farm โซนเก่าไม่โดนลาก) · แก้ softlock หลังล้มบอสเควส (returnToQuestFrontier) · การ์ดเควสอันดับ 1 เหนือประตูบอส · แบนเนอร์ "มีแพตช์ใหม่" (build id พ่วง /api/save, เซฟก่อน reload) · patch notes 2026-07-08b — 984/984, sim canonical เกตครบ (บอสเควสชนะ 3/3 คลาส)
 
+> **UAT round-4 CLOSED (2026-07-08, playtest สดหลัง PR #13 — merged PR #14–16):**
+>
+> - [x] แก้บั๊กเดินเอง/คุย NPC ในเมืองไม่ได้ (owner report): early-return โซนเมืองใน `step()` ข้าม `applyManualCommand`+`updateHeroes` — moveTo หายเงียบทั้งเมือง → เพิ่ม `tickTownManualWalk` (walk-only, botWalk มี priority, ร่ายวาปยืนนิ่ง) + regression 5 ตัววิ่งผ่าน `step()` ในเมืองจริง (PR #14)
+> - [x] ร้านป้าปุ๊ 3 แท็บ [ซื้อของ|ขาย·ย่อย|ซื้อคืน]: แท็บขาย reuse flow กระเป๋าเป๊ะ (แยก `sortRank.ts`+`useConfirmGuard` ใช้ร่วม, InventoryPanel พฤติกรรมเดิม, กดรัวได้ไม่ปิด panel) (PR #15)
+> - [x] ระบบซื้อคืน (owner request): ตาราง `SoldItem` additive, ขายบันทึกใน tx เดียวกัน, GET/POST `/api/items/buyback` — หน้าต่าง 3 วัน server ตัดสินเวลา, atomic restore (+N คงเดิม, `origin:buyback` ไม่นับเพดาน drop, `boughtBack` ItemEvent), ของย่อยซื้อคืนไม่ได้ (กันปั๊มวัสดุ), manual เท่านั้นบอทห้ามเรียก, เช็คทอง = MVP gap เดิมแบบตีบวก (PR #16)
+> - [x] patch notes 2026-07-08c (แก้เมือง+แท็บขาย) + 2026-07-08d (ซื้อคืน)
+> - หมายเหตุ: บอทขาย/ย่อยของตำนาน owner ถามหา — **มีอยู่แล้ว** (v3 "option A": ตั้งค่าบอท→Drops→ของตำนาน, keep-guard บังคับ, ของใส่กันสองชั้น) ไม่ต้องแก้
+> - ⚠ **ค้างก่อน deploy: เจ้าของต้องรัน `prisma db push`** (ตาราง `SoldItem` ใหม่ — ไม่ push แล้วขายของจะ error) + playtest แท็บใหม่ใน browser (desktop+mobile) — 1009/1009, tsc/eslint/next build เขียว, engine แตะแค่ nav ไม่ต้อง sim
+
 ## M8 — Party & Friends (ปรับสโคป 2026-07-08: เจ้าของขอเพิ่มระบบเพื่อน + ระบบ account จริง)
 
 > **กติกาหลักจากเจ้าของ:** เพื่อน**ผูกกับ account ไม่ใช่ตัวละคร** — สร้างตัวใหม่/สลับตัวเล่น friend list ต้องอยู่ครบเหมือนเดิม → ต้องมี **account จริง (login)** มาก่อน friend graph · ฟีเจอร์เพื่อนชุดแรก: เห็น online/offline · เห็นว่าอยู่โซนไหน · เล่นตัวละครตัวไหนอยู่ · ขอปาร์ตี้ · ส่ง emoji หากัน
