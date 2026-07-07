@@ -158,7 +158,13 @@ describe("hofQuerySchema (frozen query contract)", () => {
 
 describe("upsertLeaderboardEntry — server-derived, server-stamped", () => {
   beforeEach(() => {
-    mockPrisma.character.findUnique.mockResolvedValue({ name: "Alice", baseClass: "mage" });
+    // createdAt far in the past → generous playtime, so a normal save is plausible
+    // (the anti-cheat re-derive only flags physically-impossible progress).
+    mockPrisma.character.findUnique.mockResolvedValue({
+      name: "Alice",
+      baseClass: "mage",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
     mockPrisma.itemInstance.findMany.mockResolvedValue([]); // no gear
     mockPrisma.leaderboardEntry.upsert.mockResolvedValue({});
     mockPrisma.bossRecord.upsert.mockResolvedValue({});
@@ -225,19 +231,46 @@ describe("upsertLeaderboardEntry — server-derived, server-stamped", () => {
     expect(mockPrisma.leaderboardEntry.upsert.mock.calls[0][0].update.onlineSeconds).toBe(100);
   });
 
-  it("preserves an existing suspect verdict (ingest never clears it)", async () => {
+  it("re-derives suspect every save: an implausible level stays flagged", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Character created 1h before NOW but already at the level cap → impossible.
+    mockPrisma.character.findUnique.mockResolvedValue({
+      name: "Cheater",
+      baseClass: "mage",
+      createdAt: new Date(NOW.getTime() - 3600 * 1000),
+    });
     mockPrisma.leaderboardEntry.findUnique.mockResolvedValue({
       levelCapAt: null,
       lastTickAt: null,
       onlineSeconds: 0,
-      bossBest: { 25: { seconds: 8.0, at: "2026-01-01T00:00:00.000Z" } },
+      bossBest: {},
       suspect: true,
     });
-    await upsertLeaderboardEntry(CHAR, USER, saveData({ bossBest: { 25: { seconds: 8.0, at: 0 } } }), NOW);
-    // LeaderboardEntry.update omits suspect (Prisma leaves it unchanged); the boss
-    // projection mirrors the character's suspect flag.
-    expect(mockPrisma.leaderboardEntry.upsert.mock.calls[0][0].update.suspect).toBeUndefined();
-    expect(mockPrisma.bossRecord.upsert.mock.calls[0][0].update.suspect).toBe(true);
+    await upsertLeaderboardEntry(
+      CHAR,
+      USER,
+      saveData({ hero: { ...saveData().hero, level: CONFIG.leveling.levelCap } }),
+      NOW,
+    );
+    // The re-derive wave OWNS suspect: it is written on every save (create + update).
+    expect(mockPrisma.leaderboardEntry.upsert.mock.calls[0][0].update.suspect).toBe(true);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("recovers a clean character (suspect true → false) when back within bounds", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPrisma.leaderboardEntry.findUnique.mockResolvedValue({
+      levelCapAt: null,
+      lastTickAt: null,
+      onlineSeconds: 0,
+      bossBest: {},
+      suspect: true, // was flagged before
+    });
+    // Plausible save (level 50, gold 5000, createdAt far in past via beforeEach).
+    await upsertLeaderboardEntry(CHAR, USER, saveData(), NOW);
+    expect(mockPrisma.leaderboardEntry.upsert.mock.calls[0][0].update.suspect).toBe(false);
+    warn.mockRestore();
   });
 });
 

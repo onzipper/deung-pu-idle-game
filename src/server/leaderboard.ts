@@ -20,10 +20,11 @@
 
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import { CONFIG, type SaveData, type BossClearBest } from "@/engine";
+import { CONFIG, type SaveData, type BossClearBest, type HeroClass } from "@/engine";
 import { prisma } from "@/lib/db";
 import { powerFromSaveAndGear } from "@/server/characters";
 import { loadInventory, equippedLoadoutFrom } from "@/server/items";
+import { judgePlausibility } from "@/server/plausibility";
 
 // ── Boss-time plausibility floor ─────────────────────────────────────────────
 //
@@ -144,7 +145,7 @@ export async function upsertLeaderboardEntry(
   // Authoritative identity (name/class immutable at creation).
   const character = await prisma.character.findUnique({
     where: { id: characterId },
-    select: { name: true, baseClass: true },
+    select: { name: true, baseClass: true, createdAt: true },
   });
   if (!character) return; // defensive: the caller already verified ownership
 
@@ -194,8 +195,32 @@ export async function upsertLeaderboardEntry(
 
     // bossBest — merge with the floor + server-stamp.
     const merged = mergeBossBest(parseStoredBossBest(existing?.bossBest), data.bossBest, characterId, now);
-    // suspect is owned by the re-derive wave — never clobbered by ingest.
-    const suspect = existing?.suspect ?? false;
+
+    // Anti-cheat re-derive (M7.95 W2b): judge whether the character's headline stats
+    // are achievable for its REAL elapsed play time. suspect=true hides it from every
+    // board (the /api/hof query filters suspect=false); gameplay/saves are NEVER
+    // blocked. Recovery: level/gold latch via monotonic re-detection, power can regress
+    // — see @/server/plausibility. Pure verdict → persisted + audited (console.warn).
+    const prevSuspect = existing?.suspect ?? false;
+    const verdict = judgePlausibility(
+      {
+        cls: cls as HeroClass,
+        level,
+        power,
+        goldEarned: Number(goldEarned),
+        onlineSeconds,
+        createdAt: character.createdAt,
+        now,
+        levelCapAt,
+      },
+      prevSuspect,
+    );
+    const suspect = verdict.suspect;
+    if (verdict.reasons.length > 0) {
+      console.warn(
+        `[hof] plausibility char=${characterId} suspect=${suspect} (was ${prevSuspect}): ${verdict.reasons.join("; ")}`,
+      );
+    }
 
     const bossBestJson = merged as unknown as Prisma.InputJsonValue;
     const profileJson = profile as unknown as Prisma.InputJsonValue;
@@ -215,6 +240,7 @@ export async function upsertLeaderboardEntry(
         onlineSeconds,
         bossBest: bossBestJson,
         profile: profileJson,
+        suspect,
         lastTickAt: now,
         levelAt: now,
         powerAt: now,
@@ -232,12 +258,14 @@ export async function upsertLeaderboardEntry(
         onlineSeconds,
         bossBest: bossBestJson,
         profile: profileJson,
+        // Anti-cheat verdict (M7.95 W2b) — this IS the re-derive wave; suspect is
+        // recomputed + written every save (recovers a power flag, latches level/gold).
+        suspect,
         lastTickAt: now,
         levelAt: now,
         powerAt: now,
         goldAt: now,
         onlineAt: now,
-        // suspect intentionally NOT written here (preserve the re-derive verdict).
       },
     });
 
