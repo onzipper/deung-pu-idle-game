@@ -58,6 +58,7 @@ import {
   evolutionQuestFor,
   initGameState,
   isEvolutionQuestOffered,
+  isTier3BossObjectiveActive,
   learnedSkills,
   migrate,
   repairHeroClass,
@@ -212,7 +213,7 @@ function buildSkillSummaries(h: Hero): SkillSummary[] {
  * quest, the bar shows the final-form badge instead), or below the level gate
  * with no active quest (the bar shows the locked hint from tier/level).
  */
-function buildQuestSummary(h: Hero): HeroQuestSummary | null {
+function buildQuestSummary(state: GameState, h: Hero, isSolo: boolean): HeroQuestSummary | null {
   if (h.tier === 3) return null;
   const offered = isEvolutionQuestOffered(h);
   const q = h.quest;
@@ -239,6 +240,9 @@ function buildQuestSummary(h: Hero): HeroQuestSummary | null {
     bossDone,
     killMapId,
     bossMapId,
+    // M7.9b: `isTier3BossObjectiveActive` reads `state.heroes[0]` internally
+    // (it's a solo-hero concept), so it's only meaningful for that hero.
+    bossChallengeActive: isSolo && isTier3BossObjectiveActive(state),
   };
 }
 
@@ -272,7 +276,7 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       // `xpProgress` uses: engine helpers compute it, the store just carries
       // the display-ready result.
       canEvolve: canEvolveHero(state, h),
-      quest: buildQuestSummary(h),
+      quest: buildQuestSummary(state, h, h === state.heroes[0]),
       // M5 "Base stats" — same one-way display read-path: engine helpers compute
       // it, the store just carries the display-ready result.
       statPoints: h.statPoints,

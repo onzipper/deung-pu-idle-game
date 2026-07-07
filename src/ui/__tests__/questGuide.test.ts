@@ -54,6 +54,19 @@ describe("selectQuestGuideTarget", () => {
     expect(target?.zone.zoneIdx).toBe(5);
   });
 
+  it("guides the tier-3 quest's boss objective (same map as kill) to the FIRST farm zone, not the last", () => {
+    const target = selectQuestGuideTarget({
+      kill: { mapId: "map4", done: true },
+      boss: { mapId: "map4", done: false },
+      currentMapId: "map4",
+      unlockedZones: { map4: 1 },
+    });
+    expect(target?.kind).toBe("bossTier3");
+    expect(target?.zone.mapId).toBe("map4");
+    expect(target?.zone.zoneIdx).toBe(0);
+    expect(target?.zone.kind).toBe("farm");
+  });
+
   it("returns null once both objectives are done", () => {
     const target = selectQuestGuideTarget({
       kill: { mapId: "map3", done: true },

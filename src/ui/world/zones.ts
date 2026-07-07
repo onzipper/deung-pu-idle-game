@@ -86,6 +86,19 @@ export function lastFarmZone(mapId: string): UiZone | null {
   return farms.length > 0 ? farms[farms.length - 1] : null;
 }
 
+/** The FIRST (lowest-`zoneIdx`) farm zone of `mapId`. Used to guide a player
+ * toward the tier-3 quest's boss objective (M7.9b): unlike a normal boss
+ * objective, the young Glacial Sovereign's arena is reached from the
+ * quest-granted FRONTIER field (`engine/systems/world.tier3PreviewZone`,
+ * always this map's first farm zone) via the "challenge" affordance, NOT by
+ * walking through the map's other (locked) farm zones — the tier-3 quest
+ * grants only zone 1, so `lastFarmZone` would send the player somewhere they
+ * can't enter (see `ui/questGuide.ts`'s `"bossTier3"` guide kind). */
+export function firstFarmZone(mapId: string): UiZone | null {
+  const farms = farmZonesForMap(mapId);
+  return farms.length > 0 ? farms[0] : null;
+}
+
 /** The highest UNLOCKED farm zone of `mapId` (or `null` if none are unlocked
  * yet). Used to guide a player toward a KILL quest objective — the deepest
  * zone they can already reach, so the guide never sends them somewhere

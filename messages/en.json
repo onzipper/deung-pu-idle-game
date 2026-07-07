@@ -87,10 +87,14 @@
       "objectiveKillAny": "🗡 Hunt monsters (anywhere)",
       "objectiveBossScoped": "👑 Defeat the {map} boss",
       "objectiveBossAny": "👑 Defeat any map boss once",
+      "objectiveBossYoungSovereign": "👑 Defeat the young Glacial Sovereign",
       "guideKillScoped": "Head to {map} to hunt",
       "guideKillAny": "Keep hunting in your current zone — it counts anywhere",
       "guideBossBacktrack": "Walk back to the {map} boss room — the boss respawns for a re-fight",
       "guideBossAny": "Beat the boss of the map you're currently farming",
+      "guideBossTier3Hint": "You've reached the frontier — hit the challenge button when you're ready",
+      "challengeButton": "Challenge Boss",
+      "ariaChallenge": "{heroName}: challenge the quest boss",
       "rewardLine": "Reward: become {cls} · a big power jump + a new skill",
       "rewardLineTier3": "Reward: become {cls} · a big power jump + a new skill + 4th skill + 4th auto-cast slot",
       "guideButton": "Guide me",
@@ -348,7 +352,7 @@
       },
       "classTier3": {
         "title": "Tier-3 class change (Grand Expansion)",
-        "body": "At Lv.40 a second class-change quest unlocks: the gate to the Frozen Tundra frontier (map 4, first zone) opens early — hunt 90 monsters there. No boss, no backtracking. Completing it advances your hero to its final class tier — a huge power spike, a 4th skill, and a 4th auto-cast slot — then come back and smash the stage-15 boss."
+        "body": "At Lv.40 a second class-change quest unlocks: the gate to the Frozen Tundra frontier (map 4, first zone) opens early — hunt 90 monsters there. Once you're done, the boss-room gate opens — walk in and defeat the young Glacial Sovereign, a weakened taste of the real stage-20 fight. Completing it advances your hero to its final class tier — a huge power spike, a 4th skill, and a 4th auto-cast slot — then come back and smash the stage-15 boss."
       },
       "boss-map4": {
         "title": "Glacial Sovereign (stage 20) — Charge",
@@ -778,6 +782,7 @@
     "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
+    "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",

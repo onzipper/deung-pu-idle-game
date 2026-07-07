@@ -108,6 +108,20 @@ export interface HeroQuestSummary {
    * button's fast-travel target (`ui/questGuide.ts`). */
   killMapId: string | null;
   bossMapId: string | null;
+  /**
+   * M7.9b tier-3 quest boss objective: true iff this quest is the tier-3
+   * "young Glacial Sovereign" quest, the kill objective is banked, and the
+   * boss objective is still pending — straight off the engine's
+   * `isTier3BossObjectiveActive(state)` (same one-way "engine computes, store
+   * just carries it" pattern as `canEvolve`). Drives the quest card's "⚔
+   * ท้าบอส" challenge button (`GoalLadder.tsx`'s `ClassQuestCard`), which
+   * queues the same `challengeBoss` intent as the regular boss rung — the
+   * engine's `enterBossRoom` picks the quest-boss path over the normal one.
+   * Location-independent by design (see the engine doc); the UI button only
+   * additionally guards traveling/channeling/dead, same as other one-shot
+   * actions.
+   */
+  bossChallengeActive: boolean;
 }
 
 /** Per-hero HUD summary (subset of the engine `Hero` entity). */

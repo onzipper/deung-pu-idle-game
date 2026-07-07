@@ -3,6 +3,7 @@ import {
   UI_WORLD_ZONES,
   fastTravelTargets,
   farmZonesForMap,
+  firstFarmZone,
   highestUnlockedFarmZone,
   isZoneUnlockedUi,
   lastFarmZone,
@@ -90,5 +91,14 @@ describe("farmZonesForMap / lastFarmZone / highestUnlockedFarmZone", () => {
   it("highestUnlockedFarmZone picks the deepest reachable farm zone", () => {
     expect(highestUnlockedFarmZone("map3", { map3: 2 })?.zoneIdx).toBe(1);
     expect(highestUnlockedFarmZone("map3", {})).toBeNull();
+  });
+
+  it("firstFarmZone is map4's frontier field (zone 0) — the tier-3 quest's granted zone", () => {
+    expect(firstFarmZone("map4")).toEqual({
+      mapId: "map4",
+      zoneIdx: 0,
+      kind: "farm",
+      stage: 16,
+    });
   });
 });

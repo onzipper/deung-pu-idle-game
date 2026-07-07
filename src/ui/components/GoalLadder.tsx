@@ -31,7 +31,7 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { CONFIG } from "@/engine";
 import { HallOfFamePanel } from "@/ui/hof/HallOfFamePanel";
 import {
@@ -98,9 +98,10 @@ function RungPill({ rung, onClick }: { rung: GoalRungState; onClick?: () => void
 /** One objective ROW of the full quest card (owner-approved quest UX
  * upgrade): icon + label + its own progress bar (kill objectives, goal > 1)
  * or a plain ✓/✗ chip (boss objectives, goal 1) — plus, only while
- * incomplete, a plain-words location line underneath. Generalizes over both
- * objective types purely off `goal` so it never needs to know which one it's
- * rendering. */
+ * incomplete, a plain-words location line underneath, and an optional
+ * `action` node (M7.9b: the boss row's "⚔ ท้าบอส" challenge button) rendered
+ * last. Generalizes over both objective types purely off `goal` so it never
+ * needs to know which one it's rendering. */
 function QuestObjectiveRow({
   icon,
   label,
@@ -108,6 +109,7 @@ function QuestObjectiveRow({
   goal,
   done,
   locationHint,
+  action,
 }: {
   icon: string;
   label: string;
@@ -115,6 +117,7 @@ function QuestObjectiveRow({
   goal: number;
   done: boolean;
   locationHint: string | null;
+  action?: ReactNode;
 }) {
   const pct = goal > 0 ? Math.min(100, (progress / goal) * 100) : 0;
   return (
@@ -141,6 +144,7 @@ function QuestObjectiveRow({
       {!done && locationHint && (
         <span className="text-[11px] text-ddp-ink-muted/80">{locationHint}</span>
       )}
+      {!done && action}
     </div>
   );
 }
@@ -155,10 +159,12 @@ function ClassQuestCard({
   quest,
   tier,
   cls,
+  dead,
 }: {
   quest: HeroQuestSummary;
   tier: 1 | 2 | 3;
   cls: string;
+  dead: boolean;
 }) {
   const t = useTranslations("ladder");
   const tq = useTranslations("panels.classQuest");
@@ -168,6 +174,7 @@ function ClassQuestCard({
   const world = useGameStore((s) => s.world);
   const unlockedZones = useGameStore((s) => s.unlockedZones);
   const channeling = useGameStore((s) => s.fastTravelChannel !== null);
+  const challengeBoss = useGameStore((s) => s.challengeBoss);
 
   // "{map name} (แมพ N)" — matches the codex's "บอสประจำ<map>" naming voice
   // while still surfacing the numbered map players already navigate by.
@@ -178,9 +185,21 @@ function ClassQuestCard({
   const killLabel = quest.killMapId
     ? tq("objectiveKillScoped", { map: mapLabel(quest.killMapId) })
     : tq("objectiveKillAny");
-  const bossLabel = quest.bossMapId
-    ? tq("objectiveBossScoped", { map: mapLabel(quest.bossMapId) })
-    : tq("objectiveBossAny");
+  // M7.9b: the tier-3 quest's boss objective is scoped to the SAME map as its
+  // kill objective (both pin to `CONFIG.quest.tier3.killMapId`, "map4" today —
+  // see `engine/systems/quests.tier3QuestFor`); the tier-1 class-change quest
+  // never scopes both, so this structural check identifies ONLY the young
+  // Glacial Sovereign quest without hardcoding a map id. Gives it flavor copy
+  // + the challenge-affordance treatment instead of the generic "{map} boss".
+  const isTier3BossQuest =
+    quest.bossMapId !== null &&
+    quest.bossMapId === quest.killMapId &&
+    quest.bossMapId === CONFIG.quest.tier3.killMapId;
+  const bossLabel = isTier3BossQuest
+    ? tq("objectiveBossYoungSovereign")
+    : quest.bossMapId
+      ? tq("objectiveBossScoped", { map: mapLabel(quest.bossMapId) })
+      : tq("objectiveBossAny");
 
   // "backtrack" hint (M7.9 tier-3 quest): the boss objective's map differs
   // from where the hero is currently standing — explain WHY (re-fight an
@@ -189,9 +208,11 @@ function ClassQuestCard({
   const killHint = quest.killMapId
     ? tq("guideKillScoped", { map: mapLabel(quest.killMapId) })
     : tq("guideKillAny");
-  const bossGuideHint = isBacktrack
-    ? tq("guideBossBacktrack", { map: mapLabel(quest.bossMapId as string) })
-    : tq("guideBossAny");
+  const bossGuideHint = isTier3BossQuest
+    ? tq("guideBossTier3Hint")
+    : isBacktrack
+      ? tq("guideBossBacktrack", { map: mapLabel(quest.bossMapId as string) })
+      : tq("guideBossAny");
 
   const heroName = tContent(`classes.${cls}.${tier === 2 ? "evolvedName" : "name"}`);
   const nextClassName = tContent(
@@ -245,7 +266,20 @@ function ClassQuestCard({
     if (!guideTarget) return;
     queueFastTravel({ mapId: guideTarget.zone.mapId, zoneIdx: guideTarget.zone.zoneIdx });
     if (guideTarget.kind === "boss") pushNotice("guideBossDoor");
+    else if (guideTarget.kind === "bossTier3") pushNotice("guideBossTier3");
   };
+
+  // M7.9b challenge affordance: queues the SAME `challengeBoss` intent as the
+  // regular boss rung (`CoreLoopCard`) — the engine's `enterBossRoom` picks
+  // this quest-boss path over the normal one whenever
+  // `isTier3BossObjectiveActive` is true, so there's no separate mutator to
+  // wire. `bossChallengeActive` is location-independent by design (engine
+  // doc); this button only additionally guards the usual one-shot-action
+  // states (traveling/channeling/dead) — if tapped from outside the granted
+  // frontier zone the engine safely no-ops (never crosstalks with the
+  // regular `bossReady` boss-gate rung, which arms off a totally different
+  // read).
+  const challengeDisabled = channeling || world.traveling || dead;
 
   return (
     <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20 p-2.5">
@@ -264,6 +298,19 @@ function ClassQuestCard({
         goal={1}
         done={quest.bossDone}
         locationHint={quest.bossDone ? null : bossGuideHint}
+        action={
+          quest.bossChallengeActive ? (
+            <button
+              type="button"
+              disabled={challengeDisabled}
+              onClick={challengeBoss}
+              aria-label={tq("ariaChallenge", { heroName })}
+              className="min-h-9 w-full rounded-(--ddp-radius-md) border border-ddp-boss/50 bg-ddp-boss/15 px-3 text-[12px] font-bold text-ddp-ink transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:border-ddp-border disabled:bg-black/25 disabled:text-ddp-ink-muted"
+            >
+              ⚔ {tq("challengeButton")}
+            </button>
+          ) : undefined
+        }
       />
       <span
         className={`text-[11px] font-semibold ${quest.complete ? "text-emerald-300" : "text-ddp-gold-bright"}`}
@@ -317,7 +364,7 @@ function MilestoneCard({ current }: { current: GoalRungId }) {
 
   const quest = hero.quest;
   if (!quest) return null;
-  return <ClassQuestCard quest={quest} tier={hero.tier} cls={hero.cls} />;
+  return <ClassQuestCard quest={quest} tier={hero.tier} cls={hero.cls} dead={hero.dead} />;
 }
 
 /** The always-rendered core-loop card — the direct `BossPanel` replacement. */

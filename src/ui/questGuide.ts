@@ -14,13 +14,25 @@
  *    `lastFarmZone` — landing there puts the boss door one walk-right away;
  *    a companion toast tells them to walk in). Unscoped (tier-1's "any
  *    boss") resolves to the CURRENT map, same as the kill case.
+ *  - EXCEPTION (M7.9b tier-3 quest, "young Glacial Sovereign"): when the boss
+ *    objective's map equals the KILL objective's map (only ever true for the
+ *    tier-3 quest — both its objectives are scoped to `killMapId`, see
+ *    `engine/systems/quests.tier3QuestFor`), the boss room is NOT reachable
+ *    via the map's other farm zones (the quest only grants access to zone 1
+ *    + the boss room itself, not zones 2-N — `engine/systems/world`'s
+ *    `questGrantsZoneAccess`). Guiding to `lastFarmZone` would send the
+ *    player somewhere they can't enter. Instead this targets the FIRST farm
+ *    zone (the granted frontier field — identical to the kill objective's
+ *    destination) with a distinct `"bossTier3"` kind, so the caller can show
+ *    "you're at the frontier, hit the challenge button" instead of the
+ *    normal "walk into the boss door" toast.
  *
  * Objective order always mirrors `QuestDef.objectives` (kill first, then
  * killBoss — see `engine/systems/quests.ts`), so "first incomplete" checks
  * kill before boss.
  */
 
-import { highestUnlockedFarmZone, lastFarmZone, type UiZone } from "@/ui/world/zones";
+import { firstFarmZone, highestUnlockedFarmZone, lastFarmZone, type UiZone } from "@/ui/world/zones";
 
 /** One objective's guide-relevant state: its map scope (`null` = unscoped,
  * counts anywhere) and whether it's already satisfied. */
@@ -37,7 +49,7 @@ export interface QuestGuideInput {
   unlockedZones: Record<string, number>;
 }
 
-export type QuestGuideKind = "kill" | "boss";
+export type QuestGuideKind = "kill" | "boss" | "bossTier3";
 
 export interface QuestGuideTarget {
   zone: UiZone;
@@ -57,6 +69,13 @@ export function selectQuestGuideTarget(input: QuestGuideInput): QuestGuideTarget
     return zone ? { zone, kind: "kill" } : null;
   }
   if (!input.boss.done) {
+    // Tier-3 quest exception (see module doc): boss objective scoped to the
+    // SAME map as the kill objective -> the frontier field, not the last farm
+    // zone (the map's other farm zones aren't quest-granted).
+    if (input.boss.mapId !== null && input.boss.mapId === input.kill.mapId) {
+      const zone = firstFarmZone(input.boss.mapId);
+      return zone ? { zone, kind: "bossTier3" } : null;
+    }
     const mapId = input.boss.mapId ?? input.currentMapId;
     const zone = lastFarmZone(mapId);
     return zone ? { zone, kind: "boss" } : null;
