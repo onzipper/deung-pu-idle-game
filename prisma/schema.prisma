@@ -10,11 +10,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// M8 "Party & Friends": the User row was an ANONYMOUS cookie identity (id = cookie
+// value, only id/createdAt). Registration is now an OPTIONAL upgrade layered on the
+// SAME row (a guest keeps their characters/saves when they register) — every new
+// column below is additive + NULLABLE so all pre-M8 rows read null = still a guest.
+// The ONLY hard product validation is a unique email (no verification email is sent);
+// `registeredAt` null distinguishes guest from account.
 model User {
-  id         String      @id @default(cuid())
-  createdAt  DateTime    @default(now())
-  saves      SaveState[]
-  characters Character[]
+  id           String    @id @default(cuid())
+  createdAt    DateTime  @default(now())
+  // --- M8 account layer (all nullable; null = anonymous guest) ---
+  email        String?   @unique // the one hard-unique field in the product (no verification flow)
+  passwordHash String?   @db.VarChar(255) // scrypt/bcrypt-style encoded hash string (algo+salt+digest); never the raw password
+  displayName  String?   @db.VarChar(24) // account handle, sized like Character.name
+  friendCode   String?   @unique @db.VarChar(16) // short human-shareable code (~8 chars); minted by app code at register time
+  registeredAt DateTime? // null = still a guest; set when the account layer is claimed
+  saves        SaveState[]
+  characters   Character[]
+  // M8 friend graph (account<->account). Two relation NAMES per table because a User
+  // sits on BOTH ends (requester/addressee, from/to) — Prisma needs disambiguation.
+  friendRequestsSent     FriendRequest[] @relation("FriendRequestFrom")
+  friendRequestsReceived FriendRequest[] @relation("FriendRequestTo")
+  friendshipsA           Friendship[]    @relation("FriendshipUserA")
+  friendshipsB           Friendship[]    @relation("FriendshipUserB")
+  pingsSent              EmojiPing[]     @relation("EmojiPingFrom")
+  pingsReceived          EmojiPing[]     @relation("EmojiPingTo")
+  partyInvitesSent       PartyInvite[]   @relation("PartyInviteFrom")
+  partyInvitesReceived   PartyInvite[]   @relation("PartyInviteTo")
 }
 
 // A player character (GDD v2: account -> up to 3 characters, each its own
@@ -43,6 +65,15 @@ model Character {
   baseClass String     @db.VarChar(16) // engine HeroClass string: swordsman | archer | mage
   level     Int        @default(1) // cache of engine level (re-derivable)
   power     Int        @default(0) // cache of derived combat power for HOF (re-derivable; widen to BigInt if it ever exceeds 2^31)
+  // M8 presence cache: the character's CURRENT zone id, stamped by /api/save
+  // alongside the level/power caches (src/server/persistSave). DENORMALIZED +
+  // RE-DERIVABLE from SaveState.data (engine hero.zone) — this column exists ONLY so
+  // a friends-list poll can show "where is my friend" WITHOUT parsing every friend's
+  // save JSON blob. Nullable = pre-M8 rows / never-saved characters read null. Online
+  // vs offline and "which character is being played" are NOT stored here — they
+  // derive from MAX(SaveState.lastSeen) per user (the most-recently-saved live
+  // character is the active one), so no new presence column is needed.
+  lastZone  String?    @db.VarChar(32) // re-derivable presence cache (engine hero.zone)
   // M7.6 "ตีบวก" (Refine): the per-character REFINE MATERIAL counter. UNLIKE
   // level/power above (denormalized re-derivable caches), this is AUTHORITATIVE —
   // it is NOT re-derivable from the save blob. It is minted ONLY by the salvage
@@ -356,4 +387,87 @@ model SaveState {
   updatedAt   DateTime   @updatedAt
 
   @@index([userId]) // account-scoped queries + cascade (was covered by @unique before)
+}
+
+// ============================================================================
+// M8 "Party & Friends" — account<->account social graph. ALL binds are User<->User
+// (accounts), NEVER Character: a friendship survives deleting/creating characters.
+// onDelete: Cascade from both User ends so hard-deleting an account purges its rows.
+// PRESENCE NOTE: "is my friend online / which character" is NOT stored in these
+// tables — it derives from MAX(SaveState.lastSeen) per user + Character.lastZone
+// (see the Character.lastZone comment). These tables only model the graph itself.
+// ============================================================================
+
+// A DIRECTIONAL, pending friend request (from -> to). Accept promotes it to a
+// Friendship row (in one tx) and deletes this row; decline just deletes it. A row
+// exists ONLY while pending, so @@unique([fromUserId, toUserId]) blocks duplicate
+// spam from the same requester. The reverse-direction check (B already requested A)
+// and the already-friends check are enforced in APP code before insert.
+model FriendRequest {
+  id         String   @id @default(cuid())
+  fromUserId String
+  fromUser   User     @relation("FriendRequestFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId   String
+  toUser     User     @relation("FriendRequestTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([fromUserId, toUserId]) // at most one pending request per ordered pair
+  @@index([toUserId, createdAt]) // "my incoming pending requests" (newest first)
+  @@index([fromUserId]) // "requests I sent" + cascade-side reads
+}
+
+// An ACCEPTED friendship — the canonical, symmetric relation stored ONCE per pair.
+// CONVENTION the backend MUST uphold: userAId < userBId (lexicographic on cuid) so a
+// pair has exactly ONE canonical row; @@unique([userAId, userBId]) then makes an
+// A<->B / B<->A duplicate impossible at the DB layer. Removing a friend hard-deletes
+// this row. "All my friends" = rows where userAId = me OR userBId = me — hence an
+// index leading with each side.
+model Friendship {
+  id        String   @id @default(cuid())
+  userAId   String // canonical: ALWAYS the lexicographically-smaller user id
+  userA     User     @relation("FriendshipUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId   String // canonical: ALWAYS the lexicographically-larger user id
+  userB     User     @relation("FriendshipUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userAId, userBId]) // one canonical row per pair (dedupes A->B / B->A)
+  @@index([userAId]) // "all my friends" when I am the smaller id
+  @@index([userBId]) // "all my friends" when I am the larger id
+}
+
+// Emoji ping — store-and-forward, POLLED (no websockets this phase; piggybacks the
+// save/poll cycle like RefineAnnouncement). One row per ping. EPHEMERAL: the app
+// DELETES rows once the recipient has seen them (seenAt set -> next poll purges);
+// treat this table as a transient outbox, not an audit ledger. No cron — cleanup is
+// opportunistic on the poll read (delete where seenAt IS NOT NULL, mirrors the
+// RefineAnnouncement prune pattern).
+model EmojiPing {
+  id         String    @id @default(cuid())
+  fromUserId String
+  fromUser   User      @relation("EmojiPingFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId   String
+  toUser     User      @relation("EmojiPingTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  emoji      String    @db.VarChar(16) // short emoji string (pre-2020 glyphs only, per CLAUDE.md footgun #4)
+  sentAt     DateTime  @default(now())
+  seenAt     DateTime? // null = unseen; set on delivery, then the row is purged next poll
+
+  @@index([toUserId, seenAt]) // "unseen pings for user X" (seenAt IS NULL filter) + purge sweep
+  @@index([fromUserId]) // cascade-side reads
+}
+
+// Party invite — future-proofed NOW so M8 needs only ONE `prisma db push`. Minimal:
+// from -> to with a status the app transitions (pending | accepted | declined |
+// expired). Real-time party membership/lockstep is engine/websocket state (M8 spike),
+// NOT persisted here — this table is only the invite handshake.
+model PartyInvite {
+  id         String   @id @default(cuid())
+  fromUserId String
+  fromUser   User     @relation("PartyInviteFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId   String
+  toUser     User     @relation("PartyInviteTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  status     String   @default("pending") @db.VarChar(16) // pending | accepted | declined | expired
+  createdAt  DateTime @default(now())
+
+  @@index([toUserId, status, createdAt]) // "my incoming invites" filtered by status
+  @@index([fromUserId]) // cascade-side reads
 }
