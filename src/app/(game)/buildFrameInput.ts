@@ -62,3 +62,52 @@ export function buildFrameInput(
     useWarpScroll: pending.useWarpScroll ?? undefined,
   };
 }
+
+/**
+ * The `FrameInput` fields that CHANGE the shared zone/location. In a cohort these must
+ * NEVER apply to the shared sim (design §3: a zone change makes you LEAVE the cohort and
+ * roam solo). `challengeBoss` is DELIBERATELY EXCLUDED — co-op boss entry is a shared
+ * cohort action that stays on lane 0. Shared by the pre-tick interception (reads
+ * `PendingInput`) and the defense-in-depth lane sanitizer (reads assembled `FrameInput`).
+ */
+const ZONE_CHANGE_KEYS = [
+  "fastTravel",
+  "walkToZone",
+  "useWarpScroll",
+  "useReturnScroll",
+  "advanceStage",
+] as const;
+
+/**
+ * True when a peeked/drained `PendingInput` carries ANY zone-change intent — the signal
+ * for GameClient to collapse the cohort to solo BEFORE this frame's solo path applies the
+ * move (fix B). `useReturnScroll`/`advanceStage` are booleans; the rest are nullable.
+ */
+export function hasZoneChangeIntent(pending: PendingInput): boolean {
+  return (
+    pending.fastTravel != null ||
+    pending.walkToZone != null ||
+    pending.useWarpScroll != null ||
+    pending.useReturnScroll ||
+    pending.advanceStage
+  );
+}
+
+/**
+ * Defense-in-depth (fix B): strip every zone-change field from ALL cohort lanes before
+ * `step()` — identical code on every client ⇒ identical shared state. My own client never
+ * emits these in a lane after the pre-tick interception, but a stale/older peer build
+ * could. Only clones a lane that actually carries one (the common no-op case returns the
+ * SAME array reference — allocation-light, so a clean cohort tick is unaffected).
+ */
+export function sanitizeLanes(lanes: FrameInput[]): FrameInput[] {
+  let dirty = false;
+  const out = lanes.map((lane) => {
+    if (!ZONE_CHANGE_KEYS.some((k) => lane[k] != null)) return lane;
+    dirty = true;
+    const copy = { ...lane };
+    for (const k of ZONE_CHANGE_KEYS) delete copy[k];
+    return copy;
+  });
+  return dirty ? out : lanes;
+}

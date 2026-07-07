@@ -94,18 +94,24 @@ function applyOneCommand(state: GameState, heroIdx: number, input: FrameInput): 
  * Yields to the two things that own the hero's feet in town: the bot's own town
  * walk (`state.botWalk` drives `hero.x` directly — "a manual command can't wedge
  * the trip", it waits the walk out) and a fast-travel channel (the hero stands
- * still, mirroring the farm-zone `!channeling` gate on `updateHeroes`).
+ * still, mirroring the farm-zone `!channeling` gate on `updateHeroes`). Both are
+ * GLOBAL yields that freeze the whole party's town walk, so they gate up front.
+ *
+ * M8 party P1b: EVERY cohort hero honours its own MOVE command (each member's tap
+ * lands on `heroes[myCohortIndex]` via `applyManualCommand`). Solo (one hero)
+ * reduces to the old `heroes[0]` path — byte-identical (same guards, same order).
  */
 export function tickTownManualWalk(state: GameState): void {
-  const h = state.heroes[0];
-  if (!h || h.dead) return;
-  if (!h.command || h.command.kind !== "move") return;
   if (state.botWalk || state.fastTravelCast) return;
-  const d = h.command.x - h.x;
-  if (Math.abs(d) <= CONFIG.manual.arriveEps) {
-    h.command = null;
-    return;
-  }
   const stepPx = CONFIG.hunt.huntSpeed * FIXED_DT;
-  h.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
+  for (const h of state.heroes) {
+    if (h.dead) continue;
+    if (!h.command || h.command.kind !== "move") continue;
+    const d = h.command.x - h.x;
+    if (Math.abs(d) <= CONFIG.manual.arriveEps) {
+      h.command = null;
+      continue;
+    }
+    h.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
+  }
 }

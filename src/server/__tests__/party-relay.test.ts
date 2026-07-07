@@ -65,12 +65,29 @@ function encodeClientFrame(opcode: number, payloadStr: string): Buffer {
   return Buffer.concat([header, mask, masked]);
 }
 
+/** A raw RFC6455 CLOSE frame carrying a 2-byte big-endian status `code` as its
+ *  payload — used to test the relay's client-close-code parsing directly (a plain
+ *  `socket.end()`/`destroy()` sends no WS close frame at all, so it can't exercise
+ *  this path). */
+function encodeClientCloseFrame(code: number): Buffer {
+  const payload = Buffer.alloc(2);
+  payload.writeUInt16BE(code, 0);
+  const mask = crypto.randomBytes(4);
+  const header = Buffer.alloc(2);
+  header[0] = 0x80 | OP_CLOSE;
+  header[1] = 0x80 | payload.length;
+  const masked = Buffer.alloc(payload.length);
+  for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4];
+  return Buffer.concat([header, mask, masked]);
+}
+
 interface Client {
   msgs: Record<string, unknown>[];
   closeCode: number | null;
   send: (obj: unknown) => void;
   destroy: () => void;
   end: () => void;
+  sendCloseFrame: (code: number) => void;
   waitFor: (pred: () => boolean, timeoutMs?: number) => Promise<void>;
 }
 
@@ -86,6 +103,7 @@ function connect(port: number): Promise<Client> {
       send: (obj) => socket.write(encodeClientFrame(OP_TEXT, JSON.stringify(obj))),
       destroy: () => socket.destroy(),
       end: () => socket.end(),
+      sendCloseFrame: (code) => socket.write(encodeClientCloseFrame(code)),
       waitFor: (pred, timeoutMs = 2000) =>
         new Promise<void>((res, rej) => {
           const t0 = Date.now();
@@ -258,6 +276,49 @@ describe("party-relay", () => {
     };
     expect(welcome.slots[0]).toMatchObject({ slot: 0, status: "live" });
     b2.end();
+  });
+
+  it("shadows a slot IMMEDIATELY on a clean client close-frame (code 1000), skipping grace", async () => {
+    // Use a deliberately LONG grace so an immediate shadow can't be mistaken for a
+    // (much shorter) grace-timer firing — the client-hidden-tab teardown case this
+    // guards must not stall the party for the grace window at all.
+    const long = relayMod.createRelay({ secret: SECRET, graceMs: 5000, heartbeatMs: 60_000 });
+    await new Promise<void>((res) => long.server.listen(0, "127.0.0.1", res));
+    const p = (long.server.address() as AddressInfo).port;
+    try {
+      const a = await connect(p);
+      const b = await connect(p);
+      a.send({ t: "join", ticket: ticketFor("pC", "uA", 0) });
+      b.send({ t: "join", ticket: ticketFor("pC", "uB", 1) });
+      await a.waitFor(() => a.msgs.some((m) => m.t === "member-joined" && m.slot === 1));
+
+      const t0 = Date.now();
+      b.sendCloseFrame(1000);
+      await a.waitFor(() => a.msgs.some((m) => m.t === "member-shadowed"), 1000);
+      const elapsed = Date.now() - t0;
+      const shadowed = a.msgs.find((m) => m.t === "member-shadowed");
+      expect(shadowed).toMatchObject({ slot: 1 });
+      // Well under the 5000ms grace — proves the grace timer was skipped, not raced.
+      expect(elapsed).toBeLessThan(1000);
+    } finally {
+      await new Promise<void>((res) => long.close(() => res()));
+    }
+  });
+
+  it("still waits for grace on an abrupt socket death (no close frame)", async () => {
+    // Same shape as the clean-close test above but the socket dies via a bare TCP
+    // FIN (`end()`, no WS close frame at all) — the existing grace path must be
+    // untouched by the clean-close fast path.
+    const a = await connect(port);
+    const b = await connect(port);
+    a.send({ t: "join", ticket: ticketFor("pG", "uA", 0) });
+    b.send({ t: "join", ticket: ticketFor("pG", "uB", 1) });
+    await a.waitFor(() => a.msgs.some((m) => m.t === "member-joined" && m.slot === 1));
+
+    b.end();
+    await a.waitFor(() => a.msgs.some((m) => m.t === "member-shadowed"));
+    const shadowed = a.msgs.find((m) => m.t === "member-shadowed");
+    expect(shadowed).toMatchObject({ slot: 1 });
   });
 
   it("rejects an oversized frame (close 4004)", async () => {

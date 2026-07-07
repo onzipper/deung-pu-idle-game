@@ -106,6 +106,19 @@ export class CohortTurnEngine {
   /** `nowMs` at the last tick that actually ran a sub-step (for the waiting chip). */
   private lastProgressAt: number;
 
+  /**
+   * Cohort indexes whose owner is SHADOWED (socket dead / hidden tab / left the zone):
+   * the scheduler STOPS waiting for their lanes and auto-fills `{}` when assembling a
+   * turn (fix A.1 — a shadowed member's paused rAF would otherwise stall the whole
+   * cohort forever). CONTENT determinism holds: a shadowed member sends nothing (its
+   * client has collapsed to solo on disconnect), so every peer auto-fills the IDENTICAL
+   * `{}` — only WHEN each peer unblocks differs, never WHAT executes. And a REAL lane
+   * that DID arrive before the shadow (every peer received it via the single ordered
+   * relay stream) is always preferred over the auto-fill (see the assembly below), so
+   * the edge "shadow arrived after the member's last send" stays deterministic too.
+   */
+  private readonly shadowedIndexes = new Set<number>();
+
   constructor(
     private readonly cohortSize: number,
     private readonly myIndex: number,
@@ -139,16 +152,33 @@ export class CohortTurnEngine {
     return true;
   }
 
-  /** Count consecutive fully-buffered turns starting AT the execute cursor. */
+  /**
+   * Mark/unmark a cohort index as SHADOWED (see `shadowedIndexes`). Called by GameClient
+   * when the relay reports a member shadowed/unshadowed. Un-shadowing makes the scheduler
+   * wait for that index's REAL lanes again from the next unexecuted turn onward.
+   */
+  setSlotShadowed(index: number, shadowed: boolean): void {
+    if (shadowed) this.shadowedIndexes.add(index);
+    else this.shadowedIndexes.delete(index);
+  }
+
+  /** A turn's lane set is COMPLETE once every NON-shadowed index has a real delivered
+   *  lane — shadowed indexes are auto-filled `{}` at assembly, so they never block. */
+  private laneComplete(lane: Map<number, FrameInput> | undefined): boolean {
+    for (let i = 0; i < this.cohortSize; i++) {
+      if (this.shadowedIndexes.has(i)) continue;
+      if (!lane?.has(i)) return false;
+    }
+    return true;
+  }
+
+  /** Count consecutive fully-buffered (completeness-checked) turns from the execute cursor. */
   private bufferedAhead(): number {
     let n = 0;
     let t = this.turn;
-    for (;;) {
-      const lane = this.buffer.get(t);
-      if (lane && lane.size >= this.cohortSize) {
-        n++;
-        t++;
-      } else break;
+    while (this.laneComplete(this.buffer.get(t))) {
+      n++;
+      t++;
     }
     return n;
   }
@@ -188,16 +218,20 @@ export class CohortTurnEngine {
       iterations++;
       if (this.subIndex === 0) {
         const lane = this.buffer.get(this.turn);
-        if (!lane || lane.size < this.cohortSize) {
-          // STALL: a lane hasn't fully arrived. NEVER treat a missing lane as idle (that
-          // would corrupt the slow peer's real next input) — pause and clamp the debt so
-          // recovery is bounded to one turn's catch-up.
+        if (!this.laneComplete(lane)) {
+          // STALL: a NON-shadowed lane hasn't fully arrived. NEVER treat a missing lane as
+          // idle (that would corrupt the slow peer's real next input) — pause and clamp the
+          // debt so recovery is bounded to one turn's catch-up. Shadowed indexes never gate
+          // here (they auto-fill below), so a hidden/dead member can't freeze the cohort.
           this.execAccumMs = Math.min(this.execAccumMs, STALL_DEBT_CAP_MS);
           stalledAtBoundary = true;
           break;
         }
         const lanes: FrameInput[] = new Array(this.cohortSize);
-        for (let i = 0; i < this.cohortSize; i++) lanes[i] = lane.get(i) ?? {};
+        // Prefer a REAL delivered lane for every index — including a shadowed index whose
+        // last send landed before the shadow (every peer received it via the one ordered
+        // stream). Only a shadowed index with NO delivered lane auto-fills `{}`.
+        for (let i = 0; i < this.cohortSize; i++) lanes[i] = lane?.get(i) ?? {};
         io.runSubStep(lanes); // lanes apply on sub-step 0 ONLY
       } else {
         io.runSubStep([]); // sub-steps 1..5 are all-idle

@@ -263,3 +263,108 @@ describe("CohortTurnEngine issue continues during a stall", () => {
     expect(CATCHUP_BONUS_DEPTH).toBeGreaterThan(0); // referenced for coverage of the export
   });
 });
+
+// ── (11) shadowed-slot auto-fill (fix A.1) ────────────────────────────────────────────
+
+describe("CohortTurnEngine shadowed-slot auto-fill (fix A.1)", () => {
+  it("a never-sending index stalls both peers until shadowed, then both advance with {} auto-fill", () => {
+    // Distinct scripts per live slot so any lane mixing would show; slot 2 has NO engine
+    // (its owner's tab is hidden / socket dead) -> it never delivers a lane.
+    const scriptA = (n: number): FrameInput => ({ moveTo: { x: 100 + n } });
+    const scriptB = (n: number): FrameInput => ({ moveTo: { x: 900 + n } });
+    const recA = makeRecorder(scriptA, (m) => engB.deliver(m));
+    const recB = makeRecorder(scriptB, (m) => engA.deliver(m));
+    const engA = new CohortTurnEngine(3, 0, 0);
+    const engB = new CohortTurnEngine(3, 1, 0);
+
+    let now = 0;
+    const tickBoth = (n: number) => {
+      for (let t = 0; t < n; t++) {
+        now += SUB_STEP_MS;
+        engA.tick(SUB_STEP_MS, now, recA.io);
+        engB.tick(SUB_STEP_MS, now, recB.io);
+      }
+    };
+
+    tickBoth(60);
+    // Both stall at the first non-preseeded turn: slot 2's lane never arrives.
+    expect(engA.turn).toBe(INPUT_DELAY_TURNS);
+    expect(engB.turn).toBe(INPUT_DELAY_TURNS);
+
+    engA.setSlotShadowed(2, true);
+    engB.setSlotShadowed(2, true);
+    tickBoth(60);
+
+    // Both unblock and advance now that slot 2's lane is auto-filled.
+    expect(engA.turn).toBeGreaterThan(INPUT_DELAY_TURNS);
+    expect(engB.turn).toBeGreaterThan(INPUT_DELAY_TURNS);
+    // Same assembled lanes in the same order on BOTH clients (content determinism).
+    const n = Math.min(recA.subSteps.length, recB.subSteps.length);
+    expect(recA.subSteps.slice(0, n)).toEqual(recB.subSteps.slice(0, n));
+    // Every sub-step-0 lane vector (length 3) auto-fills index 2 as idle {}.
+    for (const lanes of recA.subSteps) {
+      if (lanes.length === 3) expect(lanes[2]).toEqual({});
+    }
+  });
+
+  it("prefers a REAL delivered lane for a shadowed index over the {} auto-fill", () => {
+    const recA = makeRecorder(idle, (m) => engB.deliver(m));
+    const recB = makeRecorder(idle, (m) => engA.deliver(m));
+    const engA = new CohortTurnEngine(3, 0, 0);
+    const engB = new CohortTurnEngine(3, 1, 0);
+    // Slot 2 delivered a distinctive REAL lane for turn INPUT_DELAY to BOTH peers (every
+    // client gets the same relay-ordered send) and THEN went shadowed — later turns have
+    // no slot-2 lane, so they auto-fill {}.
+    const realLane: FrameInput = { moveTo: { x: 222 } };
+    engA.deliver({ slot: 2, executeTurn: INPUT_DELAY_TURNS, input: realLane });
+    engB.deliver({ slot: 2, executeTurn: INPUT_DELAY_TURNS, input: realLane });
+    engA.setSlotShadowed(2, true);
+    engB.setSlotShadowed(2, true);
+
+    let now = 0;
+    for (let t = 0; t < 60; t++) {
+      now += SUB_STEP_MS;
+      engA.tick(SUB_STEP_MS, now, recA.io);
+      engB.tick(SUB_STEP_MS, now, recB.io);
+    }
+
+    // Turn INPUT_DELAY's sub-step-0 vector uses the REAL lane (not {}).
+    const atT = recA.subSteps[INPUT_DELAY_TURNS * SUB_STEPS_PER_TURN];
+    expect(atT[2]).toEqual(realLane);
+    // A later turn with no delivered slot-2 lane auto-fills {}.
+    const later = recA.subSteps[(INPUT_DELAY_TURNS + 1) * SUB_STEPS_PER_TURN];
+    expect(later[2]).toEqual({});
+    // Determinism holds across the preference + auto-fill mix.
+    const n = Math.min(recA.subSteps.length, recB.subSteps.length);
+    expect(recA.subSteps.slice(0, n)).toEqual(recB.subSteps.slice(0, n));
+  });
+
+  it("un-shadowing makes the scheduler wait for that index's REAL lanes again", () => {
+    const rec = makeRecorder(idle);
+    const eng = new CohortTurnEngine(3, 0, 0);
+    // Slots 1 and 2 shadowed from the start -> only slot 0 (self-delivered) is required,
+    // so execution runs freely on real-time cadence.
+    eng.setSlotShadowed(1, true);
+    eng.setSlotShadowed(2, true);
+    let now = 0;
+    const tick = (n: number) => {
+      for (let t = 0; t < n; t++) {
+        now += SUB_STEP_MS;
+        eng.tick(SUB_STEP_MS, now, rec.io);
+      }
+    };
+    tick(60);
+    const advanced = eng.turn;
+    expect(advanced).toBeGreaterThan(INPUT_DELAY_TURNS);
+
+    // Un-shadow slot 1: it now needs slot 1's real lane again, which never arrives. Any
+    // turn already IN FLIGHT (subIndex>0) finishes its no-lane sub-steps first (at most one
+    // more turn), then execution FREEZES — it never advances thereafter.
+    eng.setSlotShadowed(1, false);
+    tick(60);
+    const stalledAt = eng.turn;
+    expect(stalledAt).toBeLessThanOrEqual(advanced + 1);
+    tick(60);
+    expect(eng.turn).toBe(stalledAt); // frozen: slot 1's real lane never comes
+  });
+});

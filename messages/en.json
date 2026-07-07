@@ -1087,6 +1087,13 @@
           "party6": "👥 Parties now hold up to 6 players! Bring the whole crew",
           "social": "📨 Party invites and friend requests now pop up on screen the moment they arrive — tap the toast to respond, no more waiting with the menu open — and friend info refreshes much faster"
         }
+      },
+      "2026-07-08h": {
+        "items": {
+          "stallFix": "🛌 A friend tabbing away or locking their phone no longer freezes the whole party (party bots/skills work again) — they rejoin the group automatically when they come back",
+          "warpSolo": "🌀 Warping or changing zones while in a party now takes just YOU — the rest keep playing (no more dragging the whole crew) — and you regroup automatically when zones match again",
+          "townWalk": "🏘️ Everyone in a party can walk around town now (it used to be just one member)"
+        }
       }
     }
   },
