@@ -33,7 +33,6 @@ function makeSnapshot(statPoints: number): EngineSnapshot {
   return {
     gold: 0,
     stage: 1,
-    wave: 0,
     kills: 0,
     killGoal: 0,
     phase: "battle" as Phase,

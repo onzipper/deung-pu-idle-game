@@ -111,23 +111,16 @@ export function makeHero(
 }
 
 /**
- * Build an enemy scaled by stage + wave. Consumes exactly two RNG draws
- * (initial attack cd, engage jitter), in that order — see `waves.ts` for how
- * this interleaves with wave-composition draws.
+ * Build an enemy scaled by stage. Consumes exactly two RNG draws
+ * (initial attack cd, engage jitter), in that order — see `hunt.ts` for how
+ * this interleaves with spawn-composition draws.
  *
- * `x` is left at 0; the wave spawner positions it.
+ * `x` is left at 0; the hunt-field spawner positions it.
  */
-export function makeEnemy(
-  id: number,
-  kind: EnemyKind,
-  stage: number,
-  wave: number,
-  rng: Rng,
-): Enemy {
+export function makeEnemy(id: number, kind: EnemyKind, stage: number, rng: Rng): Enemy {
   const et = ENEMY_TYPES[kind];
-  const wm = 1 + wave * CONFIG.waveHpScale;
-  const hp = Math.round(CONFIG.enemyHp(stage) * et.hpMult * wm);
-  const atk = Math.round(CONFIG.enemyAtk(stage) * et.atkMult * wm);
+  const hp = Math.round(CONFIG.enemyHp(stage) * et.hpMult);
+  const atk = Math.round(CONFIG.enemyAtk(stage) * et.atkMult);
   return {
     id,
     kind,
@@ -143,7 +136,7 @@ export function makeEnemy(
     cd: rng.next() * CONFIG.enemyInitialCdJitter,
     engageOffset: rng.next() * CONFIG.enemyEngageJitter,
     // Hunt-field fields (M6 "สนามล่ามอน"): the spawn system positions the mob and
-    // sets its temperament (see systems/waves.ts `spawnMob`). Defaults are a
+    // sets its temperament (see systems/hunt.ts `spawnMob`). Defaults are a
     // passive mob anchored at x=0 — safe for a directly-injected test enemy.
     homeX: 0,
     aggressive: false,

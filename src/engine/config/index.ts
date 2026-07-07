@@ -443,7 +443,6 @@ export const CONFIG = {
   // ---- waves ----
   waveGap: 1.2, // gap before each subsequent wave
   firstWaveGap: 0.5, // gap before the very first wave of a stage
-  waveHpScale: 0.05, // per-wave multiplier wm = 1 + wave * this
   waveCountBase: 3,
   waveCountPerWave: 1.1,
   waveCountPerStage: 0.6,

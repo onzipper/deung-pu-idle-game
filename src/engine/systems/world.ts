@@ -465,12 +465,10 @@ export function arriveAtZone(
   state.stage = zone.stage;
   state.enemies = [];
   state.projectiles = [];
-  state.wave = 0;
   state.kills =
     zone.kind === "farm" ? (state.zoneKills[`${target.mapId}:${target.zoneIdx}`] ?? 0) : 0;
   state.bossReady = false;
   state.anchorX = CONFIG.baseAnchor;
-  state.waveGap = CONFIG.firstWaveGap;
   // Fresh footing: clear the per-type consumable-use cooldowns (M6) alongside the
   // per-hero skill cooldowns reset in reviveHeroesFull.
   state.consumableCds = {};

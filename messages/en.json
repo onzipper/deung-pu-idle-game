@@ -9,7 +9,6 @@
   },
   "hud": {
     "stageLabel": "Stage",
-    "waveLabel": "Wave",
     "botMasterOn": "Bot: ON",
     "botMasterOff": "Bot: OFF",
     "botMasterAriaOn": "Turn the bot off (disables all automation)",
@@ -360,11 +359,11 @@
       },
       "boss-map5": {
         "title": "Buried Pharaoh (stage 25) — Summon",
-        "body": "As its HP drops, the desert ruins' boss calls in waves of adds to fight alongside it — clear the summons quickly so they don't pile up."
+        "body": "As its HP drops, the desert ruins' boss summons adds in bursts to fight alongside it — clear the summons quickly so they don't pile up."
       },
       "boss-map6": {
         "title": "Infernal Sovereign (stage 30) — Field Hazard",
-        "body": "The hell city's boss unleashes a telegraphed arena-wide hazard wave that damages you no matter where you stand — heal up and out-DPS it before the strike lands."
+        "body": "The hell city's boss unleashes a telegraphed arena-wide hazard strike that damages you no matter where you stand — heal up and out-DPS it before the strike lands."
       }
     }
   },

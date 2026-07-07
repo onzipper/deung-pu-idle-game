@@ -27,7 +27,7 @@ import {
 } from "@/engine/systems/consumables";
 import { updateAnchor } from "@/engine/systems/movement";
 import { applyManualCommand } from "@/engine/systems/manual";
-import { updateSpawns } from "@/engine/systems/waves";
+import { updateSpawns } from "@/engine/systems/hunt";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import { evolveHero } from "@/engine/systems/evolution";

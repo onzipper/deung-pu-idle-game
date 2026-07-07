@@ -22,7 +22,7 @@ step(state: GameState, dt: number, input: FrameInput): GameState
 | `config/` | Tunable balance constants (ported from the POC `CONFIG` block) |
 | `state/` | `GameState` type, `SaveData` schema, `SAVE_VERSION`, `migrate()` |
 | `entities/` | Hero / enemy / projectile type definitions |
-| `systems/` | movement, combat, waves, skills, leveling, evolution, boss — the per-step logic |
+| `systems/` | movement, combat, hunt, skills, leveling, evolution, boss — the per-step logic |
 | `__tests__/` | Headless unit tests + balance-sim harness |
 
 ## Rules

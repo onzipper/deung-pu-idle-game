@@ -57,7 +57,6 @@ export interface GameState {
   time: number;
   stage: number;
   phase: Phase;
-  wave: number;
   /** Kills toward THIS zone's unlock quota (live counter; see `zoneKills`). */
   kills: number;
   /** Persisted per-zone unlock progress (SAVE v13) backing `kills` across zone
@@ -224,12 +223,6 @@ export interface GameState {
   projectiles: Projectile[];
   /** Formation anchor x the team advances toward. */
   anchorX: number;
-  /**
-   * Legacy wave gap (M6 "สนามล่ามอน" retired the march-model wave scheduler). Kept
-   * on the state as an inert field so the boss/flow resets that still touch it
-   * compile; the hunting spawn pool uses `spawnCd`/`spawnBurst` instead.
-   */
-  waveGap: number;
   /**
    * Hunting spawn pool (M6 "สนามล่ามอน"). `spawnCd` counts down to the next
    * respawn; `spawnBurst` (set on a farm-zone arrival) fills the field to
@@ -440,7 +433,7 @@ export function repairHeroClass(save: SaveData, trueClass: HeroClass): SaveData 
 /**
  * Construct a live `GameState` from a seed and (optionally) a loaded save.
  * A save restores stage / gold / chosen class / character progression; the
- * battlefield always starts fresh at wave 0 of the saved stage.
+ * battlefield always starts fresh on the saved stage's hunting field.
  * `fallbackClass` seeds a FRESH state (no save yet — a just-created character's
  * first boot) with the account's true class instead of the swordsman default.
  */
@@ -467,7 +460,6 @@ export function initGameState(
     time: 0,
     stage,
     phase: "battle",
-    wave: 0,
     // Restore this zone's persisted unlock progress (v13) — a reload mid-zone
     // resumes the gauge instead of restarting it.
     kills: save?.zoneKills?.[`${location.mapId}:${location.zoneIdx}`] ?? 0,
@@ -519,7 +511,6 @@ export function initGameState(
     boss: null,
     projectiles: [],
     anchorX: CONFIG.baseAnchor,
-    waveGap: CONFIG.firstWaveGap,
     // Hunting spawn pool (M6): burst-fill the field on the first battle step of a
     // farm zone (a fresh start / loaded save both begin in one).
     spawnCd: CONFIG.hunt.initialGap,

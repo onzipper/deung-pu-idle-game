@@ -323,7 +323,6 @@ export function bossRetreat(state: GameState): void {
     h.hp = h.maxHp;
   }
   state.enemies = [];
-  state.waveGap = CONFIG.bossRetreatWaveGap;
   // bossReady stays true — the player can immediately re-challenge.
 }
 

@@ -326,7 +326,6 @@ function buildSnapshot(state: GameState): EngineSnapshot {
   return {
     gold: state.gold,
     stage: state.stage,
-    wave: state.wave,
     kills: state.kills,
     killGoal: CONFIG.killGoal(state.stage),
     phase: state.phase,

@@ -4,7 +4,7 @@
  * CRITICAL: never put per-frame simulation state in here. React re-renders on
  * every store change; syncing 60 Hz would tank performance. The engine loop
  * pushes a THROTTLED snapshot (~10 Hz, see CONFIG.uiSyncHz) of only the fields
- * the HUD shows (gold, stage/wave/kills, heroes, boss hint, upgrade levels).
+ * the HUD shows (gold, stage/kills, heroes, boss hint, upgrade levels).
  *
  * This store also holds the PLAYER -> ENGINE direction of the seam:
  *  - `autoCast` / `autoAllocate` / `autoReturn` / `autoHpPotion` / `autoManaPotion`
@@ -228,7 +228,6 @@ export interface ShopSummary {
 export interface EngineSnapshot {
   gold: number;
   stage: number;
-  wave: number;
   kills: number;
   killGoal: number;
   phase: Phase;
@@ -807,7 +806,6 @@ export interface HudState {
   // ---- throttled engine snapshot (~CONFIG.uiSyncHz) ----
   gold: number;
   stage: number;
-  wave: number;
   kills: number;
   killGoal: number;
   phase: Phase;
@@ -1143,7 +1141,6 @@ export interface HudState {
 export const useGameStore = create<HudState>((set, get) => ({
   gold: 0,
   stage: 1,
-  wave: 0,
   kills: 0,
   killGoal: 0,
   phase: "battle",

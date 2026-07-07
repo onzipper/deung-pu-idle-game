@@ -13,7 +13,7 @@ import {
 const HERO_MELEE_RANGE = HERO_TYPES.swordsman.range;
 import { makeHero } from "@/engine";
 import { updateEnemies, updateHeroes } from "@/engine/systems/combat";
-import { zoneSpawnParams } from "@/engine/systems/waves";
+import { zoneSpawnParams } from "@/engine/systems/hunt";
 import { applyDamage, applyAoeDamage } from "@/engine/systems/damage";
 import { makeStubEnemy, soloSave, worldAutopilot } from "./helpers";
 
