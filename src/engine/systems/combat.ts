@@ -16,6 +16,7 @@
 import { CONFIG, HERO_TYPES, ENEMY_TYPES, type HeroType } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp, sign } from "@/engine/core/math";
+import { dsin, dhypot } from "@/engine/core/dmath";
 import {
   heroAtkOf,
   heroAtkSpeedOf,
@@ -161,7 +162,7 @@ function wanderMob(state: GameState, e: Enemy): void {
   const hunt = CONFIG.hunt;
   const phase = e.id * 2.399963; // golden-angle-ish spread so mobs desync
   const freq = hunt.wanderFreqBase + ((e.id * 0.618034) % 1) * hunt.wanderFreqSpread;
-  const target = e.homeX + Math.sin(state.time * freq + phase) * hunt.wanderAmp;
+  const target = e.homeX + dsin(state.time * freq + phase) * hunt.wanderAmp;
   e.x += clamp(target - e.x, -hunt.wanderSpeed * FIXED_DT, hunt.wanderSpeed * FIXED_DT);
 }
 
@@ -450,7 +451,7 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
   if (p.kind === "orb" || p.kind === "meteor" || p.kind === "rainArrow") {
     const dx = p.tx - p.x;
     const dy = p.ty - p.y;
-    const d = Math.hypot(dx, dy);
+    const d = dhypot(dx, dy);
     if (d <= arrive) {
       const src = projHitSource(p.kind);
       // M7.7 survivor-retaliation: every falling AoE (rain drop, meteor, cataclysm,
@@ -474,7 +475,7 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
       : L.groundY - L.enemyProjImpactYOffset;
   const dx = target.x - p.x;
   const dy = ty - p.y;
-  const d = Math.hypot(dx, dy);
+  const d = dhypot(dx, dy);
   if (d <= arrive) {
     applyDamage(state, target, p.damage, projHitSource(p.kind));
     return true;

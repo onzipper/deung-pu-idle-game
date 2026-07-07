@@ -493,3 +493,35 @@ unchanged (119-133 attempts, 4-7 breaks / ~550 drops).
 determinism, qty depth-scaling, **stream isolation** = gear byte-identical + one-tick-per-kill,
 claim-key uniqueness/idempotence + save-load disjointness). **1051/1051** vitest green,
 `tsc --noEmit` clean, eslint clean. No SAVE bump.
+
+---
+
+## Float determinism rebaseline (party P1a) — 2026-07-07
+
+**What & why.** Lockstep party (M8) needs the sim to be bit-identical across JS engines
+(V8/JavaScriptCore/SpiderMonkey). IEEE-754 only mandates correct rounding for `+ - * /` and
+`sqrt`; `Math.sin/cos/pow/hypot/...` are implementation-defined and can diverge by an ULP →
+desync. All such calls whose RESULT ENTERS SIM STATE were moved to the new
+`src/engine/core/dmath.ts`: `dsin/dcos` (4096-entry quarter-wave LUT + lerp, the table itself
+built at load from a Taylor polynomial using only `+ - *` — never `Math.sin`), `dhypot` (=
+`sqrt(x²+y²)`, IEEE-exact), `dpow` (exact integer exponentiation-by-squaring). Call sites swapped:
+mob wander `sin` (combat.ts), two projectile-distance `hypot` (combat.ts), and every growth-curve
+`Math.pow` (config: enemyHp/enemyAtk/bossHp/bossAtk/goldPerKill/xpToLevel/enemyAtk|HpDamp; shop
+priceStageBase). A source-scan guard test (`float-determinism-guard.test.ts`) fails the build if a
+banned `Math.*` transcendental reappears in `engine/` outside dmath/tests.
+
+**Observed drift = ZERO at reporting resolution.** Ran the canonical `GEAR=1 REFINE=1
+SIM_SECONDS=5400` (5 seeds × 3 classes) and `BOSSISO=1` BEFORE and AFTER the swap on the same
+current code: **every reported metric is byte-identical** — deaths (sword 543 / archer 360 / mage
+49), mana pot/run (103 / 112 / 87), stones/run (8633 / 8575 / 8625), quest-boss winT, and BOSSISO
+s20/s25/s30 win-times (s30 sword 13.4s / archer 14.9s / mage 12.7s). Reason: every `pow` result
+flows through `Math.round` in a config curve, so the sub-integer `dpow` delta rounds to the same
+integer; the `dsin` wander perturbation is <1e-4 px and never crosses an engagement threshold in
+these runs. The underlying raw floats do shift microscopically (dsin/dpow ≠ libm bit-for-bit) —
+that is the intended one-time move — but it stays below the sim's measurement resolution.
+
+**Gates (all HELD):** class-change s5 (5/5), tier-3 quest reached s16 + young Sovereign won 5/5,
+s20/s25 organic clears, **s30 boss soft-wall intact** (organic 0/5, BOSSISO wins all t10+10), no
+stalls to the frontier, mana relief + stone income unchanged. **This is the new baseline.** No
+curve was retuned; no SAVE bump. Vitest 1069/1069 green (+13 dmath/guard tests), `tsc` + eslint
+clean.

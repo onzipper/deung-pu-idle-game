@@ -15,6 +15,7 @@
  */
 
 import { CONFIG } from "@/engine/config";
+import { dpow } from "@/engine/core/dmath";
 import { FIXED_DT } from "@/engine/core/loop";
 import { arriveAtZone, townLocation, zoneAt } from "@/engine/systems/world";
 import type { ConsumableCounts, ShopItemId } from "@/engine/entities";
@@ -37,7 +38,7 @@ export function emptyConsumables(): ConsumableCounts {
 /** Gold price of `item` at content `stage` (stage-scaled — see CONFIG.shop). */
 export function shopPriceAt(item: ShopItemId, stage: number): number {
   const base = SHOP.items[item].basePrice;
-  return Math.round(base * Math.pow(SHOP.priceStageBase, Math.max(0, stage - 1)));
+  return Math.round(base * dpow(SHOP.priceStageBase, Math.max(0, stage - 1)));
 }
 
 /**

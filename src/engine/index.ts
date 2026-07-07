@@ -8,6 +8,7 @@
 export * from "@/engine/core/loop";
 export * from "@/engine/core/rng";
 export * from "@/engine/core/math";
+export * from "@/engine/core/dmath";
 export * from "@/engine/core/hash";
 export * from "@/engine/core/step";
 export * from "@/engine/config";

@@ -15,6 +15,11 @@ import type {
   StatKey,
   HeroStats,
 } from "@/engine/entities";
+// Cross-engine deterministic pow (M8 party P1a): every growth curve here raises a
+// literal base to an INTEGER exponent (stage/level offsets), so `dpow` is exact
+// integer exponentiation-by-squaring — bit-identical on V8/JSC/SpiderMonkey, unlike
+// the implementation-defined `Math.pow`. See src/engine/core/dmath.ts.
+import { dpow } from "@/engine/core/dmath";
 
 // M5 Character Pivot (docs/GDD.md v2): the 3-hero team became a SINGLE player
 // character. The formation / targeting / multi-hero combat engine is KEPT intact
@@ -63,9 +68,9 @@ const STAGE_ATK_DAMP_BASE = 0.92;
 const STAGE_HP_DAMP_FROM = 15;
 const STAGE_HP_DAMP_BASE = 0.94;
 const enemyAtkDamp = (n: number): number =>
-  n <= STAGE_ATK_DAMP_FROM ? 1 : Math.pow(STAGE_ATK_DAMP_BASE, n - STAGE_ATK_DAMP_FROM);
+  n <= STAGE_ATK_DAMP_FROM ? 1 : dpow(STAGE_ATK_DAMP_BASE, n - STAGE_ATK_DAMP_FROM);
 const enemyHpDamp = (n: number): number =>
-  n <= STAGE_HP_DAMP_FROM ? 1 : Math.pow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
+  n <= STAGE_HP_DAMP_FROM ? 1 : dpow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
 
 export const CONFIG = {
   // ---- existing engine-infra keys (do not remove) ----
@@ -569,10 +574,10 @@ export const CONFIG = {
   // M7.9: the geometric base is UNCHANGED (s1-15 byte-identical); the s16-30 overlay
   // (enemyHpDamp / enemyAtkDamp, identity for the frozen bands) damps only the deep
   // frontier — see the overlay block above CONFIG for the rationale + curve values.
-  enemyHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * enemyHpDamp(n)),
-  enemyAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * enemyAtkDamp(n)),
-  bossHp: (n: number): number => Math.round(25 * Math.pow(1.2, n - 1) * 16),
-  bossAtk: (n: number): number => Math.round(6 * Math.pow(1.19, n - 1) * 2.1),
+  enemyHp: (n: number): number => Math.round(25 * dpow(1.2, n - 1) * enemyHpDamp(n)),
+  enemyAtk: (n: number): number => Math.round(6 * dpow(1.19, n - 1) * enemyAtkDamp(n)),
+  bossHp: (n: number): number => Math.round(25 * dpow(1.2, n - 1) * 16),
+  bossAtk: (n: number): number => Math.round(6 * dpow(1.19, n - 1) * 2.1),
   // M4 tune: gold/kill was purely linear (5 + 2n) while upgrade costs are
   // geometric, so late stages starved and the wall spiked. A gentle 1.05^(n-1)
   // multiplier keeps stage 1-3 values effectively unchanged (7, 9, 12 vs 7, 9,
@@ -582,7 +587,7 @@ export const CONFIG = {
   // killGoal factor (≈ 3.125 + 1.25n) so gold-per-ZONE = killGoal × goldPerKill is
   // preserved — income trajectory and the depth-scaled potion-sink %s are unchanged.
   goldPerKill: (n: number): number =>
-    Math.round(((3.125 + n * 1.25) / 1.5) * Math.pow(1.05, n - 1)),
+    Math.round(((3.125 + n * 1.25) / 1.5) * dpow(1.05, n - 1)),
   goldPerBoss: (n: number): number => 50 + n * 20,
 
   // ---- spatial layout ----
@@ -790,7 +795,7 @@ export const CONFIG = {
     // XP needed to advance FROM `level` TO `level+1`. Strictly increasing; gentle
     // geometric growth so the hero keeps leveling deep into the run (reaching
     // ~L40+ by S10) rather than stalling at a hard cap mid-game.
-    xpToLevel: (level: number): number => Math.round(30 * Math.pow(1.12, level - 1)),
+    xpToLevel: (level: number): number => Math.round(30 * dpow(1.12, level - 1)),
   },
 
   // ---- base stats (M5 "Base stats", 86d3jv7m3) ----
