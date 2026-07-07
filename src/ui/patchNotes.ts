@@ -92,6 +92,21 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-08.items.epicBot",
     ],
   },
+  // UAT round-3 (post-PR#12 playtest feedback): town NPCs, easy warp, quest
+  // climb-first rule + routing fixes, quest-boss soft-lock fix, update banner.
+  {
+    id: "2026-07-08b",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08b.items.npc",
+      "releases.2026-07-08b.items.warpEasy",
+      "releases.2026-07-08b.items.questClimb",
+      "releases.2026-07-08b.items.questLead",
+      "releases.2026-07-08b.items.freeFarm",
+      "releases.2026-07-08b.items.softLockFix",
+      "releases.2026-07-08b.items.updateBanner",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

@@ -932,6 +932,17 @@
           "facing": "🏹 Archers/mages stopped spinning when surrounded and now face their target while kiting — looks so much better",
           "epicBot": "✨ The bot can manage epic drops now (opt-in) — with an always-on keep-your-good-gear guard"
         }
+      },
+      "2026-07-08b": {
+        "items": {
+          "npc": "🏘 Town is alive! Pah Pu (potions·sell·salvage) and Uncle Dueng (refining) are real now — tap to walk over, tap again to talk and trade; the bot walks up to them too",
+          "warpEasy": "🌀 Warping is way easier: channel mid-combat, and taking hits no longer cancels it",
+          "questClimb": "🧗 Tier-3 quest: climb map 3 to the boss door yourself before the tundra opens — no zone-skipping shortcuts",
+          "questLead": "🧭 While on a quest, every bot route leads back to the quest zone — Guide Me can't be hijacked anymore",
+          "freeFarm": "🌾 Farming an old zone on purpose? The bot respects it — no more dragging you forward (it only advances on a fresh unlock)",
+          "softLockFix": "🔧 Fixed the freeze after defeating the young Glacial Sovereign — you now warp back to the frontier with the change-class button ready",
+          "updateBanner": "🚀 New patch deployed while you play? The game tells you — one tap saves and updates"
+        }
       }
     }
   },
