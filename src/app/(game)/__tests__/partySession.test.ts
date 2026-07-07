@@ -6,6 +6,7 @@ import {
   SeqTracker,
   deriveCohort,
   electLeader,
+  liveCohortSlots,
   resolveMemberDisplayName,
   synthesizeShadowMessage,
   type ZoneBeat,
@@ -45,6 +46,27 @@ describe("deriveCohort", () => {
     expect(deriveCohort(0, zoneA, beats)).toEqual([0, 1, 2]);
     beats.delete(2);
     expect(deriveCohort(0, zoneA, beats)).toEqual([0, 1]);
+  });
+});
+
+// ── liveCohortSlots (D1/D2: a shadowed member never acks — filter it out of formation) ─
+
+describe("liveCohortSlots", () => {
+  it("filters out shadowed slots, preserving the raw ascending order", () => {
+    expect(liveCohortSlots([0, 1, 2], new Set([1]))).toEqual([0, 2]);
+  });
+
+  it("all peers shadowed leaves just me (⇒ the solo path)", () => {
+    // My own slot (0) is never shadowed from my own perspective.
+    expect(liveCohortSlots([0, 1, 2], new Set([1, 2]))).toEqual([0]);
+  });
+
+  it("no shadowed slots is the identity", () => {
+    expect(liveCohortSlots([0, 1, 2], new Set())).toEqual([0, 1, 2]);
+  });
+
+  it("a shadowed slot not present in the cohort is a no-op", () => {
+    expect(liveCohortSlots([0, 2], new Set([1]))).toEqual([0, 2]);
   });
 });
 
