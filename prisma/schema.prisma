@@ -159,6 +159,37 @@ model ItemEvent {
   @@index([itemId]) // read an item's full history (ordered by createdAt in-memory)
 }
 
+// NPC buy-back (owner-approved). When a player SELLS an item instance (accidental
+// sells happen), one row is recorded here so the merchant can offer it BACK within
+// BUYBACK_WINDOW_DAYS (3 days, src/server/items.ts) at EXACTLY the gold credited at
+// sale. Additive + ISOLATED: no existing table/column/query changes. SALVAGED items
+// are NOT recorded (materials were granted → sold-only, per owner spec).
+//
+// Written in the SAME tx as the sell soft-delete (src/server/items.ts `sellItems`):
+// one row per sold instance with its credited `price` and a SERVER-STAMPED `soldAt`
+// (client clocks never trusted — mirrors SaveState.lastSeen's trust model). Buy-back
+// re-creates a FRESH ItemInstance (new cuid, same templateId + refineLevel) and sets
+// `restoredAt` so a row is redeemable AT MOST ONCE (atomic check-and-set, mirrors the
+// refine compare-and-set). Rows past the window are lazily purged on the list read.
+//
+// `ownerId` = Character.id (raw cuid, matches ItemInstance.ownerId's per-character
+// ownership scope) — deliberately NOT an FK relation, mirroring the
+// `ItemEvent.fromCharacterId` "immutable/transient, no FK" convention: this is a
+// short-lived buy-back window, not a permanent ledger, so a cascade buys nothing and
+// touching the Character model is avoided. `price` is the exact gold credited at sale,
+// captured then and NEVER recomputed from today's vendor config (magnitudes drift).
+model SoldItem {
+  id          String    @id @default(cuid())
+  ownerId     String // -> Character.id (per-character; matches ItemInstance ownership)
+  templateId  String    @db.VarChar(64)
+  refineLevel Int       @default(0) // preserved so buy-back restores the +N item
+  price       Int // exact gold credited at sale = the buy-back cost
+  soldAt      DateTime // server-stamped sale time (drives the 3-day window)
+  restoredAt  DateTime? // set when bought back; a row redeems at most once
+
+  @@index([ownerId, soldAt]) // buy-back list: this owner's window rows, soonest-to-expire first + the purge sweep
+}
+
 // M7.9/M7.95 server-wide announcement feed (owner-approved design; NO
 // websockets this phase — polling piggybacked on the existing autosave cycle,
 // see `src/server/items.ts`'s `recentAnnouncements`). Originally refine-only
