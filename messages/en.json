@@ -883,6 +883,24 @@
           "warpFix": "🌀 Picking a warp zone now closes the window — see your warp instantly",
           "modalFix": "📱 Mobile fix: inventory/refine/settings windows no longer get covered by HUD buttons"
         }
+      },
+      "2026-07-08": {
+        "items": {
+          "hof": "🏆 The Hall of Fame is OPEN! 5 top-10 boards — level · power · total gold earned · best boss-clear times · online time — filter by class + tap anyone to inspect their gear and auras",
+          "announce": "📣 Server-wide announcements: first player to Lv.90 and every new power #1 — everyone hears about it",
+          "quest3": "👑 Tier-3 quest reborn: the tundra frontier gate opens early for you — hunt 90 monsters, then duel the young Glacial Sovereign. No more backtracking",
+          "questCard": "🧭 New quest card: see every objective, progress bar, and reward up front — accept, change class, and guide-me buttons all in one place",
+          "botSwitch": "🤖 The bot is now ONE switch! On = plays everything for you, off = pure manual — with all bot settings in a single panel and ⓘ hints everywhere",
+          "botConfig": "💾 Bot settings now stick to your character — set once, works on every device",
+          "species": "🐺 12 new monster species across maps 4-6: frost wolves, ice golems, sand scorpions, mummies, imps, charcoal brutes and more",
+          "warcry": "⚔ War Cry got its due: a crimson battle aura while buffed + an on-screen countdown chip (party-wide once parties arrive)",
+          "skillInfo": "ⓘ Every skill is now inspectable: damage multiplier, radius, mana, cooldown — real numbers",
+          "travel": "🌀 Redesigned warp menu with themed sections per map — town pinned right at the top",
+          "inventory": "🎒 Inventory now sorts best-first and shows every item individually — no more stacks",
+          "refineSmooth": "🔨 Smoother refining: hammer away, tap to skip the reveal, your selection never slips",
+          "facing": "🏹 Archers/mages stopped spinning when surrounded and now face their target while kiting — looks so much better",
+          "epicBot": "✨ The bot can manage epic drops now (opt-in) — with an always-on keep-your-good-gear guard"
+        }
       }
     }
   },

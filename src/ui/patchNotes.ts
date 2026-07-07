@@ -70,6 +70,28 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-07c.items.modalFix",
     ],
   },
+  // M7.95 Hall of Fame + UAT round-2 polish (quest redesign, bot single-switch,
+  // mob species, war-cry visibility, UX-fix wave).
+  {
+    id: "2026-07-08",
+    date: "2026-07-08",
+    items: [
+      "releases.2026-07-08.items.hof",
+      "releases.2026-07-08.items.announce",
+      "releases.2026-07-08.items.quest3",
+      "releases.2026-07-08.items.questCard",
+      "releases.2026-07-08.items.botSwitch",
+      "releases.2026-07-08.items.botConfig",
+      "releases.2026-07-08.items.species",
+      "releases.2026-07-08.items.warcry",
+      "releases.2026-07-08.items.skillInfo",
+      "releases.2026-07-08.items.travel",
+      "releases.2026-07-08.items.inventory",
+      "releases.2026-07-08.items.refineSmooth",
+      "releases.2026-07-08.items.facing",
+      "releases.2026-07-08.items.epicBot",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
