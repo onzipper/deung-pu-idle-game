@@ -343,9 +343,9 @@ const BOSS_WEIGHT: Record<ItemRarity, number> = { common: 0.4, rare: 0.7, epic: 
  * NOTE (wave handoff): the drop-ROLL sites (systems/gear.ts rollEnemyDrop/rollBossDrop) call
  * `dropTableForStage(stage)` with NO class arg today, which resolves to the daggers-EXCLUDED
  * table for EVERYONE (the safe default that preserves byte-identity). For a NINJA hero to
- * actually roll daggers, those roll sites must pass the character's class, e.g.
- * `dropTableForStage(state.stage, ninjaClass)` — a one-line change per site in systems/gear.ts
- * (out of this wave's file zone; flagged for the render/server wave).
+ * actually roll daggers, the roll sites pass the roster's gated class — see
+ * `gatedLootClass` in systems/gear.ts (wired in the same wave; end-to-end tested in
+ * ninja.test.ts "dagger drop gating").
  */
 export const DROP_GATED_CLASSES: ReadonlySet<HeroClass> = new Set<HeroClass>(["ninja"]);
 

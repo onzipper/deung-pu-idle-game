@@ -44,6 +44,8 @@ const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
   swordsman: { solid: "#35d0c0", soft: "rgba(53, 208, 192, 0.55)" },
   archer: { solid: "#b8e04a", soft: "rgba(184, 224, 74, 0.55)" },
   mage: { solid: "#c77dff", soft: "rgba(199, 125, 255, 0.55)" },
+  // matches `HERO_COLORS.ninja.body` in render/theme.ts (slate/graphite rig tone)
+  ninja: { solid: "#6c7a99", soft: "rgba(108, 122, 153, 0.55)" },
 };
 
 /** Detects a fresh cast (cd jumped back up) to restart the CSS sweep. */

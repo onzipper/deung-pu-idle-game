@@ -45,7 +45,13 @@ const BOARD_ICON: Record<HofBoard, string> = {
   boss: "\u{23F1}", // ⏱
   online: "\u{23F3}", // ⏳
 };
-const CLASS_FILTER_ORDER: readonly HofClassFilter[] = ["all", "swordsman", "archer", "mage"];
+const CLASS_FILTER_ORDER: readonly HofClassFilter[] = [
+  "all",
+  "swordsman",
+  "archer",
+  "mage",
+  "ninja",
+];
 // Pre-2020 medal emoji (footgun #4: no Unicode-13+ glyphs on Windows 10).
 const RANK_MEDAL: Record<number, string> = { 1: "\u{1F947}", 2: "\u{1F948}", 3: "\u{1F949}" };
 

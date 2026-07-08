@@ -20,20 +20,43 @@ import { useState } from "react";
 import { primaryStat, SLOT_ORDER, type HeroClass } from "@/engine";
 import { HERO_ICONS } from "@/ui/labels";
 import { validateCharacterName, type NameValidationError } from "@/ui/characters/validateName";
-import type { CharacterDTO, CreateCharacterErrorCode } from "@/ui/components/characters/types";
+import type {
+  CharacterDTO,
+  CreateCharacterErrorCode,
+  NinjaBaseClass,
+  NinjaUnlockDTO,
+} from "@/ui/components/characters/types";
 
 export interface CreateCharacterFormProps {
   onCreated: (character: CharacterDTO) => void;
   onCancel: () => void;
+  /** Account-wide ninja-unlock progress (from `GET /api/characters`'s
+   * `ninjaUnlock` field) — `null` while the roster hasn't loaded it yet, in
+   * which case the ninja card renders locked-with-no-progress (fail safe:
+   * never shows it as selectable before the server has actually confirmed
+   * it). See docs/ninja-design.md §5. */
+  ninjaUnlock: NinjaUnlockDTO | null;
 }
+
+/** The 3 base-class lines, in the order their tier-3 checkmarks read. */
+const NINJA_BASE_CLASSES: readonly NinjaBaseClass[] = ["swordsman", "archer", "mage"];
 
 function ClassCard({
   cls,
   selected,
+  locked,
+  progressText,
   onSelect,
 }: {
   cls: HeroClass;
   selected: boolean;
+  /** Ninja wave: true when this card is the ninja class and the account
+   * hasn't cleared the tier-3 gate yet (docs/ninja-design.md §5 — "the 4th
+   * card is ALWAYS visible as a locked ninja card with progress copy"). A
+   * locked card never fires `onSelect`. */
+  locked?: boolean;
+  /** Extra progress line rendered under the tagline/playstyle when locked. */
+  progressText?: string;
   onSelect: () => void;
 }) {
   const tContent = useTranslations("content");
@@ -44,14 +67,30 @@ function ClassCard({
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={locked ? undefined : onSelect}
+      disabled={locked}
       aria-pressed={selected}
-      className={`flex min-h-11 flex-col items-start gap-1.5 rounded-(--ddp-radius-md) border px-3 py-3 text-left transition-all duration-100 active:translate-y-0.5 active:scale-[0.98] ${
-        selected
+      aria-disabled={locked}
+      className={`relative flex min-h-11 flex-col items-start gap-1.5 rounded-(--ddp-radius-md) border px-3 py-3 text-left transition-all duration-100 ${
+        locked
+          ? "cursor-not-allowed border-ddp-border bg-black/20 opacity-70 grayscale"
+          : "active:translate-y-0.5 active:scale-[0.98]"
+      } ${
+        !locked && selected
           ? "border-emerald-400 bg-emerald-400/10 shadow-[0_0_14px_rgba(52,211,153,0.35)]"
-          : "border-ddp-border bg-ddp-panel-strong hover:border-ddp-border-soft"
+          : !locked
+            ? "border-ddp-border bg-ddp-panel-strong hover:border-ddp-border-soft"
+            : ""
       }`}
     >
+      {locked && (
+        <span
+          aria-hidden
+          className="absolute top-2 right-2 rounded-full border border-ddp-border-soft bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-ddp-ink-muted"
+        >
+          {"\u{1F512}"} {tCreate("ninjaLocked.badge")}
+        </span>
+      )}
       <span className="flex items-center gap-2">
         <span aria-hidden className="text-xl leading-none">
           {HERO_ICONS[cls]}
@@ -67,12 +106,18 @@ function ClassCard({
       <span className="mt-0.5 rounded-full border border-ddp-border-soft bg-black/40 px-2 py-0.5 text-[10px] font-bold text-ddp-ink-muted">
         {tCreate("affinityLabel")}: {tStats(`names.${stat}`)} · {tStats(`full.${stat}`)}
       </span>
+      {progressText && (
+        <span className="mt-0.5 text-[10px] leading-snug font-semibold text-ddp-ink-muted">
+          {progressText}
+        </span>
+      )}
     </button>
   );
 }
 
-export function CreateCharacterForm({ onCreated, onCancel }: CreateCharacterFormProps) {
+export function CreateCharacterForm({ onCreated, onCancel, ninjaUnlock }: CreateCharacterFormProps) {
   const t = useTranslations("characters");
+  const tContent = useTranslations("content");
   const tCreate = useTranslations("characters.create");
 
   const [selectedClass, setSelectedClass] = useState<HeroClass | null>(null);
@@ -84,6 +129,22 @@ export function CreateCharacterForm({ onCreated, onCancel }: CreateCharacterForm
   const validation = validateCharacterName(name);
   const showNameError = touched && !validation.ok;
 
+  // Ninja wave (docs/ninja-design.md §5): the ninja card is locked until the
+  // account has all 3 base lines at tier 3. `ninjaUnlock === null` (roster
+  // still loading) fails closed — never selectable before the server
+  // confirms it. `progressText` combines the "N/needed" readout with a
+  // per-base-class checkmark row ("+ which lines are done", owner brief) on
+  // its own line — e.g. "ปลดล็อก: อาชีพ tier 3 แล้ว 1/3 · ดาบ ✓ · ธนู ✗ · เวท ✗".
+  const ninjaLocked = !ninjaUnlock || !ninjaUnlock.unlocked;
+  const ninjaProgressText = ninjaUnlock
+    ? `${tCreate("ninjaLocked.progress", {
+        cleared: ninjaUnlock.cleared,
+        needed: ninjaUnlock.needed,
+      })} · ${NINJA_BASE_CLASSES.map(
+        (c) => `${tContent(`classes.${c}.name`)} ${ninjaUnlock.baseTier3[c] ? "✓" : "✗"}`,
+      ).join(" · ")}`
+    : undefined;
+
   function nameErrorMessage(error: NameValidationError): string {
     return tCreate(`nameError.${error}`);
   }
@@ -93,6 +154,7 @@ export function CreateCharacterForm({ onCreated, onCancel }: CreateCharacterForm
     setTouched(true);
     setServerError(null);
     if (!selectedClass || !validation.ok) return;
+    if (selectedClass === "ninja" && ninjaLocked) return;
 
     setSubmitting(true);
     try {
@@ -114,6 +176,8 @@ export function CreateCharacterForm({ onCreated, onCancel }: CreateCharacterForm
           : null;
       if (code === "limit") setServerError(tCreate("limitError"));
       else if (code === "duplicate") setServerError(tCreate("duplicateError"));
+      else if (code === "ninja_locked") setServerError(tCreate("ninjaLockedError"));
+      else if (code === "ninja_only_slot") setServerError(tCreate("ninjaOnlySlotError"));
       else setServerError(tCreate("genericError"));
     } catch {
       setServerError(tCreate("genericError"));
@@ -142,15 +206,22 @@ export function CreateCharacterForm({ onCreated, onCancel }: CreateCharacterForm
         <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
           {tCreate("classPickerLabel")}
         </span>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {SLOT_ORDER.map((cls) => (
-            <ClassCard
-              key={cls}
-              cls={cls}
-              selected={selectedClass === cls}
-              onSelect={() => setSelectedClass(cls)}
-            />
-          ))}
+        {/* 4 cards now (docs/ninja-design.md §5): 1-col mobile, 2-col small,
+            4-col desktop — comfortable on both (owner directive). */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {SLOT_ORDER.map((cls) => {
+            const isNinja = cls === "ninja";
+            return (
+              <ClassCard
+                key={cls}
+                cls={cls}
+                selected={selectedClass === cls}
+                locked={isNinja && ninjaLocked}
+                progressText={isNinja && ninjaLocked ? ninjaProgressText : undefined}
+                onSelect={() => setSelectedClass(cls)}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -187,9 +258,17 @@ export function CreateCharacterForm({ onCreated, onCancel }: CreateCharacterForm
 
       <button
         type="submit"
-        disabled={submitting || !selectedClass || !validation.ok}
+        disabled={
+          submitting ||
+          !selectedClass ||
+          !validation.ok ||
+          (selectedClass === "ninja" && ninjaLocked)
+        }
         className={`min-h-11 rounded-(--ddp-radius-md) border px-3 py-2.5 text-sm font-extrabold shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.98] ${
-          submitting || !selectedClass || !validation.ok
+          submitting ||
+          !selectedClass ||
+          !validation.ok ||
+          (selectedClass === "ninja" && ninjaLocked)
             ? "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted"
             : "border-emerald-400 bg-emerald-400 text-emerald-950"
         }`}

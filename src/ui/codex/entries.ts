@@ -89,6 +89,9 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
     contentRef: { kind: "heroClass", id: "archer" },
   },
   { id: "hero-mage", category: "heroes", contentRef: { kind: "heroClass", id: "mage" } },
+  // Ninja wave: the account-gated 4th class (§5 of docs/ninja-design.md) —
+  // same "contentRef, no title" convention as the three base classes.
+  { id: "hero-ninja", category: "heroes", contentRef: { kind: "heroClass", id: "ninja" } },
 
   { id: "boss", category: "boss" },
   // M7.9 "Grand Expansion" boss variety — one behavior-hint entry per new map

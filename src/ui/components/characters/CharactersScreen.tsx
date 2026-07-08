@@ -23,7 +23,7 @@ import { MAX_LIVE_CHARACTERS_CLIENT } from "@/ui/characters/constants";
 import { CharacterCard } from "@/ui/components/characters/CharacterCard";
 import { CreateCharacterForm } from "@/ui/components/characters/CreateCharacterForm";
 import { DeleteCharacterDialog } from "@/ui/components/characters/DeleteCharacterDialog";
-import type { CharacterDTO } from "@/ui/components/characters/types";
+import type { CharacterDTO, NinjaUnlockDTO } from "@/ui/components/characters/types";
 
 type LoadStatus = "loading" | "error" | "ready";
 type View = "roster" | "create";
@@ -34,6 +34,7 @@ export function CharactersScreen() {
 
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [characters, setCharacters] = useState<CharacterDTO[]>([]);
+  const [ninjaUnlock, setNinjaUnlock] = useState<NinjaUnlockDTO | null>(null);
   const [view, setView] = useState<View>("roster");
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
@@ -46,8 +47,12 @@ export function CharactersScreen() {
     try {
       const res = await fetch("/api/characters");
       if (!res.ok) throw new Error("load failed");
-      const data = (await res.json()) as { characters: CharacterDTO[] };
+      const data = (await res.json()) as {
+        characters: CharacterDTO[];
+        ninjaUnlock: NinjaUnlockDTO;
+      };
       setCharacters(data.characters);
+      setNinjaUnlock(data.ninjaUnlock);
       setView(data.characters.length === 0 ? "create" : "roster");
       setStatus("ready");
     } catch {
@@ -130,6 +135,7 @@ export function CharactersScreen() {
         <CreateCharacterForm
           onCreated={handleCreated}
           onCancel={() => setView("roster")}
+          ninjaUnlock={ninjaUnlock}
         />
       )}
 
