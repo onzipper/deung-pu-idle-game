@@ -19,17 +19,75 @@
 import { Container } from "pixi.js";
 import { describe, expect, it } from "vitest";
 import { initGameState } from "@/engine";
-import { LEGENDARY_FOR_CLASS } from "@/engine/config/items";
+import { LEGENDARY_FOR_CLASS, LEGENDARY_MAX_AWAKEN } from "@/engine/config/items";
 import type { HeroClass } from "@/engine/entities";
 import type { GameEvent, GameState } from "@/engine/state";
 import { FxController } from "@/render/fx/FxController";
-import { LegendaryFxController } from "@/render/fx/legendaryFx";
+import { awakenParamsFor, LegendaryFxController } from "@/render/fx/legendaryFx";
 
 if (typeof document === "undefined") {
   (globalThis as unknown as { document: unknown }).document = {
     createElement: () => ({ getContext: () => null }),
   };
 }
+
+describe("awakenParamsFor — ยิ่งปลุกยิ่งเดือด pure step lookup", () => {
+  it("bands +0/+1 identically (today's baseline look, unchanged)", () => {
+    expect(awakenParamsFor(0)).toEqual(awakenParamsFor(1));
+  });
+
+  it("bands +2/+3 identically (denser/brighter idle + slightly longer trail)", () => {
+    expect(awakenParamsFor(2)).toEqual(awakenParamsFor(3));
+  });
+
+  it("each band is a REAL jump — every knob only ever increases (or a toggle flips on), never regresses, walking +0 -> +5", () => {
+    const levels = [0, 1, 2, 3, 4, 5];
+    let prev = awakenParamsFor(levels[0]);
+    for (const level of levels.slice(1)) {
+      const cur = awakenParamsFor(level);
+      expect(cur.ambientActiveCount).toBeGreaterThanOrEqual(prev.ambientActiveCount);
+      expect(cur.ambientAlphaMult).toBeGreaterThanOrEqual(prev.ambientAlphaMult);
+      expect(cur.ambientRateMult).toBeGreaterThanOrEqual(prev.ambientRateMult);
+      expect(cur.trailWidthMult).toBeGreaterThanOrEqual(prev.trailWidthMult);
+      expect(cur.trailLifeMult).toBeGreaterThanOrEqual(prev.trailLifeMult);
+      expect(cur.secondRing || !prev.secondRing).toBe(true); // never flips OFF
+      expect(cur.glowPulse || !prev.glowPulse).toBe(true); // never flips OFF
+      prev = cur;
+    }
+  });
+
+  it("+4 is the first band with the orbiting second ring, and NOT yet the glow pulse", () => {
+    const p4 = awakenParamsFor(4);
+    expect(p4.secondRing).toBe(true);
+    expect(p4.glowPulse).toBe(false);
+    expect(awakenParamsFor(3).secondRing).toBe(false);
+  });
+
+  it('+5 ("จุติ" ceiling) is the ONLY band with the persistent glow pulse, and is strictly the most intense across every continuous knob', () => {
+    const p5 = awakenParamsFor(5);
+    expect(p5.glowPulse).toBe(true);
+    expect(p5.secondRing).toBe(true);
+    for (const level of [0, 1, 2, 3, 4]) {
+      const p = awakenParamsFor(level);
+      expect(p.glowPulse).toBe(false);
+      expect(p5.ambientAlphaMult).toBeGreaterThan(p.ambientAlphaMult);
+      expect(p5.ambientRateMult).toBeGreaterThan(p.ambientRateMult);
+      expect(p5.trailWidthMult).toBeGreaterThan(p.trailWidthMult);
+      expect(p5.trailLifeMult).toBeGreaterThan(p.trailLifeMult);
+    }
+    expect(p5.ambientActiveCount).toBe(5); // densest tier, matches the fixed pool cap
+  });
+
+  it("degrades out-of-range/bad input to the nearest valid band instead of throwing/indexing OOB", () => {
+    expect(() => awakenParamsFor(-3)).not.toThrow();
+    expect(awakenParamsFor(-3)).toEqual(awakenParamsFor(0));
+    expect(() => awakenParamsFor(99)).not.toThrow();
+    expect(awakenParamsFor(99)).toEqual(awakenParamsFor(LEGENDARY_MAX_AWAKEN));
+    expect(() => awakenParamsFor(Number.NaN)).not.toThrow();
+    expect(awakenParamsFor(Number.NaN)).toEqual(awakenParamsFor(0));
+    expect(() => awakenParamsFor(2.4)).not.toThrow(); // rounds, still a valid band
+  });
+});
 
 describe("LegendaryFxController — pool sweep", () => {
   it("active/idle/negative-position/every-class slots never throw and never grow the pooled Graphics count", () => {
@@ -73,6 +131,59 @@ describe("LegendaryFxController — pool sweep", () => {
       fx.setSlot(99, true, "archer", 0, 0, false);
       fx.update(1 / 60);
     }).not.toThrow();
+  });
+
+  it("every awaken level (+0..+5) sweeps without throwing and never grows the pooled Graphics count — the densest tier (+5) is the visible ceiling", () => {
+    const container = new Container();
+    const fx = new LegendaryFxController(container);
+    const before = container.children.length;
+
+    expect(() => {
+      for (let level = 0; level <= 5; level++) {
+        fx.setSlot(0, true, "swordsman", 10, 20, level === 5, level);
+        fx.setSlot(1, true, "archer", -5, -5, level === 5, level);
+        fx.setSlot(2, true, "mage", 900, 300, level === 5, level);
+        for (let i = 0; i < 30; i++) fx.update(1 / 60);
+      }
+    }).not.toThrow();
+
+    // Pool never grows past construction time, regardless of awaken level.
+    expect(container.children.length).toBe(before);
+
+    // At +5 every slot's visible children (ambient dots capped at the dense
+    // count + the always-built ring/glow, both toggled on) stays within the
+    // fixed pool — no per-level allocation ever occurs.
+    const visibleAtCeiling = container.children.filter((c) => c.visible).length;
+    expect(visibleAtCeiling).toBeGreaterThan(0);
+    expect(visibleAtCeiling).toBeLessThanOrEqual(before);
+
+    fx.destroy();
+  });
+
+  it("an out-of-range awaken level (negative/NaN/above ceiling) degrades gracefully instead of throwing", () => {
+    const fx = new LegendaryFxController(new Container());
+    expect(() => {
+      fx.setSlot(0, true, "swordsman", 10, 10, false, -7);
+      fx.update(1 / 60);
+      fx.setSlot(0, true, "swordsman", 10, 10, false, 999);
+      fx.update(1 / 60);
+      fx.setSlot(0, true, "swordsman", 10, 10, false, Number.NaN);
+      fx.update(1 / 60);
+    }).not.toThrow();
+    fx.destroy();
+  });
+
+  it("omitting the awaken level defaults to +0/+1's baseline (backward-compatible call signature)", () => {
+    const container = new Container();
+    const fx = new LegendaryFxController(container);
+    fx.setSlot(0, true, "swordsman", 10, 10, false); // no 7th arg
+    for (let i = 0; i < 60; i++) fx.update(1 / 60);
+    // Baseline tier never activates the ring/glow — only ambient dots + trail
+    // Graphics are ever visible.
+    const visible = container.children.filter((c) => c.visible);
+    expect(visible.length).toBeGreaterThan(0);
+    expect(visible.length).toBeLessThanOrEqual(3); // AMBIENT_BASE_COUNT
+    fx.destroy();
   });
 
   it("a never-activated controller stays inert (no visible ambient dot) across many frames", () => {

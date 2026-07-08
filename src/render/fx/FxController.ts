@@ -1662,6 +1662,10 @@ export class FxController {
       const view = h.dead ? null : this.lookupHeroView(h.id);
       const legendary = !!view && isLegendaryTemplate(h.equipped.weapon);
       const active = legendary && getWeaponAnchorPos(view!, this.weaponAnchorScratch);
+      // "ยิ่งปลุกยิ่งเดือด": a legendary's own `refineOf(...)` value doubles as
+      // its 0..LEGENDARY_MAX_AWAKEN (+0..+5) awaken level — see
+      // `legendaryFx.ts`'s `awakenParamsFor()` for the step-lookup this feeds.
+      const awakenLevel = active ? refineOf(h.equipped, "weapon") : 0;
       this.legendaryFx.setSlot(
         slot,
         active,
@@ -1669,6 +1673,7 @@ export class FxController {
         this.weaponAnchorScratch.x,
         this.weaponAnchorScratch.y,
         active && isHeroAttackSwinging(view!),
+        awakenLevel,
       );
     });
     this.legendaryFx.update(dt);

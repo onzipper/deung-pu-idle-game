@@ -19,6 +19,23 @@
  *     every class (unlike `weaponTrail.ts`'s swordsman-only ribbon), since a
  *     legendary staff/bow/dagger swing deserves the same kinetic read.
  *
+ * "ยิ่งปลุกยิ่งเดือด" AWAKEN escalation (owner ask): a legendary's own
+ * `refineOf(equipped, "weapon")` value doubles as its 0..`LEGENDARY_MAX_AWAKEN`
+ * (+0..+5) "awaken" level (see `engine/config/items.ts`). `awakenParamsFor()`
+ * below is a PURE step lookup (no interpolation — each level band is a
+ * deliberate visible jump, not a continuous ramp) from that level to 4 knobs:
+ * how many of the (fixed, pre-built) ambient dot pool are active, an alpha/
+ * cycle-rate multiplier on them, a width/lifetime multiplier on the attack
+ * trail, and two ALL-NEW-AT-A-THRESHOLD toggles — a slow orbiting second
+ * accent ring/glyph (+4) and a persistent breathing glow pulse ON the weapon
+ * anchor itself (+5, the "จุติ" ceiling). Every one of these rides pools sized
+ * for the DENSEST tier up front (`AMBIENT_POOL_COUNT`, one ring/glow Graphics
+ * per slot) — nothing is ever created/destroyed per awaken-level change,
+ * only shown/hidden and transform-scaled, so the pooled-Graphics-count
+ * invariant `legendaryFx.test.ts` checks never breaks. Composes cleanly with
+ * champion aura / tier auras because this controller never adds NEW colors —
+ * every new shape reuses the same gold/violet legendary pair.
+ *
  * Perf: fixed `MAX_SLOTS` (party cap) pools. Each slot's ambient dots are
  * built ONCE per (unchanging) class — every frame only mutates position/
  * alpha/rotation. The trail is one pooled ring-buffer polyline per slot
@@ -29,14 +46,148 @@
 
 import { Container, Graphics } from "pixi.js";
 import type { HeroClass } from "@/engine/entities";
+import { LEGENDARY_MAX_AWAKEN } from "@/engine/config/items";
 import { PALETTE, safeRadius } from "@/render/theme";
 
 const MAX_SLOTS = 3; // party cap, same convention as gearAura.ts/gearSparkle.ts
 
 // ---------------------------------------------------------------------------
+// "ยิ่งปลุกยิ่งเดือด" awaken-level escalation — pure step lookup
+// ---------------------------------------------------------------------------
+
+/** Per-tier knobs `awakenParamsFor()` resolves to. `tier` is exposed mainly
+ * for tests/debugging — every consumer below reads the named fields. */
+export interface AwakenFxParams {
+  tier: 0 | 1 | 2 | 3;
+  /** How many of the `AMBIENT_POOL_COUNT`-sized dot pool are active/visible
+   * this frame (the rest stay `visible = false`, never destroyed). */
+  ambientActiveCount: number;
+  ambientAlphaMult: number;
+  /** Multiplies the per-dot cycle's own `dt` — a higher rate reads as
+   * "denser" because dots complete their rise/fall/orbit loop faster. */
+  ambientRateMult: number;
+  trailWidthMult: number;
+  /** Multiplies the trail point's stale-out threshold — older points stay
+   * bright longer, reading as a visibly longer ribbon at a fixed point cap. */
+  trailLifeMult: number;
+  /** +4: a slow orbiting second accent ring/glyph around the anchor. */
+  secondRing: boolean;
+  /** +5 ("จุติ" ceiling): a persistent breathing glow pulse ON the anchor. */
+  glowPulse: boolean;
+}
+
+const AMBIENT_BASE_COUNT = 3; // +0..+1 (today's baseline look, unchanged)
+const AMBIENT_DENSE_COUNT = 5; // +2 and up: denser idle signature
+/** Fixed pool size per slot — sized for the densest tier so nothing is ever
+ * created/destroyed as awaken level changes, only shown/hidden. */
+const AMBIENT_POOL_COUNT = AMBIENT_DENSE_COUNT;
+
+const AWAKEN_TIERS: readonly AwakenFxParams[] = [
+  {
+    tier: 0,
+    ambientActiveCount: AMBIENT_BASE_COUNT,
+    ambientAlphaMult: 1,
+    ambientRateMult: 1,
+    trailWidthMult: 1,
+    trailLifeMult: 1,
+    secondRing: false,
+    glowPulse: false,
+  }, // +0..+1
+  {
+    tier: 1,
+    ambientActiveCount: AMBIENT_DENSE_COUNT,
+    ambientAlphaMult: 1.25,
+    ambientRateMult: 1.2,
+    trailWidthMult: 1.15,
+    trailLifeMult: 1.2,
+    secondRing: false,
+    glowPulse: false,
+  }, // +2..+3
+  {
+    tier: 2,
+    ambientActiveCount: AMBIENT_DENSE_COUNT,
+    ambientAlphaMult: 1.25,
+    ambientRateMult: 1.2,
+    trailWidthMult: 1.15,
+    trailLifeMult: 1.2,
+    secondRing: true,
+    glowPulse: false,
+  }, // +4
+  {
+    tier: 3,
+    ambientActiveCount: AMBIENT_DENSE_COUNT,
+    ambientAlphaMult: 1.45,
+    ambientRateMult: 1.4,
+    trailWidthMult: 1.35,
+    trailLifeMult: 1.45,
+    secondRing: true,
+    glowPulse: true,
+  }, // +5 "จุติ"
+];
+
+/** Pure knob lookup — no interpolation, deliberately steppy so +2, +4, +5
+ * each read as a real jump side-by-side. Clamps/rounds defensively (a
+ * negative or above-ceiling level, e.g. from a save-migration edge case,
+ * degrades to the nearest valid band rather than throwing/indexing OOB). */
+export function awakenParamsFor(level: number): AwakenFxParams {
+  const clamped = Math.max(0, Math.min(LEGENDARY_MAX_AWAKEN, Math.round(level || 0)));
+  if (clamped <= 1) return AWAKEN_TIERS[0];
+  if (clamped <= 3) return AWAKEN_TIERS[1];
+  if (clamped === 4) return AWAKEN_TIERS[2];
+  return AWAKEN_TIERS[3];
+}
+
+const RING_GLYPH_R = 3.2; // local-space radius of the second accent ring shape
+const RING_ORBIT_R = 20; // orbit radius around the weapon anchor (bigger than ambient dots)
+const RING_ORBIT_RY = 0.55;
+const RING_ORBIT_SPEED = 0.55; // rad/s — slower than the mage rune orbit, reads as a distinct layer
+
+const GLOW_INNER_R = 3.4;
+const GLOW_OUTER_R = 5.6;
+const GLOW_PULSE_CYCLE = 1.4; // seconds per breathe in/out
+const GLOW_ALPHA_MIN = 0.35;
+const GLOW_ALPHA_MAX = 0.85;
+
+/** Build (once) the generic orbiting accent ring/glyph — local-space, centered
+ * on its own origin; `updateRing()` only ever transforms it. Deliberately
+ * class-agnostic (unlike the ambient dots) so it reads as one consistent
+ * "awakened" cue regardless of weapon type. */
+function buildRingGlyph(g: Graphics): void {
+  g.clear();
+  g.circle(0, 0, safeRadius(RING_GLYPH_R)).stroke({
+    width: 1,
+    color: PALETTE.legendaryGold,
+    alpha: 0.8,
+  });
+  const nodeCount = 3;
+  for (let i = 0; i < nodeCount; i++) {
+    const a = (Math.PI * 2 * i) / nodeCount;
+    g.circle(Math.cos(a) * RING_GLYPH_R, Math.sin(a) * RING_GLYPH_R * 0.6, safeRadius(1)).fill({
+      color: PALETTE.legendaryViolet,
+      alpha: 0.85,
+    });
+  }
+}
+
+/** Build (once) the +5 persistent weapon glow — two stacked flat-alpha
+ * circles (footgun 3: no hand-built canvas gradients), gold core inside a
+ * softer violet halo. Only the container `alpha` is ever touched afterward
+ * (the breathing pulse), never the fill alphas baked in here. */
+function buildGlowPulse(g: Graphics): void {
+  g.clear();
+  g.circle(0, 0, safeRadius(GLOW_OUTER_R)).fill({
+    color: PALETTE.legendaryVioletDark,
+    alpha: 0.4,
+  });
+  g.circle(0, 0, safeRadius(GLOW_INNER_R)).fill({
+    color: PALETTE.legendaryGoldCore,
+    alpha: 0.6,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Idle ambient particle signature (per class)
 // ---------------------------------------------------------------------------
-const AMBIENT_COUNT = 3; // per slot
 const AMBIENT_FADE_RATE = 5; // per-second lerp toward active/inactive
 
 const EMBER_CYCLE = 1.1; // seconds per rise-and-fade loop (sword)
@@ -89,6 +240,7 @@ interface Slot {
   x: number;
   y: number;
   fade: number; // 0..1, eased toward active
+  awakenLevel: number; // 0..LEGENDARY_MAX_AWAKEN, last value passed to setSlot
   dots: AmbientDot[];
   builtCls: HeroClass | null;
   // ---- trail ----
@@ -99,6 +251,11 @@ interface Slot {
   lastTrailX: number;
   lastTrailY: number;
   hasTrailSample: boolean;
+  // ---- +4/+5 awaken escalation (built once, generic across classes) ----
+  ringGfx: Graphics;
+  ringPhase: number;
+  glowGfx: Graphics;
+  glowPhase: number;
 }
 
 function clamp01(v: number): number {
@@ -151,6 +308,7 @@ function updateAmbientDot(
   fade: number,
   baseX: number,
   baseY: number,
+  alphaMult: number,
 ): void {
   const g = dot.g;
   if (cls === "swordsman") {
@@ -160,7 +318,7 @@ function updateAmbientDot(
       baseX + Math.sin(t * Math.PI * 2 + dot.seed) * EMBER_DRIFT * t,
       baseY - t * EMBER_RISE,
     );
-    g.alpha = fade * (1 - t) * 0.9;
+    g.alpha = Math.min(1, fade * (1 - t) * 0.9 * alphaMult);
   } else if (cls === "archer") {
     dot.phase = (dot.phase + dt / STAR_CYCLE) % 1;
     const t = dot.phase;
@@ -168,13 +326,13 @@ function updateAmbientDot(
       baseX + Math.cos(dot.seed) * STAR_DRIFT,
       baseY - STAR_FALL * 0.5 + t * STAR_FALL,
     );
-    g.alpha = fade * Math.sin(t * Math.PI) * 0.9;
+    g.alpha = Math.min(1, fade * Math.sin(t * Math.PI) * 0.9 * alphaMult);
   } else if (cls === "mage") {
     dot.phase += dt * RUNE_ORBIT_SPEED;
     const a = dot.phase + dot.seed;
     g.position.set(baseX + Math.cos(a) * RUNE_ORBIT_R, baseY + Math.sin(a) * RUNE_ORBIT_R * RUNE_ORBIT_RY);
     g.rotation = a;
-    g.alpha = fade * 0.85;
+    g.alpha = Math.min(1, fade * 0.85 * alphaMult);
   } else {
     dot.phase = (dot.phase + dt / WISP_CYCLE) % 1;
     const t = dot.phase;
@@ -182,7 +340,7 @@ function updateAmbientDot(
       baseX + Math.sin(t * Math.PI * 2 + dot.seed) * WISP_SWAY * t,
       baseY - t * WISP_RISE,
     );
-    g.alpha = fade * (1 - t) * 0.7;
+    g.alpha = Math.min(1, fade * (1 - t) * 0.7 * alphaMult);
   }
 }
 
@@ -191,7 +349,9 @@ export class LegendaryFxController {
 
   constructor(private readonly container: Container) {
     this.slots = Array.from({ length: MAX_SLOTS }, () => {
-      const dots: AmbientDot[] = Array.from({ length: AMBIENT_COUNT }, () => {
+      // Pool sized for the DENSEST awaken tier up front — lower tiers just
+      // leave the extra dots `visible = false`, never create/destroy them.
+      const dots: AmbientDot[] = Array.from({ length: AMBIENT_POOL_COUNT }, () => {
         const g = new Graphics();
         g.visible = false;
         container.addChild(g);
@@ -199,12 +359,21 @@ export class LegendaryFxController {
       });
       const trailGfx = new Graphics();
       container.addChild(trailGfx);
+      const ringGfx = new Graphics();
+      ringGfx.visible = false;
+      buildRingGlyph(ringGfx);
+      container.addChild(ringGfx);
+      const glowGfx = new Graphics();
+      glowGfx.visible = false;
+      buildGlowPulse(glowGfx);
+      container.addChild(glowGfx);
       return {
         cls: null,
         active: false,
         x: 0,
         y: 0,
         fade: 0,
+        awakenLevel: 0,
         dots,
         builtCls: null,
         trailGfx,
@@ -218,6 +387,10 @@ export class LegendaryFxController {
         lastTrailX: 0,
         lastTrailY: 0,
         hasTrailSample: false,
+        ringGfx,
+        ringPhase: Math.random() * Math.PI * 2,
+        glowGfx,
+        glowPhase: Math.random() * Math.PI * 2,
       };
     });
   }
@@ -226,7 +399,10 @@ export class LegendaryFxController {
    * hero has a legendary weapon equipped. `active=false` eases the ambient
    * signature out (never a hard pop) and stops new trail sampling (existing
    * points still finish decaying). `swinging` gates whether THIS frame's
-   * anchor position gets sampled into the trail ribbon. */
+   * anchor position gets sampled into the trail ribbon. `awakenLevel`
+   * (0..`LEGENDARY_MAX_AWAKEN`, the weapon's `refineOf(...)` value — see
+   * `awakenParamsFor()`) escalates the whole signature in steps; defaults to
+   * 0 (today's baseline look) for any caller that doesn't pass it. */
   setSlot(
     slot: number,
     active: boolean,
@@ -234,6 +410,7 @@ export class LegendaryFxController {
     x: number,
     y: number,
     swinging: boolean,
+    awakenLevel = 0,
   ): void {
     if (slot < 0 || slot >= MAX_SLOTS) return;
     const s = this.slots[slot];
@@ -241,6 +418,7 @@ export class LegendaryFxController {
     s.cls = cls;
     s.x = x;
     s.y = y;
+    s.awakenLevel = awakenLevel;
     this.sampleTrail(s, active && swinging, x, y);
   }
 
@@ -248,6 +426,8 @@ export class LegendaryFxController {
   update(dt: number): void {
     for (const s of this.slots) {
       this.updateAmbient(s, dt);
+      this.updateRing(s, dt);
+      this.updateGlow(s, dt);
       this.decayTrail(s, dt);
     }
   }
@@ -260,6 +440,10 @@ export class LegendaryFxController {
       }
       this.container.removeChild(s.trailGfx);
       s.trailGfx.destroy();
+      this.container.removeChild(s.ringGfx);
+      s.ringGfx.destroy();
+      this.container.removeChild(s.glowGfx);
+      s.glowGfx.destroy();
     }
     this.slots.length = 0;
   }
@@ -279,10 +463,49 @@ export class LegendaryFxController {
       for (const d of s.dots) buildAmbientDot(d.g, cls);
       s.builtCls = cls;
     }
-    for (const d of s.dots) {
+    const params = awakenParamsFor(s.awakenLevel);
+    for (let i = 0; i < s.dots.length; i++) {
+      const d = s.dots[i];
+      if (i >= params.ambientActiveCount) {
+        d.g.visible = false;
+        continue;
+      }
       d.g.visible = true;
-      updateAmbientDot(d, cls, dt, s.fade, s.x, s.y);
+      updateAmbientDot(d, cls, dt * params.ambientRateMult, s.fade, s.x, s.y, params.ambientAlphaMult);
     }
+  }
+
+  /** +4/+5: a slow orbiting second accent ring/glyph around the anchor —
+   * built once (`buildRingGlyph()`), transform-only per frame. */
+  private updateRing(s: Slot, dt: number): void {
+    const params = awakenParamsFor(s.awakenLevel);
+    if (!params.secondRing || s.fade < 0.02) {
+      s.ringGfx.visible = false;
+      return;
+    }
+    s.ringPhase = (s.ringPhase + dt * RING_ORBIT_SPEED) % (Math.PI * 2);
+    const a = s.ringPhase;
+    s.ringGfx.visible = true;
+    s.ringGfx.position.set(s.x + Math.cos(a) * RING_ORBIT_R, s.y + Math.sin(a) * RING_ORBIT_R * RING_ORBIT_RY);
+    s.ringGfx.rotation = a;
+    s.ringGfx.alpha = s.fade * 0.85;
+  }
+
+  /** +5 ("จุติ" ceiling): a persistent breathing glow pulse ON the weapon
+   * anchor itself — built once (`buildGlowPulse()`), only `alpha`/position
+   * mutate per frame. */
+  private updateGlow(s: Slot, dt: number): void {
+    const params = awakenParamsFor(s.awakenLevel);
+    if (!params.glowPulse || s.fade < 0.02) {
+      s.glowGfx.visible = false;
+      return;
+    }
+    s.glowPhase = (s.glowPhase + dt / GLOW_PULSE_CYCLE) % 1;
+    const pulse =
+      GLOW_ALPHA_MIN + (GLOW_ALPHA_MAX - GLOW_ALPHA_MIN) * (0.5 + 0.5 * Math.sin(s.glowPhase * Math.PI * 2));
+    s.glowGfx.visible = true;
+    s.glowGfx.position.set(s.x, s.y);
+    s.glowGfx.alpha = s.fade * pulse;
   }
 
   private sampleTrail(s: Slot, sampling: boolean, x: number, y: number): void {
@@ -306,17 +529,21 @@ export class LegendaryFxController {
   }
 
   private decayTrail(s: Slot, dt: number): void {
+    // +2 and up: a higher `trailLifeMult` means points stay bright longer —
+    // reads as a visibly longer ribbon at the SAME fixed point-count cap
+    // (`TRAIL_MAX_POINTS` never changes, only how long each stays alive).
+    const life = TRAIL_POINT_LIFE * awakenParamsFor(s.awakenLevel).trailLifeMult;
     let anyLive = false;
     for (const p of s.trailPoints) {
-      if (p.age <= TRAIL_POINT_LIFE) {
+      if (p.age <= life) {
         p.age += dt;
-        if (p.age <= TRAIL_POINT_LIFE) anyLive = true;
+        if (p.age <= life) anyLive = true;
       }
     }
-    this.redrawTrail(s, anyLive);
+    this.redrawTrail(s, anyLive, life);
   }
 
-  private redrawTrail(s: Slot, anyLive: boolean): void {
+  private redrawTrail(s: Slot, anyLive: boolean, life: number): void {
     s.trailGfx.clear();
     // An EMPTY but VISIBLE Graphics still contributes a bounds point at its
     // own local origin (the same footgun `heroView.ts`'s `tierAccent` guards
@@ -327,17 +554,18 @@ export class LegendaryFxController {
       return;
     }
     s.trailGfx.visible = true;
+    const widthMult = awakenParamsFor(s.awakenLevel).trailWidthMult;
     const oldestIdx = (s.trailHead - s.trailCount + TRAIL_MAX_POINTS) % TRAIL_MAX_POINTS;
     let prev: TrailPoint | null = null;
     for (let k = 0; k < s.trailCount; k++) {
       const p = s.trailPoints[(oldestIdx + k) % TRAIL_MAX_POINTS];
-      if (p.age > TRAIL_POINT_LIFE) {
+      if (p.age > life) {
         prev = null; // stale slot — break the segment chain
         continue;
       }
       if (prev) {
-        const frac = 1 - clamp01(p.age / TRAIL_POINT_LIFE); // 1 = brand new
-        const width = safeRadius(TRAIL_WIDTH_OLD + (TRAIL_WIDTH_NEW - TRAIL_WIDTH_OLD) * frac);
+        const frac = 1 - clamp01(p.age / life); // 1 = brand new
+        const width = safeRadius((TRAIL_WIDTH_OLD + (TRAIL_WIDTH_NEW - TRAIL_WIDTH_OLD) * frac) * widthMult);
         const alpha = TRAIL_ALPHA_NEW * frac;
         if (alpha > 0.01) {
           // Gold-violet two-tone trail, matching the rig's own edge accent —
