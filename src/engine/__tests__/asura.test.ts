@@ -418,7 +418,7 @@ describe("ดินแดนอสูร — daily hot zone (deterministic hash 
 });
 
 describe("ตำราตำนาน — legendary templates + awakening cap (+5, no drop tables)", () => {
-  it("defines one legendary weapon per class at ≈ t10 × 1.4 atk, kind-tagged + craft-only", () => {
+  it("defines one legendary weapon per class at ≈ t10 × 1.8 atk, kind-tagged + craft-only", () => {
     const CLASSES = ["swordsman", "archer", "mage", "ninja"] as const;
     for (const cls of CLASSES) {
       const id = LEGENDARY_FOR_CLASS[cls];
@@ -428,9 +428,9 @@ describe("ตำราตำนาน — legendary templates + awakening cap (+
       expect(t.classReq).toBe(cls);
       expect(t.kind).toBe("legendary");
       expect(isLegendaryTemplate(id)).toBe(true);
-      // ~t10 × 1.4 (sword/mage/ninja 70→98, archer 88→123).
+      // ~t10 × 1.8 (sword/mage/ninja 70→126, archer 88→158) — owner call 2026-07-08 (v1.3).
       const t10 = cls === "archer" ? 88 : 70;
-      expect(t.stats.atk).toBe(Math.round(t10 * 1.4));
+      expect(t.stats.atk).toBe(Math.round(t10 * 1.8));
     }
     // A legendary NEVER enters a drop/boss table (tier 11 > MAX_TIER), so s1-30 tables are untouched.
     for (const id of Object.keys(LEGENDARY_TEMPLATES)) {
@@ -460,9 +460,9 @@ describe("ตำราตำนาน — legendary templates + awakening cap (+
     equipItem(s, h, "weapon", legend, 9); // server-decided +9 → clamped to +5
     expect(h.equipped.weapon).toBe(legend);
     expect(h.equipped.refine?.weapon).toBe(5);
-    // ATK = refinedStat(98, 5) = round(98 × 1.4) = 137 (armor null).
+    // ATK = refinedStat(126, 5) = round(126 × 1.4) = 176 (armor null).
     expect(equipAtkOf(h)).toBe(refinedStat(LEGENDARY_TEMPLATES[legend].stats.atk!, 5));
-    expect(equipAtkOf(h)).toBe(137);
+    expect(equipAtkOf(h)).toBe(176);
   });
 });
 
