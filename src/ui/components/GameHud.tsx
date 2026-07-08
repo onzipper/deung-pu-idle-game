@@ -31,7 +31,7 @@ import { AsuraTomeButton } from "@/ui/components/AsuraTomeButton";
 import { BuffBadgeHub } from "@/ui/components/BuffBadgeHub";
 import { CodexButton } from "@/ui/components/CodexButton";
 import { ConsumableBar } from "@/ui/components/ConsumableBar";
-import { DropFeed } from "@/ui/components/DropFeed";
+import { DropFeed, DropFeedCorner } from "@/ui/components/DropFeed";
 import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
 import { FriendsButton } from "@/ui/components/FriendsButton";
 import { GoalLadder } from "@/ui/components/GoalLadder";
@@ -50,7 +50,8 @@ import { WalkControls } from "@/ui/components/WalkControls";
 import { WorldBossBanner } from "@/ui/components/WorldBossBanner";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
-import { CohortStatus } from "@/ui/party/CohortStatus";
+import { PartySignalChip } from "@/ui/party/PartySignalChip";
+import { ChatButton } from "@/ui/chat/ChatButton";
 
 export interface GameHudProps {
   /** Canvas content (e.g. a Pixi-mounting client component) for the arena slot. */
@@ -74,6 +75,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           sibling — gated so the two are never active at the same time. */}
       <OnboardingOverlay />
       <ContextualTipOverlay />
+      {/* M8 party Wave 3 "global chat": fixed/viewport-anchored floating trigger +
+          unread badge (mobile bottom-left, desktop right-edge mid-height) — the
+          slide-in panel it opens portals through ModalPortal, see ChatButton.tsx. */}
+      <ChatButton />
       {/* M7.9: server-wide high-refine announcements — a full-width slide-down
           strip at the very top of the viewport (z-75), deliberately ABOVE
           the modal panels (z-70) and the DropFeed/NoticeToast toasts (z-60)
@@ -85,13 +90,12 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           `AnnouncementBanner` above, mutually exclusive with it (see
           `UpdateBanner.tsx`'s doc: announcements play first). */}
       <UpdateBanner />
-      {/* M7 Gear & Drops: drop-notification toasts, store-driven off claim
-          results — sits above the arena, below the modal panels (z-70). */}
+      {/* M7 Gear & Drops: EPIC-only drop-notification toast, store-driven off
+          claim results — sits above the arena, below the modal panels
+          (z-70). Commons/rares/stones moved into the arena's bottom-right
+          corner (`DropFeedCorner` below) in Wave 3 "จัดระเบียบ DropFeed". */}
       <DropFeed />
       <NoticeToast />
-      {/* M8 party P4b: lockstep cohort chip — renders nothing solo (the overwhelming
-          common case), see CohortStatus.tsx. */}
-      <CohortStatus />
       {/* World boss "เสี่ยจ๋อง": hourly countdown/found-it banner — renders nothing
           outside the pre-announce/active windows, see WorldBossBanner.tsx. */}
       <WorldBossBanner />
@@ -122,6 +126,15 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
             the arena/console dock down. Renders nothing with no active
             buffs, see BuffBadgeHub.tsx. */}
         <BuffBadgeHub />
+        {/* M8 party Wave 3 "ตัวบอกสถานะปาร์ตี้": network signal chip, mirrors
+            BuffBadgeHub's top-[14%] placement on the OPPOSITE corner (right-2) —
+            renders nothing solo, see PartySignalChip.tsx. */}
+        <PartySignalChip />
+        {/* Wave 3 "จัดระเบียบ DropFeed" (owner: "ไม่รก แต่รู้ว่าได้ของ"): common/rare
+            item + stone pickup pills, coalesced max-3, bottom-right corner —
+            mirrors BuffBadgeHub's top-left placement, ZERO layout
+            participation. Epic keeps the top-center DropFeed beat above. */}
+        <DropFeedCorner />
       </div>
 
       {/* M6 "World & Town": zone/map label + walk arrows (functional; theming

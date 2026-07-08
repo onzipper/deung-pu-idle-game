@@ -225,9 +225,16 @@ export function buildCohortState(
  */
 export function extractSoloState(cohort: GameState, mySlot: number, seed: number): GameState {
   const myHero = cohort.heroes[mySlot];
-  return buildCohortState(seed, sharedSaveFromState(cohort), [
-    { slot: 0, progression: progressionFromHero(myHero) },
-  ]);
+  // Owner bug batch A #1 ("position reset on collapse/re-form"): carry MY hero's live x
+  // into the solo rebuild via the `positions` map — without it every collapseToSolo (a
+  // warp, a bot town trip, a reconnect) re-spawned me at the formation anchor. Slot 0 is
+  // always my (only) hero in this 1-member "cohort".
+  return buildCohortState(
+    seed,
+    sharedSaveFromState(cohort),
+    [{ slot: 0, progression: progressionFromHero(myHero) }],
+    new Map([[0, myHero.x]]),
+  );
 }
 
 // ── The offer/ack exchange itself ───────────────────────────────────────────────

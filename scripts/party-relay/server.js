@@ -22,6 +22,35 @@
  * game server (src/server/partyTicket.ts) under the SHARED `PARTY_RELAY_SECRET`. The
  * relay REFUSES TO START if that secret is absent (fail-loud — no unsigned rooms).
  *
+ * ── WORLD LAYER (additive; ghost-presence + global chat + ping) ──────────────────
+ *   Zero-dep held. New message types coexist with the party protocol above — a stale
+ *   client/relay simply ignores unknown `t` values (forward-compat). These paths share
+ *   ZERO state with party rooms: presence conns use their OWN conn fields
+ *   (`presenceRoom`, chat `chatJoined`), never `room`/`slot`/`joined`, so a presence or
+ *   chat join can NEVER disturb lockstep membership. A world ticket is a DISTINCT kind
+ *   (`kind:"presence"`), rejected by the party verifier and vice-versa.
+ *
+ *   1. PRESENCE (pub/sub, no seq, no order, lossy) — `presenceRooms: zoneKey -> room`:
+ *      • pjoin {v:1, ticket, zone}  → join a zone room; immediately receive every other
+ *        member's cached last-value snapshot. Bad ticket → CLOSE 4001.
+ *      • p    {v:1, payload}        → store as this member's last-value + fan `{t:"p",
+ *        payload}` to ≤ PRESENCE_FAN (12) other members. payload > 256B → CLOSE 4004.
+ *      • pleave {v:1}               → drop presence membership (no broadcast — peers
+ *        despawn on ~10s silence). Zone switch = client sends pleave then pjoin.
+ *      Any presence msg with v!==1 is dropped SILENTLY (deploy-skew safety).
+ *
+ *   2. GLOBAL CHAT (one server-wide room, text-only, 30-min ring buffer):
+ *      • cjoin {v:1, ticket}        → join; immediately receive `{t:"c-history",
+ *        entries:[...]}`. Bad ticket → CLOSE 4001.
+ *      • c    {v:1, text}           → String()/trim/≤120 chars, empty dropped; stamped
+ *        {name,charId} FROM THE TICKET (unforgeable) + server t; pushed to the ring
+ *        buffer (pruned > CHAT_HISTORY_MS and hard-capped) and fanned as `{t:"c",
+ *        entry}`. Rate: 1 msg / 2s per conn — on breach the message is dropped and the
+ *        sender ALONE gets `{t:"c-rej", reason:"rate"}` (NO socket kill — spam≠abuse).
+ *
+ *   3. PING ECHO — {t:"ping", n} → {t:"pong", n} point-to-point to that socket only
+ *      (never fanned, never seq'd, allowed before any join; counts toward maxMsgPerSec).
+ *
  * Wire protocol + deploy steps: docs/party-relay-protocol.md.
  *
  * Usage:
@@ -47,6 +76,13 @@ const DEFAULTS = {
   maxRooms: intEnv("PARTY_RELAY_MAX_ROOMS", 500),
   maxMsgBytes: intEnv("PARTY_RELAY_MAX_MSG_BYTES", 8192), // ~8KB per frame
   maxMsgPerSec: intEnv("PARTY_RELAY_MAX_MSG_PER_SEC", 40), // per-socket flood kill
+  // ── World layer (presence + global chat) ──
+  presenceFan: intEnv("PARTY_RELAY_PRESENCE_FAN", 12), // max members fanned per zone
+  presenceMaxBytes: intEnv("PARTY_RELAY_PRESENCE_MAX_BYTES", 256), // per snapshot payload
+  chatHistoryMs: intEnv("PARTY_RELAY_CHAT_HISTORY_MS", 1_800_000), // 30-min ring buffer
+  chatMaxEntries: intEnv("PARTY_RELAY_CHAT_MAX_ENTRIES", 200), // hard cap on ring buffer
+  chatTextMax: intEnv("PARTY_RELAY_CHAT_TEXT_MAX", 120), // max chat chars (truncated)
+  chatRateMs: intEnv("PARTY_RELAY_CHAT_RATE_MS", 2000), // 1 chat msg per conn per 2s
 };
 
 function intEnv(name, fallback) {
@@ -100,13 +136,61 @@ function verifyTicket(ticket, secret, now = Date.now()) {
   ) {
     return null;
   }
+  // A presence ticket (kind:"presence") is NEVER a valid party join — party tickets
+  // carry no `kind`. Enforced in lockstep with src/server/partyTicket.ts's verifyTicket.
+  if (payload.kind === "presence") return null;
   if (payload.slot < 0 || payload.slot >= MAX_SLOTS) return null;
+  if (now >= payload.exp) return null;
+  return payload;
+}
+
+/**
+ * Verify a WORLD/presence ticket (`kind:"presence"`). Requires the presence payload
+ * shape + unexpired exp; a PARTY ticket (no `kind`) is rejected here, so party and
+ * presence tickets can never cross rooms. Byte-identical to the copy in
+ * src/server/partyTicket.ts (verifyPresenceTicket).
+ */
+function verifyPresenceTicket(ticket, secret, now = Date.now()) {
+  if (typeof ticket !== "string") return null;
+  const dot = ticket.indexOf(".");
+  if (dot <= 0 || dot >= ticket.length - 1) return null;
+  const body = ticket.slice(0, dot);
+  const sig = ticket.slice(dot + 1);
+  const expected = crypto.createHmac("sha256", secret).update(body).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch (_err) {
+    return null;
+  }
+  if (
+    !payload ||
+    payload.kind !== "presence" ||
+    typeof payload.userId !== "string" ||
+    typeof payload.charId !== "string" ||
+    typeof payload.displayName !== "string" ||
+    typeof payload.classId !== "string" ||
+    !Number.isInteger(payload.tier) ||
+    typeof payload.exp !== "number"
+  ) {
+    return null;
+  }
   if (now >= payload.exp) return null;
   return payload;
 }
 
 /** Mint a ticket (dev/test helper — production tickets come from partyTicket.ts). */
 function signTicket(payload, secret) {
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(body).digest("base64url");
+  return `${body}.${sig}`;
+}
+
+/** Mint a presence ticket (dev/test helper — production tickets come from partyTicket.ts). */
+function signPresenceTicket(payload, secret) {
   const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   const sig = crypto.createHmac("sha256", secret).update(body).digest("base64url");
   return `${body}.${sig}`;
@@ -244,12 +328,24 @@ function createRelay(opts = {}) {
     throw new Error("PARTY_RELAY_SECRET is required — relay refuses to start without it");
   }
   const cfg = { ...DEFAULTS, ...opts };
+  // Injectable wall-clock for the world layer (chat stamping + ring-buffer pruning),
+  // so tests can drive the 30-minute prune deterministically. Party paths keep the
+  // real Date.now() untouched (they never read this).
+  const now = typeof opts.now === "function" ? opts.now : Date.now;
 
   /** partyId -> Room. Room.slots[i] = { status, socket, userId, graceTimer }. */
   const rooms = new Map();
   /** All open (upgraded) connections — heartbeat + shutdown iterate this. */
   const conns = new Set();
   const startedAt = Date.now();
+
+  // ── World layer state (presence + global chat) — separate from party rooms ──────
+  /** zoneKey -> { members: Map<conn, { snapshot: string|null }> }. Pub/sub, no seq. */
+  const presenceRooms = new Map();
+  /** Every conn currently joined to the ONE global chat room. */
+  const chatMembers = new Set();
+  /** Global chat ring buffer of { name, charId, text, t } (pruned by time + hard cap). */
+  const chatHistory = [];
 
   function emptySlot() {
     return { status: "empty", socket: null, userId: null, graceTimer: null };
@@ -411,6 +507,134 @@ function createRelay(opts = {}) {
     if (s.graceTimer.unref) s.graceTimer.unref();
   }
 
+  // --- world layer: presence rooms -------------------------------------------
+
+  /** Detach `conn` from its presence room (if any). Idempotent; drops empty rooms.
+   *  No peer broadcast — presence is lossy, peers despawn a ghost on silence. */
+  function leavePresence(conn) {
+    const zone = conn.presenceRoom;
+    if (!zone) return;
+    conn.presenceRoom = null;
+    const room = presenceRooms.get(zone);
+    if (!room) return;
+    room.members.delete(conn);
+    if (room.members.size === 0) presenceRooms.delete(zone);
+  }
+
+  function handlePresenceJoin(conn, msg) {
+    if (msg.v !== 1) return; // unknown protocol version — drop silently (deploy skew)
+    const payload = verifyPresenceTicket(msg.ticket, secret);
+    if (!payload) return closeConn(conn, CLOSE.BAD_TICKET, "bad presence ticket");
+    const zone = msg.zone;
+    if (typeof zone !== "string" || !zone || zone.length > 64)
+      return closeConn(conn, CLOSE.PROTOCOL, "bad zone");
+    leavePresence(conn); // a re-join (zone switch without pleave) never double-registers
+    let room = presenceRooms.get(zone);
+    if (!room) {
+      room = { members: new Map() };
+      presenceRooms.set(zone, room);
+    }
+    conn.presenceRoom = zone;
+    room.members.set(conn, { snapshot: null });
+    // Last-value cache: hand the joiner every OTHER member's cached snapshot at once
+    // (no "empty zone then people pop in" beat), bounded by the same fan cap.
+    let sent = 0;
+    for (const [other, m] of room.members) {
+      if (other === conn) continue;
+      if (sent >= cfg.presenceFan) break;
+      if (m.snapshot != null) {
+        sendText(conn.socket, m.snapshot);
+        sent++;
+      }
+    }
+  }
+
+  function handlePresence(conn, msg) {
+    if (msg.v !== 1) return; // unknown version — drop silently
+    const zone = conn.presenceRoom;
+    if (!zone) return closeConn(conn, CLOSE.PROTOCOL, "presence before pjoin");
+    const room = presenceRooms.get(zone);
+    if (!room) return;
+    if (!("payload" in msg)) return closeConn(conn, CLOSE.PROTOCOL, "no payload");
+    const payloadStr = JSON.stringify(msg.payload);
+    if (Buffer.byteLength(payloadStr, "utf8") > cfg.presenceMaxBytes)
+      return closeConn(conn, CLOSE.TOO_BIG, "presence payload too large");
+    const framed = `{"t":"p","payload":${payloadStr}}`;
+    const me = room.members.get(conn);
+    if (me) me.snapshot = framed; // last-value cache
+    // Fan to at most presenceFan OTHER members. Unordered, no seq — lossy by design.
+    let sent = 0;
+    for (const [other] of room.members) {
+      if (other === conn) continue;
+      if (sent >= cfg.presenceFan) break;
+      sendText(other.socket, framed);
+      sent++;
+    }
+  }
+
+  // --- world layer: global chat -----------------------------------------------
+
+  /** Drop ring-buffer entries older than the 30-min window, then enforce the hard cap. */
+  function pruneChat(nowMs) {
+    const cutoff = nowMs - cfg.chatHistoryMs;
+    while (chatHistory.length && chatHistory[0].t < cutoff) chatHistory.shift();
+    while (chatHistory.length > cfg.chatMaxEntries) chatHistory.shift();
+  }
+
+  function handleChatJoin(conn, msg) {
+    if (msg.v !== 1) return; // unknown version — drop silently
+    const payload = verifyPresenceTicket(msg.ticket, secret);
+    if (!payload) return closeConn(conn, CLOSE.BAD_TICKET, "bad chat ticket");
+    conn.chatJoined = true;
+    conn.chatName = payload.displayName; // FROM the signed ticket — unforgeable
+    conn.chatCharId = payload.charId;
+    chatMembers.add(conn);
+    pruneChat(now());
+    // Hand the joiner the current 30-min window immediately.
+    sendText(conn.socket, JSON.stringify({ t: "c-history", entries: chatHistory }));
+  }
+
+  function handleChat(conn, msg) {
+    if (msg.v !== 1) return; // unknown version — drop silently
+    if (!conn.chatJoined) return closeConn(conn, CLOSE.PROTOCOL, "chat before cjoin");
+    const nowMs = now();
+    // Chat-specific 1-per-2s throttle (SEPARATE from the general maxMsgPerSec flood
+    // guard): a breach is a SOFT reject — drop the msg + tell only the sender. Chat
+    // spam is not protocol abuse, so the socket is never killed.
+    if (conn.lastChatAt != null && nowMs - conn.lastChatAt < cfg.chatRateMs) {
+      sendText(conn.socket, JSON.stringify({ t: "c-rej", reason: "rate" }));
+      return;
+    }
+    // Text-only: coerce to string, trim, reject empty, truncate to the char cap. The
+    // server NEVER interprets content (no markup) — it only bounds + relays it.
+    let text = String(msg.text == null ? "" : msg.text).trim();
+    if (!text) return; // empty dropped silently (does not consume the rate window)
+    if (text.length > cfg.chatTextMax) text = text.slice(0, cfg.chatTextMax);
+    conn.lastChatAt = nowMs;
+    const entry = { name: conn.chatName, charId: conn.chatCharId, text, t: nowMs };
+    chatHistory.push(entry);
+    pruneChat(nowMs);
+    const framed = JSON.stringify({ t: "c", entry });
+    for (const other of chatMembers) sendText(other.socket, framed);
+  }
+
+  // --- world layer: ping echo -------------------------------------------------
+
+  /** Point-to-point echo — never fanned, never seq'd, allowed before any join. */
+  function handlePing(conn, msg) {
+    sendText(conn.socket, JSON.stringify({ t: "pong", n: msg.n }));
+  }
+
+  /** Drop a conn from ALL world memberships (presence + chat). Idempotent. Called from
+   *  every socket-death path so a vanished world socket leaves nothing behind. */
+  function cleanupWorld(conn) {
+    leavePresence(conn);
+    if (conn.chatJoined) {
+      chatMembers.delete(conn);
+      conn.chatJoined = false;
+    }
+  }
+
   // --- connection lifecycle ---
 
   function findConn(socket) {
@@ -421,6 +645,7 @@ function createRelay(opts = {}) {
   function closeConn(conn, code, reason) {
     if (!conn || conn.closed) return;
     conn.closed = true;
+    cleanupWorld(conn); // drop presence/chat membership (idempotent; party path below)
     sendClose(conn.socket, code, reason);
     try {
       conn.socket.end();
@@ -443,6 +668,20 @@ function createRelay(opts = {}) {
         return handleGame(conn, msg);
       case "leave":
         return handleLeave(conn);
+      // ── World layer (presence + global chat + ping) — see the top-of-file doc.
+      // These share ZERO state with party rooms above (separate conn fields).
+      case "pjoin":
+        return handlePresenceJoin(conn, msg);
+      case "p":
+        return handlePresence(conn, msg);
+      case "pleave":
+        return leavePresence(conn);
+      case "cjoin":
+        return handleChatJoin(conn, msg);
+      case "c":
+        return handleChat(conn, msg);
+      case "ping":
+        return handlePing(conn, msg);
       default:
         return; // unknown types ignored (forward-compat)
     }
@@ -523,6 +762,12 @@ function createRelay(opts = {}) {
       awaitingPong: false,
       clientCleanClose: false, // set true iff the client's OWN close frame carried code 1000
       msgTimes: [],
+      // World-layer membership (separate from party room/slot — never crosses).
+      presenceRoom: null, // zoneKey of the presence room this conn is in, or null
+      chatJoined: false, // true once cjoin succeeds
+      chatName: null,
+      chatCharId: null,
+      lastChatAt: null, // ms of the last accepted chat msg (2s throttle)
     };
     conns.add(conn);
 
@@ -572,6 +817,7 @@ function createRelay(opts = {}) {
     // — for a silently-dropped path with neither — the heartbeat pong timeout below.
     const onDead = () => {
       conns.delete(conn);
+      cleanupWorld(conn); // drop presence/chat membership on any socket death
       onSocketDead(conn);
       // Upgrade sockets can linger half-open on a bare FIN ('end'); fully tear the
       // socket down so it never keeps the process / server.close() waiting.
@@ -614,7 +860,7 @@ function createRelay(opts = {}) {
     server.close(cb);
   }
 
-  return { server, stats, close, rooms, CLOSE };
+  return { server, stats, close, rooms, presenceRooms, chatMembers, chatHistory, CLOSE };
 }
 
 // ---------------------------------------------------------------------------
@@ -639,4 +885,13 @@ if (require.main === module) {
   process.on("SIGINT", shutdown);
 }
 
-module.exports = { createRelay, verifyTicket, signTicket, OPCODE, MAX_SLOTS, CLOSE };
+module.exports = {
+  createRelay,
+  verifyTicket,
+  signTicket,
+  verifyPresenceTicket,
+  signPresenceTicket,
+  OPCODE,
+  MAX_SLOTS,
+  CLOSE,
+};

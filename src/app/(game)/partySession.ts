@@ -15,6 +15,7 @@
  */
 
 import { INPUT_DELAY_TURNS, type TurnMessage } from "@/engine/lockstep";
+import { zoneAt } from "@/engine";
 import type { FrameInput } from "@/engine";
 
 // ── Pure: zone beats -> cohort (design §3 "same-zone cohort") ─────────────────────
@@ -39,6 +40,14 @@ export function deriveCohort(
   myZone: ZoneBeat,
   beats: ReadonlyMap<number, ZoneBeat>,
 ): number[] {
+  // Fix C (owner "เมืองไม่ตั้งวง lockstep"): NEVER form a lockstep cohort while I'm in a
+  // town zone — everyone in town sims solo (still party-linked; the ghost layer shows
+  // peers) so bot restock/sell trips run their full town path instead of deadlocking on a
+  // shared cohort. `ZoneBeat` is `{mapId, zoneIdx}` = `WorldLocation`, so `zoneAt` (a pure
+  // CONFIG read) resolves it directly. Deterministic + identical on every client, so no
+  // town cohort ever forms; walking back out to a farm zone re-derives the cohort on the
+  // next beat. Engine-side town/farm-gate defenses stay as defense-in-depth for old peers.
+  if (zoneAt(myZone).kind === "town") return [mySlot];
   const slots = [mySlot];
   for (const [slot, beat] of beats) {
     if (slot !== mySlot && sameZone(beat, myZone)) slots.push(slot);
@@ -177,6 +186,10 @@ export interface PartySessionHandlers {
   /** The seq-gap detector fired (fatal) — the session has already torn itself down
    * and scheduled a rejoin with a fresh ticket; this is purely a diagnostic hook. */
   onFatalGap?: () => void;
+  /** Wave 3 network HUD: the relay echoed a `ping` I sent (point-to-point, never
+   * fanned/seq'd — protocol §"PING ECHO"). `n` is whatever I stamped the ping with
+   * (the caller uses `Date.now()`, so `Date.now() - n` is the RTT sample). */
+  onPong?: (n: number) => void;
 }
 
 const HEALTH_PREWAKE_TIMEOUT_MS = 60_000;
@@ -262,8 +275,19 @@ export class PartySession {
   /** Send an opaque game payload (a lockstep `TurnMessage`, typically). No-op while
    * not connected — the caller's own turn-buffering logic handles the gap. */
   send(payload: unknown): void {
+    this.sendRaw({ t: "g", payload });
+  }
+
+  /** Wave 3 network HUD: fire a `{t:"ping", n}` — the relay echoes it back
+   * point-to-point as `{t:"pong", n}` (never fanned, never seq'd). No-op while not
+   * connected (the caller's ~5s accumulator just tries again next tick). */
+  ping(n: number): void {
+    this.sendRaw({ t: "ping", n });
+  }
+
+  private sendRaw(obj: unknown): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ t: "g", payload }));
+    this.ws.send(JSON.stringify(obj));
   }
 
   teardown(): void {
@@ -461,6 +485,9 @@ export class PartySession {
           // for the same reason as the member-joined case above.
           if (slot !== this.mySlot) this.broadcastZoneBeat();
         }
+        break;
+      case "pong":
+        if (typeof msg.n === "number") this.handlers.onPong?.(msg.n);
         break;
       default:
         break; // unknown t — forward-compat, ignored (protocol §3/§4)

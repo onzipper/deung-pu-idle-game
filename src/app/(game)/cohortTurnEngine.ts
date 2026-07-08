@@ -105,6 +105,11 @@ export class CohortTurnEngine {
   private execAccumMs = 0;
   /** `nowMs` at the last tick that actually ran a sub-step (for the waiting chip). */
   private lastProgressAt: number;
+  /** Last-delivered `executeTurn` PER OTHER SLOT (never `myIndex` — my own progress is
+   *  `issueTurn`), fed by `deliver()` below. Wave 3 network HUD's `perSlotLag()` reads
+   *  this to report how many turns behind a peer's lane is; pure bookkeeping that never
+   *  feeds back into scheduling/assembly (touching it can't affect determinism). */
+  private readonly lastReceivedTurn = new Map<number, number>();
 
   /**
    * Cohort indexes whose owner is SHADOWED (socket dead / hidden tab / left the zone):
@@ -149,6 +154,10 @@ export class CohortTurnEngine {
       this.buffer.set(msg.executeTurn, lane);
     }
     lane.set(msg.slot, msg.input);
+    if (msg.slot !== this.myIndex) {
+      const prev = this.lastReceivedTurn.get(msg.slot) ?? -1;
+      if (msg.executeTurn > prev) this.lastReceivedTurn.set(msg.slot, msg.executeTurn);
+    }
     return true;
   }
 
@@ -172,8 +181,10 @@ export class CohortTurnEngine {
     return true;
   }
 
-  /** Count consecutive fully-buffered (completeness-checked) turns from the execute cursor. */
-  private bufferedAhead(): number {
+  /** Count consecutive fully-buffered (completeness-checked) turns from the execute cursor.
+   *  Public (Wave 3 network HUD): a read-only depth signal for the signal-chip popover —
+   *  never mutates scheduler state, safe to poll from the frame loop at any cadence. */
+  bufferedAhead(): number {
     let n = 0;
     let t = this.turn;
     while (this.laneComplete(this.buffer.get(t))) {
@@ -181,6 +192,27 @@ export class CohortTurnEngine {
       t++;
     }
     return n;
+  }
+
+  /**
+   * Lane lag per cohort index (Wave 3 network HUD, docs/ghost-presence-design.md): for
+   * every NON-shadowed peer index, `issueTurn - lastReceivedExecuteTurn` — how many turns
+   * behind that peer's most-recently-seen lane is relative to MY current issue cursor, in
+   * TURNS (the caller multiplies by `TURN_MS` for a display-ms figure). A star topology
+   * can't measure peer-to-peer RTT directly, so this is the honest substitute: it reads
+   * as ~0 for a peer keeping pace and grows for one that's actually behind. An index with
+   * no delivered lane yet reports the full `INPUT_DELAY_TURNS` gap (the worst case any
+   * lane could be in) rather than being omitted, so a fresh/silent peer still shows up
+   * instead of vanishing from the popover. Read-only — never touched by scheduling.
+   */
+  perSlotLag(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (let i = 0; i < this.cohortSize; i++) {
+      if (i === this.myIndex || this.shadowedIndexes.has(i)) continue;
+      const last = this.lastReceivedTurn.get(i) ?? this.issueTurn - INPUT_DELAY_TURNS;
+      out.set(i, Math.max(0, this.issueTurn - last));
+    }
+    return out;
   }
 
   /**

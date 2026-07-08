@@ -47,6 +47,41 @@ describe("deriveCohort", () => {
     beats.delete(2);
     expect(deriveCohort(0, zoneA, beats)).toEqual([0, 1]);
   });
+
+  // ── fix C: NEVER form a lockstep cohort while I'm in a town zone ──────────────────
+  // map1 layout (CONFIG): zoneIdx 0 = town, 1..5 = farm, 6 = boss.
+  const town: ZoneBeat = { mapId: "map1", zoneIdx: 0 };
+  const farm: ZoneBeat = { mapId: "map1", zoneIdx: 2 };
+  const boss: ZoneBeat = { mapId: "map1", zoneIdx: 6 };
+
+  it("fix C: a town beat NEVER cohorts, even with same-zone peers standing in town", () => {
+    const beats = new Map<number, ZoneBeat>([
+      [1, town],
+      [2, town],
+    ]);
+    expect(deriveCohort(0, town, beats)).toEqual([0]);
+  });
+
+  it("fix C: farm zones still form cohorts as before", () => {
+    const beats = new Map<number, ZoneBeat>([[1, farm]]);
+    expect(deriveCohort(0, farm, beats)).toEqual([0, 1]);
+  });
+
+  it("fix C: boss zones still form cohorts as before", () => {
+    const beats = new Map<number, ZoneBeat>([
+      [1, boss],
+      [2, boss],
+    ]);
+    expect(deriveCohort(0, boss, beats)).toEqual([0, 1, 2]);
+  });
+
+  it("fix C: walking OUT of town into a farm zone re-forms the cohort on the next beat", () => {
+    const beats = new Map<number, ZoneBeat>([[1, farm]]);
+    // Peer is farming; while I'm in town I see only myself…
+    expect(deriveCohort(0, town, beats)).toEqual([0]);
+    // …then I walk to the peer's farm zone and the cohort re-derives immediately.
+    expect(deriveCohort(0, farm, beats)).toEqual([0, 1]);
+  });
 });
 
 // ── liveCohortSlots (D1/D2: a shadowed member never acks — filter it out of formation) ─

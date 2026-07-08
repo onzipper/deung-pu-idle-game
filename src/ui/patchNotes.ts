@@ -307,6 +307,23 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09i.items.rename",
     ],
   },
+  // "World layer" round (owner vision: เห็นคนอื่นในโลก): ghost presence (see other
+  // players walk/idle in your zone — render-only, docs/ghost-presence-design.md),
+  // global chat (text-only, 30-min history), the signal-bar party chip replacing the
+  // debug-looking cohort strip, the DropFeed corner coalesce, and the cohort live-bug
+  // fix wave (position/bot-toggle/zone-gauge/town-bot — plan ghost-woolly-patterson).
+  {
+    id: "2026-07-09j",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09j.items.ghosts",
+      "releases.2026-07-09j.items.chat",
+      "releases.2026-07-09j.items.signal",
+      "releases.2026-07-09j.items.dropCorner",
+      "releases.2026-07-09j.items.townSolo",
+      "releases.2026-07-09j.items.partyFixes",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

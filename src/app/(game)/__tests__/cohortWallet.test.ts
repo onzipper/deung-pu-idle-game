@@ -4,6 +4,7 @@ import {
   dropAssignedIndex,
   heroConfigDiff,
   myAutoHuntDisplay,
+  nextAutoHuntWish,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
@@ -35,6 +36,43 @@ describe("walletSliceFrom", () => {
     });
     slice.consumables.hpPotion = 0;
     expect(s.consumables.hpPotion).toBe(7); // clone, not alias
+  });
+});
+
+describe("nextAutoHuntWish (owner bug batch A #2 — bot master toggle in a cohort)", () => {
+  it("latches a freshly-drained toggle intent", () => {
+    // Player taps OFF (setAutoHunt=false); hero config still ON — latch holds false.
+    expect(nextAutoHuntWish(null, false, true)).toBe(false);
+    // Player taps ON (setAutoHunt=true); hero config still OFF — latch holds true.
+    expect(nextAutoHuntWish(null, true, false)).toBe(true);
+  });
+
+  it("SURVIVES stale-mirror drains: no new intent, config not yet caught up -> holds the wish", () => {
+    // Frame 1 latched false; subsequent frames have no pending intent (undefined) and the
+    // config mirror is still stale (true) — the wish must NOT be dropped.
+    expect(nextAutoHuntWish(false, undefined, true)).toBe(false);
+    expect(nextAutoHuntWish(false, null, true)).toBe(false);
+  });
+
+  it("CLEARS on confirm: releases the latch once the hero config matches the wish", () => {
+    // Config has caught up to the wished-for OFF -> release to null (fall back to store).
+    expect(nextAutoHuntWish(false, undefined, false)).toBeNull();
+    expect(nextAutoHuntWish(true, undefined, true)).toBeNull();
+  });
+
+  it("rapid toggles: the LAST drained intent supersedes a still-latched prior wish", () => {
+    // Prior wish was ON (true) and hasn't landed (config still OFF); the player now taps
+    // OFF — the fresh intent wins, so the latch flips to false (config true would match, but
+    // here config is still true from before it turned on, so the wish holds).
+    expect(nextAutoHuntWish(true, false, true)).toBe(false);
+    // And an immediate opposite re-tap that happens to match the CURRENT config releases
+    // (nothing to replicate — config already reflects the desired value).
+    expect(nextAutoHuntWish(false, true, true)).toBeNull();
+  });
+
+  it("a redundant toggle to the CURRENT config value latches nothing", () => {
+    // Tapping OFF while already OFF: wish=false but config already false -> released.
+    expect(nextAutoHuntWish(null, false, false)).toBeNull();
   });
 });
 

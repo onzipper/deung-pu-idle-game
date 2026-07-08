@@ -126,6 +126,7 @@ import {
   writeUiConfig,
   type DailyBoardSummary,
   type CohortStatusState,
+  type CohortNetState,
   type DailyQuestSummary,
   type EngineSnapshot,
   type HeroQuestSummary,
@@ -168,6 +169,7 @@ import {
   type PartyConnStatus,
 } from "./partySession";
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
+import { emaRtt, pickWaitingSlot } from "./cohortNet";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
@@ -176,12 +178,24 @@ import {
   dropAssignedIndex,
   heroConfigDiff,
   myAutoHuntDisplay,
+  nextAutoHuntWish,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
 } from "./cohortWallet";
-import { applyProgressSlice, progressSliceFrom, type ProgressSlice } from "./cohortProgress";
+import {
+  applyProgressSlice,
+  liveZoneKills,
+  progressSliceFrom,
+  settleProgressSlice,
+  type ProgressSlice,
+} from "./cohortProgress";
 import { TimeDirector } from "./timeDirector";
+import { WorldSession } from "./presence/worldSession";
+import { GhostStore, GHOST_CAP_DEFAULT } from "./presence/ghostStore";
+import { buildPresenceSnapshot, shouldPublish, type PresenceSnapshot } from "./presence/presencePublish";
+import { parseChatFrame } from "@/ui/chat/chatMessages";
+import { onSendChatRequest } from "@/ui/chat/chatSendSignal";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
  * relay `g` payloads (handshake messages / lockstep `TurnMessage`s) — mirrors
@@ -257,6 +271,16 @@ const CATCHUP_MIN_HIDDEN_MS = 5_000;
 
 /** Wall time between periodic autosave POSTs. */
 const AUTOSAVE_INTERVAL_MS = 30_000;
+
+/** Ghost-presence publish cadence (~3Hz, docs/ghost-presence-design.md §3). One snapshot
+ * of MY hero per beat, sent only when it changed or every 3rd beat (keepalive). */
+const PRESENCE_BEAT_MS = 330;
+
+/** Wave 3 network HUD (docs/ghost-presence-design.md): RTT ping cadence over the PARTY
+ * socket (relay echoes it point-to-point) and the `cohortNet` store-push cadence. Both
+ * are wall-clock accumulators like `PRESENCE_BEAT_MS` above, not per-rAF-frame writes. */
+const COHORT_PING_INTERVAL_MS = 5_000;
+const COHORT_NET_PUSH_MS = 1_000;
 
 /**
  * Wall-clock budget for replaying capped offline-idle time synchronously on
@@ -887,12 +911,31 @@ export function GameClient() {
      * active (`serialize()`) and restored verbatim on `collapseToSolo()` — the fix for the
      * "partying with a deep player permanently unlocked my zones" live bug. Null while solo. */
     let cohortProgressBase: ProgressSlice | null = null;
+    /** PROGRESSION-INTEGRITY, owner bug batch B: the SHARED cohort pot's `zoneKills` at the
+     * moment I joined (or re-seeded) — the baseline `settleProgressSlice` measures the pot's
+     * kill-delta against, so I get FULL credit for kills made while in the cohort without
+     * double-counting across re-seeds (mirrors `cohortSharedBase`'s role for the wallet).
+     * Null while solo. */
+    let cohortZoneKillsBase: Record<string, number> | null = null;
+    /** Owner bug batch A #2: my CLIENT-LOCAL bot-master toggle wish latch (see
+     * `nextAutoHuntWish`). Holds a pressed `autoHunt` value until my hero's replicated
+     * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
+    let cohortAutoHuntWish: boolean | null = null;
     /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
      * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
     let cohortEngine: CohortTurnEngine | null = null;
     /** Last-seen `waiting` value from the engine, to detect chip transitions per frame. */
     let cohortPrevWaiting = false;
     let lastZoneKey: string | null = null;
+
+    // ---- Wave 3 "signal chip" network HUD (docs/ghost-presence-design.md) ----
+    /** EMA-smoothed RTT to the relay over the PARTY socket (`partySession.ping`'s pong
+     * echo), or `null` before the first sample. Survives cohort collapse/reform (still
+     * meaningful once reconnected — a fresh EMA seed on the next pong reads fine either
+     * way, so this is deliberately never reset). */
+    let cohortRttMs: number | null = null;
+    let cohortPingAccumMs = 0;
+    let cohortNetAccumMs = 0;
 
     // ---- HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) ----
     /** At most one `/api/hof/rewards` fetch in flight — refreshed on every town
@@ -1069,6 +1112,16 @@ export function GameClient() {
       );
     }
 
+    /** My personal, FULL-CREDIT zone-unlock progress reconstructed from the live shared
+     * cohort pot (cohortProgress.ts, owner bug batch B) — my frozen base + the pot's
+     * kill-delta since I joined. Null while solo / before the bases are set. NEVER writes to
+     * `state`. Reads the live current-zone counter (`liveZoneKills`) so a kill made THIS
+     * frame is credited immediately (both to the HUD gauge and to any save that lands). */
+    function settledProgress(): ProgressSlice | null {
+      if (!cohortActive || !cohortProgressBase || !cohortZoneKillsBase) return null;
+      return settleProgressSlice(cohortProgressBase, cohortZoneKillsBase, liveZoneKills(state));
+    }
+
     /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
      * `buildCohortState` primitive (`extractSoloState`), resume the ordinary solo
      * accumulator loop next frame. */
@@ -1079,7 +1132,11 @@ export function GameClient() {
       // authority-seeded pot). Overwrite the rebuilt solo wallet with my settled share so
       // leaving a party keeps my own gold/materials/potions, not the shared pot's.
       const settled = myVirtualWallet();
-      const progress = cohortProgressBase;
+      // PROGRESSION-INTEGRITY (owner bug batch B): settle my FULL-CREDIT zone-unlock
+      // progress from the live shared pot BEFORE the extract rebuilds `state` off the shared
+      // slice — kills I made inside the cohort accrue to my own `zoneKills`, so leaving the
+      // party keeps them (and the accumulated count unlocks the zone once I'm solo).
+      const settledProg = settledProgress();
       state = extractSoloState(state, myCohortIndex, seed);
       if (settled) {
         state.gold = settled.gold;
@@ -1089,15 +1146,18 @@ export function GameClient() {
       }
       // PROGRESSION-INTEGRITY: `extractSoloState` rebuilds `location`/`unlockedZones`/
       // `stage`/`zoneKills`/`lastFarmZone`/`bossBest`/`levelCapAt` from the cohort's SHARED
-      // slice (`sharedSaveFromState`) — restore MY OWN frozen snapshot over it instead, so
-      // leaving a party never adopts a deep friend's world unlocks (or, for the asura/tome
-      // fields — not part of the shared slice at all — resets them from the fresh rebuild's
-      // zeroed defaults back to what I actually had). Safe to mutate here: this `state` is
-      // the freshly-built SOLO state, no longer shared with any other client.
-      if (progress) applyProgressSlice(state, progress);
+      // slice (`sharedSaveFromState`) — restore my SETTLED snapshot over it instead (my
+      // frozen base + full credit for kills made in the cohort, batch B), so leaving a party
+      // never adopts a deep friend's world unlocks (or, for the asura/tome fields — not part
+      // of the shared slice at all — resets them from the fresh rebuild's zeroed defaults
+      // back to what I actually had). Safe to mutate here: this `state` is the freshly-built
+      // SOLO state, no longer shared with any other client.
+      if (settledProg) applyProgressSlice(state, settledProg);
       cohortWalletBase = null;
       cohortSharedBase = null;
       cohortProgressBase = null;
+      cohortZoneKillsBase = null;
+      cohortAutoHuntWish = null;
       cohortActive = false;
       handshake?.abort();
       handshake = null;
@@ -1108,6 +1168,12 @@ export function GameClient() {
       renderer.setHeroDisplayNames(null);
       renderer.setPovHeroIndex(0);
       pushCohortStatus({ kind: "solo" });
+      // Wave 3 network HUD: clear the popover's stale member rows immediately (the chip
+      // itself is already hidden by "solo" above — this just keeps `cohortNet` honest for
+      // the instant something reads it before the next push). RTT survives (still
+      // meaningful — the party socket itself may still be connected).
+      cohortNetAccumMs = 0;
+      useGameStore.getState().setCohortNet({ rttMs: cohortRttMs, waitingOnSlot: null, perMember: [] });
       pushHeroSocialBadges(); // switch the nameplate/aura seam back to my solo badge
     }
 
@@ -1132,12 +1198,14 @@ export function GameClient() {
         myProgression,
         mySharedSave: sharedSaveFromState(state),
         mintSeed: () => Date.now() >>> 0,
-        // Owner bug batch A #2 ("position reset on cohort re-form"): attach my CURRENT
-        // x ONLY when this re-seed continues a cohort I was ALREADY active in — e.g.
-        // someone else joins/leaves my zone and everyone's handshake restarts. A fresh
-        // solo->cohort join has no meaningful position in this cohort yet, so it's
-        // omitted and the joiner spawns at the formation anchor, same as before.
-        myX: cohortActive ? myHero.x : undefined,
+        // Owner bug batch A #1 ("position reset on cohort re-form"): attach my CURRENT x
+        // ALWAYS. The unshadow/reconnect paths collapse to solo BEFORE re-handshaking, so
+        // `cohortActive` is already false by the time we get here — the old
+        // `cohortActive ? … : undefined` gate silently dropped x on exactly those paths,
+        // re-spawning me at the anchor every trip. Sending my real x on a fresh
+        // solo->cohort join is correct too (I'm standing somewhere in the zone already),
+        // and old-format offers without x still anchor-default (ReseedOfferMsg.x optional).
+        myX: myHero.x,
       });
       handshakeStartedAt = performance.now();
       handshake.start();
@@ -1157,15 +1225,20 @@ export function GameClient() {
       // size (state is overwritten below). Computed via `myVirtualWallet` which reads the
       // current bases + live state.
       const preWallet: WalletSlice = myVirtualWallet() ?? walletSliceFrom(state);
-      // PROGRESSION-INTEGRITY: my progress base is FROZEN at whatever it already was if
-      // this is a re-seed of an already-active cohort (it never drifts while active, so
-      // there's nothing new to capture); otherwise (a fresh join from solo) snapshot my
-      // current world-progression fields right now, before `state` is overwritten below.
-      const preProgress: ProgressSlice = cohortProgressBase ?? progressSliceFrom(state);
+      // PROGRESSION-INTEGRITY (owner bug batch B): my progress base for the NEW cohort is my
+      // SETTLED slice — on a re-seed of an already-active cohort that folds the OLD pot's
+      // full kill-credit into my base FIRST (mirrors the wallet's `myVirtualWallet` re-base),
+      // so re-seeds never double-count; on a fresh join from solo `settledProgress()` is null
+      // and we snapshot my current world-progression fields as-is.
+      const preProgress: ProgressSlice = settledProgress() ?? progressSliceFrom(state);
       state = built;
       cohortWalletBase = preWallet;
       cohortSharedBase = walletSliceFrom(built);
       cohortProgressBase = preProgress;
+      // Baseline the pot's zoneKills for THIS cohort (what `settleProgressSlice` measures the
+      // shared kill-delta against) + clear the bot-toggle wish latch for the fresh cohort.
+      cohortZoneKillsBase = liveZoneKills(built);
+      cohortAutoHuntWish = null;
       handshake = null;
       handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS; // converged — reset the backoff
       cohortActive = true;
@@ -1364,7 +1437,67 @@ export function GameClient() {
       onGameMessage: onPartyGameMessage,
       onStatusChange: onPartyStatusChange,
       onMemberShadowChanged: onPartyMemberShadowChanged,
+      // Wave 3 network HUD: `n` is the `Date.now()` I stamped the ping with, so the
+      // round trip is just "now minus that" — EMA-smoothed for display stability.
+      onPong: (n) => {
+        cohortRttMs = emaRtt(cohortRttMs, Date.now() - n, 0.3);
+      },
     });
+
+    // ---- Ghost presence "world layer" (docs/ghost-presence-design.md). A SEPARATE socket
+    // from `partySession` that carries render-only presence (+ chat, later). THE ONE RULE:
+    // inbound presence flows ONLY into `ghostStore`; it has no path into `pendingInput`,
+    // `state`, or the lockstep stream (invariants §2). Dormant unless `ghostsVisible` &&
+    // the tab is visible — solo/feature-off costs nothing beyond one boolean per frame. ----
+    const ghostStore = new GhostStore();
+    const worldSession = new WorldSession({
+      onGhost: (payload) => ghostStore.upsert(payload, performance.now()),
+      // Wave 3 "chat UI": parse the raw relay frame (the ONE place that trusts its
+      // shape, see `ui/chat/chatMessages.ts`) and hand the typed result straight to the
+      // store — mirrors `onGhost` -> `ghostStore.upsert` above, just a different sink.
+      onChat: (frame) => {
+        const parsed = parseChatFrame(frame);
+        if (!parsed) return;
+        if (parsed.kind === "history") {
+          useGameStore.getState().ingestChatHistory(parsed.entries);
+        } else if (parsed.kind === "message") {
+          useGameStore.getState().ingestChatMessage(parsed.entry);
+        } else {
+          useGameStore.getState().pushNotice("chatRateLimited");
+        }
+      },
+    });
+    /** Presence publish accumulator (≈330ms beat) + monotonic seq + last-SENT snapshot for
+     * change detection. Purely local publish bookkeeping — never read by the sim. */
+    let presenceAccumMs = 0;
+    let presenceBeatIndex = 0;
+    let presenceSeq = 0;
+    let lastSentPresence: PresenceSnapshot | null = null;
+    /** fps valve (design §7): a smoothed frame-time EMA steps the ghost cap 12→6→0 so a
+     * struggling device sheds ghost rigs first. Client-local, display-only. */
+    let ghostFpsEmaMs = 1000 / 60;
+    let ghostCap = GHOST_CAP_DEFAULT;
+    /** Drives `worldSession.connect/disconnect`: on only while EITHER the ghosts flag is
+     * set OR the chat panel is open, AND the tab is visible. Recomputed by
+     * `syncWorldSessionActive()`. */
+    let ghostsFeatureOn = useGameStore.getState().ghostsVisible;
+    /** Wave 3 "chat UI": the socket must stay open while the chat panel is open even if
+     * ghost-presence is off — decoupled per docs/ghost-presence-design.md Wave 3. */
+    let chatFeatureOn = useGameStore.getState().chatOpen;
+    let unsubscribeGhosts: (() => void) | undefined;
+    let unsubscribeChatOpen: (() => void) | undefined;
+    let unsubscribeChatSend: (() => void) | undefined;
+    function syncWorldSessionActive(): void {
+      const active = (ghostsFeatureOn || chatFeatureOn) && document.visibilityState === "visible";
+      worldSession.setPresenceEnabled(ghostsFeatureOn);
+      if (active) {
+        worldSession.connect();
+      } else {
+        worldSession.disconnect();
+        ghostStore.clear();
+        renderer.setGhosts([]);
+      }
+    }
 
     let rafId = 0;
     let lastTime = performance.now();
@@ -1789,7 +1922,16 @@ export function GameClient() {
           zoneAt(state.location).kind === "farm"
         ) {
           const want = wantsBotTownTrip(
-            state.bot,
+            // A2: gate BOTH bot chores on MY hero's master switch (`config.autoHunt`) — the
+            // shared `state.bot.enabled`/`sellTripEnabled` flags are lane-0-owned, so without
+            // this a member whose master is OFF would still be dragged on a leader-driven trip
+            // (and a member with it ON couldn't trip if the leader's was off). AND-ing per
+            // hero makes the leave-decision honour MY own toggle.
+            {
+              ...state.bot,
+              enabled: state.bot.enabled && myHero.config.autoHunt,
+              sellTripEnabled: state.bot.sellTripEnabled && myHero.config.autoHunt,
+            },
             { hpPotion: myWallet.consumables.hpPotion ?? 0, manaPotion: myWallet.consumables.manaPotion ?? 0 },
             myWallet.gold,
             shopStageOf(state),
@@ -1822,26 +1964,35 @@ export function GameClient() {
             const pending = store.drainPendingInput();
             if (pending.buyShopItem) manualBuyThisFrame = true;
             const input = buildFrameInput(pending, store.inventory.length, myCohortIndex);
-            // Bot-toggle fix (defense-in-depth, see `myAutoHuntDisplay`'s doc): the LEGACY
-            // `setAutoHunt` intent (from `toggleBotMaster`) only ever writes the SHARED,
-            // lane-0-owned `state.autoHunt` global (`step()`'s `primary.setAutoHunt`) —
-            // superseded in a cohort by the per-hero `setHeroConfig` replication below, which
-            // now reads a correctly-personal `store.autoHunt`. Drop it here so a lane-0 member
-            // (the leader) never mutates that pointless-but-persisted/hashed shared field
-            // (which would otherwise still bleed into `SharedCohortSave`); a non-lane-0
-            // member's copy is already redundant with `setHeroConfig` (both target the SAME
-            // hero) and equally safe to drop.
+            // Bot-master toggle fix (owner bug batch A #2): LATCH the pressed `autoHunt` from
+            // this frame's drained intent (`input.setAutoHunt`) BEFORE stripping it. `store.
+            // autoHunt` is a mirror of the SHARED lane-0 field and never reflects my own
+            // toggle in a cohort, so feeding it raw into `desiredHeroConfig` below makes the
+            // diff perpetually null (the toggle does nothing). The wish holds my value until
+            // my hero's replicated config confirms it landed — then releases to the mirror.
+            cohortAutoHuntWish = nextAutoHuntWish(
+              cohortAutoHuntWish,
+              input.setAutoHunt,
+              state.heroes[myCohortIndex]?.config.autoHunt ?? store.autoHunt,
+            );
+            // Strip the LEGACY `setAutoHunt` intent: `step()` applies it lane-0-only
+            // (`primary.setAutoHunt`), so the leader's copy would mutate the SHARED
+            // `state.autoHunt` for everyone (and bleed into `SharedCohortSave`), and a
+            // member's copy is dead — the per-hero `setHeroConfig` replication below is the
+            // ONLY correct channel. Same for `setBotSettings` (also lane-0-only in `step()`:
+            // a leader's edit rewrites the shared `state.bot` under every member).
             input.setAutoHunt = undefined;
+            input.setBotSettings = undefined;
             // ECONOMY-INTEGRITY / mid-cohort automation: solo's global config mirror
             // (`syncPrimaryHeroConfig`) no-ops at heroes.length >= 2, so a bot/auto-cast/
             // potion toggle would be DEAD in a cohort. Derive my desired config from the
-            // store (same recipe as the solo frame block), diff it against my hero's
-            // current config, and replicate any change on my lane — the engine applies it
-            // lane-index -> hero, so it lands (deterministically, on every client) within
-            // one turn. Re-sent until the change is observed in `state` (idempotent).
+            // store (same recipe as the solo frame block, but the master switch reads the
+            // latched wish), diff it against my hero's current config, and replicate any
+            // change on my lane — the engine applies it lane-index -> hero, so it lands
+            // (deterministically, on every client) within one turn. Re-sent until observed.
             const diff = heroConfigDiff(
               desiredHeroConfig({
-                autoHunt: store.autoHunt,
+                autoHunt: cohortAutoHuntWish ?? store.autoHunt,
                 autoCast: store.autoCast,
                 autoAllocate: store.autoAllocate,
                 autoHpPotion: store.autoHpPotion,
@@ -1885,6 +2036,92 @@ export function GameClient() {
         }
       }
 
+      // ---- Wave 3 "signal chip" network HUD (docs/ghost-presence-design.md) ----
+      // RTT ping over the PARTY socket (~5s cadence; `partySession.ping` no-ops
+      // internally while the socket isn't OPEN, so this accumulator can run
+      // unconditionally without an extra "am I connected" branch here) + a ~1Hz push of
+      // per-member lane lag/names into `cohortNet` for the chip's tap-to-open popover.
+      cohortPingAccumMs += elapsed * 1000;
+      if (cohortPingAccumMs >= COHORT_PING_INTERVAL_MS) {
+        cohortPingAccumMs -= COHORT_PING_INTERVAL_MS;
+        partySession.ping(Date.now());
+      }
+      if (cohortActive && cohortEngine) {
+        cohortNetAccumMs += elapsed * 1000;
+        if (cohortNetAccumMs >= COHORT_NET_PUSH_MS) {
+          cohortNetAccumMs = 0;
+          const lagMap = cohortEngine.perSlotLag();
+          const perMember: CohortNetState["perMember"] = [];
+          lastCohortSlots.forEach((ticketSlot, idx) => {
+            if (ticketSlot === myTicketSlot) return;
+            perMember.push({
+              slot: ticketSlot,
+              name: cohortMemberNames.get(ticketSlot) ?? null,
+              lagTurns: lagMap.get(idx) ?? 0,
+              shadowed: shadowedTicketSlots.has(ticketSlot),
+            });
+          });
+          useGameStore.getState().setCohortNet({
+            rttMs: cohortRttMs,
+            waitingOnSlot: pickWaitingSlot(cohortPrevWaiting, perMember),
+            perMember,
+          });
+        }
+      } else if (cohortNetAccumMs !== 0) {
+        // Cohort just ended — clear the stale member rows once (cheap transition-only
+        // write; `cohortNetAccumMs` only ever moves inside the branch above, so this
+        // guard fires exactly once per collapse, never every solo frame).
+        cohortNetAccumMs = 0;
+        useGameStore.getState().setCohortNet({ rttMs: cohortRttMs, waitingOnSlot: null, perMember: [] });
+      }
+
+      // ---- Ghost presence (render-only; THE ONE RULE — never touches `state`) ----
+      // Publish MY hero read-only on a ~3Hz beat, and feed the peer render list to the
+      // renderer. Gated on the feature flag; a disabled/dormant socket makes this a couple
+      // of cheap boolean checks. `worldSession.me`/`publish` no-op until the socket is up.
+      if (ghostsFeatureOn) {
+        const me = worldSession.me;
+        // My hero is `heroes[myCohortIndex]` in a cohort (index 0 solo) — same resolution
+        // every other "my hero" read in this loop uses. Read-only: `buildPresenceSnapshot`
+        // samples x/cls/tier and returns a fresh object, never mutating `state`.
+        const myHero = state.heroes[myCohortIndex] ?? state.heroes[0];
+        presenceAccumMs += elapsed * 1000;
+        if (presenceAccumMs >= PRESENCE_BEAT_MS) {
+          presenceAccumMs = 0;
+          if (me && myHero) {
+            const candidate = buildPresenceSnapshot(
+              myHero,
+              { charId: me.charId, displayName: me.displayName },
+              presenceSeq + 1,
+            );
+            if (shouldPublish(lastSentPresence, candidate, presenceBeatIndex)) {
+              presenceSeq++;
+              worldSession.publish(candidate);
+              lastSentPresence = candidate;
+            }
+            presenceBeatIndex++;
+          }
+        }
+        // fps valve: smooth the frame time and step the cap down on sustained slowness
+        // (design §7). Thresholds ~45fps → 6, ~30fps → 0; recovers when frames speed up.
+        ghostFpsEmaMs += (elapsed * 1000 - ghostFpsEmaMs) * 0.05;
+        const wantCap = ghostFpsEmaMs > 33 ? 0 : ghostFpsEmaMs > 22 ? 6 : GHOST_CAP_DEFAULT;
+        if (wantCap !== ghostCap) {
+          ghostCap = wantCap;
+          ghostStore.setCap(ghostCap);
+        }
+        // Dedupe: never render my OWN ghost, nor a cohort peer (already a fully-simulated
+        // real hero in my field). Peers key on displayName — the party wire carries no
+        // charId (see `GhostStore.setExcluded`). Cheap set rebuild per frame.
+        const excluded = new Set<string>();
+        if (me) excluded.add(me.charId);
+        if (cohortActive) for (const n of cohortMemberNames.values()) excluded.add(n);
+        ghostStore.setExcluded(excluded);
+        const nowMs = performance.now();
+        ghostStore.prune(nowMs);
+        renderer.setGhosts(ghostStore.list(nowMs));
+      }
+
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
 
@@ -1895,6 +2132,11 @@ export function GameClient() {
       if (zoneKey !== lastZoneKey) {
         lastZoneKey = zoneKey;
         partySession.setZone(state.location.mapId, state.location.zoneIdx);
+        // Same seam drives the world socket's presence room (pleave+pjoin). Idempotent:
+        // `setZone` no-ops if the zone is unchanged, and does nothing while disconnected
+        // (the next open re-`pjoin`s the current zone). Presence rides EVERY zone,
+        // including town (the social space) — unlike lockstep cohorts, which skip town.
+        worldSession.setZone(state.location.mapId, state.location.zoneIdx);
       }
 
       // ---- M7.5 bot-status toasts (transition detection; engine untouched) ----
@@ -2082,16 +2324,25 @@ export function GameClient() {
                 ]
               : state.heroes;
           const w = myVirtualWallet();
+          // PROGRESSION-INTEGRITY (owner bug batch B): the zone-unlock gauge (`buildSnapshot`
+          // reads `state.kills`) must show MY full-credit progress, not the shared pot's raw
+          // counter — override it with my settled current-zone value (throwaway-view spread,
+          // exactly like the wallet override; NEVER writes the live `state`, so it can't
+          // enter the hash). `unlockedZones` stays the shared live value (display only).
+          const settledProg = settledProgress();
+          const zk = `${state.location.mapId}:${state.location.zoneIdx}`;
+          const kills = settledProg ? (settledProg.zoneKills[zk] ?? state.kills) : state.kills;
           snapState = w
             ? {
                 ...state,
                 heroes,
+                kills,
                 gold: w.gold,
                 goldEarned: w.goldEarned,
                 materials: w.materials,
                 consumables: { ...state.consumables, ...w.consumables },
               }
-            : { ...state, heroes };
+            : { ...state, heroes, kills };
         }
         store.syncFromEngine(buildSnapshot(snapState));
       }
@@ -2122,12 +2373,15 @@ export function GameClient() {
         const base = { ...state, heroes: [mine] };
         // PROGRESSION-INTEGRITY (cohortProgress.ts): same shape as the wallet override —
         // `base` is a THROWAWAY shallow clone (never the live `state`, so mutating its
-        // scalar fields here can't desync the lockstep sim), overwritten with MY frozen
-        // world-progression snapshot so autosave/the hide beacon never persist a deep
-        // friend's zone unlocks (or wipe my own asura/tome progress, which isn't part of
-        // the shared slice at all and would otherwise save as the cohort rebuild's zeroed
-        // defaults — see `cohortProgress.ts`'s module doc).
-        if (cohortProgressBase) applyProgressSlice(base, cohortProgressBase);
+        // scalar fields here can't desync the lockstep sim), overwritten with MY SETTLED
+        // world-progression snapshot (frozen base + full credit for kills made in the cohort,
+        // batch B) so autosave/the hide beacon never persist a deep friend's zone unlocks (or
+        // wipe my own asura/tome progress, which isn't part of the shared slice at all and
+        // would otherwise save as the cohort rebuild's zeroed defaults) AND my in-cohort
+        // farming isn't lost on the next save. Falls back to the frozen base if the
+        // zoneKills baseline somehow isn't set yet.
+        const settledProg = settledProgress() ?? cohortProgressBase;
+        if (settledProg) applyProgressSlice(base, settledProg);
         return toSaveData(
           w
             ? {
@@ -2345,6 +2599,9 @@ export function GameClient() {
           collapseToSolo(); // no-op if not in an active cohort
           partySession.teardown(); // closes the socket -> relay grace -> peers shadow me
         }
+        // Ghost presence: a hidden tab pauses rAF, so stop publishing + close the world
+        // socket clean (peers despawn my ghost on silence). Mirrors the party pattern.
+        syncWorldSessionActive();
         return;
       }
       if (document.visibilityState === "visible") {
@@ -2354,6 +2611,8 @@ export function GameClient() {
         // when already live, so a hide that never actually tore down is a safe no-op.
         const party = useGameStore.getState().party;
         if (party) partySession.setParty(party);
+        // Ghost presence: reopen the world socket if the feature is on (idempotent).
+        syncWorldSessionActive();
       }
     }
 
@@ -2669,6 +2928,32 @@ export function GameClient() {
       });
       partySession.setParty(useGameStore.getState().party);
 
+      // Ghost presence: react to the Settings toggle. Flipping it on/off lazily opens or
+      // closes the world socket (and clears ghosts) via `syncWorldSessionActive`. Feed the
+      // CURRENT value now (a hydrate may have landed before this subscription attaches).
+      ghostsFeatureOn = useGameStore.getState().ghostsVisible;
+      unsubscribeGhosts = useGameStore.subscribe((next, prev) => {
+        if (next.ghostsVisible !== prev.ghostsVisible) {
+          ghostsFeatureOn = next.ghostsVisible;
+          syncWorldSessionActive();
+        }
+      });
+      // Wave 3 "chat UI": the chat panel opening/closing ALSO drives the world socket
+      // lifecycle (decoupled from `ghostsVisible` — see `syncWorldSessionActive`'s doc).
+      chatFeatureOn = useGameStore.getState().chatOpen;
+      unsubscribeChatOpen = useGameStore.subscribe((next, prev) => {
+        if (next.chatOpen !== prev.chatOpen) {
+          chatFeatureOn = next.chatOpen;
+          syncWorldSessionActive();
+        }
+      });
+      // Wave 3 "chat UI": the panel's send button reaches the live `worldSession`
+      // instance through this signal (same "UI dispatches, GameClient's loop/effect
+      // drains it" shape as `updateReloadRequested` above, just a CustomEvent instead of
+      // a store field since sending is repeatable/non-engine — see `chatSendSignal.ts`).
+      unsubscribeChatSend = onSendChatRequest((text) => worldSession.sendChat(text));
+      syncWorldSessionActive();
+
       // HOF seasonal rewards: the Settings title picker (`TitleSection.tsx`)
       // writes a fresh `mySocialBadge` straight into the store the instant
       // `POST /api/hof/title` succeeds — this subscription is the ONLY thing
@@ -2702,7 +2987,11 @@ export function GameClient() {
       unsubscribeReload?.();
       unsubscribeParty?.();
       unsubscribeSocialBadge?.();
+      unsubscribeGhosts?.();
+      unsubscribeChatOpen?.();
+      unsubscribeChatSend?.();
       partySession.teardown();
+      worldSession.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       document.removeEventListener("pointerdown", onPointerDown, { capture: true });

@@ -333,6 +333,23 @@ describe("owner bug batch A #2 — position reset on cohort re-form", () => {
     expect(stateHash(hs[2].result!)).toBe(stateHash(hs[0].result!));
   });
 
+  it("A1: both clients send their x on EVERY offer (always, not gated) -> byte-equal + positioned", () => {
+    const slots = [0, 1];
+    // Fix A1: `beginHandshake` now sends `myX` unconditionally, so BOTH members carry one.
+    const hs = runHandshakeWithX(
+      slots,
+      (s) => prog(s === 0 ? "swordsman" : "mage", 10 + s),
+      (s) => 500 + s * 100,
+      0x1234,
+    );
+    for (const h of hs) expect(h.phase).toBe("done");
+    const built = hs[0].result!;
+    expect(built.heroes[0].x).toBe(500);
+    expect(built.heroes[1].x).toBe(600);
+    // Every client still converges byte-identically with x folded into positions.
+    expect(stateHash(hs[1].result!)).toBe(stateHash(hs[0].result!));
+  });
+
   it("an old-format offer (no `x` at all) leaves every hero at the formation anchor, as before", () => {
     const slots = [0, 1];
     const hs = runHandshakeCohort(slots, (s) => prog(s === 0 ? "swordsman" : "archer", 5 + s), 0xaaaa);
@@ -366,6 +383,24 @@ describe("M8 party handshake — cohort -> solo extraction (design C)", () => {
     expect(solo.heroes[0].cls).toBe("mage");
     expect(solo.heroes[0].level).toBe(20);
     expect(solo.stage).toBe(cohort.stage); // shared slice carried through
+  });
+
+  it("owner bug batch A #1: extractSoloState carries MY hero's live x into the solo rebuild", () => {
+    const cohort = buildCohortState(
+      2024,
+      sharedSave(7),
+      [
+        { slot: 0, progression: prog("swordsman", 12) },
+        { slot: 1, progression: prog("mage", 20) },
+      ],
+      new Map([[1, 1234]]), // my hero (slot 1) is standing at x=1234, not the anchor
+    );
+    expect(cohort.heroes[1].x).toBe(1234);
+    const solo = extractSoloState(cohort, 1, 555);
+    expect(solo.heroes).toHaveLength(1);
+    // x survives the collapse instead of resetting to the formation anchor.
+    expect(solo.heroes[0].x).toBe(1234);
+    expect(solo.heroes[0].x).not.toBe(makeHero(1, "mage", 20).x);
   });
 
   it("progressionFromHero never aliases the source hero (deep-enough copy)", () => {
