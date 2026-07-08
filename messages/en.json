@@ -1358,6 +1358,17 @@
           "townSolo": "🏘️ In town everyone now walks freely — your bot's potion trip no longer stalls when a friend is standing in town.",
           "partyFixes": "🛠️ Big party bug-fix set: your position survives reconnects, the bot switch truly sticks, and the zone-unlock gauge never resets (party kills count in full for everyone)."
         }
+      },
+      "2026-07-09k": {
+        "items": {
+          "botSettingsParty": "🤖 All bot settings now work while in a party — every switch and setting is yours alone; no more fleeing to another zone to change them.",
+          "unlockTruth": "🗺️ The zone-unlock gauge in a party now tells YOUR truth — help friends at your own frontier and the moment your kills complete it, it unlocks for real and you can walk on (no more fake unlocks borrowed from a far-progressed friend).",
+          "asuraCounts": "🔮 Asura essence, zone stones, and burnt tome pages are counted per player in a party — what you farm together truly lands in YOUR pouch.",
+          "hiddenTab": "😴 Switch tabs or fold your phone freely — the party never stalls, your hero keeps farming, and you catch up automatically when you return.",
+          "worldBossDown": "🌟 When Sia Jong falls, the banner says so server-wide immediately — and anyone who fought but left the zone gets their reward automatically.",
+          "refineAnywhere": "🔨 The refine button now works from anywhere — your hero travels to Uncle Dueng and the refine station opens on arrival.",
+          "warpZone": "🌀 The warp button moved next to the zone name at the top-left, and the HUD now says Zone everywhere."
+        }
       }
     }
   },
