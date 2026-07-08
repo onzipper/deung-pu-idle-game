@@ -279,8 +279,12 @@ export function BuffBadgeHub() {
   // Absolute overlay, top-left of the arena — see the file doc's v3 note.
   // `pointer-events-none` here so this never blocks the arena's own
   // pointerdown listener; each chip restores `pointer-events-auto` itself.
+  // top-[14%]: the boss/world-boss HP bar + gold nameplate own the arena's top
+  // band (world y -4..32 of WORLD_HEIGHT 300 = 0..10.7% at ANY canvas scale —
+  // bar and canvas scale together), so 14% clears them with margin on every
+  // screen size (owner recheck 2026-07-08: "จะบังเกจเลือดบอสไหม").
   return (
-    <div role="status" className="pointer-events-none absolute top-2 left-2 z-10">
+    <div role="status" className="pointer-events-none absolute top-[14%] left-2 z-10">
       <BuffBadgeRow badges={badges} maxSlots={MOBILE_MAX_SLOTS} className="flex sm:hidden" />
       <BuffBadgeRow badges={badges} maxSlots={DESKTOP_MAX_SLOTS} className="hidden sm:flex" />
     </div>
