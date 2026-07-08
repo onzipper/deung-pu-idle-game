@@ -1235,6 +1235,11 @@
           "partyShare": "⚖️ Party EXP share rebalanced — partying still levels clearly faster than solo, without leaving solo players far behind (the +10%/member buff is unchanged)",
           "potionCd": "⏱️ Potion buttons now show their cooldown like skill buttons"
         }
+      },
+      "2026-07-09f": {
+        "items": {
+          "buffHubV2": "Buff badges now name their source + a cleaner, reorganized layout"
+        }
       }
     }
   },
@@ -1365,14 +1370,20 @@
     "reconnecting": "Reconnecting…"
   },
   "buffHub": {
+    "source": {
+      "partyExp": "Party x{count}",
+      "warCry": "War Cry"
+    },
     "chip": {
-      "partyExp": "+{percent}% EXP ({count} players)",
-      "warCry": "+{percent}% ATK ({seconds}s)"
+      "partyExp": "EXP +{percent}%",
+      "warCry": "ATK +{percent}% ⏱{seconds}s"
     },
     "detail": {
       "partyExp": "Party buff: with {count} in your cohort, every kill grants +{percent}% EXP.",
       "warCry": "War Cry: +{percent}% attack for the whole party, temporarily — {seconds}s left."
-    }
+    },
+    "overflowChip": "+{count}",
+    "overflowTitle": "All active buffs"
   },
   "worldBoss": {
     "pre": "🌟 Sia Jong is about to invade Map 1! {time} left",

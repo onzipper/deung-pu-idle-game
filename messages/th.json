@@ -1235,6 +1235,11 @@
           "partyShare": "⚖️ ปรับสมดุล EXP แชร์ในตี้ — รวมตี้ยังเลเวลไวกว่าเดี่ยวชัดเจน แต่ไม่ทิ้งห่างคนเล่นเดี่ยวเกินไป (บัฟ +10%/คน คงเดิม)",
           "potionCd": "⏱️ ปุ่มยาแสดงคูลดาวน์แบบเดียวกับปุ่มสกิลแล้ว"
         }
+      },
+      "2026-07-09f": {
+        "items": {
+          "buffHubV2": "ป้ายบัฟบอกที่มาชัดเจน + จัดระเบียบใหม่"
+        }
       }
     }
   },
@@ -1365,14 +1370,20 @@
     "reconnecting": "กำลังเชื่อมต่อใหม่…"
   },
   "buffHub": {
+    "source": {
+      "partyExp": "ตี้ {count} คน",
+      "warCry": "โห่ร้อง"
+    },
     "chip": {
-      "partyExp": "+{percent}% EXP ({count} คน)",
-      "warCry": "+{percent}% ATK ({seconds}s)"
+      "partyExp": "EXP +{percent}%",
+      "warCry": "ATK +{percent}% ⏱{seconds}วิ"
     },
     "detail": {
       "partyExp": "บัฟตี้: อยู่ในตี้ {count} คน ได้ EXP เพิ่ม {percent}% จากทุกยอดฆ่า",
       "warCry": "โห่ร้อง: เพิ่มพลังโจมตี +{percent}% ให้ทั้งทีมชั่วคราว เหลืออีก {seconds} วินาที"
-    }
+    },
+    "overflowChip": "+{count}",
+    "overflowTitle": "บัฟทั้งหมด"
   },
   "worldBoss": {
     "pre": "🌟 เสี่ยจ๋องกำลังจะบุกแมพ 1! อีก {time}",
