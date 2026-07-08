@@ -6,17 +6,26 @@
  * React/fetch — headlessly testable.
  */
 
-import { ITEM_TEMPLATES, refinedStat, type ItemRarity, type ItemTemplate } from "@/engine";
+import {
+  ITEM_TEMPLATES,
+  refineStepFor,
+  refinedStat,
+  type ItemRarity,
+  type ItemTemplate,
+} from "@/engine";
 import type { StatBlock } from "@/ui/gear/statDelta";
 import type { InventoryItem } from "@/ui/gear/types";
 
 /** The template's flat stat block, refined to `refineLevel` (M7.6 ตีบวก — a
- * +0 item is byte-identical to its base template). */
+ * +0 item is byte-identical to its base template). A "ตำราตำนาน" legendary uses its
+ * own steeper awakening step (`refineStepFor` → 16%/level) so the inventory compare
+ * shows its true +N ATK; ordinary gear keeps the 8% default. */
 export function refinedStatsOf(template: ItemTemplate, refineLevel: number): StatBlock {
+  const step = refineStepFor(template);
   return {
-    atk: template.stats.atk ? refinedStat(template.stats.atk, refineLevel) : undefined,
-    def: template.stats.def ? refinedStat(template.stats.def, refineLevel) : undefined,
-    hp: template.stats.hp ? refinedStat(template.stats.hp, refineLevel) : undefined,
+    atk: template.stats.atk ? refinedStat(template.stats.atk, refineLevel, step) : undefined,
+    def: template.stats.def ? refinedStat(template.stats.def, refineLevel, step) : undefined,
+    hp: template.stats.hp ? refinedStat(template.stats.hp, refineLevel, step) : undefined,
   };
 }
 

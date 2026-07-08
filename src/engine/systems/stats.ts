@@ -20,7 +20,7 @@
  */
 
 import { CONFIG, HERO_TYPES, PRIMARY_STAT, SKILL_TYPES } from "@/engine/config";
-import { lookupTemplate, refineOf } from "@/engine/config/items";
+import { lookupTemplate, refineOf, refineStepFor } from "@/engine/config/items";
 import type { EquippedGear } from "@/engine/config/items";
 import { refinedStat } from "@/engine/config/refine";
 import type { Hero, HeroClass, HeroStats, StatKey } from "@/engine/entities";
@@ -144,9 +144,11 @@ function equipStatSum(equipped: EquippedGear, key: "atk" | "def" | "hp"): number
   const w = equipped.weapon ? lookupTemplate(equipped.weapon) : undefined;
   const a = equipped.armor ? lookupTemplate(equipped.armor) : undefined;
   // M7.6 ตีบวก: each item's flat stat is scaled by its per-slot refine level
-  // (+0 → ×1, so an unrefined loadout is byte-identical to pre-M7.6).
-  if (w) sum += refinedStat(w.stats[key] ?? 0, refineOf(equipped, "weapon"));
-  if (a) sum += refinedStat(a.stats[key] ?? 0, refineOf(equipped, "armor"));
+  // (+0 → ×1, so an unrefined loadout is byte-identical to pre-M7.6). A "ตำราตำนาน"
+  // legendary awakens on its OWN steeper step (`refineStepFor` → 16%/level) so its
+  // +5 hits +80% over t10+10; ordinary gear keeps the 8% default (byte-identical).
+  if (w) sum += refinedStat(w.stats[key] ?? 0, refineOf(equipped, "weapon"), refineStepFor(w));
+  if (a) sum += refinedStat(a.stats[key] ?? 0, refineOf(equipped, "armor"), refineStepFor(a));
   return sum;
 }
 

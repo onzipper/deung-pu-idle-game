@@ -83,10 +83,20 @@ export function clampRefine(level: number | undefined): number {
 /**
  * Apply a refine level to one flat stat value (deterministic, integer output).
  * `level 0` returns `base` unchanged (round-trip exact for an unrefined item).
+ *
+ * `stepPercent` is the per-level multiplier increment; it DEFAULTS to the ordinary
+ * refine step (`REFINE.statBonusPerRefine` = 8%), so every ordinary-gear call site is
+ * byte-identical. A "ตำราตำนาน" legendary passes its OWN, steeper awakening step
+ * (`LEGENDARY_AWAKEN_STEP` = 16%, items.ts) so its +0..+5 climbs on a different curve —
+ * see `refineStepFor(template)` (the single place that picks the step by item kind).
  */
-export function refinedStat(base: number, level: number): number {
+export function refinedStat(
+  base: number,
+  level: number,
+  stepPercent: number = REFINE.statBonusPerRefine,
+): number {
   if (!base) return 0;
-  return Math.round(base * (1 + clampRefine(level) * REFINE.statBonusPerRefine));
+  return Math.round(base * (1 + clampRefine(level) * stepPercent));
 }
 
 /** Success chance for an attempt TARGETING +level (out-of-range → 0). */

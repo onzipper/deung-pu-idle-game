@@ -28,6 +28,8 @@ import {
   clampRefineForTemplate,
   equipAtkOf,
   refinedStat,
+  refineStepFor,
+  LEGENDARY_AWAKEN_STEP,
   canCraftLegendary,
   craftBlockReason,
   hasAllZoneStones,
@@ -460,9 +462,32 @@ describe("ตำราตำนาน — legendary templates + awakening cap (+
     equipItem(s, h, "weapon", legend, 9); // server-decided +9 → clamped to +5
     expect(h.equipped.weapon).toBe(legend);
     expect(h.equipped.refine?.weapon).toBe(5);
-    // ATK = refinedStat(126, 5) = round(126 × 1.4) = 176 (armor null).
-    expect(equipAtkOf(h)).toBe(refinedStat(LEGENDARY_TEMPLATES[legend].stats.atk!, 5));
-    expect(equipAtkOf(h)).toBe(176);
+    // Owner retune 2026-07-08: legendary awakens on its OWN 16%/level step, so +5 =
+    // refinedStat(126, 5, 0.16) = round(126 × (1 + 5×0.16)) = round(126 × 1.8) = 227
+    // (armor null) — +80% over a t10+10 (126), superseding the earlier +40% (176) pass.
+    const legAtk = LEGENDARY_TEMPLATES[legend].stats.atk!;
+    expect(refineStepFor(LEGENDARY_TEMPLATES[legend])).toBe(LEGENDARY_AWAKEN_STEP);
+    expect(equipAtkOf(h)).toBe(refinedStat(legAtk, 5, LEGENDARY_AWAKEN_STEP));
+    expect(equipAtkOf(h)).toBe(227);
+  });
+
+  it("pins the +0..+5 awaken ATK table on the 16%/level legendary step (both weapon groups)", () => {
+    // Owner retune 2026-07-08: base = t10+10 parity (sword 126 / bow 158), awakening on the OWN
+    // 16%/level step (1 + 5×0.16 = 1.8) → +5 = ×1.8 over +0 = +80% over a t10+10. These are the
+    // exact rounded per-level values the equip/power/UI paths all resolve to.
+    expect(LEGENDARY_AWAKEN_STEP).toBe(0.16);
+    const sword = LEGENDARY_TEMPLATES[LEGENDARY_FOR_CLASS.swordsman].stats.atk!; // 126
+    const bow = LEGENDARY_TEMPLATES[LEGENDARY_FOR_CLASS.archer].stats.atk!; // 158
+    expect([sword, bow]).toEqual([126, 158]);
+    const table = (base: number) =>
+      [0, 1, 2, 3, 4, 5].map((n) => refinedStat(base, n, LEGENDARY_AWAKEN_STEP));
+    expect(table(sword)).toEqual([126, 146, 166, 186, 207, 227]);
+    expect(table(bow)).toEqual([158, 183, 209, 234, 259, 284]);
+    // +5 is exactly +80% over the +0 (t10+10-parity) base for both groups.
+    expect(refinedStat(sword, 5, LEGENDARY_AWAKEN_STEP)).toBe(Math.round(sword * 1.8));
+    expect(refinedStat(bow, 5, LEGENDARY_AWAKEN_STEP)).toBe(Math.round(bow * 1.8));
+    // Ordinary gear is UNTOUCHED: the default 8% step still yields the pre-retune curve.
+    expect(refinedStat(70, 10)).toBe(126); // t10 +10 stays the ordinary ceiling
   });
 });
 

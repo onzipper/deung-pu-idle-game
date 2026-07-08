@@ -303,18 +303,46 @@ export const FORTIFIER_FOR_SLOT: Record<GearSlot, string> = {
 // maxRefineForTemplate). Display name/desc are ui-side i18n (`items.<id>`), never here.
 //
 // OWNER CALL 2026-07-08 (v1.3 power-ceiling raise, "เดือดๆ"): LEGENDARY_ATK_MULT 1.4 → 1.8. Since
-// `refinedStat(base, 10) === round(base * 1.8)`, the legendary's +0 base now lands EXACTLY at
-// t10+10 parity (126 for the 70-base classes) — craft = instant parity with a maxed ordinary
-// weapon. Awakening +0..+5 then rides the SAME 8%/step curve as ordinary refine, so +5 peaks at
-// ×1.4 over parity (≈ +40% over a t10+10) — deliberately supersedes the old +9-19%-over-t10+10
-// band. Deliberate: legendary+5 will trivialize asura's deeper zones; flagged for the owner as an
-// earned-fantasy ceiling, not a bug.
+// `refinedStat(base, 10) === round(base * 1.8)`, the legendary's +0 base lands EXACTLY at t10+10
+// parity (126 for the 70-base classes) — craft = instant parity with a maxed ordinary weapon.
+//
+// OWNER RETUNE 2026-07-08 (SUPERSEDES the +40% pass above): a fully-awakened legendary (+5) should
+// sit at +80% over a t10+10, not +40%. Base stays at parity (LEGENDARY_ATK_MULT 1.8 UNCHANGED, +0 =
+// 126 / bow 158). The reach comes from AWAKENING riding its OWN, steeper step — `LEGENDARY_AWAKEN_
+// STEP` = 0.16 (16%/level) instead of the ordinary REFINE 8%. Then `1 + 5 × 0.16 = 1.8`, so a +5
+// legendary's stat = base × 1.8 = (t10×1.8) × 1.8 = t10 × 3.24 ⇒ +5/+0 = ×1.8 = +80% over t10+10.
+// Ordinary gear is UNTOUCHED (still 8%/step, `refinedStat`'s default) — normal-gear stat math +
+// the canonical sim are byte-identical; only a kind === "legendary" item picks the 16% step (via
+// `refineStepFor`). Deliberate earned-fantasy ceiling (legendary+5 trivializes asura's deeper
+// zones) — flagged for the owner, not a bug.
 
 /** The (above-ceiling) tier every legendary carries — keeps them out of tierForStage bands. */
 export const LEGENDARY_TIER = 11;
 /** ATK multiplier vs the class's t10 weapon (sim-sweepable balance lever, docs/endgame). Owner
- *  call 2026-07-08: 1.4 → 1.8 (base now == t10+10 parity; see the block comment above). */
+ *  call 2026-07-08: 1.4 → 1.8 (base == t10+10 parity; see the block comment above). UNCHANGED by
+ *  the +80% retune — the ceiling raise rides `LEGENDARY_AWAKEN_STEP`, not this base mult. */
 export const LEGENDARY_ATK_MULT = 1.8;
+
+/**
+ * "สายปลุกพลัง" AWAKENING per-level stat step for a legendary (owner retune 2026-07-08). A
+ * legendary's +N stat is `base × (1 + N × LEGENDARY_AWAKEN_STEP)` — 16%/level, DISTINCT from
+ * ordinary gear's `REFINE.statBonusPerRefine` (8%). At the +5 cap this is `base × 1.8`, i.e. +80%
+ * over the (already t10+10-parity) +0 base. `refinedStat` takes this as its `stepPercent` arg only
+ * for kind === "legendary" items (see `refineStepFor`); every ordinary call keeps the 8% default,
+ * so normal gear + the canonical sim stay byte-identical.
+ */
+export const LEGENDARY_AWAKEN_STEP = 0.16;
+
+/**
+ * The per-level refine/awaken stat STEP a template's stats climb by: a legendary uses its own
+ * `LEGENDARY_AWAKEN_STEP` (16%), every other item (gear, fortifier, unknown) the ordinary
+ * `REFINE.statBonusPerRefine` (8%). The SINGLE place item-kind maps to a refine step — every
+ * stat reader (engine `equipStatSum`, the ui compare/stat lines) passes this into `refinedStat`
+ * so a legendary's displayed + combat stats match its steeper awakening curve.
+ */
+export function refineStepFor(template: ItemTemplate | null | undefined): number {
+  return template?.kind === "legendary" ? LEGENDARY_AWAKEN_STEP : REFINE.statBonusPerRefine;
+}
 
 function legendaryWeapon(id: string, cls: HeroClass, t10Atk: number): ItemTemplate {
   return {
@@ -356,8 +384,8 @@ export function isLegendaryTemplate(id: string | null | undefined): boolean {
 
 /** The "ตำราตำนาน" AWAKENING ceiling (+0..+5, no-break) — a legendary's refine field is capped
  *  HERE, distinct from ordinary gear's REFINE.maxRefine (+10). Owner-locked (docs/endgame-design
- *  v1.2 "สายปลุกพลัง +0..+5"); as of the v1.3 owner call (LEGENDARY_ATK_MULT 1.8) the +5 peak is
- *  ≈ +40% over a t10+10 (superseded the old +9-19% band — see the items.ts owner-call comment). */
+ *  v1.2 "สายปลุกพลัง +0..+5"); as of the 2026-07-08 owner retune (LEGENDARY_AWAKEN_STEP 0.16) the
+ *  +5 peak is +80% over a t10+10 (superseded the earlier +40% pass — see the items.ts block). */
 export const LEGENDARY_MAX_AWAKEN = 5;
 
 /** The max refine/awaken level a given template accepts: a legendary caps at LEGENDARY_MAX_AWAKEN
