@@ -16,6 +16,7 @@
  * timers/animation state).
  */
 
+import { FORTIFIER_FOR_SLOT } from "@/engine";
 import { postRefine } from "@/ui/gear/api";
 import type { RefineOutcome } from "@/ui/gear/types";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -27,12 +28,27 @@ export type RefineFlowResult =
       refineLevel: number;
       destroyed: boolean;
       cost: { materials: number; gold: number };
+      /** True when a "แกร่ง" fortifier was consumed for a guaranteed success —
+       * `RefinePanel.tsx` plays distinct success juice/copy for it. */
+      fortified: boolean;
     }
   | { ok: false; reason: string };
 
-export async function executeRefine(itemId: string): Promise<RefineFlowResult> {
+/**
+ * `useFortifier` (world-boss wave): guaranteed-success refine, consuming one
+ * matching-slot "แกร่ง" fortifier server-side (same gold+materials cost as a
+ * normal attempt — see `RefinePanel.tsx`'s fortify button). The server doesn't
+ * echo back WHICH fortifier instance it consumed (fortifiers are fungible, no
+ * stat rolls), so on a fortified success this removes exactly ONE matching-slot
+ * fortifier instance from the local inventory slice by templateId — any one is
+ * as good as any other; the server-side ledger is the actual authority.
+ */
+export async function executeRefine(
+  itemId: string,
+  useFortifier = false,
+): Promise<RefineFlowResult> {
   const before = useGameStore.getState().inventory.find((i) => i.instanceId === itemId);
-  const res = await postRefine(itemId);
+  const res = await postRefine(itemId, useFortifier);
   if (!res.ok) return { ok: false, reason: res.reason };
 
   const store = useGameStore.getState();
@@ -49,11 +65,20 @@ export async function executeRefine(itemId: string): Promise<RefineFlowResult> {
     }
   }
 
+  if (res.fortified && before) {
+    const fortId = FORTIFIER_FOR_SLOT[before.slot];
+    const consumed = useGameStore
+      .getState()
+      .inventory.find((i) => i.templateId === fortId);
+    if (consumed) store.removeInventoryInstance(consumed.instanceId);
+  }
+
   return {
     ok: true,
     outcome: res.outcome,
     refineLevel: res.refineLevel,
     destroyed: res.destroyed,
     cost: res.cost,
+    fortified: res.fortified,
   };
 }

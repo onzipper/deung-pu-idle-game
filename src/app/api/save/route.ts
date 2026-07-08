@@ -50,6 +50,9 @@ export async function GET() {
         // Cross-device UI config: no character yet → nothing stored; the client
         // keeps its own localStorage/defaults (see @/server/uiConfig).
         uiConfig: null,
+        // World boss "เสี่ยจ๋อง": the client's spawn countdown/window math is driven off
+        // the SERVER clock (never the device clock) — this offset lets it align. Additive.
+        serverNow: Date.now(),
         // M7.9: still worth surfacing even pre-character (a fresh login lands
         // here for a beat before a character is selected) — see the POST
         // branch's doc for the feed shape.
@@ -101,6 +104,9 @@ export async function GET() {
       materials,
       uiConfig,
       announcements,
+      // World boss "เสี่ยจ๋อง": server-clock offset for the client spawn countdown /
+      // windowId math (the device clock is never trusted). Additive.
+      serverNow: Date.now(),
       // Mid-session "new patch deployed" banner (owner-approved feature): the
       // client compares this against its own inlined `NEXT_PUBLIC_BUILD_ID` on
       // every save response — see `@/server/buildId` + `@/ui/updateBanner`.

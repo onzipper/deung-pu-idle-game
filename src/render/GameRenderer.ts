@@ -37,6 +37,13 @@ import {
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
 import {
+  createWorldBossView,
+  updateWorldBossView,
+  WORLD_BOSS_CORE_R,
+  WORLD_BOSS_CY,
+  type WorldBossView,
+} from "@/render/views/worldBossView";
+import {
   createEnemyView,
   updateEnemyView,
   type EnemyView,
@@ -102,6 +109,20 @@ export class GameRenderer {
   private bossView: BossView | null = null;
   private bossHpBar: Graphics | null = null;
   private bossLabel: Text | null = null;
+  /** WORLD BOSS "เสี่ยจ๋อง" (hourly world boss, render wave): a SEPARATE live
+   * view from `bossView`/`bossHpBar` above — `state.worldBoss.entity` is a
+   * distinct field from `state.boss` (the two are mutually exclusive: a stage
+   * boss only lives in a boss room, the world boss only in an open farm
+   * zone), so it gets its own create/destroy lifecycle + its own gold-trimmed
+   * overlay (nameplate + wide HP bar) instead of sharing the stage boss's. */
+  private worldBossView: WorldBossView | null = null;
+  private worldBossHpBar: Graphics | null = null;
+  private worldBossPlate: Graphics | null = null;
+  private worldBossLabel: Text | null = null;
+  /** id of the live world-boss entity `this.worldBossView` represents (mirrors
+   * `currentBossId`'s hit-flash-lookup-correctness reasoning across a
+   * defeat -> next-window-spawn id change). */
+  private currentWorldBossId: number | null = null;
   /** ป้าปุ๊/ลุงดึ๋ง — fixed-position town actors, built once in `create()` and
    * kept for the whole session (never pooled-by-id like heroes/enemies,
    * there are always exactly the two of them). Visibility toggles with the
@@ -240,6 +261,26 @@ export class GameRenderer {
     });
     overlay.addChild(this.bossHpBar, this.bossLabel);
 
+    // WORLD BOSS "เสี่ยจ๋อง" overlay: gold-trimmed nameplate backdrop + wide gold
+    // HP bar. Never visible at the same time as the stage-boss overlay above
+    // (mutually exclusive phases — see the field doc comments), so sharing the
+    // same on-screen band (bx/by) is safe; kept as separate Graphics/Text
+    // instances so each gets its own distinct gold-trim look.
+    this.worldBossPlate = new Graphics();
+    this.worldBossHpBar = new Graphics();
+    this.worldBossLabel = new Text({
+      text: "เสี่ยจ๋อง",
+      style: {
+        fontSize: 13,
+        fontWeight: "700",
+        fill: PALETTE.worldBossPlateGold,
+        fontFamily: "sans-serif",
+      },
+    });
+    // Order matters (z-index by insertion): plate backdrop first, then the
+    // bar, then the name text on top.
+    overlay.addChild(this.worldBossPlate, this.worldBossHpBar, this.worldBossLabel);
+
     // Town NPCs (ป้าปุ๊/ลุงดึ๋ง): fixed-position, built once — same layer as
     // heroes/enemies/boss so they z-order correctly against the entity list,
     // even though they never move. Visibility is toggled per-frame in
@@ -347,6 +388,26 @@ export class GameRenderer {
     }
     this.drawBossOverlay(state);
 
+    // WORLD BOSS "เสี่ยจ๋อง" (hourly world boss, render wave): a SEPARATE live
+    // entity from `state.boss` (see the field doc comment above) — it lives
+    // alongside the normal farm enemies during the BATTLE phase, so its view
+    // is created/destroyed independent of the stage-boss branch above.
+    const wb = state.worldBoss;
+    if (wb && wb.active && wb.entity) {
+      if (!this.worldBossView) {
+        this.worldBossView = createWorldBossView();
+        this.layers.entities.addChild(this.worldBossView);
+      }
+      updateWorldBossView(this.worldBossView, wb.entity, { elapsedMs, dt, events: frameEvents });
+      this.currentWorldBossId = wb.entity.id;
+    } else if (this.worldBossView) {
+      this.layers.entities.removeChild(this.worldBossView);
+      this.worldBossView.destroy({ children: true });
+      this.worldBossView = null;
+      this.currentWorldBossId = null;
+    }
+    this.drawWorldBossOverlay(state);
+
     // Town NPCs: only animate/render while actually standing in the town
     // zone — `zoneAt` is the same sanctioned read `enemyMapId`/the boss theme
     // lookup above already use.
@@ -419,10 +480,18 @@ export class GameRenderer {
       this.bossView = null;
     }
     this.currentBossId = null;
+    if (this.worldBossView) {
+      this.worldBossView.destroy({ children: true });
+      this.worldBossView = null;
+    }
+    this.currentWorldBossId = null;
     this.lastAnchorX = null;
     this.heroDisplayNames = null;
     this.bossHpBar = null;
     this.bossLabel = null;
+    this.worldBossHpBar = null;
+    this.worldBossPlate = null;
+    this.worldBossLabel = null;
     this.layers = null;
     this.world = null;
 
@@ -508,6 +577,23 @@ export class GameRenderer {
         bestId = e.id;
       }
     }
+    // WORLD BOSS "เสี่ยจ๋อง": joins the SAME target set as the farm mobs during
+    // the battle phase (`getTargets()`/`findById()` in `systems/targeting.ts`/
+    // `combat.ts` already include it), so a manual tap-to-attack against it
+    // works end-to-end once render recognizes it as a tappable "monster" here
+    // — a much bigger touch ellipse than a normal mob, matching its ~2.5x scale.
+    const wb = state.worldBoss;
+    if (wb && wb.active && wb.entity) {
+      const rx = Math.max(touchHalf, WORLD_BOSS_CORE_R * 0.9);
+      const ry = Math.max(touchHalf, WORLD_BOSS_CORE_R * 0.9);
+      const dx = (wx - wb.entity.x) / rx;
+      const dy = (wy - WORLD_BOSS_CY) / ry;
+      const dist = dx * dx + dy * dy;
+      if (dist <= 1 && dist < bestDist) {
+        bestDist = dist;
+        bestId = wb.entity.id;
+      }
+    }
     if (bestId !== null) return { kind: "monster", id: bestId };
     return { kind: "ground", x: wx };
   }
@@ -580,7 +666,12 @@ export class GameRenderer {
   private getEntityView(target: HitTargetKind, id: number): Container | null {
     if (target === "hero") return this.heroPool?.peek(id) ?? null;
     if (target === "enemy") return this.enemyPool?.peek(id) ?? null;
-    return id === this.currentBossId ? this.bossView : null;
+    // "boss" covers BOTH the stage boss and the world boss (`damage.ts`'s
+    // `targetKind()` classifies anything that isn't a hero/enemy as "boss") —
+    // the two never coexist, so checking both live-view ids here is safe.
+    if (id === this.currentBossId) return this.bossView;
+    if (id === this.currentWorldBossId) return this.worldBossView;
+    return null;
   }
 
   private drawBossOverlay(state: GameState): void {
@@ -603,6 +694,63 @@ export class GameRenderer {
 
     this.bossLabel.text = `บอสด่าน ${state.stage}${boss.enraged ? "  ⚡ENRAGED" : ""}`;
     this.bossLabel.position.set(bx, by - 16);
+  }
+
+  /**
+   * WORLD BOSS "เสี่ยจ๋อง" overlay: a gold-trimmed nameplate backdrop + a WIDE
+   * gold HP bar, visually distinct from `drawBossOverlay()`'s stage-boss bar
+   * (never shown at the same time — see the field doc comment). The name is a
+   * hardcoded Thai literal, matching this same file's existing convention for
+   * `bossLabel.text` above (`บอสด่าน ${stage}`) — stage-boss names aren't i18n'd
+   * through a UI-layer string table either, so no new naming seam was needed
+   * (there is no `Hero.name`-style field to source it from on the engine side;
+   * `WorldBossState` carries no display string).
+   */
+  private drawWorldBossOverlay(state: GameState): void {
+    if (!this.worldBossHpBar || !this.worldBossPlate || !this.worldBossLabel) return;
+    const wb = state.worldBoss;
+    const visible =
+      !!wb &&
+      wb.active &&
+      !!wb.entity &&
+      state.location.mapId === wb.mapId &&
+      state.location.zoneIdx === wb.zoneIdx;
+    this.worldBossHpBar.visible = visible;
+    this.worldBossPlate.visible = visible;
+    this.worldBossLabel.visible = visible;
+    if (!visible || !wb || !wb.entity) return;
+    const boss = wb.entity;
+
+    const bw = safeRadius(WORLD_WIDTH - 120);
+    const bx = 60;
+    const by = 16;
+    const bh = 16; // taller than the stage boss's 12px bar — reads as "bigger"
+    const pct = boss.maxHp > 0 ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : 0;
+
+    this.worldBossHpBar.clear();
+    this.worldBossHpBar.roundRect(bx, by, bw, bh, 6).fill({ color: 0x000000, alpha: 0.45 });
+    this.worldBossHpBar
+      .roundRect(bx, by, safeRadius(bw * pct), bh, 6)
+      .fill(boss.enraged ? PALETTE.warn : PALETTE.worldBossGold);
+    this.worldBossHpBar
+      .roundRect(bx, by, bw, bh, 6)
+      .stroke({ width: 2, color: PALETTE.worldBossPlateGold, alpha: 0.85 });
+
+    // Gold-trimmed nameplate backdrop behind the label.
+    const plateW = 96;
+    const plateH = 18;
+    const plateX = bx;
+    const plateY = by - plateH - 2;
+    this.worldBossPlate.clear();
+    this.worldBossPlate
+      .roundRect(plateX, plateY, plateW, plateH, 5)
+      .fill({ color: PALETTE.worldBossGoldDark, alpha: 0.85 });
+    this.worldBossPlate
+      .roundRect(plateX, plateY, plateW, plateH, 5)
+      .stroke({ width: 1.5, color: PALETTE.worldBossPlateGold, alpha: 0.9 });
+
+    this.worldBossLabel.text = `เสี่ยจ๋อง${boss.enraged ? "  ⚡" : ""}`;
+    this.worldBossLabel.position.set(plateX + 6, plateY + 2);
   }
 }
 

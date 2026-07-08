@@ -137,12 +137,15 @@ export async function postSell(
  * funds, 404 not found) resolves to `{ ok: false, reason }` rather than
  * throwing, using the route's `code` field when present (falls back to `error`,
  * then `"unknown"`) — same shape as `postEquip`'s `EquipApiResult`. */
-export async function postRefine(itemId: string): Promise<RefineApiResult> {
+export async function postRefine(
+  itemId: string,
+  useFortifier = false,
+): Promise<RefineApiResult> {
   try {
     const res = await fetch("/api/items/refine", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId }),
+      body: JSON.stringify({ itemId, useFortifier }),
     });
     const json = (await res.json()) as
       | Omit<Extract<RefineApiResult, { ok: true }>, "ok">

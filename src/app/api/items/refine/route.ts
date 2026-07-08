@@ -57,7 +57,9 @@ export async function POST(request: Request) {
     const { save } = await loadSave(characterId);
     const goldBalance = save?.gold ?? 0;
 
-    const result = await refineItem(characterId, parsed.data.itemId, goldBalance);
+    const result = await refineItem(characterId, parsed.data.itemId, goldBalance, {
+      useFortifier: parsed.data.useFortifier ?? false,
+    });
     if (!result.ok) {
       const status = result.reason === "not_found" ? 404 : 409;
       return NextResponse.json({ error: result.reason, code: result.reason }, { status });
@@ -70,6 +72,7 @@ export async function POST(request: Request) {
       materialsDelta: result.materialsDelta,
       goldDelta: result.goldDelta,
       cost: result.cost,
+      fortified: result.fortified,
     });
   } catch (err) {
     console.error("[api/items/refine] POST failed:", err);

@@ -38,6 +38,8 @@ import {
   playMobAggroed,
   playSkillCast,
   playStageAdvanced,
+  playWorldBossDefeated,
+  playWorldBossSpawned,
 } from "@/render/audio/sfxMap";
 import { isBossZoneIdx } from "@/render/environment/zoneGates";
 
@@ -164,6 +166,16 @@ export class AudioController {
             playBossRoomEntered(this.engine);
           }
           break;
+        case "worldBossSpawned":
+          if (this.engine.allow("worldBossSpawned", SFX_MIN_INTERVAL_MS.worldBossSpawned)) {
+            playWorldBossSpawned(this.engine);
+          }
+          break;
+        case "worldBossDefeated":
+          if (this.engine.allow("worldBossDefeated", SFX_MIN_INTERVAL_MS.worldBossDefeated)) {
+            playWorldBossDefeated(this.engine);
+          }
+          break;
         case "stageAdvanced":
           if (this.engine.allow("stageAdvanced", SFX_MIN_INTERVAL_MS.stageAdvanced)) {
             playStageAdvanced(this.engine);
@@ -233,12 +245,14 @@ export class AudioController {
           break;
         default:
           break; // projectileSpawn / stageCleared / zoneEntered / zoneGateEnter /
-          // zoneGateExit / mapUnlocked / townArrived: silent by design — the
-          // same high-frequency-event fatigue reasoning as waveSpawn
-          // (zoneEntered/zoneGateEnter fire every zone-to-zone hop), and
-          // zoneUnlocked/mapUnlocked already get their moment via
+          // zoneGateExit / mapUnlocked / townArrived / worldBossDespawned:
+          // silent by design — the same high-frequency-event fatigue reasoning
+          // as waveSpawn (zoneEntered/zoneGateEnter fire every zone-to-zone
+          // hop), and zoneUnlocked/mapUnlocked already get their moment via
           // FxController's visual-only sparkle (see sfxMap.ts's module doc
           // comment for the general policy + the boss-door exception above).
+          // worldBossDespawned is "he wandered off" — the render side's
+          // smoke-out poof alone; see sfxMap.ts's doc comment.
       }
     }
   }

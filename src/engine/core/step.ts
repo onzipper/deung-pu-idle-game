@@ -39,6 +39,12 @@ import { applyManualCommand, tickTownManualWalk } from "@/engine/systems/manual"
 import { updateSpawns } from "@/engine/systems/hunt";
 import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
+import {
+  applyWorldBossSpawnIntents,
+  updateWorldBossAI,
+  tickWorldBossLifetime,
+  resolveWorldBossDeath,
+} from "@/engine/systems/worldBoss";
 import { evolveHero } from "@/engine/systems/evolution";
 import { acceptQuest } from "@/engine/systems/quests";
 import { processStatAllocation } from "@/engine/systems/allocation";
@@ -288,6 +294,18 @@ export interface FrameInput {
    * hero). Applied once per drained input.
    */
   setShadowed?: { value: boolean };
+  /**
+   * WORLD BOSS "เสี่ยจ๋อง" spawn (hourly world boss — engine wave). The CLIENT computes the
+   * wall-clock schedule (`worldBossPhaseAt` — the engine never reads a clock) and injects
+   * this while the player stands in the chosen zone. The engine spawns the boss iff the
+   * current location is `CONFIG.worldBoss.mapId` + the window's chosen farm zone
+   * (`worldBossZoneFor`), in the BATTLE phase, and no boss for this `windowId` was already
+   * spawned/handled this session (IDEMPOTENT — in a cohort several members may inject it;
+   * the ordered lanes make first-wins deterministic). `remainingSeconds` seeds a
+   * deterministic lifetime countdown (decremented per FIXED_DT step; reaching 0 despawns
+   * it — as does leaving the zone). Applied from every lane in slot order.
+   */
+  spawnWorldBoss?: { windowId: number; remainingSeconds: number };
 }
 
 /**
@@ -465,6 +483,10 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     const arrived = updateTransit(state);
     if (arrived?.kind === "boss") startBossFight(state);
     if (arrived?.kind === "town" && state.botPending) onBotTownArrival(state);
+    // WORLD BOSS "เสี่ยจ๋อง": its 15-min lifetime is a wall-clock window, so the despawn clock
+    // keeps ticking WHILE the local player travels (combat AI stays paused) — a death/return
+    // round-trip must not freeze it alive past its hour. Dormant (no boss) → no-op.
+    tickWorldBossLifetime(state);
     state.time += FIXED_DT;
     state.rngState = rng.state();
     return state;
@@ -494,6 +516,13 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   // Victory pauses the sim (a boss-room win). Navigation above (advanceStage) may
   // already have started a walk out of it.
   if (state.phase === "victory") {
+    // Same bug class as the 2026-07-06 town early-return above: a fast-travel
+    // intent is ACCEPTED by the navigation block (channel starts, cast bar shows)
+    // but the countdown lives in tickFastTravel BELOW this return — a warp tapped
+    // on the victory screen spun forever (owner live report, 2026-07-08). Victory
+    // is combat-free so the channel just counts down; arrival (`arriveAtZone`)
+    // already resets `phase` to "battle", dismissing the victory pause.
+    tickFastTravel(state);
     state.rngState = rng.state();
     return state;
   }
@@ -514,12 +543,17 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   const channeling = state.fastTravelCast !== null;
   if (!channeling) processSkills(state, lanes); // manual casts + guarded auto-cast
   updateAnchor(state);
+  // WORLD BOSS "เสี่ยจ๋อง": apply this step's spawn intents (all lanes, first-wins) BEFORE
+  // combat so a freshly-spawned boss is targetable this same step. Dormant with no intent.
+  applyWorldBossSpawnIntents(state, lanes);
   updateSpawns(state, rng); // maintain the farm zone's mob pool (M6 "สนามล่ามอน")
   updateEnemies(state); // no-op during the boss phase (field is cleared)
   if (state.phase === "boss") updateBoss(state);
+  updateWorldBossAI(state); // world boss despawn/countdown + movement/mechanics (battle only)
   if (!channeling) updateHeroes(state);
   updateProjectiles(state);
   resolveDeaths(state); // enemy kills / boss kill / death->town respawn / bossReady
+  resolveWorldBossDeath(state); // world boss death -> worldBossDefeated (no xp/gold/quota)
   const unlockedNextFarm = checkZoneUnlock(state); // farm-zone quota met -> unlock next (M6)
   maybeAutoAdvance(state, unlockedNextFarm); // frontier-only auto walk into the fresh zone
   // Fast-travel channel tick (M7.5): after combat so this step's damage cancels it;

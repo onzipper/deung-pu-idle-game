@@ -66,6 +66,15 @@ const SKILL_BURST_MIN_HITS = 3;
  */
 const FREEZE_SWORD_SKYFALL = 0.16;
 
+/**
+ * Ninja wave — the ninja's tier-3 skill-4 (ETERNAL SHADOWS, `ninja_eternal`)
+ * gets the same real TIME-FREEZE beat as every other class's tier-3 skill-4
+ * (mirrors `FREEZE_SWORD_SKYFALL` above verbatim — see
+ * `render/fx/FxController.ts`'s `onNinjaEternalCast` comment, which points at
+ * this exact spot). Solo existing-class behavior is untouched.
+ */
+const FREEZE_NINJA_ETERNAL = 0.16;
+
 /** Boss-defeated slow-mo: time-scale, hold duration, then ease-back duration. */
 const SLOWMO_BOSS_DEFEATED_SCALE = 0.25;
 const SLOWMO_BOSS_DEFEATED_HOLD_S = 0.6;
@@ -194,6 +203,8 @@ export class TimeDirector {
         case "skillCast":
           if (e.skillId === "sword_skyfall") {
             freezeCandidate = Math.max(freezeCandidate, FREEZE_SWORD_SKYFALL);
+          } else if (e.skillId === "ninja_eternal") {
+            freezeCandidate = Math.max(freezeCandidate, FREEZE_NINJA_ETERNAL);
           }
           break;
         case "hit":

@@ -10,6 +10,7 @@ import {
   bossDropTableForStage,
   maxSummedDropChance,
   tierForStage,
+  vendorPriceForTemplate,
   equipAtkOf,
   equipDefOf,
   equipHpOf,
@@ -57,14 +58,25 @@ describe("catalog + drop tables", () => {
     }
   });
 
-  it("maxSummedDropChance is honest (== the real per-stage max) and in (0,1)", () => {
+  it("maxSummedDropChance is honest (== the densest per-stage max) and in (0,1)", () => {
+    // The guard must cap to the DENSEST table any hero can roll — that is a ninja's
+    // (SAVE v18), whose table is the SUPERSET (every legacy line + its own class-gated
+    // daggers). Scanned across the full s1-30 range with the ninja pool, matching the
+    // guard's own computation.
     let max = 0;
-    for (let s = 1; s <= 15; s++) {
-      max = Math.max(max, dropTableForStage(s).reduce((a, e) => a + e.chance, 0));
+    for (let s = 1; s <= 30; s++) {
+      max = Math.max(max, dropTableForStage(s, "ninja").reduce((a, e) => a + e.chance, 0));
     }
     expect(maxSummedDropChance()).toBeCloseTo(max, 10);
     expect(maxSummedDropChance()).toBeGreaterThan(0);
     expect(maxSummedDropChance()).toBeLessThan(1);
+    // And it is strictly ABOVE the legacy 3-class max (daggers add per-kill chance for
+    // ninja only) — a looser cap that never rejects a byte-identical non-ninja claim.
+    let legacyMax = 0;
+    for (let s = 1; s <= 30; s++) {
+      legacyMax = Math.max(legacyMax, dropTableForStage(s).reduce((a, e) => a + e.chance, 0));
+    }
+    expect(maxSummedDropChance()).toBeGreaterThan(legacyMax);
   });
 
   it("template ids are all ≤64 chars (frozen DB key constraint)", () => {
@@ -289,6 +301,107 @@ describe("migrate v9 → v10", () => {
     const h = initGameState(3, save).heroes[0];
     expect(h.equipped).toEqual(save.equipped);
     expect(equipAtkOf(h)).toBe(ITEM_TEMPLATES["w_staff_t2_oak"].stats.atk);
+  });
+});
+
+describe("ninja dagger line (SAVE v18)", () => {
+  const DAGGERS = [
+    "w_dagger_t1_kunai", "w_dagger_t2_tanto", "w_dagger_t3_shadow", "w_dagger_t4_venom",
+    "w_dagger_t5_wraith", "w_dagger_t6_ragna", "w_dagger_t7_frost", "w_dagger_t8_dune",
+    "w_dagger_t9_obsidian", "w_dagger_t10_apocalypse",
+  ];
+
+  it("has a full t1-t10 dagger line: weapon slot, classReq ninja, ATK == the sword curve", () => {
+    for (let tier = 1; tier <= 10; tier++) {
+      const dag = DAGGERS[tier - 1];
+      const t = ITEM_TEMPLATES[dag];
+      expect(t, dag).toBeDefined();
+      expect(t.slot).toBe("weapon");
+      expect(t.classReq).toBe("ninja");
+      expect(t.tier).toBe(tier);
+      // Curve reasoning (docs/ninja-design.md §6): dagger ATK == the shared sword ATK
+      // curve; the ninja's ~+10% DPS over sword is delivered by the 2×0.55 double-hit
+      // (multiHit), NOT a raw weapon-number premium — so the line stays parallel.
+      const sword = Object.values(ITEM_TEMPLATES).find(
+        (x) => x.slot === "weapon" && x.classReq === "swordsman" && x.tier === tier,
+      )!;
+      expect(t.stats.atk).toBe(sword.stats.atk);
+    }
+    // Rarity band mirrors the other weapon lines (t6 + t10 are the EPIC break/ceiling).
+    expect(ITEM_TEMPLATES["w_dagger_t6_ragna"].rarity).toBe("epic");
+    expect(ITEM_TEMPLATES["w_dagger_t10_apocalypse"].rarity).toBe("epic");
+    expect(ITEM_TEMPLATES["w_dagger_t3_shadow"].rarity).toBe("rare");
+  });
+
+  it("vendor price + refine compat parallel the sword line (same tier/rarity → same price)", () => {
+    for (let tier = 1; tier <= 10; tier++) {
+      const dag = DAGGERS[tier - 1];
+      const sword = Object.values(ITEM_TEMPLATES).find(
+        (x) => x.slot === "weapon" && x.classReq === "swordsman" && x.tier === tier,
+      )!;
+      // Same tier + rarity ⇒ identical vendor price (tier² × rarityMult) — daggers are
+      // real NPC-sellable gear like every other weapon line.
+      expect(vendorPriceForTemplate(dag)).toBe(vendorPriceForTemplate(sword.id));
+      expect(vendorPriceForTemplate(dag)).toBeGreaterThan(0);
+    }
+  });
+
+  it("only a ninja hero can equip a dagger (classReq enforced through step)", () => {
+    for (const cls of ["swordsman", "archer", "mage"] as const) {
+      const s = initGameState(1, soloSave(cls, 3));
+      step(s, { equip: { slot: "weapon", templateId: "w_dagger_t3_shadow" } });
+      expect(s.heroes[0].equipped.weapon, `${cls} must not equip a dagger`).toBeNull();
+    }
+    const ninja = initGameState(1, soloSave("ninja", 3));
+    step(ninja, { equip: { slot: "weapon", templateId: "w_dagger_t3_shadow" } });
+    expect(ninja.heroes[0].equipped.weapon).toBe("w_dagger_t3_shadow");
+  });
+});
+
+describe("dagger drop gating (existing players unaffected)", () => {
+  const isDagger = (id: string) => id.startsWith("w_dagger_");
+
+  it("non-ninja farm+boss tables are byte-identical to the pre-ninja (no-arg) tables", () => {
+    for (let s = 1; s <= 30; s++) {
+      for (const cls of ["swordsman", "archer", "mage"] as const) {
+        // Passing a legacy class yields EXACTLY the default (no-arg) table — daggers
+        // never leak in, so the deterministic loot-roll accumulator is unshifted.
+        expect(dropTableForStage(s, cls)).toEqual(dropTableForStage(s));
+        expect(bossDropTableForStage(s, cls)).toEqual(bossDropTableForStage(s));
+      }
+      // No dagger appears in ANY default table (the roll-site's current path).
+      expect(dropTableForStage(s).some((e) => isDagger(e.templateId))).toBe(false);
+      expect(bossDropTableForStage(s).some((e) => isDagger(e.templateId))).toBe(false);
+    }
+  });
+
+  it("a ninja's tables DO include the on-curve dagger (superset of the legacy pool)", () => {
+    for (let s = 1; s <= 30; s++) {
+      const tier = tierForStage(s);
+      const farm = dropTableForStage(s, "ninja");
+      const dagger = farm.find((e) => isDagger(e.templateId));
+      expect(dagger, `s${s} ninja farm dagger`).toBeDefined();
+      expect(ITEM_TEMPLATES[dagger!.templateId].tier).toBe(tier);
+      // Ninja pool = every legacy entry PLUS the dagger (superset, same order preserved).
+      const legacy = dropTableForStage(s);
+      expect(farm.length).toBe(legacy.length + 1);
+      for (const e of legacy) expect(farm).toContainEqual(e);
+      // Boss pool likewise gains the class daggers.
+      expect(bossDropTableForStage(s, "ninja").some((e) => isDagger(e.templateId))).toBe(true);
+    }
+  });
+
+  it("an existing-class hero NEVER rolls a dagger across thousands of kills (real roll path)", () => {
+    // The live roll sites (systems/gear.ts) call dropTableForStage with NO class arg → the
+    // daggers-excluded table. So a swordsman/archer/mage playthrough emits ZERO dagger drops,
+    // and its itemDrop stream is exactly the pre-ninja sequence (locked by the determinism
+    // test above). This is the "least impact on existing players" guarantee, end-to-end.
+    for (const cls of ["swordsman", "archer", "mage"] as const) {
+      const s = initGameState(4242, soloSave(cls, 3));
+      const drops = collectDrops(s, 6000);
+      expect(drops.length).toBeGreaterThan(0);
+      expect(drops.some((d) => isDagger(d.templateId))).toBe(false);
+    }
   });
 });
 

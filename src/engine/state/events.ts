@@ -54,6 +54,13 @@ export type GameEvent =
   | { type: "evolve"; id: number; cls: HeroClass; tier: number }
   | { type: "statAllocated"; id: number; stat: StatKey; amount: number }
   | { type: "skillCast"; heroClass: HeroClass; slot: number; skillId: string }
+  // NINJA `dash` reposition (SAVE v18, docs/ninja-design.md §1). Fires each time a ninja
+  // skill blinks the hero (เงาพริบ once, เงาสังหาร per chain hop, พันเงานิรันดร์ to the centroid):
+  // render draws the shadow-trail / afterimage from `fromX` to `toX`. `heroId` is the hero
+  // ENTITY id (render views key by entity id). One-way, deterministic (no RNG), NOT persisted.
+  // NB (footgun #6): this new event kind needs a render/audio entry in the ninja RENDER wave;
+  // unhandled it falls to the FxController/audio DEFAULT (a safe no-op), no crash.
+  | { type: "heroDashed"; heroId: number; fromX: number; toX: number }
   | { type: "projectileSpawn"; kind: ProjectileKind; x: number; y: number }
   | { type: "bossSlamTelegraph"; x: number; y: number }
   | { type: "bossSlamLand"; x: number; y: number }
@@ -74,6 +81,17 @@ export type GameEvent =
   | { type: "bossSummon"; x: number; count: number }
   | { type: "bossHazardWarn"; x: number }
   | { type: "bossHazardStrike"; x: number }
+  // WORLD BOSS "เสี่ยจ๋อง" lifecycle (hourly world boss — engine wave). Fires on the STEP
+  // the world boss spawns / despawns (lifetime expiry OR the hero leaving its zone) /
+  // dies. `windowId` identifies the hour-window. The boss REUSES the existing hit +
+  // boss-telegraph events (bossSlamTelegraph/bossSlamLand/bossChargeTelegraph/…/hit) for
+  // its combat juice; these three only bracket its life. Rewards are SERVER-claimed off
+  // `worldBossDefeated` (the engine grants no xp/gold). One-way like every event.
+  // NB (footgun #6): render/audio + a spawn-announce toast wire these in the render wave;
+  // unhandled they fall to the FxController/audio DEFAULT (a safe no-op), no crash.
+  | { type: "worldBossSpawned"; windowId: number }
+  | { type: "worldBossDespawned"; windowId: number }
+  | { type: "worldBossDefeated"; windowId: number }
   // A mob AGGROED onto the hero (M6 "สนามล่ามอน"): an aggressive mob's aggro radius
   // triggered, so it starts hunting the hero. One-way (render may hook a growl/alert
   // beat). Replaces the retired march-model `waveSpawn` (there are no waves now).

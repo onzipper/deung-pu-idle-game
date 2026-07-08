@@ -23,10 +23,94 @@ import {
 } from "@/engine";
 import { prisma } from "@/lib/db";
 
-/** Max LIVE characters per account (GDD v2). Enforced at app level — see schema. */
-export const MAX_LIVE_CHARACTERS = 3;
+/**
+ * Max LIVE characters per account. Ninja wave: 3 → 4. The first three slots hold
+ * the base-class lines (sword/bow/magic); the 4th slot is the NINJA unlock slot
+ * (doc §5: "การ์ดสร้างตัวละครใบที่ 4"). Enforced at app level — see schema.
+ */
+export const MAX_LIVE_CHARACTERS = 4;
 
 const KNOWN_CLASSES = [...SLOT_ORDER] as [HeroClass, ...HeroClass[]];
+
+/**
+ * The three BASE-class lines. The ninja-unlock gate requires each of these present
+ * on the account at tier ≥ 3; the base classes also fill slots 1–3.
+ */
+export const BASE_CLASSES = ["swordsman", "archer", "mage"] as const;
+export type BaseClass = (typeof BASE_CLASSES)[number];
+
+/** Tier every base line must reach to unlock the ninja class. */
+export const NINJA_UNLOCK_TIER = 3;
+
+/**
+ * THE single removable gate (doc §5: "ภายหลังค่อยปลดเงื่อนไขนี้"). Flip to `false`
+ * to open the ninja class + 4th slot to everyone regardless of tier progress —
+ * `computeNinjaUnlock().unlocked` then always returns true and `createCharacter`
+ * stops rejecting ninja creation. This is the ONLY switch the owner needs to touch.
+ */
+export const REQUIRE_NINJA_UNLOCK = true;
+
+/**
+ * Ninja-unlock progress for an account, derived from the `Character.tier` caches
+ * (never a save blob). `baseTier3` drives the UI "ปลดล็อก: อาชีพ tier 3 แล้ว N/3"
+ * readout; `unlocked` is the server-authoritative gate the create path enforces.
+ */
+export interface NinjaUnlock {
+  /** Server-authoritative: may this account create a ninja? */
+  unlocked: boolean;
+  /** Tier each base line must reach (NINJA_UNLOCK_TIER). */
+  requiredTier: number;
+  /** Per-base-class: does the account have that line at tier ≥ requiredTier? */
+  baseTier3: Record<BaseClass, boolean>;
+  /** Highest tier seen per base line across the account's LIVE characters. */
+  maxTier: Record<BaseClass, number>;
+  /** How many of the 3 base lines have cleared the gate (0..3). */
+  cleared: number;
+  /** Total base lines needed (BASE_CLASSES.length = 3). */
+  needed: number;
+}
+
+/**
+ * Pure gate evaluator over an account's (baseClass, tier) cache rows. Kept pure so
+ * both the create path (reads inside the tx) and the roster endpoint (plain read)
+ * feed it the same way. A row whose `tier` cache is still the default 1 (pre-ninja
+ * rows / never-saved-since-deploy) simply counts as tier 1 — progress may undercount
+ * until that character next saves; ACCEPTED (no blob-parsing backfill, see schema).
+ */
+export function computeNinjaUnlock(rows: { baseClass: string; tier: number }[]): NinjaUnlock {
+  const maxTier: Record<BaseClass, number> = { swordsman: 0, archer: 0, mage: 0 };
+  for (const r of rows) {
+    if ((BASE_CLASSES as readonly string[]).includes(r.baseClass)) {
+      const cls = r.baseClass as BaseClass;
+      const t = r.tier ?? 1;
+      if (t > maxTier[cls]) maxTier[cls] = t;
+    }
+  }
+  const baseTier3: Record<BaseClass, boolean> = {
+    swordsman: maxTier.swordsman >= NINJA_UNLOCK_TIER,
+    archer: maxTier.archer >= NINJA_UNLOCK_TIER,
+    mage: maxTier.mage >= NINJA_UNLOCK_TIER,
+  };
+  const cleared = BASE_CLASSES.filter((c) => baseTier3[c]).length;
+  const conditionMet = cleared === BASE_CLASSES.length;
+  return {
+    unlocked: REQUIRE_NINJA_UNLOCK ? conditionMet : true,
+    requiredTier: NINJA_UNLOCK_TIER,
+    baseTier3,
+    maxTier,
+    cleared,
+    needed: BASE_CLASSES.length,
+  };
+}
+
+/** Roster read: the account's ninja-unlock progress (piggybacks GET /api/characters). */
+export async function getNinjaUnlock(userId: string): Promise<NinjaUnlock> {
+  const rows = await prisma.character.findMany({
+    where: { userId, deletedAt: null },
+    select: { baseClass: true, tier: true },
+  });
+  return computeNinjaUnlock(rows);
+}
 
 /**
  * Name rules: trimmed 2–24 chars, Thai and/or EN alphanumerics only (no spaces or
@@ -63,6 +147,8 @@ export interface CharacterDTO {
   baseClass: string;
   level: number;
   power: number;
+  /** Class-advancement tier cache (1..3); display + ninja-unlock progress. */
+  tier: number;
   createdAt: string;
 }
 
@@ -72,6 +158,7 @@ function toDTO(c: {
   baseClass: string;
   level: number;
   power: number;
+  tier: number;
   createdAt: Date;
 }): CharacterDTO {
   return {
@@ -80,6 +167,7 @@ function toDTO(c: {
     baseClass: c.baseClass,
     level: c.level,
     power: c.power,
+    tier: c.tier,
     createdAt: c.createdAt.toISOString(),
   };
 }
@@ -124,15 +212,25 @@ export function powerFromSaveAndGear(hero: CharacterSave, equipped: EquippedGear
 export async function listCharacters(userId: string): Promise<CharacterDTO[]> {
   const rows = await prisma.character.findMany({
     where: { userId, deletedAt: null },
-    select: { id: true, name: true, baseClass: true, level: true, power: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      baseClass: true,
+      level: true,
+      power: true,
+      tier: true,
+      createdAt: true,
+    },
     orderBy: { createdAt: "desc" },
   });
   return rows.map(toDTO);
 }
 
+export type CreateErrorCode = "limit" | "duplicate" | "ninja_locked" | "ninja_only_slot";
+
 export type CreateResult =
   | { ok: true; character: CharacterDTO }
-  | { ok: false; code: "limit" | "duplicate"; error: string };
+  | { ok: false; code: CreateErrorCode; error: string };
 
 /**
  * Create a live character for `userId`. Enforces the ≤3-live cap and global
@@ -147,10 +245,30 @@ export async function createCharacter(
   input: CreateCharacterInput,
 ): Promise<CreateResult> {
   const { name, baseClass } = input;
+  const isNinja = baseClass === "ninja";
   try {
     const character = await prisma.$transaction(async (tx) => {
       const live = await tx.character.count({ where: { userId, deletedAt: null } });
       if (live >= MAX_LIVE_CHARACTERS) throw new SlotError("limit");
+
+      // Ninja class gate (server-authoritative). The account must hold all three
+      // base lines at tier ≥ 3, checked via the Character.tier caches (never a save
+      // blob). Behind the single REQUIRE_NINJA_UNLOCK flag so the owner can lift it.
+      // NOTE: because the unlock condition needs 3 LIVE base characters at tier 3,
+      // it structurally consumes slots 1–3, so a ninja can only ever be the 4th —
+      // the two rules below are equivalent in practice, enforced separately for
+      // defense-in-depth + a precise error code the UI can map.
+      if (isNinja) {
+        const rows = await tx.character.findMany({
+          where: { userId, deletedAt: null },
+          select: { baseClass: true, tier: true },
+        });
+        if (!computeNinjaUnlock(rows).unlocked) throw new SlotError("ninja_locked");
+      } else if (live >= MAX_LIVE_CHARACTERS - 1) {
+        // The 4th slot is reserved for the ninja unlock (doc §5). A non-ninja 4th
+        // character is rejected with its own code so the UI shows the ninja card.
+        throw new SlotError("ninja_only_slot");
+      }
 
       // utf8mb4 default collation is case-insensitive, so equality here is a CI
       // match — the required global-CI-uniqueness-among-live check.
@@ -161,31 +279,35 @@ export async function createCharacter(
       if (dup) throw new SlotError("duplicate");
 
       return tx.character.create({
-        data: { userId, name, baseClass, level: 1, power: 0 },
+        data: { userId, name, baseClass, level: 1, power: 0, tier: 1 },
         select: {
           id: true,
           name: true,
           baseClass: true,
           level: true,
           power: true,
+          tier: true,
           createdAt: true,
         },
       });
     });
     return { ok: true, character: toDTO(character) };
   } catch (err) {
-    if (err instanceof SlotError) {
-      return err.kind === "limit"
-        ? { ok: false, code: "limit", error: `at most ${MAX_LIVE_CHARACTERS} characters per account` }
-        : { ok: false, code: "duplicate", error: "that name is already taken" };
-    }
+    if (err instanceof SlotError) return { ok: false, code: err.kind, error: SLOT_ERROR_MSG[err.kind] };
     throw err;
   }
 }
 
+const SLOT_ERROR_MSG: Record<CreateErrorCode, string> = {
+  limit: `at most ${MAX_LIVE_CHARACTERS} characters per account`,
+  duplicate: "that name is already taken",
+  ninja_locked: "ninja requires all three base classes at tier 3",
+  ninja_only_slot: "the 4th character slot is reserved for the ninja class",
+};
+
 /** Internal control-flow error so the tx callback can abort with a reason. */
 class SlotError extends Error {
-  constructor(public readonly kind: "limit" | "duplicate") {
+  constructor(public readonly kind: CreateErrorCode) {
     super(kind);
   }
 }

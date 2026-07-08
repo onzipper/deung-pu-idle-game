@@ -8,8 +8,15 @@
 
 import type { EquippedGear } from "@/engine/config/items";
 
-/** Player hero classes (POC: sword / archer / mage). */
-export type HeroClass = "swordsman" | "archer" | "mage";
+/**
+ * Player hero classes (POC: sword / archer / mage). The NINJA (นินจา, SAVE v18) is the
+ * 4th line — a short-range dual-dagger melee bruiser (DEX-primary) with a `dash` reposition
+ * primitive. Its tier chain: ninja → จอมนินจา (tier 2) → ราชันเงา (tier 3). Adding it is a
+ * pure DOMAIN WIDENING of the union (no new save field), like the v15 tier-3 widening —
+ * every `Record<HeroClass, …>` in the engine gains a ninja entry; existing classes are
+ * byte-identical (they never read the ninja key). See docs/ninja-design.md.
+ */
+export type HeroClass = "swordsman" | "archer" | "mage" | "ninja";
 
 /**
  * Base-stat axes (M5 "Base stats", 86d3jv7m3 — RO-flavoured but lean):
@@ -571,6 +578,35 @@ export interface Boss {
    * outer layers remain valid. Transient (the boss is never persisted).
    */
   variety?: BossVarietyState;
+}
+
+/**
+ * WORLD BOSS "เสี่ยจ๋อง" runtime state (hourly world boss — engine wave). Fully
+ * TRANSIENT: never persisted (toSaveData/SaveData untouched, no SAVE bump), rebuilt
+ * null on load. Spawned by the `spawnWorldBoss` FrameInput intent (the client computes
+ * the wall-clock schedule; the engine never reads a clock), it lives alongside the
+ * normal farm field during the BATTLE phase and reuses the enemy pipeline (targeting/
+ * hits) + the M7.9 boss-mechanic machinery. Sim-affecting → it IS in `stateHash`.
+ *
+ *  - `windowId`  : the hour-window this boss belongs to (`worldBossWindowId`). Once a
+ *    windowId has been spawned/handled this session the record persists (entity nulled
+ *    on despawn/defeat) so a re-injected `spawnWorldBoss` for the SAME window is a no-op
+ *    (idempotent — a cohort's several members may all inject it; first-wins).
+ *  - `mapId`/`zoneIdx` : the farm zone it spawned in — leaving that zone despawns it.
+ *  - `active`    : the entity is present + alive (drives getTargets/findById inclusion).
+ *  - `defeated`  : set once it dies (emits `worldBossDefeated`; blocks respawn same window).
+ *  - `countdown` : seconds until the lifetime despawn (seeded from the intent's
+ *    `remainingSeconds`, decremented per FIXED_DT battle step).
+ *  - `entity`    : the Boss entity (null when inactive) — a Boss with `variety` mechanics.
+ */
+export interface WorldBossState {
+  windowId: number;
+  mapId: string;
+  zoneIdx: number;
+  active: boolean;
+  defeated: boolean;
+  countdown: number;
+  entity: Boss | null;
 }
 
 export interface Projectile {

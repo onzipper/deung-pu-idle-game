@@ -292,5 +292,27 @@ export function stateHash(state: GameState): number {
   h = mix(h, state.projectiles.length);
   for (const p of state.projectiles) h = hashProjectile(h, p);
 
+  // --- WORLD BOSS "เสี่ยจ๋อง" (transient hourly boss). Sim-affecting (targeting +
+  // damage), so it MUST fold in — but ONLY when present, so a DORMANT state (no world
+  // boss ever spawned) hashes byte-identically to pre-feature (the solo canonical /
+  // determinism suites stay green). The record persists after a despawn/defeat (entity
+  // nulled) — that too is sim-relevant (it blocks a same-window respawn) so it folds. ---
+  const wb = state.worldBoss;
+  if (wb) {
+    h = mix(h, 0x77626f73 /* "wbos" */);
+    h = num(h, wb.windowId);
+    h = str(h, wb.mapId);
+    h = num(h, wb.zoneIdx);
+    h = bool(h, wb.active);
+    h = bool(h, wb.defeated);
+    h = num(h, wb.countdown);
+    if (wb.entity) {
+      h = mix(h, 0x77626531 /* "wbe1" = entity present */);
+      h = hashBoss(h, wb.entity);
+    } else {
+      h = mix(h, 0x77626530 /* "wbe0" = entity retired */);
+    }
+  }
+
   return h >>> 0;
 }

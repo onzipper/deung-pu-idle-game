@@ -110,6 +110,9 @@ export interface RefineApiSuccess {
   materialsDelta: number;
   goldDelta: number;
   cost: { materials: number; gold: number };
+  /** True when a "แกร่ง" world-boss fortifier was consumed for a guaranteed
+   * success (mirrors `server/items.ts`'s `RefineResult.fortified`). */
+  fortified: boolean;
 }
 
 export type RefineApiResult = RefineApiSuccess | { ok: false; reason: string };

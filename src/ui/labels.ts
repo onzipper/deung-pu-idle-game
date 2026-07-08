@@ -13,12 +13,14 @@ export const HERO_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F5E1}️", // 🗡️
   archer: "\u{1F3F9}", // 🏹
   mage: "✦",
+  ninja: "\u{1F52A}", // 🔪 dual dagger stand-in
 };
 
 export const SKILL_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F300}", // 🌀
   archer: "\u{1F327}️", // 🌧️ arrow rain
   mage: "☄️",
+  ninja: "\u{1F4A8}", // 💨 shadow dash (matches ninja_dashstrike, the signature skill)
 };
 
 /**
@@ -43,6 +45,11 @@ export const SKILL_ICONS_BY_ID: Record<string, string> = {
   sword_skyfall: "\u{26A1}", // ⚡ skyfall strike
   archer_storm: "\u{1F32A}️", // 🌪️ arrow storm
   mage_apocalypse: "\u{1F480}", // 💀 apocalypse
+  // ninja (all pre-2020, Win10-safe emoji — no 🥷, that's Unicode 13)
+  ninja_dashstrike: "\u{1F4A8}", // 💨 shadow blink
+  ninja_twinfang: "\u{1F52A}", // 🔪 twin fang flurry
+  ninja_massacre: "\u{1F311}", // 🌑 shadow massacre (chain dash)
+  ninja_eternal: "\u{1F30C}", // 🌌 eternal shadows (tier-3 skill 4)
 };
 
 /** M7 Gear & Drops — per-slot icon (pre-2020 emoji, Win10-safe — footgun #4). */

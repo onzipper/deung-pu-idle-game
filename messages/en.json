@@ -321,8 +321,8 @@
         "body": "Your hero hunts the scattered field mobs on its own, all the time. Every kill banks XP (level-ups + stat points) and gold, and pushes the hunt tally toward the next zone unlock. Cast skills to speed things up and walk the world as you grow."
       },
       "characterSlots": {
-        "title": "Characters & 3 slots",
-        "body": "Each account can create up to 3 characters, each locked to a starting class (Sword/Bow/Magic) chosen at creation. Switch between them anytime from the characters page (the \"Switch character\" button in the settings row)."
+        "title": "Characters & 4 slots",
+        "body": "Each account can create up to 4 characters, each locked to a starting class (Sword/Bow/Magic) chosen at creation. Switch between them anytime from the characters page (the \"Switch character\" button in the settings row) — the 4th slot is reserved for the Ninja, a special class that unlocks once all 3 base classes reach tier 3."
       },
       "baseStats": {
         "title": "Base stats (STR/DEX/INT/VIT)",
@@ -344,6 +344,9 @@
       },
       "hero-mage": {
         "body": "The Mage deals area-of-effect magic damage, great against grouped-up enemies, and learns more special skills as it levels, usable once cooldown and mana are ready (tap the skill button on the skill bar, or slot it into auto-cast)."
+      },
+      "hero-ninja": {
+        "body": "The Ninja is a special class with the shortest range in the game — dual daggers for the highest attack speed, and a dash that blinks it straight into its target. It learns more special skills as it levels, usable once cooldown and mana are ready. Unlocks the 4th character slot once your account has all 3 base classes (Sword/Bow/Magic) at tier 3."
       },
       "boss": {
         "title": "Challenging the map boss",
@@ -407,6 +410,11 @@
         "name": "Mage",
         "evolvedName": "Archmage",
         "tier3Name": "Archmage"
+      },
+      "ninja": {
+        "name": "Ninja",
+        "evolvedName": "Ninja Master",
+        "tier3Name": "ShadowKing"
       }
     },
     "skills": {
@@ -421,6 +429,10 @@
       "mage": {
         "name": "Meteor",
         "desc": "Calls down a meteor strike on the area"
+      },
+      "ninja": {
+        "name": "Shadow Blink",
+        "desc": "Dashes through the nearest foe with a slashing strike"
       },
       "sword_whirl": {
         "name": "Whirl Slash",
@@ -469,6 +481,22 @@
       "mage_apocalypse": {
         "name": "Apocalypse",
         "desc": "Darkens the sky and calls down a volley of meteors — the end of the world"
+      },
+      "ninja_dashstrike": {
+        "name": "Shadow Blink",
+        "desc": "Dashes through the nearest foe with a slashing strike"
+      },
+      "ninja_twinfang": {
+        "name": "Twin Fang",
+        "desc": "A flurry of dagger strikes on one foe, with a shadow-edge splash to nearby enemies"
+      },
+      "ninja_massacre": {
+        "name": "Shadow Massacre",
+        "desc": "A chain of shadow blinks that cuts down foe after foe across the field"
+      },
+      "ninja_eternal": {
+        "name": "Eternal Shadows",
+        "desc": "Darkens the field as shadow clones strike every foe at once, before the real ninja appears at the center"
       }
     },
     "quests": {},
@@ -626,6 +654,42 @@
       },
       "a_infernal_t10_aegis": {
         "name": "Infernal Aegis"
+      },
+      "fort_weapon": {
+        "name": "Weapon Fortifier"
+      },
+      "fort_armor": {
+        "name": "Armor Fortifier"
+      },
+      "w_dagger_t1_kunai": {
+        "name": "Kunai"
+      },
+      "w_dagger_t2_tanto": {
+        "name": "Tanto Dagger"
+      },
+      "w_dagger_t3_shadow": {
+        "name": "Shadow Dagger"
+      },
+      "w_dagger_t4_venom": {
+        "name": "Venom Dagger"
+      },
+      "w_dagger_t5_wraith": {
+        "name": "Wraith Dagger"
+      },
+      "w_dagger_t6_ragna": {
+        "name": "Ragnarok Daggers"
+      },
+      "w_dagger_t7_frost": {
+        "name": "Frostbite Daggers"
+      },
+      "w_dagger_t8_dune": {
+        "name": "Dune Daggers"
+      },
+      "w_dagger_t9_obsidian": {
+        "name": "Obsidian Daggers"
+      },
+      "w_dagger_t10_apocalypse": {
+        "name": "Apocalypse Daggers"
       }
     },
     "maps": {
@@ -651,8 +715,8 @@
   },
   "characters": {
     "pageTitle": "Your Characters",
-    "pageSubtitle": "Pick a character to play, or create a new one (up to 3 per account)",
-    "slotCount": "{count}/3 characters",
+    "pageSubtitle": "Pick a character to play, or create a new one (up to 4 per account)",
+    "slotCount": "{count}/4 characters",
     "loading": "Loading characters...",
     "loadError": "Couldn't load your characters",
     "retryButton": "Retry",
@@ -695,6 +759,10 @@
         "mage": {
           "tagline": "Area-of-effect destroyer",
           "playstyle": "Casts spells that shred grouped-up enemies."
+        },
+        "ninja": {
+          "tagline": "Melee shadow assassin",
+          "playstyle": "Dashes in fast with twin daggers for the highest attack speed in the game — thin and short-ranged in exchange."
         }
       },
       "nameLabel": "Character name",
@@ -708,9 +776,15 @@
       },
       "submitButton": "Create character",
       "submitting": "Creating...",
-      "limitError": "You already have the maximum of 3 characters",
+      "limitError": "You already have the maximum of 4 characters",
       "duplicateError": "That name is already taken — try another",
-      "genericError": "Couldn't create the character — try again"
+      "genericError": "Couldn't create the character — try again",
+      "ninjaLockedError": "You need all 3 base classes (Sword/Bow/Magic) at tier 3 before you can create a ninja",
+      "ninjaOnlySlotError": "The 4th character slot is reserved for the ninja class",
+      "ninjaLocked": {
+        "badge": "Locked",
+        "progress": "Unlock: {cleared}/{needed} base classes at tier 3"
+      }
     }
   },
   "auth": {
@@ -902,6 +976,7 @@
     "rewardManaPotion": "+{amount} mana potions",
     "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
     "warpToFriendStarted": "🌀 Warping to your friend...",
+    "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -936,8 +1011,10 @@
     },
     "refineButton": "Refine!",
     "refiningButton": "Refining...",
+    "fortifyButton": "Use Fortifier (×{count} left) — 100% success",
     "outcomeBreak": "Shattered!",
     "outcomeSafeFail": "Miss — nothing lost",
+    "outcomeFortified": "(guaranteed!)",
     "disabled": {
       "pickItem": "Pick an item to refine",
       "townOnly": "Refining only works in town",
@@ -1109,6 +1186,14 @@
           "reconnect": "🔄 Reloading or tabbing away and back now rejoins your party group automatically — no more dead-end \"connecting…\"",
           "multiSell": "🛒 Multi-select selling! A \"select multiple\" mode in Pah Pu's shop — pick items, see the total, sell in one tap"
         }
+      },
+      "2026-07-09": {
+        "items": {
+          "worldBoss": "🌟 The world boss \"Sia Jong\" has arrived! Spawns every hour in Map 1 (5-min pre-announce), lives for 15 minutes — defeat it for 5,000 gold + 350 enhancement stones + 1 Fortifier — bring friends for a faster kill",
+          "fortifier": "⚔️🛡️ \"Fortifiers\" from Sia Jong's reward — use one at Uncle Dueng's refine station to GUARANTEE that attempt's success (same cost, zero chance of a miss/break)",
+          "warpVictoryFix": "🔧 Bugfix: warping back to town after a boss victory no longer gets stuck",
+          "ninja": "🔪 The 4th special class \"Ninja\" has arrived! Shortest range in the game, highest attack speed with twin daggers, plus a dash that blinks straight into its target — unlocks the 4th character slot once your account has all 3 base classes (Sword/Bow/Magic) at tier 3"
+        }
       }
     }
   },
@@ -1136,7 +1221,8 @@
       "all": "All",
       "swordsman": "Sword",
       "archer": "Bow",
-      "mage": "Magic"
+      "mage": "Magic",
+      "ninja": "Ninja"
     }
   },
   "friends": {
@@ -1214,6 +1300,11 @@
     "playingWith": "Playing with {names} in this zone",
     "waiting": "Waiting for teammate…",
     "reconnecting": "Reconnecting…"
+  },
+  "worldBoss": {
+    "pre": "🌟 Sia Jong is about to invade Map 1! {time} left",
+    "active": "🌟 Sia Jong has appeared somewhere in Map 1 — hunt him down! ({time})",
+    "activeHere": "🌟 Sia Jong is in THIS zone!!"
   },
   "questBoard": {
     "title": "Quest Board",

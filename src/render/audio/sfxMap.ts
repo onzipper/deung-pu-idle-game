@@ -34,6 +34,12 @@
  *    hop) — "reuse/extend the whoosh feel, don't duplicate audio" per spec.
  *  - `townArrived` (M7.5 idle-bot trips) — a background bookkeeping event
  *    (restock/sell), not a moment the player is watching for; silent.
+ *  - `worldBossDespawned` (WORLD BOSS "เสี่ยจ๋อง") — "he wandered off" (lifetime
+ *    expiry or the hero left the zone), a quiet non-event by design; the
+ *    render side's smoke-out poof carries this beat alone (see
+ *    `FxController.onWorldBossDespawned`). `worldBossSpawned`/
+ *    `worldBossDefeated` DO get dedicated cues below (a rare, hourly moment
+ *    earns its own fanfare).
  */
 
 import type { GameEvent } from "@/engine";
@@ -67,6 +73,20 @@ export const SFX_PARAMS = {
     swordsman: { duration: 0.22, filterFrom: 2200, filterTo: 300, gain: 0.22 },
     archer: { tickFreq: 1200, tickGain: 0.16, tickGap: 0.045, tickCount: 3 },
     mage: { freqFrom: 90, freqTo: 55, duration: 0.4, gain: 0.22 },
+    // NINJA (SAVE v18 render wave): a quick high-pitched blade whoosh
+    // (shorter/sharper than the swordsman's own — "ตีถี่สุดในเกม") + a fast
+    // double-tick (the dagger's double-hit identity, mirrors the archer's
+    // tick vocabulary but only 2 and a touch brighter/faster).
+    ninja: {
+      duration: 0.09,
+      filterFrom: 3400,
+      filterTo: 900,
+      gain: 0.18,
+      tickFreq: 1700,
+      tickGain: 0.14,
+      tickGap: 0.035,
+      tickCount: 2,
+    },
   },
   heroDown: { freqFrom: 320, freqTo: 110, duration: 0.5, gain: 0.22 },
   /** Somber "walking home" tail, layered right after `heroDown`'s own sting
@@ -184,6 +204,40 @@ export const SFX_PARAMS = {
    * shorter than `bossRoomEntered`'s own drone (which fires later, on actual
    * entry) so the two never get confused despite sharing a register. */
   bossDoorUnlocked: { freq: 85, freqEnd: 55, decay: 0.4, gain: 0.16 },
+  /** WORLD BOSS "เสี่ยจ๋อง" spawn (hourly world boss, render wave): a deep
+   * horn stack (two low tones a fifth apart, LONGER decay than
+   * `bossRoomEntered`'s own drone) + a low rumble noise tail — reads as
+   * grander/more ceremonial than a routine boss-room entry since this is a
+   * server-wide/hourly moment, not a per-run one. */
+  worldBossSpawned: {
+    hornFreq: 62,
+    hornFreqEnd: 40,
+    hornFreq2: 93, // a perfect fifth above hornFreq
+    hornFreq2End: 60,
+    decay: 0.7,
+    gain: 0.24,
+    rumbleFilterFreq: 220,
+    rumbleDuration: 0.6,
+    rumbleGain: 0.22,
+  },
+  /** WORLD BOSS defeated: a richer, bigger version of `bossDefeated`'s
+   * victory arpeggio + coin shower — a 5-note ascending run (vs. the stage
+   * boss's 4) landing on a higher, brighter final note, followed by a denser/
+   * longer coin-shower texture (matches the render side's bigger "coin
+   * fountain"). Deliberately in a DIFFERENT register/voicing from
+   * `bossDefeated` so the two never sound interchangeable. */
+  worldBossDefeated: {
+    arpeggio: [523.25, 659.25, 783.99, 987.77, 1318.51], // C5 E5 G5 B5 E6
+    noteGap: 0.085,
+    noteDecay: 0.2,
+    noteGain: 0.22,
+    coinCount: 10,
+    coinGap: 0.055,
+    coinFreqFrom: 900,
+    coinFreqTo: 1600,
+    coinDuration: 0.1,
+    coinGain: 0.15,
+  },
 } as const;
 
 /** Minimum ms between two sounds sharing a throttle key — the "same-type
@@ -215,6 +269,10 @@ export const SFX_MIN_INTERVAL_MS = {
   fastTravelArrive: 300,
   fastTravelFizzle: 300,
   bossDoorUnlocked: 1000,
+  // WORLD BOSS "เสี่ยจ๋อง": generous throttles — these are rare (hourly),
+  // never need a hail-guard, just a sane "don't double-fire on a re-render" gate.
+  worldBossSpawned: 2000,
+  worldBossDefeated: 2000,
   // M7.9 boss-variety mechanics (maps 4-6) — reuse the CLOSEST existing synth
   // recipes below (no new `SFX_PARAMS` entries): charge telegraph/hit mirror
   // the slam's own riser/boom (same "wind-up then heavy landing" shape),
@@ -293,6 +351,25 @@ export function playSkillCast(engine: AudioEngine, ev: Ev<"skillCast">): void {
         delay: i * a.tickGap,
       });
     }
+  } else if (ev.heroClass === "ninja") {
+    const n = p.ninja;
+    engine.noise({
+      duration: n.duration,
+      filterType: "highpass",
+      filterFreq: n.filterFrom,
+      filterFreqEnd: n.filterTo,
+      filterQ: 1.1,
+      gain: n.gain,
+    });
+    for (let i = 0; i < n.tickCount; i++) {
+      engine.tone(n.tickFreq, {
+        shape: "square",
+        attack: 0.001,
+        decay: 0.03,
+        gain: n.tickGain,
+        delay: i * n.tickGap,
+      });
+    }
   } else {
     const m = p.mage;
     engine.sweep(m.freqFrom, m.freqTo, {
@@ -306,7 +383,11 @@ export function playSkillCast(engine: AudioEngine, ev: Ev<"skillCast">): void {
 /** Hero down: sad downward sweep. */
 export function playHeroDown(engine: AudioEngine): void {
   const p = SFX_PARAMS.heroDown;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "sine", duration: p.duration, gain: p.gain });
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "sine",
+    duration: p.duration,
+    gain: p.gain,
+  });
 }
 
 /** Somber "walking home" tail (M6 "World & Town") — a quieter, slightly
@@ -512,13 +593,21 @@ export function playItemDrop(engine: AudioEngine, rarity: ItemRarity): void {
     return;
   }
   const cfg = rarity === "rare" ? p.rare : p.common;
-  engine.sweep(cfg.freq, cfg.freqEnd, { shape: "sine", duration: cfg.duration, gain: cfg.gain });
+  engine.sweep(cfg.freq, cfg.freqEnd, {
+    shape: "sine",
+    duration: cfg.duration,
+    gain: cfg.gain,
+  });
 }
 
 /** Fast travel begins channeling: a short rising arcane whir. */
 export function playFastTravelCastStart(engine: AudioEngine): void {
   const p = SFX_PARAMS.fastTravelCastStart;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "sawtooth", duration: p.duration, gain: p.gain });
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "sawtooth",
+    duration: p.duration,
+    gain: p.gain,
+  });
 }
 
 /** Fast travel arrives: a soft pop immediately followed by a bright chime —
@@ -546,7 +635,11 @@ export function playFastTravelArrive(engine: AudioEngine): void {
  * descending "dud". */
 export function playFastTravelFizzle(engine: AudioEngine): void {
   const p = SFX_PARAMS.fastTravelFizzle;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "square", duration: p.duration, gain: p.gain });
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "square",
+    duration: p.duration,
+    gain: p.gain,
+  });
 }
 
 /** Boss-door unlock: a low drone at the door itself — see `SFX_PARAMS
@@ -561,6 +654,58 @@ export function playBossDoorUnlocked(engine: AudioEngine): void {
     gain: p.gain,
     freqEnd: p.freqEnd,
   });
+}
+
+/** WORLD BOSS "เสี่ยจ๋อง" spawn: a deep horn stack (two low detuned-fifth tones)
+ * + a lowpass rumble tail — see `SFX_PARAMS.worldBossSpawned`'s doc comment. */
+export function playWorldBossSpawned(engine: AudioEngine): void {
+  const p = SFX_PARAMS.worldBossSpawned;
+  engine.tone(p.hornFreq, {
+    shape: "sawtooth",
+    attack: 0.02,
+    decay: p.decay,
+    gain: p.gain,
+    freqEnd: p.hornFreqEnd,
+  });
+  engine.tone(p.hornFreq2, {
+    shape: "sawtooth",
+    attack: 0.02,
+    decay: p.decay,
+    gain: p.gain * 0.8,
+    freqEnd: p.hornFreq2End,
+    delay: 0.03,
+  });
+  engine.noise({
+    duration: p.rumbleDuration,
+    filterType: "lowpass",
+    filterFreq: p.rumbleFilterFreq,
+    gain: p.rumbleGain,
+  });
+}
+
+/** WORLD BOSS defeated: a bigger/richer 5-note victory arpeggio + a denser
+ * coin-shower tail than `playBossDefeated` — see `SFX_PARAMS.worldBossDefeated`'s
+ * doc comment for how this stays distinct in register/voicing. */
+export function playWorldBossDefeated(engine: AudioEngine): void {
+  const p = SFX_PARAMS.worldBossDefeated;
+  p.arpeggio.forEach((freq, i) => {
+    engine.tone(freq, {
+      shape: "triangle",
+      attack: 0.004,
+      decay: p.noteDecay,
+      gain: p.noteGain,
+      delay: i * p.noteGap,
+    });
+  });
+  const showerStart = p.arpeggio.length * p.noteGap + 0.05;
+  for (let i = 0; i < p.coinCount; i++) {
+    engine.sweep(p.coinFreqFrom, p.coinFreqTo, {
+      shape: "triangle",
+      duration: p.coinDuration,
+      gain: p.coinGain,
+      delay: showerStart + i * p.coinGap,
+    });
+  }
 }
 
 /** Upgrade bought: a tiny click followed by a rising confirmation blip. Kept

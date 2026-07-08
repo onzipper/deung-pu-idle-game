@@ -29,6 +29,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  FORTIFIER_FOR_SLOT,
   ITEM_TEMPLATES,
   REFINE,
   failModeForLevel,
@@ -120,6 +121,9 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const [frozenStack, setFrozenStack] = useState<ItemStack | null>(null);
   const [errorReason, setErrorReason] = useState<string | null>(null);
   const [outcomeLevel, setOutcomeLevel] = useState<number | null>(null);
+  /** World-boss wave: was the LAST resolved attempt a guaranteed-success fortify?
+   * Drives the distinct success copy in the outcome banner. */
+  const [outcomeFortified, setOutcomeFortified] = useState(false);
 
   const audioRef = useRef<AudioEngine | null>(null);
   if (audioRef.current == null) audioRef.current = createRefineAudio();
@@ -179,6 +183,12 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const band = !atMax ? failModeForLevel(targetLevel) : "safe";
   const canAffordMaterials = cost ? materials >= cost.materials : true;
   const canAffordGold = cost ? gold >= cost.gold : true;
+  // World-boss wave: how many matching-slot "แกร่ง" fortifiers do I own? Fortifiers
+  // are fungible (no stat rolls, never equipped) — a plain templateId count is exact.
+  const fortifierTemplateId = displayStack ? FORTIFIER_FOR_SLOT[displayStack.slot] : null;
+  const fortifierCount = fortifierTemplateId
+    ? inventory.filter((i) => i.templateId === fortifierTemplateId).length
+    : 0;
 
   const disabledReason: string | null = !displayStack
     ? "pickItem"
@@ -192,8 +202,9 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
             ? "insufficientGold"
             : null;
 
-  async function handleRefine(): Promise<void> {
+  async function handleRefine(useFortifier = false): Promise<void> {
     if (busy || !displayStack || disabledReason) return;
+    if (useFortifier && fortifierCount <= 0) return;
     const instanceId = displayStack.equippedInstanceId ?? displayStack.unequippedIds[0];
     if (!instanceId) return;
 
@@ -205,6 +216,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
     setPhase("charging");
     setErrorReason(null);
     setOutcomeLevel(null);
+    setOutcomeFortified(false);
 
     if (audio) {
       for (let i = 0; i < STRIKE_COUNT; i++) {
@@ -213,7 +225,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
     }
 
     const [result] = await Promise.all([
-      executeRefine(instanceId),
+      executeRefine(instanceId, useFortifier),
       new Promise<void>((resolve) => setTimeout(resolve, CHARGE_MS)),
     ]);
 
@@ -230,6 +242,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
     }
 
     setOutcomeLevel(result.refineLevel);
+    setOutcomeFortified(result.fortified);
     if (result.destroyed) {
       setPhase("break");
       if (audio) playRefineBreak(audio);
@@ -436,7 +449,10 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                 {/* Outcome banner (M4 juice, per spec) */}
                 {phase === "success" && outcomeLevel !== null && (
                   <span className="animate-refine-rise absolute top-0 right-1 text-lg font-black text-emerald-400">
-                    +{outcomeLevel}!
+                    +{outcomeLevel}!{" "}
+                    {outcomeFortified && (
+                      <span className="text-sm text-violet-300">{t("outcomeFortified")}</span>
+                    )}
                   </span>
                 )}
                 {phase === "degrade" && (
@@ -523,27 +539,50 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     </div>
                   )}
 
-                  <button
-                    type="button"
-                    // Only truly inert while charging or while genuinely
-                    // unable to act at idle — during the reveal the button
-                    // must stay clickable (native `disabled` blocks click
-                    // entirely) so a tap on it can skip straight to settle.
-                    disabled={phase === "charging" || (phase === "idle" && !!disabledReason)}
-                    title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
-                    onClick={() => {
-                      if (isReveal) {
-                        skipReveal();
-                        return;
-                      }
-                      void handleRefine();
-                    }}
-                    className={`min-h-11 rounded-(--ddp-radius-md) border border-ddp-gold/70 bg-ddp-gold/20 px-3 text-sm font-black text-ddp-gold-bright transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
-                      isReveal ? "opacity-70" : ""
-                    }`}
-                  >
-                    {busy ? t("refiningButton") : t("refineButton")}
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      // Only truly inert while charging or while genuinely
+                      // unable to act at idle — during the reveal the button
+                      // must stay clickable (native `disabled` blocks click
+                      // entirely) so a tap on it can skip straight to settle.
+                      disabled={phase === "charging" || (phase === "idle" && !!disabledReason)}
+                      title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
+                      onClick={() => {
+                        if (isReveal) {
+                          skipReveal();
+                          return;
+                        }
+                        void handleRefine(false);
+                      }}
+                      className={`min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-gold/70 bg-ddp-gold/20 px-3 text-sm font-black text-ddp-gold-bright transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+                        isReveal ? "opacity-70" : ""
+                      }`}
+                    >
+                      {busy ? t("refiningButton") : t("refineButton")}
+                    </button>
+                    {/* World-boss wave: guaranteed-success fortify — same cost, no roll.
+                        Only offered while an owned "แกร่ง" fortifier matches this slot. */}
+                    {fortifierCount > 0 && (
+                      <button
+                        type="button"
+                        disabled={phase === "charging" || (phase === "idle" && !!disabledReason)}
+                        title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
+                        onClick={() => {
+                          if (isReveal) {
+                            skipReveal();
+                            return;
+                          }
+                          void handleRefine(true);
+                        }}
+                        className={`min-h-11 flex-1 rounded-(--ddp-radius-md) border border-violet-400/70 bg-violet-400/15 px-3 text-xs font-black text-violet-300 transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+                          isReveal ? "opacity-70" : ""
+                        }`}
+                      >
+                        {t("fortifyButton", { count: fortifierCount })}
+                      </button>
+                    )}
+                  </div>
                   {disabledReason && (
                     <p className="text-center text-[11px] text-rose-300">
                       {t(`disabled.${disabledReason}`)}

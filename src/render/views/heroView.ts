@@ -95,6 +95,7 @@ const REST_ANGLE: Record<HeroClass, number> = {
   swordsman: -0.15,
   archer: -0.35, // held slightly drawn at rest — "always under tension"
   mage: -0.05,
+  ninja: -0.22, // low forward dagger guard — "always ready to blink in"
 };
 const OFFARM_REST = 0.35;
 
@@ -140,7 +141,16 @@ const WEAPON_HAND: Record<HeroClass, { x: number; y: number }> = {
   swordsman: { x: 12, y: HEAD_Y - 2 },
   archer: { x: 11, y: HEAD_Y + 4 },
   mage: { x: 11, y: HEAD_Y + 4 },
+  // Held low/close — the shortest reach in the game (docs/ninja-design.md §1).
+  ninja: { x: 9, y: HEAD_Y + 5 },
 };
+
+/** Ninja OFF-hand dagger grip — mirrors the generic off-arm segment's own
+ * fixed hand point (`view.offArm`'s `moveTo(0, SHOULDER_Y).lineTo(-9,
+ * SHOULDER_Y + 6)` in `buildRig`, drawn for every class). Kept as its own
+ * named constant (not derived) so `buildGearWeapon`'s ninja branch and this
+ * off-arm line data can never drift apart. */
+const NINJA_OFF_HAND = { x: -9, y: SHOULDER_Y + 6 };
 
 /** Rarity -> accent color (common reuses the shared `steel` weapon-material
  * tone; rare/epic get their own jewel accents — see `theme.ts`). */
@@ -156,6 +166,20 @@ function rarityAccentColor(rarity: ItemRarity): number {
 const SWING_DURATION = 0.22;
 const SWING_AMPLITUDE = 1.35;
 const LUNGE_PX = 5;
+
+// ---------------------------------------------------------------------------
+// Ninja dual-dagger basic attack (docs/ninja-design.md §7 "ท่าโจมตีสลับซ้าย-ขวา"):
+// a much SHORTER anim than the swordsman's (ninja is "ตีถี่สุดในเกม" — fastest
+// cadence in the game), where the lead hand (weaponArm) throws the full slash
+// and the off hand (offArm, carrying `gearOffWeapon`) mirrors a smaller
+// counter-slash a beat behind — `HeroAnimState.comboIndex` (0/1 parity, NOT
+// the swordsman's 0-2 cycle) picks which arm leads THIS swing, alternating
+// every attack.
+// ---------------------------------------------------------------------------
+const NINJA_SLASH_DURATION = 0.15;
+const NINJA_SLASH_AMPLITUDE = 1.5;
+const NINJA_TRAIL_FRAC = 0.5; // the trailing arm's delta as a fraction of the lead's
+const NINJA_LUNGE_PX = 4;
 
 // ---------------------------------------------------------------------------
 // Swordsman basic-attack combo (HERO SIGNATURE PASS 86d3k2q8f, item 1): 3
@@ -226,7 +250,8 @@ const NAMEPLATE_ALPHA = 0.85;
 const NAMEPLATE_Y = GROUND_Y - 72;
 const SHADOW_TAG_Y = GROUND_Y - 84;
 
-type AttackKindAnim = "swing" | "spin" | "release" | "triple" | "staffPulse" | "castHold";
+type AttackKindAnim =
+  "swing" | "spin" | "release" | "triple" | "staffPulse" | "castHold" | "dualSlash";
 
 interface AttackAnim {
   kind: AttackKindAnim;
@@ -321,6 +346,13 @@ export interface HeroView extends Container {
    * the equipped template's own `tier`/`rarity` (`@/engine/config/items`),
    * independent of `hero.tier` (M5 evolution) below. */
   gearWeapon: Graphics;
+  /** Ninja-only (docs/ninja-design.md §7 "มีดคู่สองมือ"): the OFF-hand dagger, a
+   * child of `offArm` so it swings with the off-arm's own rotation (the
+   * "alternates L/R" attack read needs the off-hand blade to actually move,
+   * unlike `swordsman`'s off-arm shield). Mirrors `gearWeapon`'s growth/
+   * rebuild convention exactly (`buildGearWeapon`'s ninja branch draws both),
+   * but stays permanently empty/invisible for every other class. */
+  gearOffWeapon: Graphics;
   /** M7 gear paper-doll: the equipped ARMOR overlay (trim/accents on top of
    * the class's base silhouette), a sibling of `torso` under `upperBody` —
    * see `buildGearArmor()`. Rebuilt only when `hero.equipped.armor` changes. */
@@ -444,6 +476,16 @@ export function createHeroView(): HeroView {
   // body lean/bob/breathe, never a swing.
   const gearWeapon = new Graphics();
   weaponArm.addChild(gearWeapon);
+  // Ninja-only off-hand dagger — a plain child of `offArm` (same "no
+  // pivot/position offset of its own" no-op-transform trick as `gearWeapon`
+  // above), so it inherits the off-arm's own swing for free. Starts hidden;
+  // `buildGearWeapon`'s ninja branch is the only place that ever draws into
+  // or shows it (every other class leaves it permanently empty+invisible —
+  // same "empty Graphics must be excluded via visible=false" rule `gearArmor`
+  // below already follows).
+  const gearOffWeapon = new Graphics();
+  gearOffWeapon.visible = false;
+  offArm.addChild(gearOffWeapon);
   const gearArmor = new Graphics();
   gearArmor.visible = false; // stays hidden until `buildGearArmor` actually draws something
 
@@ -510,6 +552,7 @@ export function createHeroView(): HeroView {
   view.offArm = offArm;
   view.weaponArm = weaponArm;
   view.gearWeapon = gearWeapon;
+  view.gearOffWeapon = gearOffWeapon;
   view.gearArmor = gearArmor;
   view.gearWeaponTier = 1;
   view.gearWeaponRarity = "common";
@@ -603,10 +646,12 @@ function buildRig(view: HeroView, cls: HeroClass): void {
   } else if (cls === "archer") {
     // Cloak drape (back triangle) + quiver + fletching pokes, drawn first so
     // the spine/hood render on top of it.
-    t.poly([-6, SHOULDER_Y, -10, HIP_Y - 2, -2, HIP_Y + 2, 2, SHOULDER_Y + 2], true).fill({
-      color: colors.shade,
-      alpha: 0.9,
-    });
+    t.poly([-6, SHOULDER_Y, -10, HIP_Y - 2, -2, HIP_Y + 2, 2, SHOULDER_Y + 2], true).fill(
+      {
+        color: colors.shade,
+        alpha: 0.9,
+      },
+    );
     t.moveTo(-8, SHOULDER_Y - 2)
       .lineTo(-4, SHOULDER_Y - 15)
       .stroke({ width: 4, color: colors.shade, cap: "round" });
@@ -616,6 +661,20 @@ function buildRig(view: HeroView, cls: HeroClass): void {
     t.moveTo(-4, SHOULDER_Y - 14)
       .lineTo(-5.5, SHOULDER_Y - 19)
       .stroke({ width: 1.2, color: colors.light, cap: "round" });
+  } else if (cls === "ninja") {
+    // Fitted dark wrap top (narrower than a full robe — "thin agile
+    // silhouette" per docs/ninja-design.md §7) + a diagonal dagger-sheath
+    // strap, plus a trailing scarf ribbon drawn first so it sits behind the
+    // body (-x side, same "drawn first = further back" convention the
+    // archer's cloak drape above uses).
+    t.poly(
+      [-3, SHOULDER_Y, -9, SHOULDER_Y + 9, -4, SHOULDER_Y + 15, -1, SHOULDER_Y + 6],
+      true,
+    ).fill({ color: colors.shade, alpha: 0.85 });
+    t.roundRect(-3.4, SHOULDER_Y - 1, 6.8, HIP_Y - SHOULDER_Y - 2, 2).fill(colors.body);
+    t.moveTo(-3, SHOULDER_Y + 1)
+      .lineTo(3, HIP_Y - 4)
+      .stroke({ width: 1.4, color: colors.shade, alpha: 0.85, cap: "round" });
   } else {
     // Robe body — wide hem stopping above the knee so leg-swing stays
     // legible under it — plus a belt/sash at the waist.
@@ -636,7 +695,9 @@ function buildRig(view: HeroView, cls: HeroClass): void {
   if (cls === "swordsman") {
     // Two-tone open-face helm: a light cap over the top half of the head, a
     // short plume, and a thin visor-slit — minimal "there's a face" cue.
-    t.poly(arcFanPoints(0, HEAD_Y, HEAD_R + 1, Math.PI, Math.PI * 2), true).fill(colors.light);
+    t.poly(arcFanPoints(0, HEAD_Y, HEAD_R + 1, Math.PI, Math.PI * 2), true).fill(
+      colors.light,
+    );
     t.poly(
       [-2, HEAD_Y - HEAD_R - 1, 2, HEAD_Y - HEAD_R - 1, 0, HEAD_Y - HEAD_R - 8],
       true,
@@ -664,9 +725,28 @@ function buildRig(view: HeroView, cls: HeroClass): void {
       true,
     ).fill(colors.shade);
     t.circle(0, HEAD_Y, HEAD_R + 1).fill(colors.body);
-    t.circle(HEAD_R * 0.3, HEAD_Y + 1, HEAD_R * 0.6).fill({ color: colors.shade, alpha: 0.6 });
+    t.circle(HEAD_R * 0.3, HEAD_Y + 1, HEAD_R * 0.6).fill({
+      color: colors.shade,
+      alpha: 0.6,
+    });
     t.circle(HEAD_R * 0.55, HEAD_Y - 1, 1).fill(PALETTE.outline);
     t.circle(HEAD_R * 0.55, HEAD_Y + 2, 1).fill(PALETTE.outline);
+  } else if (cls === "ninja") {
+    // Wrapped headband (with two short trailing tails on the -x/back side) +
+    // a lower-face mask, a single eye-slit peeking out on the +x
+    // (heroes-face-right) side — reads as "shadow-clad", distinct from the
+    // archer's hood/mage's hat.
+    t.moveTo(-HEAD_R - 1, HEAD_Y - 1)
+      .lineTo(HEAD_R + 1, HEAD_Y - 1)
+      .stroke({ width: 2.4, color: colors.shade, cap: "round" });
+    t.poly(
+      [-HEAD_R - 1, HEAD_Y - 1, -HEAD_R - 6, HEAD_Y + 2, -HEAD_R - 3, HEAD_Y - 4],
+      true,
+    ).fill({ color: colors.shade, alpha: 0.85 });
+    t.circle(0, HEAD_Y + 2.5, HEAD_R * 0.72).fill({ color: colors.shade, alpha: 0.55 }); // mask
+    t.moveTo(HEAD_R * 0.2, HEAD_Y - 0.5)
+      .lineTo(HEAD_R * 0.75, HEAD_Y - 0.5)
+      .stroke({ width: 1.2, color: PALETTE.outline, cap: "round" }); // eye-slit
   } else {
     // Pointed hat: flat brim + a forward-leaning cone + a thin band, plus a
     // peeking pair of eye dots below the brim.
@@ -713,6 +793,11 @@ function buildRig(view: HeroView, cls: HeroClass): void {
     g.moveTo(0, SHOULDER_Y)
       .lineTo(hand.x, hand.y)
       .stroke({ width: 2.4, color: colors.body, cap: "round" });
+  } else if (cls === "ninja") {
+    const hand = WEAPON_HAND.ninja;
+    g.moveTo(0, SHOULDER_Y)
+      .lineTo(hand.x, hand.y)
+      .stroke({ width: 2.1, color: colors.body, cap: "round" });
   } else {
     const hand = WEAPON_HAND.mage;
     g.moveTo(0, SHOULDER_Y)
@@ -801,7 +886,87 @@ function drawApexOrnament(
   }
 }
 
-function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | null): void {
+/** Ninja dagger blade (main OR off hand — see `buildGearWeapon`'s ninja
+ * branch), same tapered-poly-via-perpendicular-normal technique as the
+ * swordsman's blade above, just shorter/flatter (shortest reach in the game)
+ * and mirrorable so the off-hand dagger reads as a natural twin blade rather
+ * than a copy-pasted main-hand one. `mirror` flips the blade's x-direction
+ * (1 = main hand, points toward +x; -1 = off hand, points toward -x). The
+ * main-hand tip formula is mirrored in `weaponAnchorLocal()`'s ninja case
+ * below (the tier-6/epic gear-aura anchor hook) — keep the two in sync. */
+function drawNinjaDaggerBlade(
+  g: Graphics,
+  hand: { x: number; y: number },
+  mirror: 1 | -1,
+  tier: number,
+  scale: number,
+  rarity: ItemRarity,
+  accent: number,
+): void {
+  const bladeLen = (7 + (tier - 1) * 1.4) * scale * mirror;
+  const bladeRise = 9 * scale;
+  const tipX = hand.x + bladeLen;
+  const tipY = hand.y - bladeRise;
+  const dx = tipX - hand.x;
+  const dy = tipY - hand.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = dx / len;
+  const ny = dy / len;
+  const px = -ny;
+  const py = nx;
+  const halfW = 1.5 * (0.9 + scale * 0.1);
+  g.poly(
+    [
+      hand.x + px * halfW,
+      hand.y + py * halfW,
+      tipX,
+      tipY,
+      hand.x - px * halfW,
+      hand.y - py * halfW,
+    ],
+    true,
+  ).fill(PALETTE.steel);
+  const guardLen = 3.2 * scale;
+  g.moveTo(hand.x - px * guardLen, hand.y - py * guardLen)
+    .lineTo(hand.x + px * guardLen, hand.y + py * guardLen)
+    .stroke({ width: 1.6, color: PALETTE.ninjaVioletDark, cap: "round" });
+  if (rarity !== "common") {
+    g.poly(
+      [
+        hand.x + px * halfW,
+        hand.y + py * halfW,
+        tipX,
+        tipY,
+        hand.x - px * halfW,
+        hand.y - py * halfW,
+      ],
+      true,
+    ).stroke({ width: 0.8, color: accent, alpha: 0.85 });
+  }
+  if (tier >= 6) {
+    // "อาวุธใหญ่อลัง" break-tier flare — a small violet wisp off the guard,
+    // matching the ninja's own silver-violet fx language (not `swordEmber`).
+    const flareLen = guardLen * 1.6;
+    g.poly(
+      [
+        hand.x - px * guardLen,
+        hand.y - py * guardLen,
+        hand.x - px * flareLen,
+        hand.y - py * flareLen - 2,
+        hand.x - px * guardLen * 0.7,
+        hand.y - py * guardLen * 0.7 - 3,
+      ],
+      true,
+    ).fill(PALETTE.ninjaViolet);
+  }
+  drawApexOrnament(g, tier, { x: tipX, y: tipY }, Math.abs(bladeLen) * 0.5);
+}
+
+function buildGearWeapon(
+  view: HeroView,
+  cls: HeroClass,
+  templateId: string | null,
+): void {
   const colors = HERO_COLORS[cls];
   const tpl = templateId ? ITEM_TEMPLATES[templateId] : undefined;
   const tier = tpl?.tier ?? 1;
@@ -810,6 +975,13 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
   const accent = rarityAccentColor(rarity);
   const g = view.gearWeapon;
   g.clear();
+  // Ninja-only off-hand dagger (`view.gearOffWeapon`, a child of `offArm` —
+  // see `createHeroView`) — every other class leaves it permanently
+  // empty+invisible, same "clear + hide" convention `buildGearArmor` uses for
+  // an unequipped slot.
+  const g2 = view.gearOffWeapon;
+  g2.clear();
+  g2.visible = cls === "ninja";
 
   if (cls === "swordsman") {
     const hand = WEAPON_HAND.swordsman;
@@ -829,7 +1001,14 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
     const py = nx;
     const halfW = 2.2 * (0.9 + scale * 0.1);
     g.poly(
-      [hand.x + px * halfW, hand.y + py * halfW, tipX, tipY, hand.x - px * halfW, hand.y - py * halfW],
+      [
+        hand.x + px * halfW,
+        hand.y + py * halfW,
+        tipX,
+        tipY,
+        hand.x - px * halfW,
+        hand.y - py * halfW,
+      ],
       true,
     ).fill(PALETTE.steel);
     const guardLen = 5 * scale;
@@ -881,7 +1060,10 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
     const cx = hand.x + 3;
     const cy = hand.y;
     const r = 13 * scale;
-    g.arc(cx, cy, r, -1.1, 1.1).stroke({ width: tier >= 4 ? 2.2 : 1.8, color: colors.light });
+    g.arc(cx, cy, r, -1.1, 1.1).stroke({
+      width: tier >= 4 ? 2.2 : 1.8,
+      color: colors.light,
+    });
     const p1x = cx + r * Math.cos(-1.1);
     const p1y = cy + r * Math.sin(-1.1);
     const p2x = cx + r * Math.cos(1.1);
@@ -896,7 +1078,14 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
       .lineTo(stringX + arrowLen, cy)
       .stroke({ width: 1.4, color: colors.light, cap: "round" });
     g.poly(
-      [stringX + arrowLen, cy - 2, stringX + arrowLen + 4, cy, stringX + arrowLen, cy + 2],
+      [
+        stringX + arrowLen,
+        cy - 2,
+        stringX + arrowLen + 4,
+        cy,
+        stringX + arrowLen,
+        cy + 2,
+      ],
       true,
     ).fill(PALETTE.steel);
     if (rarity !== "common") {
@@ -919,6 +1108,15 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
       g.poly([p2x, p2y, p2x - 3, p2y + 5, p2x + 2, p2y + 3], true).fill(accent);
     }
     drawApexOrnament(g, tier, { x: cx, y: cy }, r * 0.9);
+  } else if (cls === "ninja") {
+    // Dual daggers (docs/ninja-design.md §7 "มีดคู่สองมือ"): the main-hand
+    // blade grows with the equipped tier exactly like every other class's
+    // weapon (`view.gearWeapon`, child of `weaponArm`); the off-hand mirror
+    // (`view.gearOffWeapon`, child of `offArm`) grows in lockstep off the
+    // SAME templateId (one dagger item type, dual-wielded) so both blades
+    // always read as matching gear.
+    drawNinjaDaggerBlade(g, WEAPON_HAND.ninja, 1, tier, scale, rarity, accent);
+    drawNinjaDaggerBlade(g2, NINJA_OFF_HAND, -1, tier, scale, rarity, accent);
   } else {
     const hand = WEAPON_HAND.mage;
     const sx = hand.x;
@@ -931,9 +1129,18 @@ function buildGearWeapon(view: HeroView, cls: HeroClass, templateId: string | nu
     // Crystal head: layered flat-alpha "glow" rings (no gradients) around a
     // bright core — the cast "pulse" scales `weaponArm` as a whole, so the
     // glow breathes with it for free.
-    g.circle(sx, crystalY, safeRadius(crystalR * 2.33)).fill({ color: colors.light, alpha: 0.16 });
-    g.circle(sx, crystalY, safeRadius(crystalR * 1.67)).fill({ color: colors.light, alpha: 0.32 });
-    g.circle(sx, crystalY, safeRadius(crystalR)).fill({ color: colors.light, alpha: 0.95 });
+    g.circle(sx, crystalY, safeRadius(crystalR * 2.33)).fill({
+      color: colors.light,
+      alpha: 0.16,
+    });
+    g.circle(sx, crystalY, safeRadius(crystalR * 1.67)).fill({
+      color: colors.light,
+      alpha: 0.32,
+    });
+    g.circle(sx, crystalY, safeRadius(crystalR)).fill({
+      color: colors.light,
+      alpha: 0.95,
+    });
     g.circle(sx, crystalY, safeRadius(crystalR)).stroke({
       width: 1,
       color: PALETTE.outline,
@@ -1004,18 +1211,49 @@ function buildGearArmor(view: HeroView, cls: HeroClass, templateId: string | nul
       color: accent,
       alpha: 0.9,
     });
-    g.circle(-4.5, SHOULDER_Y, safeRadius(padR)).stroke({ width: 1.2, color: accent, alpha: 0.9 });
-    g.circle(4.5, SHOULDER_Y, safeRadius(padR)).stroke({ width: 1.2, color: accent, alpha: 0.9 });
+    g.circle(-4.5, SHOULDER_Y, safeRadius(padR)).stroke({
+      width: 1.2,
+      color: accent,
+      alpha: 0.9,
+    });
+    g.circle(4.5, SHOULDER_Y, safeRadius(padR)).stroke({
+      width: 1.2,
+      color: accent,
+      alpha: 0.9,
+    });
   } else if (cls === "archer") {
-    g.circle(-2, SHOULDER_Y - 1, safeRadius(4 * scale)).fill({ color: accent, alpha: 0.18 });
-    g.circle(-2, SHOULDER_Y - 1, safeRadius(2.4 * scale)).fill({ color: accent, alpha: 0.6 });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(4 * scale)).fill({
+      color: accent,
+      alpha: 0.18,
+    });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(2.4 * scale)).fill({
+      color: accent,
+      alpha: 0.6,
+    });
     g.circle(-2, SHOULDER_Y - 1, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
     g.moveTo(-6, SHOULDER_Y - 2)
       .lineTo(-10, HIP_Y - 2)
       .stroke({ width: 1, color: accent, alpha: 0.75 });
+  } else if (cls === "ninja") {
+    // Rarity-tinted trim tracing the diagonal dagger-sheath strap
+    // (`buildRig`'s ninja torso) + a small clasp at the scarf's shoulder tie.
+    g.moveTo(-3 * scale, SHOULDER_Y + 1 * scale)
+      .lineTo(3 * scale, HIP_Y - 4 * scale)
+      .stroke({ width: 1.2, color: accent, alpha: 0.85 });
+    g.circle(-3, SHOULDER_Y, safeRadius(2.2 * scale)).stroke({
+      width: 1,
+      color: accent,
+      alpha: 0.8,
+    });
   } else {
-    g.circle(0, SHOULDER_Y - 2, safeRadius(4 * scale)).fill({ color: accent, alpha: 0.18 });
-    g.circle(0, SHOULDER_Y - 2, safeRadius(2.4 * scale)).fill({ color: accent, alpha: 0.6 });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(4 * scale)).fill({
+      color: accent,
+      alpha: 0.18,
+    });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(2.4 * scale)).fill({
+      color: accent,
+      alpha: 0.6,
+    });
     g.circle(0, SHOULDER_Y - 2, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
     g.moveTo(-6, HEAD_Y - 9)
       .lineTo(6, HEAD_Y - 9)
@@ -1079,8 +1317,16 @@ function buildTierAccent(view: HeroView, cls: HeroClass): void {
       color: TIER_ACCENT_GOLD,
       alpha: 0.85,
     });
-    g.circle(-4.5, SHOULDER_Y, 3.2).stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.85 });
-    g.circle(4.5, SHOULDER_Y, 3.2).stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.85 });
+    g.circle(-4.5, SHOULDER_Y, 3.2).stroke({
+      width: 1,
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.85,
+    });
+    g.circle(4.5, SHOULDER_Y, 3.2).stroke({
+      width: 1,
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.85,
+    });
     g.poly([-5, SHOULDER_Y + 1, -12, HIP_Y - 3, -4, HIP_Y + 3], true).fill({
       color: colors.shade,
       alpha: 0.9,
@@ -1092,18 +1338,41 @@ function buildTierAccent(view: HeroView, cls: HeroClass): void {
     // Brighter jewel accent: a small glowing gem clasp at the collar (same
     // layered-alpha "glow" vocabulary the mage's staff crystal uses) plus a
     // thin gold trim line along the cloak edge.
-    g.circle(-2, SHOULDER_Y - 1, safeRadius(4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.18 });
-    g.circle(-2, SHOULDER_Y - 1, safeRadius(2.4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.55 });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(4)).fill({
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.18,
+    });
+    g.circle(-2, SHOULDER_Y - 1, safeRadius(2.4)).fill({
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.55,
+    });
     g.circle(-2, SHOULDER_Y - 1, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
     g.moveTo(-6, SHOULDER_Y - 2)
       .lineTo(-10, HIP_Y - 2)
       .stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.7 });
+  } else if (cls === "ninja") {
+    // Gold-trimmed headband (tracing `buildRig`'s ninja headband stroke) +
+    // gold tips on the trailing scarf ribbon — the shared "evolution gold"
+    // motif, kept modest per the class's thin-silhouette identity.
+    g.moveTo(-HEAD_R - 1, HEAD_Y - 1)
+      .lineTo(HEAD_R + 1, HEAD_Y - 1)
+      .stroke({ width: 1, color: TIER_ACCENT_GOLD, alpha: 0.85 });
+    g.circle(-4, SHOULDER_Y + 15, safeRadius(1.4)).fill({
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.8,
+    });
   } else {
     // Brighter jewel accent: a glowing gem brooch at the collar (mirrors the
     // archer's, keeping the "evolution gem" motif consistent) plus a gold
     // band trim over the hat.
-    g.circle(0, SHOULDER_Y - 2, safeRadius(4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.18 });
-    g.circle(0, SHOULDER_Y - 2, safeRadius(2.4)).fill({ color: TIER_ACCENT_GOLD, alpha: 0.55 });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(4)).fill({
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.18,
+    });
+    g.circle(0, SHOULDER_Y - 2, safeRadius(2.4)).fill({
+      color: TIER_ACCENT_GOLD,
+      alpha: 0.55,
+    });
     g.circle(0, SHOULDER_Y - 2, safeRadius(1.2)).fill({ color: 0xffffff, alpha: 0.9 });
     g.moveTo(-6, HEAD_Y - 9)
       .lineTo(6, HEAD_Y - 9)
@@ -1151,7 +1420,13 @@ function buildAuraRing(view: HeroView, cls: HeroClass): void {
  * pen position (world-origin-ish) instead of the arc's own coordinates.
  * `poly()` always builds a fully explicit, self-contained closed shape, so
  * it can't inherit garbage from whatever was drawn immediately before it. */
-function arcFanPoints(cx: number, cy: number, r: number, start: number, end: number): number[] {
+function arcFanPoints(
+  cx: number,
+  cy: number,
+  r: number,
+  start: number,
+  end: number,
+): number[] {
   const segments = 8;
   const pts: number[] = [];
   for (let i = 0; i <= segments; i++) {
@@ -1189,11 +1464,17 @@ function startAttack(anim: HeroAnimState, kind: AttackKindAnim): void {
             ? TRIPLE_DURATION
             : kind === "staffPulse"
               ? STAFF_PULSE_DURATION
-              : CASTHOLD_DURATION;
+              : kind === "dualSlash"
+                ? NINJA_SLASH_DURATION
+                : CASTHOLD_DURATION;
   anim.attack = { kind, t: 0, duration };
   anim.attackSeq++;
   if (kind === "swing") anim.comboIndex = (anim.comboIndex + 1) % 3;
   else if (kind === "release") anim.shotPoseIndex = (anim.shotPoseIndex + 1) % 2;
+  // Ninja dual-slash: 0/1 parity picks which arm LEADS this swing (see the
+  // module doc comment above `NINJA_SLASH_DURATION`) — a separate 2-cycle
+  // from the swordsman's 0-2 combo above, reusing the same `comboIndex` field.
+  else if (kind === "dualSlash") anim.comboIndex = (anim.comboIndex + 1) % 2;
 }
 
 interface AttackFx {
@@ -1209,7 +1490,13 @@ interface AttackFx {
  * weapon-arm scale multiplier (mage's cast "pulse"). All-neutral once no
  * attack is active. */
 function resolveAttack(anim: HeroAnimState, dt: number): AttackFx {
-  const out: AttackFx = { weaponDelta: 0, offArmDelta: 0, bobExtra: 0, lungeX: 0, weaponScale: 1 };
+  const out: AttackFx = {
+    weaponDelta: 0,
+    offArmDelta: 0,
+    bobExtra: 0,
+    lungeX: 0,
+    weaponScale: 1,
+  };
   const atk = anim.attack;
   if (!atk) return out;
 
@@ -1241,6 +1528,19 @@ function resolveAttack(anim: HeroAnimState, dt: number): AttackFx {
     case "spin": {
       out.weaponDelta = progress * Math.PI * 2;
       out.bobExtra = Math.sin(progress * Math.PI) * -2;
+      break;
+    }
+    case "dualSlash": {
+      // Ninja alternating L/R dagger strike (docs/ninja-design.md §7):
+      // `comboIndex` parity (see `startAttack`) picks which arm LEADS this
+      // swing — the lead arm gets the full amplitude, the trailing arm
+      // mirrors a smaller counter-slash the OPPOSITE direction (both blades
+      // read as cutting, not one arm idling).
+      const swing = Math.sin(progress * Math.PI);
+      const leadSign = anim.comboIndex === 0 ? 1 : -1;
+      out.weaponDelta = leadSign * swing * NINJA_SLASH_AMPLITUDE;
+      out.offArmDelta = -leadSign * swing * NINJA_SLASH_AMPLITUDE * NINJA_TRAIL_FRAC;
+      out.lungeX = swing * NINJA_LUNGE_PX;
       break;
     }
     case "release": {
@@ -1277,7 +1577,8 @@ function resolveAttack(anim: HeroAnimState, dt: number): AttackFx {
       break;
     }
     case "castHold": {
-      const rise = progress < CASTHOLD_RISE_FRAC ? easeOutQuad(progress / CASTHOLD_RISE_FRAC) : 1;
+      const rise =
+        progress < CASTHOLD_RISE_FRAC ? easeOutQuad(progress / CASTHOLD_RISE_FRAC) : 1;
       out.weaponDelta = -rise * CASTHOLD_RAISE;
       out.offArmDelta = -rise * CASTHOLD_RAISE;
       break;
@@ -1403,13 +1704,15 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
 
   const legSwing = LEG_SWING_MAX * speedFrac;
   const idleWobble = Math.sin(anim.breathPhase * 0.6) * IDLE_SWAY;
-  view.legBack.rotation = IDLE_LEG_BACK + Math.sin(anim.walkPhase) * legSwing + idleWobble;
+  view.legBack.rotation =
+    IDLE_LEG_BACK + Math.sin(anim.walkPhase) * legSwing + idleWobble;
   view.legFront.rotation =
     IDLE_LEG_FRONT + Math.sin(anim.walkPhase + Math.PI) * legSwing - idleWobble;
 
   const marchBoost = ctx.marching ? MARCH_BOB_BOOST : 1;
   const leanBoost = ctx.marching ? MARCH_LEAN_BOOST : 1;
-  const walkBob = Math.abs(Math.sin(anim.walkPhase)) * BOB_AMPLITUDE * speedFrac * marchBoost;
+  const walkBob =
+    Math.abs(Math.sin(anim.walkPhase)) * BOB_AMPLITUDE * speedFrac * marchBoost;
   const idleBob = Math.sin(anim.breathPhase) * 0.5;
   const leanTarget = hero.dead ? 0 : LEAN_WALK * speedFrac * leanBoost;
   anim.leanCurrent += (leanTarget - anim.leanCurrent) * clamp01(dt * LEAN_SMOOTH);
@@ -1424,22 +1727,39 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
         skillCastThisHero = true;
         if (hero.cls === "swordsman") startAttack(anim, "spin");
         else if (hero.cls === "archer") startAttack(anim, "triple");
+        // Ninja: every skill (dash/twinfang/chaindash/eternal) resolves as a
+        // strike, so all 4 play the same snappy dual-slash pose — the actual
+        // dash reposition/chain hops are their own shadow-streak fx
+        // (`heroDashed` -> `fx/shadowDash.ts`), not a rig animation.
+        else if (hero.cls === "ninja") startAttack(anim, "dualSlash");
         else startAttack(anim, "castHold");
       }
     }
     if (!skillCastThisHero) {
       for (const ev of ctx.events) {
-        if (ev.type === "projectileSpawn" && ev.kind === "arrow" && hero.cls === "archer") {
+        if (
+          ev.type === "projectileSpawn" &&
+          ev.kind === "arrow" &&
+          hero.cls === "archer"
+        ) {
           startAttack(anim, "release");
-        } else if (ev.type === "projectileSpawn" && ev.kind === "orb" && hero.cls === "mage") {
+        } else if (
+          ev.type === "projectileSpawn" &&
+          ev.kind === "orb" &&
+          hero.cls === "mage"
+        ) {
           startAttack(anim, "staffPulse");
         }
       }
     }
-    // Swordsman basic melee has no dedicated event — a same-tick `cd` RESET
-    // (jumping back up instead of ticking down) is the tell.
+    // Swordsman/ninja basic melee has no dedicated event — a same-tick `cd`
+    // RESET (jumping back up instead of ticking down) is the tell (ninja
+    // shares this convention: shortest range, no projectile, per
+    // docs/ninja-design.md §1).
     if (hero.cls === "swordsman" && hero.cd > anim.lastCd + 1e-4) {
       startAttack(anim, "swing");
+    } else if (hero.cls === "ninja" && hero.cd > anim.lastCd + 1e-4) {
+      startAttack(anim, "dualSlash");
     }
   }
   anim.lastCd = hero.cd;
@@ -1459,7 +1779,8 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
     view.weaponArm.rotation = restAngle + attackFx.weaponDelta;
     view.offArm.rotation = OFFARM_REST + attackFx.offArmDelta;
   } else {
-    view.weaponArm.rotation = restAngle + weaponIdleSway + Math.sin(anim.walkPhase) * armSwing;
+    view.weaponArm.rotation =
+      restAngle + weaponIdleSway + Math.sin(anim.walkPhase) * armSwing;
     view.offArm.rotation =
       OFFARM_REST + Math.sin(anim.walkPhase + Math.PI) * armSwing - idleWobble;
   }
@@ -1474,7 +1795,8 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   // exactly the unchanged rest pose `rig.test.ts` checks).
   if (hero.cls === "mage" && anim.attack?.kind === "castHold") {
     const holdFrac = clamp01(anim.attack.t / anim.attack.duration);
-    view.torso.rotation = Math.sin(anim.breathPhase * 1.6) * CASTHOLD_SWAY_AMPLITUDE * holdFrac;
+    view.torso.rotation =
+      Math.sin(anim.breathPhase * 1.6) * CASTHOLD_SWAY_AMPLITUDE * holdFrac;
   } else {
     view.torso.rotation = 0;
   }
@@ -1530,6 +1852,7 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
     view.weaponArm.tint = shadowTint;
     view.tierAccent.tint = shadowTint;
     view.gearWeapon.tint = shadowTint;
+    view.gearOffWeapon.tint = shadowTint;
     view.gearArmor.tint = shadowTint;
   }
 
@@ -1547,7 +1870,10 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
       view.nameplate.alpha = NAMEPLATE_ALPHA;
     } else {
       const pulse = Math.sin(clamp01(anim.joinFlashT / JOIN_FLASH_DURATION) * Math.PI);
-      view.nameplate.scale.set(1 + pulse * JOIN_FLASH_SCALE, 1 + pulse * JOIN_FLASH_SCALE);
+      view.nameplate.scale.set(
+        1 + pulse * JOIN_FLASH_SCALE,
+        1 + pulse * JOIN_FLASH_SCALE,
+      );
       view.nameplate.alpha = NAMEPLATE_ALPHA + pulse * JOIN_FLASH_ALPHA;
     }
   } else {
@@ -1640,6 +1966,15 @@ function weaponAnchorLocal(cls: HeroClass, tier: number): { x: number; y: number
     const hand = WEAPON_HAND.archer;
     return { x: hand.x + 3, y: hand.y };
   }
+  if (cls === "ninja") {
+    // Mirrors `drawNinjaDaggerBlade`'s main-hand tip formula (`mirror: 1`) —
+    // the off-hand dagger doesn't get its own aura anchor (one flame per
+    // hero slot, same convention as every other class).
+    const hand = WEAPON_HAND.ninja;
+    const bladeLen = (7 + (tier - 1) * 1.4) * scale;
+    const bladeRise = 9 * scale;
+    return { x: hand.x + bladeLen * 0.55, y: hand.y - bladeRise * 0.55 };
+  }
   const hand = WEAPON_HAND.mage;
   return { x: hand.x, y: HEAD_Y - 18 - (tier - 1) * 2 * scale - 2 };
 }
@@ -1648,9 +1983,16 @@ function weaponAnchorLocal(cls: HeroClass, tier: number): { x: number; y: number
  * `weaponAnchorLocal`), for the tier-6/epic "Super Saiyan" aura
  * (`fx/gearAura.ts`) — driven continuously from `FxController`, never from
  * an event. `false` for a view not yet attached under a parent Container. */
-export function getWeaponAnchorPos(view: HeroView, out: { x: number; y: number }): boolean {
+export function getWeaponAnchorPos(
+  view: HeroView,
+  out: { x: number; y: number },
+): boolean {
   if (!view.cls || !view.parent) return false;
-  view.parent.toLocal(weaponAnchorLocal(view.cls, view.gearWeaponTier), view.weaponArm, out);
+  view.parent.toLocal(
+    weaponAnchorLocal(view.cls, view.gearWeaponTier),
+    view.weaponArm,
+    out,
+  );
   return true;
 }
 
@@ -1663,7 +2005,10 @@ const ARMOR_ANCHOR_LOCAL = { x: 0, y: SHOULDER_Y + 4 };
 /** World-space position of this hero's chest/armor anchor THIS frame, for
  * the tier-5+ armor sparkle (`fx/gearSparkle.ts`). `false` for a view not
  * yet attached under a parent Container. */
-export function getArmorAnchorPos(view: HeroView, out: { x: number; y: number }): boolean {
+export function getArmorAnchorPos(
+  view: HeroView,
+  out: { x: number; y: number },
+): boolean {
   if (!view.parent) return false;
   view.parent.toLocal(ARMOR_ANCHOR_LOCAL, view.upperBody, out);
   return true;
@@ -1719,7 +2064,9 @@ function setGhostTint(view: HeroView, dead: boolean): void {
   // `tint` doesn't cascade to children the way `alpha` does — `gearWeapon`/
   // `gearArmor` are children of `weaponArm`/`upperBody` (M7 paper-doll) and
   // need the same ghost tint explicitly, or gear would stay full-color while
-  // everything else desaturates on death.
+  // everything else desaturates on death. `gearOffWeapon` (ninja off-hand
+  // dagger, child of `offArm`) needs the same treatment.
   view.gearWeapon.tint = tint;
+  view.gearOffWeapon.tint = tint;
   view.gearArmor.tint = tint;
 }

@@ -845,6 +845,22 @@ export const CONFIG = {
     arrowRainRange: 760,
   },
 
+  // ---- ninja dash primitive + skill tunables (SAVE v18, docs/ninja-design.md §1/§3) ----
+  // The `dash` reposition (systems/dash.ts) is fully DETERMINISTIC — fixed offsets, NO RNG
+  // (the seeded stream stays wave-composition only) and NO wall-clock. Every ninja skill that
+  // repositions (เงาพริบ / เงาสังหาร / พันเงานิรันดร์) reads these knobs so the sim can sweep them.
+  ninja: {
+    // A dash lands this far past the target on the FAR side (blink "through" it), inside the
+    // dagger's short reach (70) so the follow-up strike connects. Sized under `range` 70.
+    dashLandGap: 18,
+    // Max hop distance for the single SHADOW-BLINK (เงาพริบ) — a short teleport, NOT a
+    // field-wide leap. The chain (เงาสังหาร) + ult (พันเงานิรันดร์) pass Infinity (unbounded)
+    // so they genuinely blink across the whole field; skill cast `range` gates reachability.
+    dashMaxReach: 300,
+    // TWIN FANG (คมเงาคู่) r`radius` splash: neighbours of the primary take this fraction of a hit.
+    twinSplashFrac: 0.6,
+  },
+
   // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
   // With the upgrade lines REMOVED (M5 Character Pivot), per-hero LEVEL is the
   // PRIMARY interim power axis (base-stat allocation is a later task). The solo
@@ -935,6 +951,9 @@ export const CONFIG = {
       swordsman: { str: 8, dex: 4, int: 3, vit: 6 },
       archer: { str: 4, dex: 8, int: 3, vit: 5 },
       mage: { str: 3, dex: 4, int: 8, vit: 4 },
+      // Ninja (SAVE v18, docs/ninja-design.md §2): DEX-highest (its damage + speed stat),
+      // low VIT (thin body). Total 20 — the same budget band as archer (20) / mage (19).
+      ninja: { str: 5, dex: 8, int: 3, vit: 4 },
     } satisfies Record<HeroClass, HeroStats>,
     // ---- auto-allocate v2 ratios (M7.7 "Auto-allocate v2") ----
     // Auto-allocate no longer DUMPS every point into the class primary (which left
@@ -979,6 +998,14 @@ export const CONFIG = {
       swordsman: { str: 4, vit: 1, int: 1 },
       archer: { dex: 4, int: 1 },
       mage: { int: 3, vit: 1 },
+      // Ninja SIM ratio (SAVE v18) — OVERRULES the draft 3 DEX : 1 VIT (docs/ninja-design.md §2).
+      // Mirrors the sword's 4:1:1 shape: DEX the 4/6 damage+tempo MAJORITY, a VIT third to floor
+      // the thin melee body (a range-70 melee eats the aggressive belt — dropping VIT to 4 DEX:1
+      // INT reached s30 only 4/5; the VIT third buys consistency, exactly like the sword), and an
+      // INT third to deepen the mana pool. INT is sized at 1/6 (not 1/5) deliberately: 1/5 INT
+      // (3:1:1 or 4:1) drifts mana burn to ~94 pot/run — near the mage's comfort — while 1/6 keeps
+      // it at ~114 in the MARTIAL pressure band the pacing rule wants. Sweep in docs/balance-ninja.md.
+      ninja: { dex: 4, vit: 1, int: 1 },
     } as Record<HeroClass, Partial<Record<StatKey, number>>>,
   },
 
@@ -1354,6 +1381,102 @@ export const CONFIG = {
       tickMult: 0.3, // per-tick damage to every hero = round(atk × this)
     },
   },
+
+  // ---- WORLD BOSS "เสี่ยจ๋อง" (hourly world boss — engine wave) ----
+  // An hourly PARTY-GATED world boss. It spawns at the TOP OF EVERY HOUR in ONE
+  // deterministically-chosen FARM zone of map1 (`worldBossZoneFor` over the windowId),
+  // lives `lifetimeMs`, then despawns. The CLIENT computes the wall-clock schedule
+  // (`worldBossPhaseAt`) and injects the `spawnWorldBoss` FrameInput while the player
+  // stands in the chosen zone — the engine never reads a wall clock. The boss REUSES the
+  // enemy pipeline (targeting/hits, systems/targeting getTargets + combat findById) and
+  // the M7.9 boss-mechanic machinery (systems/boss.updateBossEntity), themed via the
+  // `worldBoss` marker. Rewards are SERVER-claimed — the engine grants NO xp/gold and the
+  // kill NEVER counts toward killGoal/zoneKills/quests; it emits only `worldBossDefeated`.
+  //
+  // AGGRO = PASSIVE-until-attacked (owner rule "never farms newbies"): map1 is where NEW
+  // players roam, so the boss stands idle at the spawn edge and does NOT approach/attack
+  // until a hero has DAMAGED it (hp < maxHp). A cautious/idle player is never farmed; an
+  // auto-hunting hero that swings at it engages it (that is on the player).
+  //
+  // TUNING — BALANCE-WAVE (docs/balance-worldboss.md; WORLDBOSS=1 sim mode, DETERMINISTIC —
+  // the isolated boss fight draws no RNG). Set DIRECTLY (not off the s5 `bossHp` curve).
+  //  - `hp` (1.9M) is the SOLO GATE. A key sim finding overturned the first-pass "solo dies →
+  //    boss despawns" plan: `updateWorldBossAI` is SKIPPED while `traveling`, so a solo hero's
+  //    death → auto-return round-trip (town is map1 too) keeps it continuously traveling and
+  //    the boss NEVER despawns — a solo just loses ~4.7 s/death and grinds on. So the gate is
+  //    a pure HP/uptime wall: a maxed L90 t10+10 SWORD and ARCHER can't out-DPS 1.9M in 15 min
+  //    (they chunk ~77-99% and survive with potions — a wall, not an instakill, ~16-46 deaths).
+  //  - IRREDUCIBLE LEAK (owner-flagged): a maxed L90 MAGE (high-DPS ranged, evades slam and
+  //    kites charge) still finishes at ~13 min. NO hp keeps a 2p party viable AND stops the
+  //    mage — party total DPS is only ~1.75× a maxed solo's, so the two targets are partly
+  //    mutually exclusive. Fully gating the mage needs a STRUCTURAL fix (min-2-heroes-to-damage,
+  //    a game-engine-specialist change), not a knob. Accepted + documented.
+  //  - `atk` (800) + slam ×2.2 / charge ×2.2 are the SINGLE-TARGET gate: they concentrate on the
+  //    lone solo hero but a party ROTATES the aggro (front hero tanks/dies/revives-in-place while
+  //    the backline DPSes untouched) — the structural party advantage. `hazard` ×0.10 is kept LOW
+  //    on purpose: it's ARENA-WIDE (hits every hero at once) so a high tick would wipe a whole
+  //    party during a channel; the gate rides slam/charge, not hazard.
+  //  - Party pacing (Lv60 t8+6): 2p ~12.5 min, 3p ~9.8 min, 6p ~4.6 min; it MELTS with power —
+  //    endgame parties (Lv80-90) 3p ~6 min / 6p ~3 min. The "~3-6 min for 2-3p" aspiration only
+  //    holds for endgame parties; a Lv50-70 2-3p runs 8-12 min (still a one-window clear). This
+  //    is the flip side of the HP wall that gates the solo — see the doc's tradeoff table.
+  //
+  // MECHANICS (3, telegraphed): base `slam`+`enrage` + `charge` (dodgeable dash — drift off
+  // the marked x) + `hazard` (arena-wide channel — a party out-heals/out-DPSes it). SUMMON
+  // is deliberately OMITTED: its adds flow into `state.enemies` and would pollute the farm
+  // kill-quota (killGoal/zoneKills) — kept out by design. Windups are a touch LONGER than
+  // the s20/s30 boss (open-field dodging). All DETERMINISTIC (fixed timing tables — NO RNG
+  // stream draw, NO loot-counter tick, so the mob/loot sequences stay byte-identical with a
+  // world boss present). Mirrors CONFIG.boss / CONFIG.bossBehavior shape so
+  // systems/boss.updateBossEntity runs it unmodified.
+  worldBoss: {
+    periodMs: 3_600_000, // spawns at the top of every hour
+    preAnnounceMs: 300_000, // 5-min pre-announce window before the hour
+    lifetimeMs: 900_000, // lives 15 min from spawn, then despawns
+    mapId: "map1", // one of map1's farm zones (chosen per-window by worldBossZoneFor)
+    hp: 1_900_000, // balance-tuned (docs/balance-worldboss.md); see the block comment
+    atk: 800, // dangerous-but-survivable for a maxed hero w/ potions (map1 passive-until-hit)
+    // The 3 telegraphed mechanics (reuse the M7.9 machinery). NO "summon" (adds would
+    // pollute the farm kill-quota). Cast to BossBehavior[] in makeWorldBoss.
+    behaviors: ["slam", "enrage", "charge", "hazard"] as string[],
+    // Movement + slam/enrage tuning (CONFIG.boss shape). Longer telegraphs than the deep
+    // bosses so an open-field party can read + react.
+    boss: {
+      y: 190,
+      initialCd: 1.5,
+      initialSkillCd: 6,
+      moveSpeed: 40,
+      engageExtra: 20, // engageX = frontHeroX + clash + this
+      enrageThreshold: 0.25, // enrage below this HP fraction
+      slamMult: 2.2, // balance-tuned up from 1.7: the single-target gate that a party rotates but a solo can't escape
+      slamCdEnraged: 4.5,
+      slamCdNormal: 7,
+      telegraphEnraged: 0.9,
+      telegraphNormal: 1.3, // slightly longer than the s20/s30 boss (open-field dodge)
+      attackCdEnraged: 0.9,
+      attackCdNormal: 1.3,
+    },
+    // Signature-mechanic tuning (CONFIG.bossBehavior shape — charge + hazard only).
+    bossBehavior: {
+      charge: {
+        cd: 9.0,
+        cdEnraged: 6.0,
+        telegraph: 1.1, // longer wind-up than the s20 boss (0.85) — fair open-field read
+        dashSpeed: 460,
+        stopGap: 40,
+        hitRange: 78,
+        hitMult: 2.2, // balance-tuned up from 1.6: reaches the ranged solo (dashes to target); single-target so a party rotates it
+      },
+      hazard: {
+        cd: 10.0,
+        cdEnraged: 6.5,
+        telegraph: 1.6, // longer warn window than the s30 boss (1.3)
+        duration: 1.2,
+        tickInterval: 0.3,
+        tickMult: 0.10, // balance-tuned DOWN from 0.3: arena-wide, so kept low to not simultaneously wipe a party (the gate is single-target slam/charge, NOT the shared hazard)
+      },
+    },
+  },
 } as const;
 
 export type SpeedMultiplier = (typeof CONFIG.speeds)[number];
@@ -1382,6 +1505,15 @@ export interface HeroType {
   projSpeed: number;
   /** AoE radius for `aoe` attackers (0 otherwise). */
   aoe: number;
+  /**
+   * NINJA dagger DOUBLE-HIT (SAVE v18): a melee BASIC attack lands this many hits per
+   * swing (default/absent = 1, so the sword/existing melee path is byte-identical). Each
+   * hit deals `multiHitMult` × the rolled atk (`~0.55`), so the dagger trades the shortest
+   * reach in the game for a rapid two-strike combo. Deterministic (no RNG).
+   */
+  multiHit?: number;
+  /** Per-hit fraction of ATK for a `multiHit` basic attack (absent = 1). */
+  multiHitMult?: number;
 }
 
 export const HERO_TYPES: Record<HeroClass, HeroType> = {
@@ -1419,6 +1551,35 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     projSpeed: 360,
     aoe: 46,
   },
+  // NINJA (นินจา, SAVE v18) — DEX-primary short-range melee bruiser. SIM-TUNED (ninja balance
+  // wave, docs/balance-ninja.md); overrules the docs/ninja-design.md §1/§8 draft where the sim
+  // proved a value unviable. Identity:
+  //   - `range` 70 = the SHORTEST reach in the game (sword 96) — trades reach for tempo.
+  //   - `atkSpeed` 0.45 = the FASTEST base cadence (sword 0.5 / archer 0.72 / mage 1.15).
+  //   - `multiHit` 2 × `multiHitMult` 0.55 = the dagger DOUBLE-HIT (2 swings ≈ 1.1× atk/attack)
+  //     → basic DPS a touch above the sword's, paying for its short reach. Kept 0.55: the raw
+  //     ~+22% basic is offset by short-range repositioning + a mana-gated kit → EFFECTIVE boss
+  //     DPS is only ~+6% over sword in BOSSISO (s20 +17% / s25 +4% / s30 −4%), inside a fair
+  //     band — no trim needed (the draft feared an over-strong basic; the sim disproved it).
+  //   - `hpMult` 1.35 = squishier than the sword TANK (1.5), tougher than the ranged classes
+  //     (archer 1.0 / mage 0.95). OVERRULES the draft 1.15: a 1.15 range-70 melee death-spirals
+  //     the aggressive frontier (a squishy MELEE can't kite the belt like the archer does at
+  //     350) — draft = 723 deaths, walls s15/s16, never reaches tier 3. 1.35 keeps the "thinner
+  //     than the tank" identity while reaching the s30 soft-wall (deaths ~560, archer hard-mode
+  //     band). See docs/balance-ninja.md "hpMult overrule".
+  // DEX drives both its ATK (PRIMARY_STAT) and the universal atk-speed factor (stats.ts).
+  ninja: {
+    offset: 30,
+    attack: "melee",
+    range: 70,
+    atkSpeed: 0.45,
+    dmgMult: 1.0,
+    hpMult: 1.35,
+    projSpeed: 0,
+    aoe: 0,
+    multiHit: 2,
+    multiHitMult: 0.55,
+  },
 };
 
 /**
@@ -1427,7 +1588,7 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
  * removed). Retained as the authoritative ordered class list — the server's
  * known-classes enum and the evolution cost index both key off it.
  */
-export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage"];
+export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage", "ninja"];
 
 /**
  * Each class's PRIMARY (damage-scaling) base stat, and the auto-allocate target
@@ -1438,6 +1599,9 @@ export const PRIMARY_STAT: Record<HeroClass, StatKey> = {
   swordsman: "str",
   archer: "dex",
   mage: "int",
+  // Ninja is a DEX melee class (SAVE v18): DEX drives its dagger ATK (like the archer) AND
+  // the universal atk-speed factor, so allocation funnels DEX for both damage + tempo.
+  ninja: "dex",
 };
 
 export interface EnemyType {
@@ -1508,7 +1672,29 @@ export const ENEMY_TYPES: Record<EnemyKind, EnemyType> = {
  *  - `bolt`   : a single high-damage HOMING arrow at the nearest target (nuke).
  *  - `buff`   : a self ATK buff for a duration (no damage; war-cry).
  */
-export type SkillKind = "nova" | "strike" | "meteor" | "rain" | "bolt" | "buff";
+// NINJA (SAVE v18) kinds reuse EXISTING combat mechanics + the `dash` reposition
+// primitive (systems/dash.ts) — NO new ProjectileKind (the dash is a hero move, not a
+// projectile; the render-crash footgun #6 only bites new ProjectileKind/render-mapped
+// unions, and render does NOT map over SkillKind). Deterministic (fixed offsets, no RNG):
+//  - `dash`        : blink THROUGH the nearest in-range target + one strike (เงาพริบ).
+//  - `multistrike` : stationary `targets` rapid hits on the nearest foe + an r`radius`
+//                    splash at `CONFIG.ninja.twinSplashFrac` (คมเงาคู่).
+//  - `chaindash`   : chain-dash up to `targets` distinct foes across the field, one strike
+//                    each (เงาสังหาร — the tier-2 signature ultimate).
+//  - `shadowstorm` : blink to the enemy centroid, then strike EVERY field target (พันเงา-
+//                    นิรันดร์ — the tier-3 skill-4; time-freeze spectacle is render/timeDirector's
+//                    job, keyed off the `skillCast` event, so the engine emits no new event).
+export type SkillKind =
+  | "nova"
+  | "strike"
+  | "meteor"
+  | "rain"
+  | "bolt"
+  | "buff"
+  | "dash"
+  | "multistrike"
+  | "chaindash"
+  | "shadowstorm";
 
 export interface SkillType {
   /** Unique, class-namespaced id (the key into `SKILLS`). */
@@ -1684,6 +1870,62 @@ const SKILL_LIST = [
     cost: 120, cd: 16, radius: 150, mult: 8.0, targets: 8, projSpeed: 360, range: 520,
     buffMult: 1, buffDuration: 0,
   },
+
+  // ---- ninja (นินจา, SAVE v18 — blink assassin) ----
+  // SIM-TUNED (ninja balance wave, docs/balance-ninja.md) under the owner-approved shape. Mana
+  // sits in the MARTIAL band (sword/archer neighbourhood ~114 pot/run, above the mage's ~87) —
+  // the ninja "feels" its mana per the pacing-governor rule but is NOT bankrupted. Unlike the
+  // sword (whose field-wide quake/skyfall + strong basics do most of the clearing), the ninja
+  // is SKILL-RELIANT for clear (single-target basics), so its whole kit is spammed — costs are
+  // tuned down from the draft so that reliance lands in-band, not at the draft's 341 pot/run.
+  // All DETERMINISTIC (fixed offsets, `dash` primitive; NO RNG, NO new ProjectileKind).
+  //
+  // Signature: SHADOW BLINK (เงาพริบ) — a `dash` THROUGH the nearest in-range target + one
+  // strike. cost/cd = 5.0/s ≤ baseRegen 7 so the flat pool sustains it (the M5 no-hard-stall
+  // signature guarantee), like the sword whirl / archer rain / mage meteor.
+  {
+    id: "ninja_dashstrike", cls: "ninja", tier: 1, unlockLevel: 1, kind: "dash",
+    cost: 16, cd: 4, radius: 0, mult: 1.8, targets: 0, projSpeed: 0, range: 260,
+    buffMult: 1, buffDuration: 0,
+  },
+  // TWIN FANG (คมเงาคู่, Lv6) — a stationary `targets`-hit flurry on the nearest foe + an
+  // r120 splash at `ninja.twinSplashFrac` (0.6) to its neighbours: single-target burst with a
+  // real cleave. Utility, but sized up from the draft (r80/0.5, cd 8) toward a sustained clear
+  // tool — the ninja has NO AoE signature (sword/archer/mage all do), so twinfang + massacre
+  // carry its field clear vs the dense killGoal fields.
+  {
+    id: "ninja_twinfang", cls: "ninja", tier: 1, unlockLevel: 6, kind: "multistrike",
+    cost: 20, cd: 7, radius: 120, mult: 0.6, targets: 5, projSpeed: 0, range: 110,
+    buffMult: 1, buffDuration: 0,
+  },
+  // SHADOW MASSACRE (เงาสังหาร, tier-2 ULTIMATE) — the class SIGNATURE: a CHAIN of `targets`
+  // (10) dashes that blink the ninja to each nearest un-hit foe across the whole field, one
+  // strike each. cost 40 — CRITICAL FIX: the draft's 90 was UNCASTABLE from a DEX ninja's flat
+  // 60 pool (its tier-2 ult never fired all game; the other classes' tier-2 ults cost ≤50 for
+  // exactly this reason). 40 is affordable from the base pool AND from the tier-2 pool with the
+  // 4:1:1 INT share, so it actually fires in the auto-cast rotation. `range` = per-hop chain
+  // reach. Reuses the `dash` primitive — no projectile. See docs/balance-ninja.md "massacre mana".
+  {
+    id: "ninja_massacre", cls: "ninja", tier: 2, unlockLevel: 15, kind: "chaindash",
+    cost: 40, cd: 12, radius: 0, mult: 2.0, targets: 10, projSpeed: 0, range: 320,
+    buffMult: 1, buffDuration: 0,
+  },
+  // ETERNAL SHADOWS (พันเงานิรันดร์, tier-3 skill-4) — the real body blinks to the enemy
+  // centroid, then shadow clones strike EVERY target on the field ×mult. Field-wide (ignores
+  // radius gating — iterates all targets). The จอสลัว + time-freeze spectacle is render/
+  // timeDirector's job, keyed off the `skillCast` event (reuses skyDarken etc.) — the engine
+  // emits NO new spectacle event. REWORKED from the draft (cost 170 / cd 45 / mult 2.2): at cd
+  // 45 it barely fired, so the ninja had no tier-3 deep-farm clear engine and death-spiralled
+  // map5-6. cost 72 / cd 14 / mult 9.0 puts it in the other skill-4 band (skyfall 80/14, storm
+  // 45/13, apoc 120/16) — a real field-clear that breaks the deep spiral. Single-target boss
+  // contribution stays modest (9× / 14s = 0.64×/s < skyfall's 0.71×/s), so eternal is a FARM
+  // tool, not a boss nuke — the ninja leans on basics vs bosses. Learned at tier 3 + level 40
+  // (auto-slot 4, tier-gated) → s1-15 has no ninja skill-4.
+  {
+    id: "ninja_eternal", cls: "ninja", tier: 3, unlockLevel: 40, kind: "shadowstorm",
+    cost: 72, cd: 14, radius: 500, mult: 9.0, targets: 0, projSpeed: 0, range: 900,
+    buffMult: 1, buffDuration: 0,
+  },
 ] as const satisfies readonly SkillType[];
 
 /** The skill catalog, keyed by id (the single source of truth for skill tuning). */
@@ -1696,6 +1938,7 @@ export const CLASS_SKILLS: Record<HeroClass, string[]> = {
   swordsman: SKILL_LIST.filter((s) => s.cls === "swordsman").map((s) => s.id),
   archer: SKILL_LIST.filter((s) => s.cls === "archer").map((s) => s.id),
   mage: SKILL_LIST.filter((s) => s.cls === "mage").map((s) => s.id),
+  ninja: SKILL_LIST.filter((s) => s.cls === "ninja").map((s) => s.id),
 };
 
 /** Each class's SIGNATURE skill id (slot-0 default; the HOF/combat-power skill). */
@@ -1703,6 +1946,7 @@ export const SIGNATURE_SKILL: Record<HeroClass, string> = {
   swordsman: "sword_whirl",
   archer: "archer_rain",
   mage: "mage_meteor",
+  ninja: "ninja_dashstrike",
 };
 
 /**
@@ -1714,4 +1958,5 @@ export const SKILL_TYPES: Record<HeroClass, SkillType> = {
   swordsman: SKILLS[SIGNATURE_SKILL.swordsman],
   archer: SKILLS[SIGNATURE_SKILL.archer],
   mage: SKILLS[SIGNATURE_SKILL.mage],
+  ninja: SKILLS[SIGNATURE_SKILL.ninja],
 };

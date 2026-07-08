@@ -349,7 +349,17 @@ export function updateHeroes(state: GameState): void {
         h.cd = heroAtkSpeedOf(h);
         const dmg = heroAtkOf(h);
         if (t.attack === "melee") {
-          applyDamage(state, tgt, dmg, "attack");
+          // NINJA dagger DOUBLE-HIT (SAVE v18): `multiHit` swings per attack, each
+          // `multiHitMult` of the rolled atk. Absent/1 for the swordsman → the single
+          // full-damage strike (byte-identical to pre-v18). Each hit routes through
+          // applyDamage so a survivor retaliates + render sees a hit per swing. No RNG.
+          const hits = t.multiHit ?? 1;
+          if (hits > 1) {
+            const per = Math.round(dmg * (t.multiHitMult ?? 1));
+            for (let i = 0; i < hits; i++) applyDamage(state, tgt, per, "attack");
+          } else {
+            applyDamage(state, tgt, dmg, "attack");
+          }
         } else if (t.attack === "arrow") {
           // Basic-attack VOLLEY (86d3k2rgf): fire `archerVolleyCount` small arrows
           // at the SAME target. Damage is split as a float — per-arrow = dmg /
@@ -437,6 +447,10 @@ function findById(state: GameState, id: number | null): Hero | Enemy | Boss | nu
   for (const h of state.heroes) if (h.id === id) return h;
   for (const e of state.enemies) if (e.id === id) return e;
   if (state.boss && state.boss.id === id) return state.boss;
+  // WORLD BOSS "เสี่ยจ๋อง": homing hero shots (arrows/bolts) must be able to find the
+  // live world boss the same way they find `state.boss`.
+  const wb = state.worldBoss;
+  if (wb && wb.active && wb.entity && wb.entity.id === id) return wb.entity;
   return null;
 }
 

@@ -49,7 +49,9 @@ function makeHero(cls: Hero["cls"]): Hero {
 }
 
 /** Per-class t7-10 weapon templateId, per the M7.9 catalog (parallel engine
- * task, `src/engine/config/items.ts`). */
+ * task, `src/engine/config/items.ts`) — ninja's own t7-10 daggers
+ * (docs/ninja-design.md §6) landed alongside this render wave and join the
+ * loop below like every other class. */
 const WEAPON_BY_TIER: Record<Hero["cls"], Record<7 | 8 | 9 | 10, string>> = {
   swordsman: {
     7: "w_sword_t7_frost",
@@ -69,6 +71,12 @@ const WEAPON_BY_TIER: Record<Hero["cls"], Record<7 | 8 | 9 | 10, string>> = {
     9: "w_staff_t9_obsidian",
     10: "w_staff_t10_apocalypse",
   },
+  ninja: {
+    7: "w_dagger_t7_frost",
+    8: "w_dagger_t8_dune",
+    9: "w_dagger_t9_obsidian",
+    10: "w_dagger_t10_apocalypse",
+  },
 };
 /** Universal (class-null) armor per tier. */
 const ARMOR_BY_TIER: Record<7 | 8 | 9 | 10, string> = {
@@ -76,6 +84,13 @@ const ARMOR_BY_TIER: Record<7 | 8 | 9 | 10, string> = {
   8: "a_dune_t8_plate",
   9: "a_obsidian_t9_scale",
   10: "a_infernal_t10_aegis",
+};
+/** Per-class t6 weapon templateId (the re-gear test's starting point below). */
+const T6_WEAPON: Record<Hero["cls"], string> = {
+  swordsman: "w_sword_t6_ragna",
+  archer: "w_bow_t6_ragna",
+  mage: "w_staff_t6_ragna",
+  ninja: "w_dagger_t6_ragna",
 };
 
 // t7-10 grows further than t6's own GEARED_MIN_Y allowance (rig.test.ts) —
@@ -86,7 +101,7 @@ const MIN_Y = GROUND_Y - 165;
 const MAX_Y = GROUND_Y + 10;
 
 describe("M7.9 gear paper-doll: tiers 7-10 continue the t1-6 ladder", () => {
-  for (const cls of ["swordsman", "archer", "mage"] as const) {
+  for (const cls of ["swordsman", "archer", "mage", "ninja"] as const) {
     for (const tier of [7, 8, 9, 10] as const) {
       it(`${cls} t${tier}: geometry lands in the GROUND_Y-relative band (regression guard)`, () => {
         const view = createHeroView();
@@ -125,7 +140,7 @@ describe("M7.9 gear paper-doll: tiers 7-10 continue the t1-6 ladder", () => {
       const view = createHeroView();
       const hero = makeHero(cls);
       hero.equipped = {
-        weapon: cls === "swordsman" ? "w_sword_t6_ragna" : cls === "archer" ? "w_bow_t6_ragna" : "w_staff_t6_ragna",
+        weapon: T6_WEAPON[cls],
         armor: "a_aegis_t6_bulwark",
       };
       updateHeroView(view, hero, { dt: 0, slot: 0, events: [], marching: false });

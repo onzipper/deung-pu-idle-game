@@ -232,6 +232,44 @@ export function makeBoss(
 }
 
 /**
+ * Build the WORLD BOSS "เสี่ยจ๋อง" entity (hourly world boss — engine wave). Unlike
+ * `makeBoss`, its HP/atk come DIRECTLY from `CONFIG.worldBoss` (not the tiny s5 boss
+ * curve) so the party-gated soft-wall is independently tunable, and it carries a fixed
+ * `behaviors` roster (slam+enrage+charge+hazard — no summon). Fully DETERMINISTIC (no
+ * RNG draw), spawned at the field's right edge (`spawnX`) to walk in. Transient — never
+ * persisted. Mechanic timers seed from `CONFIG.worldBoss.bossBehavior`.
+ */
+export function makeWorldBoss(id: number): Boss {
+  const W = CONFIG.worldBoss;
+  const hp = W.hp;
+  return {
+    id,
+    x: CONFIG.spawnX,
+    y: W.boss.y,
+    hp,
+    maxHp: hp,
+    atk: W.atk,
+    cd: W.boss.initialCd,
+    skillCd: W.boss.initialSkillCd,
+    telegraph: 0,
+    enraged: false,
+    variety: {
+      behaviors: [...W.behaviors] as BossBehavior[],
+      chargeCd: W.bossBehavior.charge.cd,
+      chargePhase: "idle",
+      chargeTimer: 0,
+      chargeTargetX: 0,
+      summonsFired: 0,
+      hazardCd: W.bossBehavior.hazard.cd,
+      hazardPhase: "idle",
+      hazardTimer: 0,
+      hazardTickTimer: 0,
+      hazardTicksLeft: 0,
+    },
+  };
+}
+
+/**
  * Fixed per-add attack-cd + engage-jitter tables (M7.9 boss SUMMON). Deterministic
  * substitutes for `makeEnemy`'s two RNG draws — boss behaviors must NEVER perturb
  * the wave-composition stream (CLAUDE.md). Indexed by the add's slot in its wave.

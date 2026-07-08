@@ -436,6 +436,10 @@ export interface PendingInput {
    * `target` (queued from the Friends panel's per-member warp button), or
    * `null` (last-wins per frame; the engine no-ops it if blocked/illegal). */
   useWarpScroll: WorldLocation | null;
+  /** World boss "เสี่ยจ๋อง" spawn intent (queued by `GameClient.tsx`'s own schedule
+   * check, never a direct player action — last-wins per frame). The engine's own
+   * `trySpawnWorldBoss` is idempotent per windowId, so a repeat is a safe no-op. */
+  spawnWorldBoss: { windowId: number; remainingSeconds: number } | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -464,6 +468,7 @@ function emptyPendingInput(): PendingInput {
     claimDaily: null,
     claimMainReward: null,
     useWarpScroll: null,
+    spawnWorldBoss: null,
   };
 }
 
@@ -940,6 +945,22 @@ export type CohortStatusState =
   | { kind: "waiting" }
   | { kind: "reconnecting" };
 
+/**
+ * World boss "เสี่ยจ๋อง" (hourly world boss) HUD status — display-ready, pushed by
+ * `GameClient.tsx`'s per-frame schedule check (`ui/worldBoss/schedule.ts`'s
+ * `deriveWorldBossStatus`/`sameWorldBossStatus`) on TRANSITIONS only, same low-
+ * frequency idiom as `cohortStatus`. `"idle"` = nothing to show (the overwhelming
+ * common case — the banner renders nothing). `secondsLeft` refreshes at ~1Hz (the
+ * ceil-second granularity naturally gates the store push without a separate
+ * throttle timer). `"activeHere"` = the boss's chosen farm zone for this window IS
+ * my current location ("found it!") — a distinct accent tone from plain `"active"`.
+ */
+export type WorldBossStatus =
+  | { kind: "idle" }
+  | { kind: "pre"; secondsLeft: number }
+  | { kind: "active"; secondsLeft: number }
+  | { kind: "activeHere"; secondsLeft: number };
+
 /** M7.9 server-wide high-refine announcement feed — session-memory (in-
  * process, NOT localStorage) dedup set. Module-level like `dropFeedSeq`
  * above (a plain implementation detail of the ingest action, not something
@@ -1030,6 +1051,8 @@ export interface HudState {
   party: PartyWire | null;
   /** The lockstep cohort HUD chip's state — see `CohortStatusState`'s doc. */
   cohortStatus: CohortStatusState;
+  /** World boss "เสี่ยจ๋อง" countdown-banner state — see `WorldBossStatus`'s doc. */
+  worldBossStatus: WorldBossStatus;
 
   // ---- M7.9 server-wide high-refine announcement feed (no websockets — the
   // feed is polled off the existing autosave/boot response, see
@@ -1340,6 +1363,15 @@ export interface HudState {
    * chip — see `cohortStatus`'s doc. */
   setCohortStatus: (status: CohortStatusState) => void;
 
+  // ---- World boss "เสี่ยจ๋อง" ----
+  /** `GameClient.tsx`-only: push the countdown-banner state on a TRANSITION (see
+   * `worldBossStatus`'s doc — never called per-frame unchanged). */
+  setWorldBossStatus: (status: WorldBossStatus) => void;
+  /** `GameClient.tsx`-only: queue the spawn intent while standing in the window's
+   * boss zone during the "active" phase (last-wins per frame) — see
+   * `PendingInput.spawnWorldBoss`'s doc. */
+  queueSpawnWorldBoss: (windowId: number, remainingSeconds: number) => void;
+
   // ---- M7.9 server-wide high-refine announcement feed ----
   /** Boot-only: record this client's own characterId (see `myCharacterId`'s doc). */
   setMyCharacterId: (characterId: string | null) => void;
@@ -1426,6 +1458,7 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   party: null,
   cohortStatus: { kind: "solo" },
+  worldBossStatus: { kind: "idle" },
 
   myCharacterId: null,
   announcementQueue: [],
@@ -1712,6 +1745,12 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   setParty: (party) => set({ party }),
   setCohortStatus: (status) => set({ cohortStatus: status }),
+
+  setWorldBossStatus: (status) => set({ worldBossStatus: status }),
+  queueSpawnWorldBoss: (windowId, remainingSeconds) =>
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, spawnWorldBoss: { windowId, remainingSeconds } },
+    })),
 
   setMyCharacterId: (characterId) => set({ myCharacterId: characterId }),
   ingestAnnouncementFeed: (wire) =>

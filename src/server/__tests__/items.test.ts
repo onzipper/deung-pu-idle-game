@@ -785,6 +785,87 @@ describe("refineItem — server-authoritative roll (M7.6)", () => {
   });
 });
 
+describe("refineItem — guaranteed fortified refine (world boss 'แกร่ง')", () => {
+  beforeEach(() => {
+    // Clear any leaked once-queue on findFirst (each test sets its own sequence).
+    mockPrisma.itemInstance.findFirst.mockReset();
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 1 }); // materials debit ok
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 }); // consume + apply win
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 50, name: "TestHero" });
+    mockPrisma.refineAnnouncement.create.mockResolvedValue({});
+    mockPrisma.refineAnnouncement.deleteMany.mockResolvedValue({ count: 0 });
+  });
+
+  // findFirst #1 = the refine TARGET, findFirst #2 = the matching-slot fortifier lookup.
+  function stock(target: Record<string, unknown>, fortifier: unknown): void {
+    mockPrisma.itemInstance.findFirst
+      .mockResolvedValueOnce({
+        id: "item_1",
+        templateId: "w_sword_t1_rusty", // tier 1, slot weapon → wants fort_weapon
+        refineLevel: 0,
+        equippedSlot: null,
+        ...target,
+      })
+      .mockResolvedValueOnce(fortifier);
+  }
+
+  it("forces success at +9 -> +10 even on a would-break roll, consuming the fort_weapon", async () => {
+    stock({ refineLevel: 9 }, { id: "fort_1" });
+    const cost = refineCost(1, 10);
+    const r = await refineItem(CHAR, "item_1", 1e9, { useFortifier: true, roll: () => 0.99 });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.outcome).toBe("success"); // guaranteed — the .99 would have broken a normal +10
+      expect(r.refineLevel).toBe(10);
+      expect(r.fortified).toBe(true);
+    }
+    // matching fort_weapon resolved
+    expect(mockPrisma.itemInstance.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ templateId: "fort_weapon", deletedAt: null }),
+      }),
+    );
+    // normal cost charged (owner rule: fortify is not free)
+    expect(mockPrisma.character.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { materials: { decrement: cost.materials } } }),
+    );
+    // fortifier consumed (soft-delete) + its destroyed event, in the same tx
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "fort_1", deletedAt: null }),
+        data: expect.objectContaining({ deletedAt: expect.any(Date), equippedSlot: null }),
+      }),
+    );
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "destroyed", meta: expect.stringContaining("fortify") }),
+      }),
+    );
+  });
+
+  it("blocks at the +10 cap (max) before resolving/charging a fortifier", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValueOnce({
+      id: "item_1",
+      templateId: "w_sword_t1_rusty",
+      refineLevel: REFINE.maxRefine,
+      equippedSlot: null,
+    });
+    const r = await refineItem(CHAR, "item_1", 1e9, { useFortifier: true });
+    expect(r).toEqual({ ok: false, reason: "max" });
+    expect(mockPrisma.itemInstance.findFirst).toHaveBeenCalledTimes(1); // no fortifier lookup
+    expect(mockPrisma.character.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects when no matching-slot fortifier is owned (wrong-type / none) — nothing charged", async () => {
+    stock({ refineLevel: 3 }, null); // target is a weapon; owns no fort_weapon
+    const r = await refineItem(CHAR, "item_1", 1e9, { useFortifier: true });
+    expect(r).toEqual({ ok: false, reason: "no_fortifier" });
+    expect(mockPrisma.character.updateMany).not.toHaveBeenCalled(); // fail-fast before debit
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("recentAnnouncements — feed query shape + in-process cache (M7.9)", () => {
   beforeEach(() => {
     mockPrisma.refineAnnouncement.findMany.mockResolvedValue([

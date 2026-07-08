@@ -29,14 +29,27 @@ export type ItemRarity = "common" | "rare" | "epic";
 export interface ItemTemplate {
   /** Catalog key == ITEM_TEMPLATES map key == DB templateId. ≤64 chars. */
   id: string;
+  /** For "gear": the slot it equips into. For "fortifier": the gear slot it MATCHES
+   *  (weapon-fortifier ↔ weapon gear) — a fortifier is never equipped into it. */
   slot: GearSlot;
-  /** null = equippable by every class. */
+  /** null = equippable by every class. Fortifiers are always null (no class gate). */
   classReq: HeroClass | null;
   /** Power/visual tier — tier 3+ drives the M7 paper-doll sparkle/aura pass. */
   tier: number;
   rarity: ItemRarity;
   /** Flat additive stat block while equipped (extend cautiously; sim-swept). */
   stats: { atk?: number; def?: number; hp?: number };
+  /**
+   * Item CATEGORY (world-boss wave). Absent/"gear" = a normal equippable gear
+   * item (every pre-existing template — byte-identical). "fortifier" = a "แกร่ง"
+   * consumable minted ONLY by the world-boss claim: NOT equippable, NOT NPC-sellable,
+   * NOT in any drop table, and consumed by a GUARANTEED refine on a matching-slot gear
+   * item (see src/server/items.ts `refineItem` useFortifier + src/server/worldBoss.ts).
+   * `slot` is reused as the match key (fort_weapon.slot === "weapon"). The server layer
+   * enforces the non-equippable/non-sellable rules; `tier: 0` also keeps fortifiers out
+   * of every stage-banded drop table for free (tierForStage only ever returns 1..10).
+   */
+  kind?: "gear" | "fortifier";
 }
 
 /**
@@ -208,12 +221,73 @@ const CATALOG: ItemTemplate[] = [
   armor("a_sword_t8_bulwark", 8, "rare", "swordsman", [64, 290]),
   armor("a_archer_t8_stalker", 8, "rare", "archer", [34, 520]),
   armor("a_mage_t8_seer", 8, "rare", "mage", [30, 560]),
+
+  // ==== Ninja "นินจา" dagger line t1-t10 (SAVE v18, docs/ninja-design.md §6) ====
+  // A full 10-tier weapon line mirroring the sword/bow/staff structure (rarity band per
+  // tier, t6/t10 EPIC), classReq "ninja". These are APPENDED to the catalog (like the M7.9
+  // t7-10 block) and are CLASS-GATED OUT of every non-ninja drop table (DROP_GATED_CLASSES
+  // below) — so the existing 3 classes' loot tables stay byte-identical (owner: "ผู้เล่นเดิม
+  // กระทบน้อยสุด"). ATK curve = the SHARED WEAPON_ATK (identical to the sword's 3→5→8→…→70),
+  // NO override. Rationale (documented per the wave brief): a ninja BASIC attack is the
+  // dagger DOUBLE-HIT (`multiHit` 2 × `multiHitMult` 0.55 = 1.10× the rolled atk per swing,
+  // HERO_TYPES.ninja), so at an equal weapon-ATK curve the ninja's effective per-swing ATK-
+  // equivalent is 1.10 × swordATK = ~+10% over the sword AT EVERY TIER — landing squarely in
+  // the design's "+10-15% DPS over sword" band (ninja-design §8), delivered THROUGH the
+  // 2×0.55 basic (not baked as a raw number premium). The ninja's faster base cadence (0.45
+  // vs sword 0.5) + DEX-driven atk-speed is its identity tax-offset for the shortest reach
+  // (range 70) + thinner body (hpMult 1.15); the ninja SIM wave (5) owns the final trim of
+  // those CLASS knobs, keeping this gear curve clean + parallel to the other three lines.
+  weapon("w_dagger_t1_kunai", "ninja", 1, "common"),
+  weapon("w_dagger_t2_tanto", "ninja", 2, "common"),
+  weapon("w_dagger_t3_shadow", "ninja", 3, "rare"),
+  weapon("w_dagger_t4_venom", "ninja", 4, "rare"),
+  weapon("w_dagger_t5_wraith", "ninja", 5, "rare"),
+  weapon("w_dagger_t6_ragna", "ninja", 6, "epic"),
+  weapon("w_dagger_t7_frost", "ninja", 7, "rare"),
+  weapon("w_dagger_t8_dune", "ninja", 8, "rare"),
+  weapon("w_dagger_t9_obsidian", "ninja", 9, "rare"),
+  weapon("w_dagger_t10_apocalypse", "ninja", 10, "epic"),
 ];
 
-/** The item catalog, keyed by templateId (== DB `ItemInstance.templateId`). */
+/** The GEAR catalog, keyed by templateId (== DB `ItemInstance.templateId`). Count is
+ *  test-enforced ui-side (46 → 56 after the SAVE-v18 ninja dagger line; the ui i18n test
+ *  owns that count + the `content.items.*` name keys, added in the ninja UI wave) —
+ *  fortifiers are deliberately kept OUT of it (see FORTIFIER_TEMPLATES) so gear stays
+ *  byte-identical. */
 export const ITEM_TEMPLATES: Record<string, ItemTemplate> = Object.fromEntries(
   CATALOG.map((t) => [t.id, t]),
 );
+
+// ---------------------------------------------------------------------------
+// World boss "เสี่ยจ๋อง" — "แกร่ง" fortifier consumables (SEPARATE catalog).
+// ---------------------------------------------------------------------------
+// Minted ONLY by the world-boss claim (50:50 crypto roll), NEVER dropped/sold/equipped.
+// They are ItemInstances (not a counter) so a future marketplace can trade them. `slot`
+// is the gear slot each one fortifies (the guaranteed-refine match key); tier 0 + empty
+// stats keep them off every curve. Held in their OWN map (not ITEM_TEMPLATES / CATALOG) so
+// the gear catalog's frozen count + drop tables are untouched; the server resolves an
+// item instance's template via `lookupTemplate` (gear ∪ fortifier). Display name/desc are
+// ui-side i18n (`items.fort_weapon` / `items.fort_armor`), never here.
+export const FORTIFIER_TEMPLATES: Record<string, ItemTemplate> = {
+  fort_weapon: { id: "fort_weapon", slot: "weapon", classReq: null, tier: 0, rarity: "epic", stats: {}, kind: "fortifier" },
+  fort_armor: { id: "fort_armor", slot: "armor", classReq: null, tier: 0, rarity: "epic", stats: {}, kind: "fortifier" },
+};
+
+/** The "แกร่ง" fortifier templateId that matches (and guarantees a refine on) each gear
+ *  slot — the single source both the world-boss mint and the guaranteed-refine match
+ *  key read (weapon gear ↔ fort_weapon, armor gear ↔ fort_armor). */
+export const FORTIFIER_FOR_SLOT: Record<GearSlot, string> = {
+  weapon: "fort_weapon",
+  armor: "fort_armor",
+};
+
+/** Resolve ANY item-instance template — gear OR fortifier. Use this (not a bare
+ *  `ITEM_TEMPLATES[id]`) wherever a persisted `ItemInstance.templateId` is turned back
+ *  into a template, so fortifier instances resolve while the gear-only maps/tables stay
+ *  fortifier-free. Returns undefined for a retired/unknown id. */
+export function lookupTemplate(id: string): ItemTemplate | undefined {
+  return ITEM_TEMPLATES[id] ?? FORTIFIER_TEMPLATES[id];
+}
 
 // ---------------------------------------------------------------------------
 // Drop tables — banded to the stage the mob was killed at.
@@ -252,6 +326,41 @@ const FARM_CHANCE: Record<ItemRarity, number> = { common: 0.03, rare: 0.02, epic
 /** Per-rarity BOSS weight (guaranteed-roll → relative weights; boss = better odds). */
 const BOSS_WEIGHT: Record<ItemRarity, number> = { common: 0.4, rare: 0.7, epic: 1.0 };
 
+/**
+ * DROP-TABLE CLASS GATE (SAVE v18, ninja). A weapon line whose `classReq` is in this set
+ * only enters a hero's drop CANDIDATE POOL when that hero IS that class — see `classAllows`.
+ *
+ * WHY only the new classes: the legacy sword/bow/staff lines have ALWAYS appeared in every
+ * class's farm/boss table (`classReq` gated EQUIP, never the roll — a swordsman routinely
+ * rolls an unusable bow). Adding the ninja daggers to those shared tables would shift the
+ * deterministic loot-roll accumulator for the existing 3 classes (every kill's `r` band moves),
+ * breaking byte-identical replay. Gating ONLY the daggers behind a class match keeps the three
+ * legacy tables composition-IDENTICAL (daggers simply absent) while ninja rolls its own line —
+ * the "least impact on existing players" policy (docs/ninja-design.md §6). Verified by the
+ * gear tests (non-ninja table === pre-change table; a swordsman/archer/mage NEVER rolls a
+ * dagger across thousands of kills) and the byte-identical canonical sim.
+ *
+ * NOTE (wave handoff): the drop-ROLL sites (systems/gear.ts rollEnemyDrop/rollBossDrop) call
+ * `dropTableForStage(stage)` with NO class arg today, which resolves to the daggers-EXCLUDED
+ * table for EVERYONE (the safe default that preserves byte-identity). For a NINJA hero to
+ * actually roll daggers, the roll sites pass the roster's gated class — see
+ * `gatedLootClass` in systems/gear.ts (wired in the same wave; end-to-end tested in
+ * ninja.test.ts "dagger drop gating").
+ */
+export const DROP_GATED_CLASSES: ReadonlySet<HeroClass> = new Set<HeroClass>(["ninja"]);
+
+/**
+ * Is `t` allowed into a `heroClass` hero's drop candidate pool? A class-gated line
+ * (DROP_GATED_CLASSES) is admitted ONLY to a matching-class hero; every legacy template
+ * (including the other classes' weapons — historical behaviour) is admitted to everyone.
+ * A missing/undefined `heroClass` (the legacy no-arg callers) admits NO gated line, so the
+ * default table is byte-identical to the pre-ninja catalog.
+ */
+function classAllows(t: ItemTemplate, heroClass: HeroClass | null | undefined): boolean {
+  if (t.classReq && DROP_GATED_CLASSES.has(t.classReq)) return heroClass === t.classReq;
+  return true;
+}
+
 const TEMPLATES_BY_TIER = new Map<number, ItemTemplate[]>();
 for (const t of CATALOG) {
   const list = TEMPLATES_BY_TIER.get(t.tier) ?? [];
@@ -264,15 +373,19 @@ function tierTemplates(tier: number): ItemTemplate[] {
 
 /**
  * Farm-zone drop table for a global stage number (s1..s15). All items of the
- * stage's on-curve tier, each at its rarity's per-kill chance. Every class's
+ * stage's on-curve tier, each at its rarity's per-kill chance. Every LEGACY class's
  * weapon is present (classReq gates equip, not the roll) plus the universal +
- * class armor of that tier.
+ * class armor of that tier. `heroClass` gates the class-locked NEW lines (ninja
+ * daggers, DROP_GATED_CLASSES): omitted/non-matching → those are excluded, so the
+ * table is byte-identical to the pre-ninja catalog for the existing 3 classes.
  */
-export function dropTableForStage(stage: number): DropTableEntry[] {
-  return tierTemplates(tierForStage(stage)).map((t) => ({
-    templateId: t.id,
-    chance: FARM_CHANCE[t.rarity],
-  }));
+export function dropTableForStage(
+  stage: number,
+  heroClass?: HeroClass | null,
+): DropTableEntry[] {
+  return tierTemplates(tierForStage(stage))
+    .filter((t) => classAllows(t, heroClass))
+    .map((t) => ({ templateId: t.id, chance: FARM_CHANCE[t.rarity] }));
 }
 
 /**
@@ -283,11 +396,16 @@ export function dropTableForStage(stage: number): DropTableEntry[] {
  * than a common. This is the milestone reward that seeds a player into the next
  * band's gear.
  */
-export function bossDropTableForStage(stage: number): DropTableEntry[] {
+export function bossDropTableForStage(
+  stage: number,
+  heroClass?: HeroClass | null,
+): DropTableEntry[] {
   const t = tierForStage(stage);
   const next = Math.min(MAX_TIER, t + 1);
   const pool = next === t ? tierTemplates(t) : [...tierTemplates(t), ...tierTemplates(next)];
-  return pool.map((tpl) => ({ templateId: tpl.id, chance: BOSS_WEIGHT[tpl.rarity] }));
+  return pool
+    .filter((tpl) => classAllows(tpl, heroClass))
+    .map((tpl) => ({ templateId: tpl.id, chance: BOSS_WEIGHT[tpl.rarity] }));
 }
 
 /**
@@ -324,9 +442,14 @@ export const INVENTORY_CAP = 100;
 export function maxSummedDropChance(): number {
   let max = 0;
   // Scans the full stage range (s1-30 since M7.9) so the guard tracks the densest
-  // band's summed chance honestly as the catalog grows.
+  // band's summed chance honestly as the catalog grows. Scanned with the "ninja" class
+  // so the class-gated dagger line is INCLUDED — a ninja's table is the SUPERSET (every
+  // legacy line + its own daggers), i.e. the densest summed chance any hero can roll, so
+  // the server claim cap stays honest for ninja. This only RAISES the cap; the existing 3
+  // classes' actual rolls are byte-identical (daggers never enter their tables), so a
+  // looser cap never rejects a legit non-ninja claim.
   for (let stage = 1; stage <= 30; stage++) {
-    const sum = dropTableForStage(stage).reduce((acc, e) => acc + e.chance, 0);
+    const sum = dropTableForStage(stage, "ninja").reduce((acc, e) => acc + e.chance, 0);
     if (sum > max) max = sum;
   }
   return max;

@@ -86,6 +86,21 @@ export { type QuestReward } from "@/engine/systems/questRewards";
 // through `step(state, input)`; systems are not part of the public surface.
 export { bossHint, type BossHint } from "@/engine/systems/boss";
 
+// WORLD BOSS "เสี่ยจ๋อง" (hourly world boss — engine wave). The CLIENT computes the
+// wall-clock schedule from these PURE reads (the engine never reads a clock) and injects
+// the `spawnWorldBoss` FrameInput while the player stands in the chosen zone; the spawn/
+// despawn/kill logic is engine-internal (driven through `step()`), so only the schedule
+// reads + knobs are public. `WORLD_BOSS` = the CONFIG.worldBoss knobs.
+export {
+  WORLD_BOSS,
+  worldBossWindowId,
+  worldBossPhaseAt,
+  worldBossZoneFor,
+  worldBossFarmZones,
+  worldBossLocationFor,
+  type WorldBossPhase,
+} from "@/engine/systems/worldBoss";
+
 // M7.95 "Hall of Fame" read surface: the server ranks characters + the UI draws the
 // board from `hallOfFame(state)` (lifetime gold / best boss clears / level-cap
 // timestamp). The counters are engine-internal write-only observers, updated only

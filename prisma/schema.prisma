@@ -71,6 +71,14 @@ model Character {
   baseClass String     @db.VarChar(16) // engine HeroClass string: swordsman | archer | mage
   level     Int        @default(1) // cache of engine level (re-derivable)
   power     Int        @default(0) // cache of derived combat power for HOF (re-derivable; widen to BigInt if it ever exceeds 2^31)
+  // Ninja wave: class-advancement TIER cache (1=base .. 3=tier-3), stamped by
+  // /api/save alongside level/power (src/server/persistSave) from the validated
+  // save blob (data.hero.tier). DENORMALIZED + RE-DERIVABLE — this column exists so
+  // the ninja-unlock gate + roster progress can be checked across an account's
+  // characters WITHOUT parsing every save blob. Additive + default 1: every pre-
+  // ninja row reads 1 until its owner logs in once and the next save stamps the real
+  // tier (progress may undercount until then — ACCEPTED, no blob-parsing backfill).
+  tier      Int        @default(1)
   // M8 presence cache: the character's CURRENT zone id, stamped by /api/save
   // alongside the level/power caches (src/server/persistSave). DENORMALIZED +
   // RE-DERIVABLE from SaveState.data (engine hero.zone) — this column exists ONLY so
@@ -116,6 +124,8 @@ model Character {
   items     ItemInstance[]
   // M8 Quest Wave B: the per-character daily-claim audit rows (anti-double-claim).
   dailyClaims DailyClaim[]
+  // World boss "เสี่ยจ๋อง": the per-character hourly-window claim ledger (anti-double-claim).
+  worldBossClaims WorldBossClaim[]
 
   @@index([userId]) // list an account's characters
   @@index([userId, deletedAt]) // count/enumerate LIVE slots (<=3 rule)
@@ -422,6 +432,29 @@ model DailyClaim {
 
   @@unique([characterId, questId, serverDay]) // at most one claim per quest per day per character
   @@index([characterId, serverDay]) // "this character's claims today" + cascade-side reads
+}
+
+// World boss "เสี่ยจ๋อง" — the per-(character, hourly-window) claim AUDIT gate, modelled
+// exactly on DailyClaim above. The boss spawns hourly (engine schedule); a player who
+// kills it claims ONCE per (character, `windowId`) — `windowId` is the SERVER-computed
+// floor(now / periodMs) hourly bucket (client clocks never trusted, like SaveState.lastSeen
+// / DailyClaim.serverDay). The @@unique makes a second claim of the same window impossible
+// at the DB layer: a retry/dup collides on P2002 → the endpoint returns 409 already_claimed
+// (the SoldItem/DailyClaim idempotency pattern). NOT re-derivable from the save blob — it is
+// authoritative. Deliberately NO reward column: the grants (gold via the client-authoritative
+// save blob, +materials on Character, a minted fortifier ItemInstance) are recorded by their
+// own authoritative rows/ledgers; THIS row only records that a claim happened. `createdAt` is
+// server-stamped for a future audit sweep. Cascades from Character so a deleted character's
+// claim history is purged with it.
+model WorldBossClaim {
+  id          String    @id @default(cuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  windowId    Int // SERVER-computed hourly window bucket (floor(now / periodMs))
+  createdAt   DateTime  @default(now()) // server-stamped (client clocks never trusted)
+
+  @@unique([characterId, windowId]) // at most one claim per hourly window per character
+  @@index([characterId, windowId]) // "did this character claim window W" + cascade-side reads
 }
 
 // ============================================================================
