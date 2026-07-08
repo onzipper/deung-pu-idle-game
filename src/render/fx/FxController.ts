@@ -51,13 +51,20 @@ import { ImpactFilterController } from "@/render/fx/impactFilters";
 import { LevelUpBurstPool } from "@/render/fx/levelUp";
 import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
-import { burst, burstDirectional, burstInward, ParticlePool, shower } from "@/render/fx/particles";
+import {
+  burst,
+  burstDirectional,
+  burstInward,
+  ParticlePool,
+  shower,
+} from "@/render/fx/particles";
 import { PortalPool } from "@/render/fx/portal";
 import { GroundArrowPool, RainShadowPool } from "@/render/fx/rainScene";
 import { RefinePrestigeFx } from "@/render/fx/refinePrestige";
 import { RingPool } from "@/render/fx/rings";
 import { RuneGlyphPool } from "@/render/fx/runeGlyph";
 import { ScreenShake } from "@/render/fx/screenShake";
+import { ShadowDashPool } from "@/render/fx/shadowDash";
 import { SkyDarkenOverlay } from "@/render/fx/skyDarken";
 import { SoulWispPool } from "@/render/fx/soulWisp";
 import { TracerPool, type TracerStyle } from "@/render/fx/tracer";
@@ -180,7 +187,9 @@ const METEOR_RUNE_TICKS = 10;
  * hand-picking a duration — stays correct if balance retunes those numbers. */
 function estimateMeteorFallTime(): number {
   const dropDist =
-    CONFIG.layout.groundY - CONFIG.layout.heroProjImpactYOffset - CONFIG.skills.meteorSpawnY;
+    CONFIG.layout.groundY -
+    CONFIG.layout.heroProjImpactYOffset -
+    CONFIG.skills.meteorSpawnY;
   return Math.max(0.2, dropDist / Math.max(1, SKILL_TYPES.mage.projSpeed));
 }
 
@@ -571,6 +580,54 @@ const APOCALYPSE_RING_R1 = 130;
 const APOCALYPSE_RUNE_RADIUS = METEOR_RUNE_RADIUS * 1.3;
 
 // ---------------------------------------------------------------------------
+// NINJA (นินจา, SAVE v18 render wave, docs/ninja-design.md §7) skill fx — the
+// silver/dark-violet jewel-tone family (`PALETTE.ninjaSilver`/`ninjaViolet`/
+// `ninjaVioletDark`), deliberately distinct from every other class's fx
+// language. The `dash` reposition primitive itself (shared by all 4 skills)
+// gets its own dedicated shadow-streak + afterimage module (`shadowDash.ts`,
+// driven off the `heroDashed` event — see `onHeroDashed()` below); the
+// per-skill handlers here layer each skill's own IMPACT identity on top —
+// same "reuse the dash trail, differentiate the strike" split the doc calls
+// for (§3: "spectacle ท่า 3/4 ใช้เครื่อง skyDarken/curtain/time-freeze เดิม").
+// Footgun 10 everywhere: flat/solid on NORMAL blend + a darker underlayer,
+// never additive.
+// ---------------------------------------------------------------------------
+
+// ---- ninja: SHADOW BLINK signature ("ninja_dashstrike") — modest ----------
+const NINJA_STRIKE_RING_R1 = 26;
+const NINJA_STRIKE_PARTICLE_COUNT = 7;
+const NINJA_STRIKE_SHAKE = 2; // punchy-but-mild, signature-tier only (matches WHIRL_IMPACT_SHAKE's class)
+
+// ---- ninja: TWIN FANG utility ("ninja_twinfang") — rapid alternating hits +
+// a small splash, NOT nuke-ified (kept distinct in role, like powershot). --
+const NINJA_FLURRY_HIT_COUNT = 5;
+const NINJA_FLURRY_HIT_GAP = 0.05; // real seconds between the 5 flurry slash streaks
+const NINJA_FLURRY_STREAK_LEN = 22;
+const NINJA_SPLASH_RING_R1 = 80; // matches SKILLS.ninja_twinfang.radius
+
+// ---- ninja: SHADOW MASSACRE ultimate ("ninja_massacre", tier-2) — the chain
+// of up to 8 dashes already gets its own streak+afterimage per hop from
+// `shadowDash.ts` (fired once per `heroDashed` event); this adds the
+// FIELD-WIDE cast punch that sells "this is the ultimate", not just 8 plain
+// dashes back to back. -----------------------------------------------------
+const NINJA_MASSACRE_SHAKE = 12;
+const NINJA_MASSACRE_RING_R1 = 340; // reads across most of the ~900px field
+
+// ---- ninja: ETERNAL SHADOWS tier-3 skill-4 ("ninja_eternal") — MUST clearly
+// out-spectacle the massacre ultimate above (owner spec, mirrors every other
+// class's tier-3 skill-4): a held violet sky-darken (จอสลัว) + a shadow-clone
+// slash streak fired at EVERY live target on the field (reusing
+// `shadowDash.ts`'s own streak visual, hero-position -> each target), the
+// biggest shake in the ninja kit, then the real body's own centroid-blink
+// streak (fired separately via the normal `heroDashed` handler) reads as
+// "arriving after the clones already struck".
+const NINJA_ETERNAL_SKY_ALPHA = 0.5;
+const NINJA_ETERNAL_SKY_HOLD = 0.5;
+const NINJA_ETERNAL_SHAKE = 18; // above massacre's 12 — biggest in the ninja kit
+const NINJA_ETERNAL_RING_R1 = 480;
+const NINJA_ETERNAL_CLONE_MAX = 12; // field-wide but capped, matches other ultimates' caps
+
+// ---------------------------------------------------------------------------
 // M7.9 "Grand Expansion" boss-variety MECHANIC telegraphs (charge/summon/
 // hazard, maps 4-6) — render follow-up for the events introduced in 993c315
 // (see `engine/state/events.ts`'s own doc comment; the engine side already
@@ -763,6 +820,10 @@ export class FxController {
   // Containers exist — see the field-initializer-ordering note there.)
   private readonly crescents: CrescentPool;
   private readonly ghostBlades: GhostBladePool;
+  /** NINJA `dash` reposition primitive fx (SAVE v18 render wave) — shadow
+   * streak + afterimage, triggered off the `heroDashed` event (see
+   * `onHeroDashed()`); shared by every ninja skill that repositions. */
+  private readonly shadowDash: ShadowDashPool;
   private readonly tracers: TracerPool;
   private readonly flashLines: FlashLinePool;
   private readonly runeGlyphs: RuneGlyphPool;
@@ -983,6 +1044,7 @@ export class FxController {
     this.curtainStreaks = new CurtainSweepPool(this.trailLayer, 40);
     this.crescents = new CrescentPool(this.heroFxLayer);
     this.ghostBlades = new GhostBladePool(this.heroFxLayer);
+    this.shadowDash = new ShadowDashPool(this.heroFxLayer);
     // Bumped 8->24 (M7.9): SKYFALL's scattered lightning bolts (2 strokes
     // each) share this pool with the archer's volley-launch streaks/
     // zone-whoosh/gate-glow beats — more concurrent users need more slots.
@@ -1074,7 +1136,8 @@ export class FxController {
     // flag also identifies (heuristically — render-only, never affects game
     // logic) which `hit` below was the swordsman's basic attack landing.
     this.swingThisFrame = this.detectSwordSwingStart(state);
-    if (this.swingThisFrame) this.onSwordSwingStart(state, this.swingThisFrame.comboIndex);
+    if (this.swingThisFrame)
+      this.onSwordSwingStart(state, this.swingThisFrame.comboIndex);
 
     for (const ev of events) {
       switch (ev.type) {
@@ -1094,6 +1157,9 @@ export class FxController {
           break;
         case "skillCast":
           this.onSkillCast(ev, state);
+          break;
+        case "heroDashed":
+          this.onHeroDashed(ev);
           break;
         case "levelUp":
           this.onLevelUp(ev, state);
@@ -1281,6 +1347,7 @@ export class FxController {
     this.lightPillars.update(dt);
     this.crescents.update(dt);
     this.ghostBlades.update(dt);
+    this.shadowDash.update(dt);
     this.flashLines.update(dt);
     this.runeGlyphs.update(dt);
     this.meteorSky.update(dt);
@@ -1325,6 +1392,7 @@ export class FxController {
     this.curtainStreaks.destroy();
     this.crescents.destroy();
     this.ghostBlades.destroy();
+    this.shadowDash.destroy();
     this.flashLines.destroy();
     this.runeGlyphs.destroy();
     this.meteorSky.destroy();
@@ -1373,7 +1441,9 @@ export class FxController {
       const weaponRarity: ItemRarity | undefined = h.equipped.weapon
         ? ITEM_TEMPLATES[h.equipped.weapon]?.rarity
         : undefined;
-      const armorTier = h.equipped.armor ? (ITEM_TEMPLATES[h.equipped.armor]?.tier ?? 0) : 0;
+      const armorTier = h.equipped.armor
+        ? (ITEM_TEMPLATES[h.equipped.armor]?.tier ?? 0)
+        : 0;
       // M7.6 ตีบวก: a heavily-refined weapon/armor earns the SAME aura/sparkle
       // hooks a naturally-tier-6/epic piece would, one step earlier than the
       // catalog's own +10 max would otherwise imply — a subtle "this thing is
@@ -1452,7 +1522,8 @@ export class FxController {
         intensity =
           h.atkBuffTimer <= WARCRY_FADE_WINDOW ? h.atkBuffTimer / WARCRY_FADE_WINDOW : 1;
       }
-      const anchorOk = intensity > 0 && getArmorAnchorPos(view!, this.warCryAnchorScratch);
+      const anchorOk =
+        intensity > 0 && getArmorAnchorPos(view!, this.warCryAnchorScratch);
       this.warCryAura.setSlot(
         slot,
         anchorOk ? intensity : 0,
@@ -1510,7 +1581,9 @@ export class FxController {
   private updateTargetLock(dt: number, state: GameState): void {
     const cmd = state.heroes[0]?.command;
     const enemy =
-      cmd?.kind === "attack" ? state.enemies.find((e) => e.id === cmd.targetId) : undefined;
+      cmd?.kind === "attack"
+        ? state.enemies.find((e) => e.id === cmd.targetId)
+        : undefined;
     this.targetLock.update(dt, enemy ? { x: enemy.x, y: TARGET_LOCK_Y } : null);
   }
 
@@ -1678,7 +1751,10 @@ export class FxController {
    * `bossEcho.ts`'s cleanup note). Solo play means every `heroDown` IS a
    * wipe today, but the `state.heroes.every` check keeps this correct once
    * M8 party makes a partial-down non-wipe possible. */
-  private onHeroDown(ev: Extract<GameEvent, { type: "heroDown" }>, state: GameState): void {
+  private onHeroDown(
+    ev: Extract<GameEvent, { type: "heroDown" }>,
+    state: GameState,
+  ): void {
     const colors = HERO_COLORS[ev.cls];
     this.soulWisps.spawn({
       x: ev.x,
@@ -1705,6 +1781,19 @@ export class FxController {
       // README's "~0.2-0.3 peak alpha, never strobing" rule.
       this.flash.trigger(PALETTE.deadHero, 0.18);
     }
+  }
+
+  /** NINJA `dash` reposition primitive (SAVE v18 render wave,
+   * docs/ninja-design.md §1/§7): the render-side reaction to EVERY
+   * `heroDashed` event, regardless of which skill triggered it (เงาพริบ once
+   * per cast, เงาสังหาร up to 8x in one cast, พันเงานิรันดร์ once for the body's
+   * own centroid blink) — a shadow streak + brief afterimage between the
+   * departure and landing points. Both endpoints are drawn at the shared
+   * `HERO_MID_Y` band (the same "entities are effectively 1D on x" convention
+   * every other position-only event in this file follows — `heroDashed`
+   * carries no y). */
+  private onHeroDashed(ev: Extract<GameEvent, { type: "heroDashed" }>): void {
+    this.shadowDash.trigger(ev.fromX, HERO_MID_Y, ev.toX, HERO_MID_Y);
   }
 
   /** Hero revive v2 (item 4): a light pillar dropping from above + a radial
@@ -1748,7 +1837,12 @@ export class FxController {
     const x = hero.x;
     const y = HERO_TOP_Y;
 
-    this.levelUpBursts.spawn({ x, y, color: PALETTE.gold, duration: LEVEL_UP_BURST_DURATION });
+    this.levelUpBursts.spawn({
+      x,
+      y,
+      color: PALETTE.gold,
+      duration: LEVEL_UP_BURST_DURATION,
+    });
     this.rings.spawn({
       x,
       y,
@@ -1805,7 +1899,12 @@ export class FxController {
       duration: EVOLVE_PILLAR_DURATION,
       width: EVOLVE_PILLAR_WIDTH,
     });
-    this.levelUpBursts.spawn({ x, y, color: PALETTE.gold, duration: EVOLVE_BURST_DURATION });
+    this.levelUpBursts.spawn({
+      x,
+      y,
+      color: PALETTE.gold,
+      duration: EVOLVE_BURST_DURATION,
+    });
     this.rings.spawn({
       x,
       y,
@@ -1902,9 +2001,166 @@ export class FxController {
       case "mage_apocalypse":
         this.onMageApocalypseCast(x, state, pov);
         break;
+      case "ninja_dashstrike":
+        this.onNinjaDashstrikeCast(x, pov);
+        break;
+      case "ninja_twinfang":
+        this.onNinjaTwinfangCast(x);
+        break;
+      case "ninja_massacre":
+        this.onNinjaMassacreCast(x, pov);
+        break;
+      case "ninja_eternal":
+        this.onNinjaEternalCast(x, state, pov);
+        break;
       default:
         break; // unknown skill id — no fx beat rather than guessing wrong
     }
+  }
+
+  /** Ninja SIGNATURE (SHADOW BLINK, "ninja_dashstrike") — the blink's own
+   * shadow-streak/afterimage plays via `onHeroDashed()` (the `heroDashed`
+   * event fires the SAME step); this just adds the landing strike's impact
+   * identity — a small silver-violet ring + burst at the caster's (POST-dash)
+   * position, modest per the signature-tier convention. */
+  private onNinjaDashstrikeCast(x: number, pov: boolean): void {
+    if (pov) this.shake.trigger(NINJA_STRIKE_SHAKE);
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 4,
+      r1: NINJA_STRIKE_RING_R1,
+      duration: 0.18,
+      width: 2.4,
+      color: PALETTE.ninjaSilver,
+    });
+    burst(
+      this.particles,
+      x,
+      HERO_MID_Y,
+      NINJA_STRIKE_PARTICLE_COUNT,
+      PALETTE.ninjaViolet,
+      {
+        speed: 90,
+        life: 0.22,
+        radius: 2,
+      },
+    );
+  }
+
+  /** Ninja UTILITY (TWIN FANG, "ninja_twinfang") — a stationary flurry: 5
+   * quick alternating L/R slash streaks at the target's own position (no
+   * dash involved — `castSkill`'s `multistrike` case never repositions the
+   * hero) + a small splash ring for the neighbour cleave. Kept modest (no
+   * shake/field dressing), matching the utility-tier convention. */
+  private onNinjaTwinfangCast(x: number): void {
+    for (let i = 0; i < NINJA_FLURRY_HIT_COUNT; i++) {
+      const lead = i % 2 === 0 ? 1 : -1;
+      const jitterY = (Math.random() - 0.5) * 6;
+      this.flashLines.spawn({
+        x1: x - lead * NINJA_FLURRY_STREAK_LEN * 0.5,
+        y1: HERO_MID_Y + jitterY - 4,
+        x2: x + lead * NINJA_FLURRY_STREAK_LEN * 0.5,
+        y2: HERO_MID_Y + jitterY + 4,
+        color: i % 2 === 0 ? PALETTE.ninjaSilver : PALETTE.ninjaViolet,
+        width: 2,
+        life: NINJA_FLURRY_HIT_GAP * 2.4,
+        alpha: 0.8,
+      });
+    }
+    burst(this.particles, x, HERO_MID_Y, 6, PALETTE.ninjaViolet, {
+      speed: 70,
+      life: 0.22,
+      radius: 2,
+    });
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 6,
+      r1: NINJA_SPLASH_RING_R1,
+      duration: 0.3,
+      width: 2,
+      color: PALETTE.ninjaVioletDark,
+    });
+    // Utility tier — no dedicated punch beyond the generic `skillCast` one
+    // `onSkillCast()` already fired, matching warcry/frostnova's convention.
+  }
+
+  /** Ninja ULTIMATE (SHADOW MASSACRE, "ninja_massacre", tier-2) — the class
+   * SIGNATURE: up to 8 chain-dash hops each already get their own streak +
+   * afterimage from `onHeroDashed()` (fired per `heroDashed` event, same
+   * engine step); this adds the FIELD-WIDE cast punch (biggest shake in the
+   * ninja kit so far) that sells "the ultimate", not just 8 plain blinks. */
+  private onNinjaMassacreCast(x: number, pov: boolean): void {
+    if (pov) {
+      this.punch.trigger("ninjaMassacre", x);
+      this.shake.trigger(NINJA_MASSACRE_SHAKE);
+    }
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 12,
+      r1: NINJA_MASSACRE_RING_R1,
+      duration: 0.45,
+      width: 4,
+      color: PALETTE.ninjaViolet,
+    });
+    burst(this.particles, x, HERO_MID_Y, 10, PALETTE.ninjaSilver, {
+      speed: 140,
+      life: 0.32,
+      radius: 2.5,
+    });
+  }
+
+  /** Ninja tier-3 skill-4 (ETERNAL SHADOWS, "ninja_eternal") — MUST clearly
+   * out-spectacle the massacre ultimate above (owner spec, mirrors every
+   * other class's tier-3 skill-4): a held violet sky-darken (จอสลัว, reusing
+   * the SAME `skyDarken` overlay every other class's ultimate uses) + a
+   * shadow-clone slash streak fired at EVERY live target on the field
+   * (reusing `shadowDash.ts`'s own streak visual, hero -> each target — the
+   * "shadow clones strike everyone" read, since the engine's own damage loop
+   * already hits every target instantly) + the biggest shake in the ninja
+   * kit. The real body's own centroid-blink streak plays separately via the
+   * normal `onHeroDashed()` handler (same engine step), reading as "the real
+   * one arrives after the clones already struck". NOTE for wave 4 (UI): a
+   * real TIME-FREEZE beat (`timeDirector.ts`'s `FREEZE_SWORD_SKYFALL`
+   * pattern) would sell this further, matching every other tier-3 skill-4 —
+   * `timeDirector.ts` lives outside `render/`, so wiring `ninja_eternal` into
+   * its `skillId` switch is a follow-up, not this wave's to make. */
+  private onNinjaEternalCast(x: number, state: GameState, pov: boolean): void {
+    if (pov) {
+      this.punch.trigger("ninjaEternal", x);
+      this.shake.trigger(NINJA_ETERNAL_SHAKE);
+      this.skyDarken.trigger(
+        PALETTE.ninjaVioletDark,
+        NINJA_ETERNAL_SKY_ALPHA,
+        NINJA_ETERNAL_SKY_HOLD,
+      );
+    }
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 20,
+      r1: NINJA_ETERNAL_RING_R1,
+      duration: 0.55,
+      width: 5,
+      color: PALETTE.ninjaSilver,
+    });
+
+    let cloneCount = 0;
+    for (const e of state.enemies) {
+      if (cloneCount >= NINJA_ETERNAL_CLONE_MAX) break;
+      this.shadowDash.trigger(x, HERO_MID_Y, e.x, HERO_MID_Y);
+      cloneCount++;
+    }
+    if (state.boss && cloneCount < NINJA_ETERNAL_CLONE_MAX) {
+      this.shadowDash.trigger(x, HERO_MID_Y, state.boss.x, BOSS_CY);
+    }
+    burst(this.particles, x, HERO_MID_Y, 16, PALETTE.ninjaViolet, {
+      speed: 160,
+      life: 0.4,
+      radius: 3,
+    });
   }
 
   /** Swordsman SIGNATURE (WHIRL SLASH, "sword_whirl") — charge-up glow,
@@ -1914,7 +2170,12 @@ export class FxController {
    * `swordEmber`) give the sword kit its own fx language, distinct from the
    * archer's emerald/mage's violet — the RIG itself stays the class's own
    * teal (`color`), only the impact/crack accents go hot-metal. */
-  private onSwordWhirlCast(hero: Hero | undefined, x: number, color: number, pov: boolean): void {
+  private onSwordWhirlCast(
+    hero: Hero | undefined,
+    x: number,
+    color: number,
+    pov: boolean,
+  ): void {
     // Stronger, spin-specific punch — "strongest wins" against the generic
     // `skillCast` punch already triggered by the caller (see cameraPunch.ts).
     // M8 party P6: SCREEN-level only for the POV hero's own cast.
@@ -1930,7 +2191,11 @@ export class FxController {
     const hasTip = view ? getSwordTipPos(view, this.tipScratch) : false;
     const gx = hasTip ? this.tipScratch.x : x + 12;
     const gy = hasTip ? this.tipScratch.y : HERO_MID_Y;
-    burstInward(this.particles, gx, gy, 8, PALETTE.swordCrimson, 26, { life: 0.16, speed: 90, radius: 2 });
+    burstInward(this.particles, gx, gy, 8, PALETTE.swordCrimson, 26, {
+      life: 0.16,
+      speed: 90,
+      radius: 2,
+    });
 
     // Whirlwind afterimages + a dust-ring kick-up at the feet.
     this.ghostBlades.triggerSpin(x, HERO_MID_Y, color);
@@ -2181,7 +2446,11 @@ export class FxController {
           GROUND_Y - 6,
           Math.round(QUAKE_DUST_PARTICLE_COUNT * bigMult),
           PALETTE.muted,
-          { speed: entry.big ? 130 : 100, life: entry.big ? 0.5 : 0.4, radius: entry.big ? 4 : 3 },
+          {
+            speed: entry.big ? 130 : 100,
+            life: entry.big ? 0.5 : 0.4,
+            radius: entry.big ? 4 : 3,
+          },
         );
         this.rings.spawn({
           x: entry.x,
@@ -2218,7 +2487,15 @@ export class FxController {
     pov: boolean,
   ): void {
     // Bow flash: quick expanding ring + a tiny release burst at the bow.
-    this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 11, duration: 0.15, width: 2, color });
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 6,
+      r1: 11,
+      duration: 0.15,
+      width: 2,
+      color,
+    });
     burst(this.particles, x, HERO_MID_Y, 5, color, { speed: 60, life: 0.2, radius: 2 });
 
     // Volley launch: a few quick streaks firing upward off the bow, reading
@@ -2251,12 +2528,19 @@ export class FxController {
     // The drops (9 signature / 13 barrage) were just pushed synchronously
     // this same engine step (`engine/systems/skills.ts`) — read them back
     // for their exact (tx,ty) + flight time rather than re-deriving either.
-    const drops = state.projectiles.filter((p) => p.team === "hero" && p.kind === "rainArrow");
+    const drops = state.projectiles.filter(
+      (p) => p.team === "hero" && p.kind === "rainArrow",
+    );
     for (const p of drops) {
       if (this.pendingRainArrows.length >= MAX_PENDING_RAIN_ARROWS) break;
       const fallDist = Math.hypot(p.tx - p.x, p.ty - p.y);
       const fallTime = Math.max(0.1, fallDist / Math.max(1, p.speed));
-      this.rainShadows.trySpawn({ x: p.tx, y: p.ty, life: fallTime, color: curtainColor });
+      this.rainShadows.trySpawn({
+        x: p.tx,
+        y: p.ty,
+        life: fallTime,
+        color: curtainColor,
+      });
       this.curtainStreaks.spawn({
         x: p.tx,
         topY: HERO_TOP_Y - 50,
@@ -2302,12 +2586,25 @@ export class FxController {
    * instead its decal lingers much longer (`STORM_GROUND_ARROW_LIFE`) so the
    * field bristles with arrows by the time `onStormFinale()` fires the one
    * big field-wide beat. */
-  private onRainArrowLanded(x: number, y: number, big: boolean, isStorm = false, pov = true): void {
-    burst(this.particles, x, y, big ? RAIN_LAND_DIRT_COUNT + 2 : RAIN_LAND_DIRT_COUNT, PALETTE.muted, {
-      speed: big ? 75 : 55,
-      life: big ? 0.28 : 0.22,
-      radius: big ? 2.6 : 2,
-    });
+  private onRainArrowLanded(
+    x: number,
+    y: number,
+    big: boolean,
+    isStorm = false,
+    pov = true,
+  ): void {
+    burst(
+      this.particles,
+      x,
+      y,
+      big ? RAIN_LAND_DIRT_COUNT + 2 : RAIN_LAND_DIRT_COUNT,
+      PALETTE.muted,
+      {
+        speed: big ? 75 : 55,
+        life: big ? 0.28 : 0.22,
+        radius: big ? 2.6 : 2,
+      },
+    );
     burst(
       this.particles,
       x,
@@ -2316,7 +2613,12 @@ export class FxController {
       HERO_COLORS.archer.light,
       { speed: big ? 55 : 35, life: big ? 0.38 : 0.3, radius: 1.8 },
     );
-    this.groundArrows.spawn(x, y, HERO_COLORS.archer.light, isStorm ? STORM_GROUND_ARROW_LIFE : undefined);
+    this.groundArrows.spawn(
+      x,
+      y,
+      HERO_COLORS.archer.light,
+      isStorm ? STORM_GROUND_ARROW_LIFE : undefined,
+    );
     if (big && !isStorm) {
       // World-level ring stays unconditional; the re-punch shake (M8 party
       // P6) only fires when the caster who scheduled THIS drop was the POV
@@ -2341,10 +2643,23 @@ export class FxController {
    * the whole storm (vs cataclysm's brief pulse), and tracks its 20 drops as
    * STORM-flagged entries so `updateRainArrowTracking()` fires
    * `onStormFinale()` the instant the last one lands. */
-  private onArcherStormCast(x: number, color: number, state: GameState, pov: boolean): void {
+  private onArcherStormCast(
+    x: number,
+    color: number,
+    state: GameState,
+    pov: boolean,
+  ): void {
     // Bow flash + volley launch streaks — same cast-time cue as the
     // signature/barrage.
-    this.rings.spawn({ x, y: HERO_MID_Y, r0: 6, r1: 12, duration: 0.16, width: 2.4, color });
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 6,
+      r1: 12,
+      duration: 0.16,
+      width: 2.4,
+      color,
+    });
     burst(this.particles, x, HERO_MID_Y, 6, color, { speed: 65, life: 0.22, radius: 2 });
     for (let i = 0; i < RAIN_LAUNCH_STREAK_COUNT + 2; i++) {
       const jitter = (Math.random() - 0.5) * RAIN_LAUNCH_STREAK_SPREAD;
@@ -2382,12 +2697,19 @@ export class FxController {
       STORM_SKY_HOLD + 0.6,
     );
 
-    const drops = state.projectiles.filter((p) => p.team === "hero" && p.kind === "rainArrow");
+    const drops = state.projectiles.filter(
+      (p) => p.team === "hero" && p.kind === "rainArrow",
+    );
     for (const p of drops) {
       if (this.pendingRainArrows.length >= MAX_PENDING_RAIN_ARROWS) break;
       const fallDist = Math.hypot(p.tx - p.x, p.ty - p.y);
       const fallTime = Math.max(0.1, fallDist / Math.max(1, p.speed));
-      this.rainShadows.trySpawn({ x: p.tx, y: p.ty, life: fallTime, color: PALETTE.archerEmerald });
+      this.rainShadows.trySpawn({
+        x: p.tx,
+        y: p.ty,
+        life: fallTime,
+        color: PALETTE.archerEmerald,
+      });
       this.curtainStreaks.spawn({
         x: p.tx,
         topY: HERO_TOP_Y - 50,
@@ -2398,7 +2720,14 @@ export class FxController {
         width: BARRAGE_CURTAIN_WIDTH,
         alpha: BARRAGE_CURTAIN_ALPHA,
       });
-      this.pendingRainArrows.push({ id: p.id, tx: p.tx, ty: p.ty, big: true, isStorm: true, pov });
+      this.pendingRainArrows.push({
+        id: p.id,
+        tx: p.tx,
+        ty: p.ty,
+        big: true,
+        isStorm: true,
+        pov,
+      });
       this.stormArrowsRemaining++;
     }
   }
@@ -2429,11 +2758,18 @@ export class FxController {
       width: 6,
       color: PALETTE.archerEmerald,
     });
-    burst(this.particles, cx, GROUND_Y - 20, STORM_FINALE_PARTICLE_COUNT, PALETTE.archerGoldGlint, {
-      speed: 170,
-      life: 0.5,
-      radius: 3,
-    });
+    burst(
+      this.particles,
+      cx,
+      GROUND_Y - 20,
+      STORM_FINALE_PARTICLE_COUNT,
+      PALETTE.archerGoldGlint,
+      {
+        speed: 170,
+        life: 0.5,
+        radius: 3,
+      },
+    );
     this.groundArrows.finaleGlintAndFadeAll(STORM_FINALE_FADE_DURATION);
   }
 
@@ -2443,7 +2779,15 @@ export class FxController {
    * field dressing. The arrow itself reuses the `arrow` projectile kind, so
    * its flight already gets `updateTracers()`'s tracer for free. */
   private onArcherPowershotCast(x: number, color: number): void {
-    this.rings.spawn({ x, y: HERO_MID_Y, r0: 4, r1: POWERSHOT_RING_R1, duration: 0.2, width: 2.5, color });
+    this.rings.spawn({
+      x,
+      y: HERO_MID_Y,
+      r0: 4,
+      r1: POWERSHOT_RING_R1,
+      duration: 0.2,
+      width: 2.5,
+      color,
+    });
     this.flashLines.spawn({
       x1: x,
       y1: HERO_MID_Y,
@@ -2454,7 +2798,11 @@ export class FxController {
       life: 0.18,
       alpha: 0.8,
     });
-    burst(this.particles, x, HERO_MID_Y, 6, color, { speed: 90, life: 0.22, radius: 2.2 });
+    burst(this.particles, x, HERO_MID_Y, 6, color, {
+      speed: 90,
+      life: 0.22,
+      radius: 2.2,
+    });
   }
 
   /** Mage SIGNATURE (METEOR, "mage_meteor") / ULTIMATE (CATACLYSM,
@@ -2479,7 +2827,9 @@ export class FxController {
     // The meteor's fixed ground-target point is `tx` on the projectile the
     // engine pushed synchronously in this same step (see
     // `engine/systems/skills.ts`) — read it back rather than re-deriving it.
-    const meteor = state.projectiles.find((p) => p.team === "hero" && p.kind === "meteor");
+    const meteor = state.projectiles.find(
+      (p) => p.team === "hero" && p.kind === "meteor",
+    );
     const tx = meteor ? meteor.tx : x;
 
     // M8 party P6: both are full-viewport/near-full-width overlays (same
@@ -2487,7 +2837,10 @@ export class FxController {
     // doc comments), so SCREEN-level, gated to the POV hero's own cast. The
     // rune glyph + cast flourish below stay world-anchored, unconditional.
     if (pov) {
-      this.meteorSky.trigger(isUltimate ? PALETTE.mageAzure : color, isUltimate ? 0.34 : 0.22);
+      this.meteorSky.trigger(
+        isUltimate ? PALETTE.mageAzure : color,
+        isUltimate ? 0.34 : 0.22,
+      );
       if (isUltimate) this.skyDarken.trigger(PALETTE.skyDarkTint, CATACLYSM_SKY_ALPHA);
     }
 
@@ -2511,11 +2864,18 @@ export class FxController {
     }
 
     // Cast flourish at the staff.
-    burst(this.particles, x, HERO_TOP_Y, isUltimate ? 10 : 6, isUltimate ? PALETTE.mageAzure : color, {
-      speed: 50,
-      life: 0.3,
-      radius: 2.5,
-    });
+    burst(
+      this.particles,
+      x,
+      HERO_TOP_Y,
+      isUltimate ? 10 : 6,
+      isUltimate ? PALETTE.mageAzure : color,
+      {
+        speed: 50,
+        life: 0.3,
+        radius: 2.5,
+      },
+    );
   }
 
   /** Mage tier-3 skill-4 (APOCALYPSE, "mage_apocalypse", M7.9 "Grand
@@ -2529,14 +2889,20 @@ export class FxController {
    * than cataclysm's one single flash. Tracked by projectile id (not `tx`
    * proximity — several drops can share nearby target x's here). */
   private onMageApocalypseCast(x: number, state: GameState, pov: boolean): void {
-    const meteors = state.projectiles.filter((p) => p.team === "hero" && p.kind === "meteor");
+    const meteors = state.projectiles.filter(
+      (p) => p.team === "hero" && p.kind === "meteor",
+    );
     const alreadyTracked = new Set(this.pendingMeteors.map((m) => m.id));
 
     // M8 party P6: SCREEN-level sky overlays gated to the POV hero's own
     // cast — see `onMageMeteorCast()`'s matching doc comment.
     if (pov) {
       this.meteorSky.trigger(PALETTE.mageAzure, 0.4);
-      this.skyDarken.trigger(PALETTE.mageVoidTint, APOCALYPSE_SKY_ALPHA, APOCALYPSE_SKY_HOLD);
+      this.skyDarken.trigger(
+        PALETTE.mageVoidTint,
+        APOCALYPSE_SKY_ALPHA,
+        APOCALYPSE_SKY_HOLD,
+      );
     }
 
     const fallTime = estimateMeteorFallTime();
@@ -2554,12 +2920,22 @@ export class FxController {
         alpha: 0.5,
         fadeInFrac: 0.15,
       });
-      this.pendingMeteors.push({ id: m.id, tx: m.tx, isUltimate: true, isApocalypse: true, pov });
+      this.pendingMeteors.push({
+        id: m.id,
+        tx: m.tx,
+        isUltimate: true,
+        isApocalypse: true,
+        pov,
+      });
     }
 
     // Cast flourish at the staff — bigger than the signature/cataclysm's,
     // reading as "channeling the whole volley at once".
-    burst(this.particles, x, HERO_TOP_Y, 14, PALETTE.mageAzure, { speed: 55, life: 0.32, radius: 2.8 });
+    burst(this.particles, x, HERO_TOP_Y, 14, PALETTE.mageAzure, {
+      speed: 55,
+      life: 0.32,
+      radius: 2.8,
+    });
     if (pov) this.punch.trigger("mageApocalypse", x);
   }
 
@@ -2579,7 +2955,11 @@ export class FxController {
       this.impactFilters.triggerShockwave(tx, GROUND_Y);
     }
 
-    const scatterXs = [tx - CATACLYSM_SCATTER_SCORCH_SPAN, tx, tx + CATACLYSM_SCATTER_SCORCH_SPAN];
+    const scatterXs = [
+      tx - CATACLYSM_SCATTER_SCORCH_SPAN,
+      tx,
+      tx + CATACLYSM_SCATTER_SCORCH_SPAN,
+    ];
     for (const sx of scatterXs) {
       this.scorches.spawn(clamp(sx, 0, WORLD_WIDTH), GROUND_Y, PALETTE.mageAzure);
     }
@@ -2735,17 +3115,27 @@ export class FxController {
    * hero's own current position — `mapUnlocked` (crossing into a whole new
    * map) gets the bigger of the two, `zoneUnlocked` (next farm zone/boss room
    * opened up) the smaller. Skipped outright if no hero exists to anchor on. */
-  private onProgressUnlocked(kind: "zoneUnlocked" | "mapUnlocked", state: GameState): void {
+  private onProgressUnlocked(
+    kind: "zoneUnlocked" | "mapUnlocked",
+    state: GameState,
+  ): void {
     const hero = state.heroes[0];
     if (!hero) return;
     const big = kind === "mapUnlocked";
-    burst(this.particles, hero.x, HERO_TOP_Y, big ? MAP_UNLOCK_PARTICLE_COUNT : ZONE_UNLOCK_PARTICLE_COUNT, PALETTE.gold, {
-      speed: 90,
-      life: 0.45,
-      radius: 2.5,
-      gravity: -25,
-      drag: 0.3,
-    });
+    burst(
+      this.particles,
+      hero.x,
+      HERO_TOP_Y,
+      big ? MAP_UNLOCK_PARTICLE_COUNT : ZONE_UNLOCK_PARTICLE_COUNT,
+      PALETTE.gold,
+      {
+        speed: 90,
+        life: 0.45,
+        radius: 2.5,
+        gravity: -25,
+        drag: 0.3,
+      },
+    );
     this.rings.spawn({
       x: hero.x,
       y: HERO_TOP_Y,
@@ -2817,11 +3207,18 @@ export class FxController {
       width: 3,
       color: PALETTE.travelPortal,
     });
-    burst(this.particles, ev.x, ev.y, FASTTRAVEL_ARRIVE_PARTICLE_COUNT, PALETTE.travelPortalCore, {
-      speed: 100,
-      life: 0.35,
-      radius: 2.5,
-    });
+    burst(
+      this.particles,
+      ev.x,
+      ev.y,
+      FASTTRAVEL_ARRIVE_PARTICLE_COUNT,
+      PALETTE.travelPortalCore,
+      {
+        speed: 100,
+        life: 0.35,
+        radius: 2.5,
+      },
+    );
     this.punch.trigger("zoneWhoosh", ev.x);
   }
 
@@ -2954,18 +3351,34 @@ export class FxController {
     view: Container | null,
   ): void {
     const angle = 0; // heroes always face +x; a forward-ish cone reads fine
-    burstDirectional(this.particles, ev.x, ev.y, MELEE_SPARK_COUNT_STEEL, PALETTE.steel, angle, {
-      speed: 140,
-      life: 0.22,
-      radius: 2.5,
-      spread: 1.4,
-    });
-    burstDirectional(this.particles, ev.x, ev.y, MELEE_SPARK_COUNT_GOLD, PALETTE.gold, angle, {
-      speed: 110,
-      life: 0.26,
-      radius: 2,
-      spread: 1.6,
-    });
+    burstDirectional(
+      this.particles,
+      ev.x,
+      ev.y,
+      MELEE_SPARK_COUNT_STEEL,
+      PALETTE.steel,
+      angle,
+      {
+        speed: 140,
+        life: 0.22,
+        radius: 2.5,
+        spread: 1.4,
+      },
+    );
+    burstDirectional(
+      this.particles,
+      ev.x,
+      ev.y,
+      MELEE_SPARK_COUNT_GOLD,
+      PALETTE.gold,
+      angle,
+      {
+        speed: 110,
+        life: 0.26,
+        radius: 2,
+        spread: 1.6,
+      },
+    );
     if (view) {
       const swordsman = state.heroes.find((h) => h.cls === "swordsman" && !h.dead);
       const dirSign = swordsman && ev.x < swordsman.x ? -1 : 1;
@@ -3043,7 +3456,9 @@ export class FxController {
     const holding = !!mage && !!view && isCastHolding(view);
     this.castAura.update(
       dt,
-      holding && mage ? { x: mage.x, y: HERO_MID_Y, color: HERO_COLORS.mage.light } : null,
+      holding && mage
+        ? { x: mage.x, y: HERO_MID_Y, color: HERO_COLORS.mage.light }
+        : null,
     );
   }
 
@@ -3221,11 +3636,19 @@ export class FxController {
   }
 
   private onHeroLeftCohort(x: number): void {
-    burstInward(this.particles, x, HERO_MID_Y, PARTY_LEAVE_PARTICLE_COUNT, PALETTE.muted, PARTY_LEAVE_PUFF_RADIUS, {
-      speed: 45,
-      life: 0.45,
-      radius: 2.2,
-    });
+    burstInward(
+      this.particles,
+      x,
+      HERO_MID_Y,
+      PARTY_LEAVE_PARTICLE_COUNT,
+      PALETTE.muted,
+      PARTY_LEAVE_PUFF_RADIUS,
+      {
+        speed: 45,
+        life: 0.45,
+        radius: 2.2,
+      },
+    );
   }
 
   /** Boss entrance (item 5): `state.boss` has no dedicated "challenge
@@ -3296,7 +3719,11 @@ export class FxController {
    * the hero walking away resolves `state.location` to the NEW zone, so this
    * correctly comes back false for that case (no shake for a boss you just
    * walked away from). */
-  private isLocalInWorldBossZone(state: GameState, mapId: string, zoneIdx: number): boolean {
+  private isLocalInWorldBossZone(
+    state: GameState,
+    mapId: string,
+    zoneIdx: number,
+  ): boolean {
     return state.location.mapId === mapId && state.location.zoneIdx === zoneIdx;
   }
 
@@ -3341,13 +3768,20 @@ export class FxController {
     const pos = this.worldBossLastPos;
     if (!wb || !pos) return;
     if (!this.isLocalInWorldBossZone(state, wb.mapId, wb.zoneIdx)) return;
-    burst(this.particles, pos.x, GROUND_Y - 10, WORLD_BOSS_DESPAWN_SMOKE_COUNT, PALETTE.muted, {
-      speed: WORLD_BOSS_DESPAWN_SMOKE_SPEED,
-      life: WORLD_BOSS_DESPAWN_SMOKE_LIFE,
-      radius: 6,
-      gravity: -30, // rises like smoke, not falling debris
-      drag: 0.3,
-    });
+    burst(
+      this.particles,
+      pos.x,
+      GROUND_Y - 10,
+      WORLD_BOSS_DESPAWN_SMOKE_COUNT,
+      PALETTE.muted,
+      {
+        speed: WORLD_BOSS_DESPAWN_SMOKE_SPEED,
+        life: WORLD_BOSS_DESPAWN_SMOKE_LIFE,
+        radius: 6,
+        gravity: -30, // rises like smoke, not falling debris
+        drag: 0.3,
+      },
+    );
     this.rings.spawn({
       x: pos.x,
       y: GROUND_Y - 10,
@@ -3429,7 +3863,9 @@ export class FxController {
    * actually `connected` (a whiff still gets a smaller beat so the dash's
    * resolution always reads, even when dodged). */
   private onBossChargeHit(ev: Extract<GameEvent, { type: "bossChargeHit" }>): void {
-    this.shake.trigger(ev.connected ? CHARGE_HIT_SHAKE_CONNECTED : CHARGE_HIT_SHAKE_WHIFF);
+    this.shake.trigger(
+      ev.connected ? CHARGE_HIT_SHAKE_CONNECTED : CHARGE_HIT_SHAKE_WHIFF,
+    );
     this.punch.trigger("bossSlamLand", ev.x);
     this.impactFilters.triggerShockwave(ev.x, GROUND_Y);
     this.rings.spawn({
@@ -3445,7 +3881,9 @@ export class FxController {
       this.particles,
       ev.x,
       GROUND_Y - 8,
-      ev.connected ? CHARGE_HIT_PARTICLE_COUNT_CONNECTED : CHARGE_HIT_PARTICLE_COUNT_WHIFF,
+      ev.connected
+        ? CHARGE_HIT_PARTICLE_COUNT_CONNECTED
+        : CHARGE_HIT_PARTICLE_COUNT_WHIFF,
       PALETTE.warn,
       { speed: 140, life: 0.3, radius: 3 },
     );
@@ -3518,11 +3956,18 @@ export class FxController {
   private onBossHazardStrike(ev: Extract<GameEvent, { type: "bossHazardStrike" }>): void {
     this.shake.trigger(HAZARD_STRIKE_SHAKE);
     this.flash.trigger(PALETTE.warn, HAZARD_STRIKE_FLASH_ALPHA);
-    burst(this.particles, ev.x, GROUND_Y - 10, HAZARD_STRIKE_PARTICLE_COUNT, PALETTE.warn, {
-      speed: 130,
-      life: 0.3,
-      radius: 3,
-    });
+    burst(
+      this.particles,
+      ev.x,
+      GROUND_Y - 10,
+      HAZARD_STRIKE_PARTICLE_COUNT,
+      PALETTE.warn,
+      {
+        speed: 130,
+        life: 0.3,
+        radius: 3,
+      },
+    );
   }
 
   /** Best-effort "above the head" y for a hit's damage number (entities are

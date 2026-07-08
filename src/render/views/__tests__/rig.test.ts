@@ -92,10 +92,15 @@ const MIN_Y = GROUND_Y - 90;
 const MAX_Y = GROUND_Y + 10;
 
 describe("heroView rig transform math (regression guard)", () => {
-  for (const cls of ["swordsman", "archer", "mage"] as const) {
+  for (const cls of ["swordsman", "archer", "mage", "ninja"] as const) {
     it(`${cls}: rest-pose geometry lands in the GROUND_Y-relative band, not near world y=0`, () => {
       const view = createHeroView();
-      updateHeroView(view, makeHero(cls), { dt: 0, slot: 0, events: [], marching: false });
+      updateHeroView(view, makeHero(cls), {
+        dt: 0,
+        slot: 0,
+        events: [],
+        marching: false,
+      });
       // `bodyRoot` only (legs/torso/arms) — NOT `view.getBounds()`, which
       // would also recurse into the sibling `reviveLabel` Text and try to
       // measure it via a canvas 2D context unavailable in headless Node;
@@ -184,10 +189,15 @@ describe("enemyView rig transform math across new mob species (M7.9, regression 
 // unequipped was exactly this bug in an early draft — see
 // `buildGearArmor`'s "EMPTY but VISIBLE" doc comment).
 // ---------------------------------------------------------------------------
+// Ninja gear (dagger t1-t10 templates, docs/ninja-design.md §6) landed
+// alongside this render wave (`w_dagger_t1_kunai`..`w_dagger_t10_apocalypse`,
+// `classReq: "ninja"`, `src/engine/config/items.ts`) — ninja joins these
+// REAL t6/t7-10 escalation loops below like every other class.
 const T6_WEAPON: Record<Hero["cls"], string> = {
   swordsman: "w_sword_t6_ragna",
   archer: "w_bow_t6_ragna",
   mage: "w_staff_t6_ragna",
+  ninja: "w_dagger_t6_ragna",
 };
 const T6_ARMOR = "a_aegis_t6_bulwark";
 
@@ -198,6 +208,7 @@ const T3_WEAPON: Record<Hero["cls"], string> = {
   swordsman: "w_sword_t3_knight",
   archer: "w_bow_t3_composite",
   mage: "w_staff_t3_arcane",
+  ninja: "w_dagger_t3_shadow",
 };
 const T3_ARMOR = "a_chain_t3_mail";
 
@@ -209,7 +220,7 @@ const T3_ARMOR = "a_chain_t3_mail";
 const GEARED_MIN_Y = GROUND_Y - 110;
 
 describe("heroView rig transform math with tier-6/epic gear equipped (regression guard)", () => {
-  for (const cls of ["swordsman", "archer", "mage"] as const) {
+  for (const cls of ["swordsman", "archer", "mage", "ninja"] as const) {
     it(`${cls}: t6 weapon + t6 armor geometry lands in the GROUND_Y-relative band, not near world y=0`, () => {
       const view = createHeroView();
       const hero = makeHero(cls);
@@ -338,6 +349,107 @@ describe("bossView rig transform math across all 6 M7.9 map themes (regression g
     const b = view.bodyRoot.getBounds();
     expect(b.y).toBeGreaterThan(BOSS_MIN_Y);
     expect(b.y + b.height).toBeLessThanOrEqual(BOSS_MAX_Y);
+    view.destroy({ children: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ninja wave 3/5 (docs/ninja-design.md §7): dual-dagger rig + the
+// "dualSlash" attack anim (alternating L/R, both `weaponArm`/`gearWeapon` AND
+// `offArm`/`gearOffWeapon` swing) — same regression class as every rig above,
+// extended to cover the ninja's OWN off-hand Graphics (a fresh footgun-2
+// surface: `gearOffWeapon` is a child of `offArm`, not `weaponArm`, so a
+// mis-anchored build here would collapse toward world y≈0 same as any other
+// pivoted-container mistake) and a mid-swing pose (where the lunge/rotation
+// deltas are actually nonzero, mirroring `stepIntoAttackTell()`'s reasoning
+// above for enemy species).
+// ---------------------------------------------------------------------------
+describe("heroView rig transform math: ninja dual-dagger rig (regression guard)", () => {
+  it("bare rest-pose geometry lands in the GROUND_Y-relative band, not near world y=0", () => {
+    const view = createHeroView();
+    updateHeroView(view, makeHero("ninja"), {
+      dt: 0,
+      slot: 0,
+      events: [],
+      marching: false,
+    });
+    const b = view.bodyRoot.getBounds();
+    expect(b.y).toBeGreaterThan(MIN_Y);
+    expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+    // The off-hand dagger (`gearOffWeapon`) must actually be showing for a
+    // bare (unequipped) ninja — the "bare-weapon glyph" convention every
+    // class's main hand already follows (see `buildGearWeapon`'s doc
+    // comment) extends to the off hand here.
+    expect(view.gearOffWeapon.visible).toBe(true);
+    view.destroy({ children: true });
+  });
+
+  it("every OTHER class's gearOffWeapon stays permanently empty/invisible (ninja-only off-hand)", () => {
+    for (const cls of ["swordsman", "archer", "mage"] as const) {
+      const view = createHeroView();
+      updateHeroView(view, makeHero(cls), {
+        dt: 0,
+        slot: 0,
+        events: [],
+        marching: false,
+      });
+      expect(view.gearOffWeapon.visible).toBe(false);
+      view.destroy({ children: true });
+    }
+  });
+
+  it("mid-dualSlash attack-tell pose (both arms swinging) still lands in the GROUND_Y-relative band", () => {
+    const view = createHeroView();
+    const hero = makeHero("ninja");
+    // Same "same-tick cd RESET" tell `updateHeroView` uses to detect a new
+    // ninja basic-melee swing (mirrors the swordsman convention).
+    updateHeroView(
+      view,
+      { ...hero, cd: 0 },
+      { dt: 0, slot: 0, events: [], marching: false },
+    );
+    updateHeroView(
+      view,
+      { ...hero, cd: 1 },
+      { dt: 0, slot: 0, events: [], marching: false },
+    );
+    updateHeroView(
+      view,
+      { ...hero, cd: 1 },
+      { dt: 0.05, slot: 0, events: [], marching: false },
+    );
+    const b = view.bodyRoot.getBounds();
+    expect(b.y).toBeGreaterThan(MIN_Y);
+    expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+    view.destroy({ children: true });
+  });
+
+  it("a skillCast event also plays the dualSlash pose without crashing (dash-based ninja skills)", () => {
+    const view = createHeroView();
+    const hero = makeHero("ninja");
+    updateHeroView(view, hero, {
+      dt: 0.02,
+      slot: 0,
+      events: [
+        { type: "skillCast", heroClass: "ninja", slot: 0, skillId: "ninja_dashstrike" },
+      ],
+      marching: false,
+    });
+    const b = view.bodyRoot.getBounds();
+    expect(b.y).toBeGreaterThan(MIN_Y);
+    expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+    view.destroy({ children: true });
+  });
+
+  it("tier-2/3 evolution accent + aura build without crashing (buildTierAccent's ninja branch)", () => {
+    const view = createHeroView();
+    const hero = makeHero("ninja");
+    hero.tier = 2;
+    updateHeroView(view, hero, { dt: 0, slot: 0, events: [], marching: false });
+    const b = view.bodyRoot.getBounds();
+    expect(b.y).toBeGreaterThan(MIN_Y);
+    expect(b.y + b.height).toBeLessThanOrEqual(MAX_Y);
+    expect(view.auraRing.visible).toBe(true);
     view.destroy({ children: true });
   });
 });

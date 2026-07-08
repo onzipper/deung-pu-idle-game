@@ -178,6 +178,17 @@ export const PALETTE = {
   warCryCore: 0xff9a5c,
   warCryDark: 0x4a0810,
 
+  // ---- Ninja (นินจา, SAVE v18 render wave, docs/ninja-design.md §7) dash +
+  // skill fx accents — a silver / dark-violet jewel-tone family ("เส้นฟันสีเงิน-
+  // ม่วงเข้ม"), deliberately its OWN identity distinct from every other class's
+  // fx language (sword crimson/archer emerald/mage azure) so a shadow-streak
+  // dash or blade fx reads as "ninja" at a glance regardless of the rig's own
+  // (cooler, slate-toned) body color below. Footgun 10: flat/solid on NORMAL
+  // blend + a darker underlayer, never additive. ----
+  ninjaSilver: 0xe4e9ff,
+  ninjaViolet: 0x8a5cff,
+  ninjaVioletDark: 0x2a1a52,
+
   // ---- Town NPCs (render task: ป้าปุ๊/ลุงดึ๋ง real actors) ----
   /** ป้าปุ๊'s apron + market-stall awning — a warm, saturated rust-orange so
    * she pops off the desaturated town scenery per the art-direction rule. */
@@ -251,10 +262,19 @@ export const PALETTE = {
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe
  * undertone, armor recess)} color — the "2-3 flat tones per part" layering
  * the art brief calls for, all plain fills/alpha (no gradients). */
-export const HERO_COLORS: Record<HeroClass, { body: number; light: number; shade: number }> = {
+export const HERO_COLORS: Record<
+  HeroClass,
+  { body: number; light: number; shade: number }
+> = {
   swordsman: { body: 0x35d0c0, light: 0x7ce8dd, shade: 0x1f8f83 },
   archer: { body: 0xb8e04a, light: 0xe3f59a, shade: 0x7a9e2e },
   mage: { body: 0xc77dff, light: 0xe6c9ff, shade: 0x8a4fc2 },
+  // Cool slate/graphite (NOT the mage's purple — that's reserved for the
+  // violet fx family above) so the rig itself reads as "shadow-clad", with
+  // the silver/dark-violet dash+skill fx providing the class's jewel-tone
+  // accent on top (same "rig stays its own hue, fx gets its own family"
+  // convention as sword's teal rig + crimson fx).
+  ninja: { body: 0x6c7a99, light: 0xd7deef, shade: 0x333c58 },
 };
 
 /** Enemy kind -> body color (POC grunt/runner/tank/shooter). This is the
@@ -277,7 +297,10 @@ export const ENEMY_COLORS: Record<EnemyKind, number> = {
  * `environment/biomes.ts` ground tones, including map6's near-black grounds —
  * see `ENEMY_SPECIES_ACCENT` below for the glow accents that carry the rest of
  * that legibility work on map6 specifically. */
-export const ENEMY_SPECIES_COLORS: Record<"map4" | "map5" | "map6", Record<EnemyKind, number>> = {
+export const ENEMY_SPECIES_COLORS: Record<
+  "map4" | "map5" | "map6",
+  Record<EnemyKind, number>
+> = {
   // map4 ice tundra: frost-wolf / ice golem / frozen shambler / frost wisp.
   map4: { fast: 0x9fe0ff, tank: 0x4a7fae, normal: 0x6fa8cc, ranged: 0xcdeaff },
   // map5 desert ruins: sand scorpion / sandstone colossus / bandaged mummy /
@@ -334,7 +357,10 @@ export type BossMapId = "map1" | "map2" | "map3" | "map4" | "map5" | "map6";
  * in `bossView.ts`) across every boss — only the boss's own idle identity
  * (body/crown/eye) varies here, so "red = danger" keeps reading consistently
  * regardless of which boss is on screen. */
-export const BOSS_COLORS: Record<BossMapId, { body: number; crown: number; eye: number }> = {
+export const BOSS_COLORS: Record<
+  BossMapId,
+  { body: number; crown: number; eye: number }
+> = {
   // s5 — cave guardian (โลกมนุษย์ ถ้ำมืด): violet-grey stone body, ember-lit horns.
   map1: { body: 0x6a5a94, crown: 0xff8a3d, eye: 0xd9cfff },
   // s10 — demon sovereign (แดนอสูร บัลลังก์อสูร): deep crimson-black, molten horns.

@@ -73,6 +73,20 @@ export const SFX_PARAMS = {
     swordsman: { duration: 0.22, filterFrom: 2200, filterTo: 300, gain: 0.22 },
     archer: { tickFreq: 1200, tickGain: 0.16, tickGap: 0.045, tickCount: 3 },
     mage: { freqFrom: 90, freqTo: 55, duration: 0.4, gain: 0.22 },
+    // NINJA (SAVE v18 render wave): a quick high-pitched blade whoosh
+    // (shorter/sharper than the swordsman's own — "ตีถี่สุดในเกม") + a fast
+    // double-tick (the dagger's double-hit identity, mirrors the archer's
+    // tick vocabulary but only 2 and a touch brighter/faster).
+    ninja: {
+      duration: 0.09,
+      filterFrom: 3400,
+      filterTo: 900,
+      gain: 0.18,
+      tickFreq: 1700,
+      tickGain: 0.14,
+      tickGap: 0.035,
+      tickCount: 2,
+    },
   },
   heroDown: { freqFrom: 320, freqTo: 110, duration: 0.5, gain: 0.22 },
   /** Somber "walking home" tail, layered right after `heroDown`'s own sting
@@ -337,6 +351,25 @@ export function playSkillCast(engine: AudioEngine, ev: Ev<"skillCast">): void {
         delay: i * a.tickGap,
       });
     }
+  } else if (ev.heroClass === "ninja") {
+    const n = p.ninja;
+    engine.noise({
+      duration: n.duration,
+      filterType: "highpass",
+      filterFreq: n.filterFrom,
+      filterFreqEnd: n.filterTo,
+      filterQ: 1.1,
+      gain: n.gain,
+    });
+    for (let i = 0; i < n.tickCount; i++) {
+      engine.tone(n.tickFreq, {
+        shape: "square",
+        attack: 0.001,
+        decay: 0.03,
+        gain: n.tickGain,
+        delay: i * n.tickGap,
+      });
+    }
   } else {
     const m = p.mage;
     engine.sweep(m.freqFrom, m.freqTo, {
@@ -350,7 +383,11 @@ export function playSkillCast(engine: AudioEngine, ev: Ev<"skillCast">): void {
 /** Hero down: sad downward sweep. */
 export function playHeroDown(engine: AudioEngine): void {
   const p = SFX_PARAMS.heroDown;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "sine", duration: p.duration, gain: p.gain });
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "sine",
+    duration: p.duration,
+    gain: p.gain,
+  });
 }
 
 /** Somber "walking home" tail (M6 "World & Town") — a quieter, slightly
@@ -556,13 +593,21 @@ export function playItemDrop(engine: AudioEngine, rarity: ItemRarity): void {
     return;
   }
   const cfg = rarity === "rare" ? p.rare : p.common;
-  engine.sweep(cfg.freq, cfg.freqEnd, { shape: "sine", duration: cfg.duration, gain: cfg.gain });
+  engine.sweep(cfg.freq, cfg.freqEnd, {
+    shape: "sine",
+    duration: cfg.duration,
+    gain: cfg.gain,
+  });
 }
 
 /** Fast travel begins channeling: a short rising arcane whir. */
 export function playFastTravelCastStart(engine: AudioEngine): void {
   const p = SFX_PARAMS.fastTravelCastStart;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "sawtooth", duration: p.duration, gain: p.gain });
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "sawtooth",
+    duration: p.duration,
+    gain: p.gain,
+  });
 }
 
 /** Fast travel arrives: a soft pop immediately followed by a bright chime —
@@ -590,7 +635,11 @@ export function playFastTravelArrive(engine: AudioEngine): void {
  * descending "dud". */
 export function playFastTravelFizzle(engine: AudioEngine): void {
   const p = SFX_PARAMS.fastTravelFizzle;
-  engine.sweep(p.freqFrom, p.freqTo, { shape: "square", duration: p.duration, gain: p.gain });
+  engine.sweep(p.freqFrom, p.freqTo, {
+    shape: "square",
+    duration: p.duration,
+    gain: p.gain,
+  });
 }
 
 /** Boss-door unlock: a low drone at the door itself — see `SFX_PARAMS
