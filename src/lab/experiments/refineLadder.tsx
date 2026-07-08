@@ -129,7 +129,11 @@ function createScene(stage: LabStage, _frames: FrameSet): LabScene {
   let legendary = false;
   let refine = 0; // +0..+10 normal, clamped to +0..+5 while legendary
   let attack = false;
-  let stepped = true;
+  // Default SMOOTH 60fps (owner call, in-browser round 3): the stepped-12fps
+  // rule exists to match PIXEL-ART sprites, but this experiment's weapons are
+  // the game's smooth code-drawn vectors — square particles moving smoothly
+  // read better next to them. The toggle stays for the sprite-weapon future.
+  let stepped = false;
   let rigs: RigInstance[] = [];
 
   function currentWeapon(): WeaponEntry {
@@ -465,7 +469,7 @@ function RefineLadderControls({ scene }: { scene: LabScene }) {
           setSteppedState(v);
         }}
       >
-        {stepped ? "สเต็ป 12fps (ถูกต้องสำหรับพิกเซล)" : "เนียน 60fps (เทียบให้เห็นว่าผิด)"}
+        {stepped ? "สเต็ป 12fps (โหมดคู่สไปรต์พิกเซล)" : "เนียน 60fps (ค่าเริ่มต้น — คู่อาวุธวาดโค้ด)"}
       </button>
 
       <p className="text-slate-500">
