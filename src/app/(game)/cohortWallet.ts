@@ -185,6 +185,37 @@ export function heroConfigDiff(desired: HeroConfig, current: HeroConfig | undefi
 }
 
 /**
+ * Owner bug batch A #2 ("bot master toggle dead in a cohort"): a CLIENT-LOCAL "wish latch"
+ * for MY hero's `autoHunt` master switch. `store.autoHunt` in a cohort is a mirror of the
+ * SHARED, lane-0-owned `state.autoHunt` (part of `SharedCohortSave`) — it never reflects a
+ * member's own toggle, so feeding it straight into `desiredHeroConfig` makes the
+ * `heroConfigDiff` perpetually null and the toggle does nothing. Instead: when the player
+ * taps the master, we LATCH the pressed value here and feed it (`wish ?? store.autoHunt`)
+ * into `desiredHeroConfig`, so a real `setHeroConfig` diff is emitted and replicated on my
+ * lane. The latch releases the moment my hero's own replicated `config.autoHunt` confirms
+ * the wish landed — after that we fall back to the store mirror again (no perpetual
+ * override). We flip NO store value optimistically (that would race the next
+ * `syncFromEngine` snapshot overwrite and self-revert).
+ *
+ * `prevWish`  — the currently latched wish (or `null` = none).
+ * `pendingSetAutoHunt` — a freshly-drained `FrameInput.setAutoHunt` this frame (a `boolean`
+ *   when the player toggled, else `null`/`undefined`). Last-wins: a new toggle supersedes
+ *   any still-latched prior wish (rapid off→on lands "on").
+ * `heroConfigAutoHunt` — my hero's CURRENT replicated `config.autoHunt`.
+ *
+ * PURE — reads no state, writes nothing; the caller owns the `prevWish` storage.
+ */
+export function nextAutoHuntWish(
+  prevWish: boolean | null,
+  pendingSetAutoHunt: boolean | null | undefined,
+  heroConfigAutoHunt: boolean,
+): boolean | null {
+  const wish = typeof pendingSetAutoHunt === "boolean" ? pendingSetAutoHunt : prevWish;
+  if (wish !== null && heroConfigAutoHunt === wish) return null; // config caught up — release
+  return wish;
+}
+
+/**
  * The bot MASTER SWITCH's HUD-facing value: MY OWN hero's `config.autoHunt` — NOT the
  * shared, lane-0-owned legacy `state.autoHunt` field (owner live bug: "leader's toggle
  * flips everyone, member can't toggle self").

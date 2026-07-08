@@ -15,6 +15,7 @@
  */
 
 import { INPUT_DELAY_TURNS, type TurnMessage } from "@/engine/lockstep";
+import { zoneAt } from "@/engine";
 import type { FrameInput } from "@/engine";
 
 // ── Pure: zone beats -> cohort (design §3 "same-zone cohort") ─────────────────────
@@ -39,6 +40,14 @@ export function deriveCohort(
   myZone: ZoneBeat,
   beats: ReadonlyMap<number, ZoneBeat>,
 ): number[] {
+  // Fix C (owner "เมืองไม่ตั้งวง lockstep"): NEVER form a lockstep cohort while I'm in a
+  // town zone — everyone in town sims solo (still party-linked; the ghost layer shows
+  // peers) so bot restock/sell trips run their full town path instead of deadlocking on a
+  // shared cohort. `ZoneBeat` is `{mapId, zoneIdx}` = `WorldLocation`, so `zoneAt` (a pure
+  // CONFIG read) resolves it directly. Deterministic + identical on every client, so no
+  // town cohort ever forms; walking back out to a farm zone re-derives the cohort on the
+  // next beat. Engine-side town/farm-gate defenses stay as defense-in-depth for old peers.
+  if (zoneAt(myZone).kind === "town") return [mySlot];
   const slots = [mySlot];
   for (const [slot, beat] of beats) {
     if (slot !== mySlot && sameZone(beat, myZone)) slots.push(slot);

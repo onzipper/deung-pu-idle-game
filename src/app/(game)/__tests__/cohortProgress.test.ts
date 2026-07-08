@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyProgressSlice, progressSliceFrom, type ProgressSlice } from "../cohortProgress";
+import {
+  applyProgressSlice,
+  liveZoneKills,
+  progressSliceFrom,
+  settleProgressSlice,
+  type ProgressSlice,
+} from "../cohortProgress";
 import { initGameState, type GameState } from "@/engine";
 
 function deepFriendState(): GameState {
@@ -117,5 +123,91 @@ describe("applyProgressSlice", () => {
     target.bossBest[30] = { seconds: 0, at: 0 };
     expect(slice.unlockedZones.map6).toBe(10);
     expect(slice.bossBest[30]).toEqual({ seconds: 12, at: 1000 });
+  });
+});
+
+describe("liveZoneKills (owner bug batch B — fold the in-progress current-zone counter)", () => {
+  it("folds the live farm-zone `kills` into the persisted zoneKills map", () => {
+    const s = initGameState(1);
+    s.location = { mapId: "map1", zoneIdx: 2 };
+    s.zoneKills = { "map1:1": 40, "map1:2": 5 }; // stashed value for the current zone is stale
+    s.kills = 12; // live counter has advanced past the stashed 5
+    expect(liveZoneKills(s)).toEqual({ "map1:1": 40, "map1:2": 12 });
+  });
+
+  it("never lowers a stashed value (max), and never touches OTHER zones", () => {
+    const s = initGameState(1);
+    s.location = { mapId: "map1", zoneIdx: 2 };
+    s.zoneKills = { "map1:2": 20 };
+    s.kills = 3; // below the stashed 20 (e.g. a boss/town where kills is unrelated)
+    expect(liveZoneKills(s)).toEqual({ "map1:2": 20 });
+  });
+
+  it("never mutates the source state", () => {
+    const s = initGameState(1);
+    s.location = { mapId: "map1", zoneIdx: 2 };
+    s.zoneKills = { "map1:2": 5 };
+    s.kills = 9;
+    const out = liveZoneKills(s);
+    out["map1:2"] = 999;
+    expect(s.zoneKills["map1:2"]).toBe(5);
+  });
+});
+
+describe("settleProgressSlice (owner bug batch B — FULL-credit zone-unlock accrual)", () => {
+  const base = (zoneKills: Record<string, number>): ProgressSlice => ({
+    ...progressSliceFrom(initGameState(1)),
+    zoneKills,
+  });
+
+  it("credits the FULL shared-pot delta per person (never divided)", () => {
+    // I joined with 10 kills; the shared pot went 30 -> 100 while I was in the cohort.
+    const out = settleProgressSlice(base({ "map1:2": 10 }), { "map1:2": 30 }, { "map1:2": 100 });
+    expect(out.zoneKills["map1:2"]).toBe(80); // 10 + (100 - 30), full credit
+  });
+
+  it("floors the delta at 0 (a pot regression / re-seed never subtracts)", () => {
+    const out = settleProgressSlice(base({ "map1:2": 10 }), { "map1:2": 50 }, { "map1:2": 20 });
+    expect(out.zoneKills["map1:2"]).toBe(10); // 10 + max(0, 20 - 50)
+  });
+
+  it("folds over the UNION of every key across base / sharedBase / sharedNow", () => {
+    const out = settleProgressSlice(
+      base({ "map1:1": 5 }),
+      { "map1:2": 0 },
+      { "map1:2": 7, "map1:3": 12 },
+    );
+    expect(out.zoneKills).toEqual({ "map1:1": 5, "map1:2": 7, "map1:3": 12 });
+  });
+
+  it("leaves every OTHER progress field frozen (unlockedZones/stage/... unchanged)", () => {
+    const b = base({ "map1:2": 10 });
+    b.unlockedZones = { map1: 3 };
+    b.stage = 3;
+    const out = settleProgressSlice(b, { "map1:2": 30 }, { "map1:2": 100 });
+    expect(out.unlockedZones).toEqual({ map1: 3 });
+    expect(out.stage).toBe(3);
+  });
+
+  it("re-seed no-double-count: settling then re-basing on the settled value credits each delta once", () => {
+    // Cohort A: joined at pot=30, base=10; farmed to pot=100 -> settled 80.
+    const settledA = settleProgressSlice(base({ "map1:2": 10 }), { "map1:2": 30 }, { "map1:2": 100 });
+    expect(settledA.zoneKills["map1:2"]).toBe(80);
+    // Re-seed into cohort B: the settled slice becomes the new base; new pot baseline = 100
+    // (liveZoneKills of the freshly-built cohort). Farm on to pot=140.
+    const settledB = settleProgressSlice(settledA, { "map1:2": 100 }, { "map1:2": 140 });
+    // 80 + (140 - 100) = 120 — the 30->100 stretch is NOT counted twice.
+    expect(settledB.zoneKills["map1:2"]).toBe(120);
+  });
+
+  it("never mutates its inputs", () => {
+    const b = base({ "map1:2": 10 });
+    const bCopy = structuredClone(b);
+    const sharedBase = { "map1:2": 30 };
+    const sharedNow = { "map1:2": 100 };
+    settleProgressSlice(b, sharedBase, sharedNow);
+    expect(b).toEqual(bCopy);
+    expect(sharedBase).toEqual({ "map1:2": 30 });
+    expect(sharedNow).toEqual({ "map1:2": 100 });
   });
 });

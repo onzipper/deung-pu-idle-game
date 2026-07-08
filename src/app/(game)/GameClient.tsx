@@ -176,11 +176,18 @@ import {
   dropAssignedIndex,
   heroConfigDiff,
   myAutoHuntDisplay,
+  nextAutoHuntWish,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
 } from "./cohortWallet";
-import { applyProgressSlice, progressSliceFrom, type ProgressSlice } from "./cohortProgress";
+import {
+  applyProgressSlice,
+  liveZoneKills,
+  progressSliceFrom,
+  settleProgressSlice,
+  type ProgressSlice,
+} from "./cohortProgress";
 import { TimeDirector } from "./timeDirector";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
@@ -887,6 +894,16 @@ export function GameClient() {
      * active (`serialize()`) and restored verbatim on `collapseToSolo()` — the fix for the
      * "partying with a deep player permanently unlocked my zones" live bug. Null while solo. */
     let cohortProgressBase: ProgressSlice | null = null;
+    /** PROGRESSION-INTEGRITY, owner bug batch B: the SHARED cohort pot's `zoneKills` at the
+     * moment I joined (or re-seeded) — the baseline `settleProgressSlice` measures the pot's
+     * kill-delta against, so I get FULL credit for kills made while in the cohort without
+     * double-counting across re-seeds (mirrors `cohortSharedBase`'s role for the wallet).
+     * Null while solo. */
+    let cohortZoneKillsBase: Record<string, number> | null = null;
+    /** Owner bug batch A #2: my CLIENT-LOCAL bot-master toggle wish latch (see
+     * `nextAutoHuntWish`). Holds a pressed `autoHunt` value until my hero's replicated
+     * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
+    let cohortAutoHuntWish: boolean | null = null;
     /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
      * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
     let cohortEngine: CohortTurnEngine | null = null;
@@ -1069,6 +1086,16 @@ export function GameClient() {
       );
     }
 
+    /** My personal, FULL-CREDIT zone-unlock progress reconstructed from the live shared
+     * cohort pot (cohortProgress.ts, owner bug batch B) — my frozen base + the pot's
+     * kill-delta since I joined. Null while solo / before the bases are set. NEVER writes to
+     * `state`. Reads the live current-zone counter (`liveZoneKills`) so a kill made THIS
+     * frame is credited immediately (both to the HUD gauge and to any save that lands). */
+    function settledProgress(): ProgressSlice | null {
+      if (!cohortActive || !cohortProgressBase || !cohortZoneKillsBase) return null;
+      return settleProgressSlice(cohortProgressBase, cohortZoneKillsBase, liveZoneKills(state));
+    }
+
     /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
      * `buildCohortState` primitive (`extractSoloState`), resume the ordinary solo
      * accumulator loop next frame. */
@@ -1079,7 +1106,11 @@ export function GameClient() {
       // authority-seeded pot). Overwrite the rebuilt solo wallet with my settled share so
       // leaving a party keeps my own gold/materials/potions, not the shared pot's.
       const settled = myVirtualWallet();
-      const progress = cohortProgressBase;
+      // PROGRESSION-INTEGRITY (owner bug batch B): settle my FULL-CREDIT zone-unlock
+      // progress from the live shared pot BEFORE the extract rebuilds `state` off the shared
+      // slice — kills I made inside the cohort accrue to my own `zoneKills`, so leaving the
+      // party keeps them (and the accumulated count unlocks the zone once I'm solo).
+      const settledProg = settledProgress();
       state = extractSoloState(state, myCohortIndex, seed);
       if (settled) {
         state.gold = settled.gold;
@@ -1089,15 +1120,18 @@ export function GameClient() {
       }
       // PROGRESSION-INTEGRITY: `extractSoloState` rebuilds `location`/`unlockedZones`/
       // `stage`/`zoneKills`/`lastFarmZone`/`bossBest`/`levelCapAt` from the cohort's SHARED
-      // slice (`sharedSaveFromState`) — restore MY OWN frozen snapshot over it instead, so
-      // leaving a party never adopts a deep friend's world unlocks (or, for the asura/tome
-      // fields — not part of the shared slice at all — resets them from the fresh rebuild's
-      // zeroed defaults back to what I actually had). Safe to mutate here: this `state` is
-      // the freshly-built SOLO state, no longer shared with any other client.
-      if (progress) applyProgressSlice(state, progress);
+      // slice (`sharedSaveFromState`) — restore my SETTLED snapshot over it instead (my
+      // frozen base + full credit for kills made in the cohort, batch B), so leaving a party
+      // never adopts a deep friend's world unlocks (or, for the asura/tome fields — not part
+      // of the shared slice at all — resets them from the fresh rebuild's zeroed defaults
+      // back to what I actually had). Safe to mutate here: this `state` is the freshly-built
+      // SOLO state, no longer shared with any other client.
+      if (settledProg) applyProgressSlice(state, settledProg);
       cohortWalletBase = null;
       cohortSharedBase = null;
       cohortProgressBase = null;
+      cohortZoneKillsBase = null;
+      cohortAutoHuntWish = null;
       cohortActive = false;
       handshake?.abort();
       handshake = null;
@@ -1132,12 +1166,14 @@ export function GameClient() {
         myProgression,
         mySharedSave: sharedSaveFromState(state),
         mintSeed: () => Date.now() >>> 0,
-        // Owner bug batch A #2 ("position reset on cohort re-form"): attach my CURRENT
-        // x ONLY when this re-seed continues a cohort I was ALREADY active in — e.g.
-        // someone else joins/leaves my zone and everyone's handshake restarts. A fresh
-        // solo->cohort join has no meaningful position in this cohort yet, so it's
-        // omitted and the joiner spawns at the formation anchor, same as before.
-        myX: cohortActive ? myHero.x : undefined,
+        // Owner bug batch A #1 ("position reset on cohort re-form"): attach my CURRENT x
+        // ALWAYS. The unshadow/reconnect paths collapse to solo BEFORE re-handshaking, so
+        // `cohortActive` is already false by the time we get here — the old
+        // `cohortActive ? … : undefined` gate silently dropped x on exactly those paths,
+        // re-spawning me at the anchor every trip. Sending my real x on a fresh
+        // solo->cohort join is correct too (I'm standing somewhere in the zone already),
+        // and old-format offers without x still anchor-default (ReseedOfferMsg.x optional).
+        myX: myHero.x,
       });
       handshakeStartedAt = performance.now();
       handshake.start();
@@ -1157,15 +1193,20 @@ export function GameClient() {
       // size (state is overwritten below). Computed via `myVirtualWallet` which reads the
       // current bases + live state.
       const preWallet: WalletSlice = myVirtualWallet() ?? walletSliceFrom(state);
-      // PROGRESSION-INTEGRITY: my progress base is FROZEN at whatever it already was if
-      // this is a re-seed of an already-active cohort (it never drifts while active, so
-      // there's nothing new to capture); otherwise (a fresh join from solo) snapshot my
-      // current world-progression fields right now, before `state` is overwritten below.
-      const preProgress: ProgressSlice = cohortProgressBase ?? progressSliceFrom(state);
+      // PROGRESSION-INTEGRITY (owner bug batch B): my progress base for the NEW cohort is my
+      // SETTLED slice — on a re-seed of an already-active cohort that folds the OLD pot's
+      // full kill-credit into my base FIRST (mirrors the wallet's `myVirtualWallet` re-base),
+      // so re-seeds never double-count; on a fresh join from solo `settledProgress()` is null
+      // and we snapshot my current world-progression fields as-is.
+      const preProgress: ProgressSlice = settledProgress() ?? progressSliceFrom(state);
       state = built;
       cohortWalletBase = preWallet;
       cohortSharedBase = walletSliceFrom(built);
       cohortProgressBase = preProgress;
+      // Baseline the pot's zoneKills for THIS cohort (what `settleProgressSlice` measures the
+      // shared kill-delta against) + clear the bot-toggle wish latch for the fresh cohort.
+      cohortZoneKillsBase = liveZoneKills(built);
+      cohortAutoHuntWish = null;
       handshake = null;
       handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS; // converged — reset the backoff
       cohortActive = true;
@@ -1789,7 +1830,16 @@ export function GameClient() {
           zoneAt(state.location).kind === "farm"
         ) {
           const want = wantsBotTownTrip(
-            state.bot,
+            // A2: gate BOTH bot chores on MY hero's master switch (`config.autoHunt`) — the
+            // shared `state.bot.enabled`/`sellTripEnabled` flags are lane-0-owned, so without
+            // this a member whose master is OFF would still be dragged on a leader-driven trip
+            // (and a member with it ON couldn't trip if the leader's was off). AND-ing per
+            // hero makes the leave-decision honour MY own toggle.
+            {
+              ...state.bot,
+              enabled: state.bot.enabled && myHero.config.autoHunt,
+              sellTripEnabled: state.bot.sellTripEnabled && myHero.config.autoHunt,
+            },
             { hpPotion: myWallet.consumables.hpPotion ?? 0, manaPotion: myWallet.consumables.manaPotion ?? 0 },
             myWallet.gold,
             shopStageOf(state),
@@ -1822,26 +1872,35 @@ export function GameClient() {
             const pending = store.drainPendingInput();
             if (pending.buyShopItem) manualBuyThisFrame = true;
             const input = buildFrameInput(pending, store.inventory.length, myCohortIndex);
-            // Bot-toggle fix (defense-in-depth, see `myAutoHuntDisplay`'s doc): the LEGACY
-            // `setAutoHunt` intent (from `toggleBotMaster`) only ever writes the SHARED,
-            // lane-0-owned `state.autoHunt` global (`step()`'s `primary.setAutoHunt`) —
-            // superseded in a cohort by the per-hero `setHeroConfig` replication below, which
-            // now reads a correctly-personal `store.autoHunt`. Drop it here so a lane-0 member
-            // (the leader) never mutates that pointless-but-persisted/hashed shared field
-            // (which would otherwise still bleed into `SharedCohortSave`); a non-lane-0
-            // member's copy is already redundant with `setHeroConfig` (both target the SAME
-            // hero) and equally safe to drop.
+            // Bot-master toggle fix (owner bug batch A #2): LATCH the pressed `autoHunt` from
+            // this frame's drained intent (`input.setAutoHunt`) BEFORE stripping it. `store.
+            // autoHunt` is a mirror of the SHARED lane-0 field and never reflects my own
+            // toggle in a cohort, so feeding it raw into `desiredHeroConfig` below makes the
+            // diff perpetually null (the toggle does nothing). The wish holds my value until
+            // my hero's replicated config confirms it landed — then releases to the mirror.
+            cohortAutoHuntWish = nextAutoHuntWish(
+              cohortAutoHuntWish,
+              input.setAutoHunt,
+              state.heroes[myCohortIndex]?.config.autoHunt ?? store.autoHunt,
+            );
+            // Strip the LEGACY `setAutoHunt` intent: `step()` applies it lane-0-only
+            // (`primary.setAutoHunt`), so the leader's copy would mutate the SHARED
+            // `state.autoHunt` for everyone (and bleed into `SharedCohortSave`), and a
+            // member's copy is dead — the per-hero `setHeroConfig` replication below is the
+            // ONLY correct channel. Same for `setBotSettings` (also lane-0-only in `step()`:
+            // a leader's edit rewrites the shared `state.bot` under every member).
             input.setAutoHunt = undefined;
+            input.setBotSettings = undefined;
             // ECONOMY-INTEGRITY / mid-cohort automation: solo's global config mirror
             // (`syncPrimaryHeroConfig`) no-ops at heroes.length >= 2, so a bot/auto-cast/
             // potion toggle would be DEAD in a cohort. Derive my desired config from the
-            // store (same recipe as the solo frame block), diff it against my hero's
-            // current config, and replicate any change on my lane — the engine applies it
-            // lane-index -> hero, so it lands (deterministically, on every client) within
-            // one turn. Re-sent until the change is observed in `state` (idempotent).
+            // store (same recipe as the solo frame block, but the master switch reads the
+            // latched wish), diff it against my hero's current config, and replicate any
+            // change on my lane — the engine applies it lane-index -> hero, so it lands
+            // (deterministically, on every client) within one turn. Re-sent until observed.
             const diff = heroConfigDiff(
               desiredHeroConfig({
-                autoHunt: store.autoHunt,
+                autoHunt: cohortAutoHuntWish ?? store.autoHunt,
                 autoCast: store.autoCast,
                 autoAllocate: store.autoAllocate,
                 autoHpPotion: store.autoHpPotion,
@@ -2082,16 +2141,25 @@ export function GameClient() {
                 ]
               : state.heroes;
           const w = myVirtualWallet();
+          // PROGRESSION-INTEGRITY (owner bug batch B): the zone-unlock gauge (`buildSnapshot`
+          // reads `state.kills`) must show MY full-credit progress, not the shared pot's raw
+          // counter — override it with my settled current-zone value (throwaway-view spread,
+          // exactly like the wallet override; NEVER writes the live `state`, so it can't
+          // enter the hash). `unlockedZones` stays the shared live value (display only).
+          const settledProg = settledProgress();
+          const zk = `${state.location.mapId}:${state.location.zoneIdx}`;
+          const kills = settledProg ? (settledProg.zoneKills[zk] ?? state.kills) : state.kills;
           snapState = w
             ? {
                 ...state,
                 heroes,
+                kills,
                 gold: w.gold,
                 goldEarned: w.goldEarned,
                 materials: w.materials,
                 consumables: { ...state.consumables, ...w.consumables },
               }
-            : { ...state, heroes };
+            : { ...state, heroes, kills };
         }
         store.syncFromEngine(buildSnapshot(snapState));
       }
@@ -2122,12 +2190,15 @@ export function GameClient() {
         const base = { ...state, heroes: [mine] };
         // PROGRESSION-INTEGRITY (cohortProgress.ts): same shape as the wallet override —
         // `base` is a THROWAWAY shallow clone (never the live `state`, so mutating its
-        // scalar fields here can't desync the lockstep sim), overwritten with MY frozen
-        // world-progression snapshot so autosave/the hide beacon never persist a deep
-        // friend's zone unlocks (or wipe my own asura/tome progress, which isn't part of
-        // the shared slice at all and would otherwise save as the cohort rebuild's zeroed
-        // defaults — see `cohortProgress.ts`'s module doc).
-        if (cohortProgressBase) applyProgressSlice(base, cohortProgressBase);
+        // scalar fields here can't desync the lockstep sim), overwritten with MY SETTLED
+        // world-progression snapshot (frozen base + full credit for kills made in the cohort,
+        // batch B) so autosave/the hide beacon never persist a deep friend's zone unlocks (or
+        // wipe my own asura/tome progress, which isn't part of the shared slice at all and
+        // would otherwise save as the cohort rebuild's zeroed defaults) AND my in-cohort
+        // farming isn't lost on the next save. Falls back to the frozen base if the
+        // zoneKills baseline somehow isn't set yet.
+        const settledProg = settledProgress() ?? cohortProgressBase;
+        if (settledProg) applyProgressSlice(base, settledProg);
         return toSaveData(
           w
             ? {

@@ -121,3 +121,52 @@ export function applyProgressSlice(
   target.tomeUnlocked = slice.tomeUnlocked;
   target.kills = slice.zoneKills[`${slice.location.mapId}:${slice.location.zoneIdx}`] ?? 0;
 }
+
+/**
+ * Owner bug batch B ("zone-unlock gauge reset + kills farmed in a cohort lost"): a
+ * zoneKills map that FOLDS the live current-zone battlefield counter into the persisted
+ * `zoneKills` record. The engine only stashes `state.kills` back into `zoneKills` on zone
+ * LEAVE (a farm zone; `world.ts`'s `arriveAtZone`, key `"<mapId>:<zoneIdx>"`), so while
+ * standing in a farm zone the in-progress count lives ONLY in `state.kills`. Folding it in
+ * (via `max`, so a boss/town zone — where `kills` is 0/unrelated and no `zoneKills` entry
+ * exists — is left untouched) gives a snapshot that reflects real progress this instant.
+ * Never mutates `state`.
+ */
+export function liveZoneKills(
+  state: Pick<GameState, "zoneKills" | "location" | "kills">,
+): Record<string, number> {
+  const out = { ...state.zoneKills };
+  const key = `${state.location.mapId}:${state.location.zoneIdx}`;
+  if (state.kills > (out[key] ?? 0)) out[key] = state.kills;
+  return out;
+}
+
+/**
+ * Owner bug batch B: settle MY personal zone-unlock progress from the shared cohort pot.
+ * Semantics = FULL CREDIT PER PERSON — a kill made inside a cohort is one shared event all
+ * present members participated in (playing solo would credit the same kill in full;
+ * `zoneKills` only ever unlocks zones, never mints economy, so there is no dupe risk, and
+ * dividing per-head would make partying strictly WORSE than solo for unlocking). So each
+ * key's settled value = my FROZEN base (`base.zoneKills`) PLUS the shared pot's full delta
+ * since I joined (`max(0, sharedNow[k] − sharedBase[k])`, floored so a re-seed / regression
+ * never subtracts), over the UNION of every key. Every other `ProgressSlice` field
+ * (`unlockedZones`/`stage`/`bossBest`/…) stays FROZEN — the accumulated kills unlock the
+ * zone themselves once I'm back solo, via `applyProgressSlice`. Never mutates its inputs.
+ */
+export function settleProgressSlice(
+  base: ProgressSlice,
+  sharedBaseZK: Record<string, number>,
+  sharedNowZK: Record<string, number>,
+): ProgressSlice {
+  const zoneKills: Record<string, number> = {};
+  const keys = new Set<string>([
+    ...Object.keys(base.zoneKills),
+    ...Object.keys(sharedBaseZK),
+    ...Object.keys(sharedNowZK),
+  ]);
+  for (const k of keys) {
+    const accrued = Math.max(0, (sharedNowZK[k] ?? 0) - (sharedBaseZK[k] ?? 0));
+    zoneKills[k] = (base.zoneKills[k] ?? 0) + accrued;
+  }
+  return { ...base, zoneKills };
+}
