@@ -36,15 +36,21 @@ function inTown(
 }
 
 describe("shop pricing", () => {
-  it("scales price with stage from the config base price", () => {
+  it("follows the config formula from the base price", () => {
     for (const item of SHOP_ITEMS) {
       const base = CONFIG.shop.items[item].basePrice;
       expect(shopPriceAt(item, 1)).toBe(base);
-      expect(shopPriceAt(item, 5)).toBe(
-        Math.round(base * dpow(CONFIG.shop.priceStageBase, 4)),
-      );
-      // Strictly increasing with stage (a deeper zone's potion costs more).
-      expect(shopPriceAt(item, 10)).toBeGreaterThan(shopPriceAt(item, 5));
+      expect(shopPriceAt(item, 5)).toBe(Math.round(base * dpow(CONFIG.shop.priceStageBase, 4)));
+    }
+  });
+  it("is FLAT at every depth (owner call 2026-07-08: fixed prices, no stage scaling)", () => {
+    // priceStageBase is 1.0 — a frontier player pays the same as a fresh one.
+    // If this fails because the knob was raised again, that's a deliberate
+    // economy re-tune: update the patch notes + balance docs alongside it.
+    for (const item of SHOP_ITEMS) {
+      const base = CONFIG.shop.items[item].basePrice;
+      expect(shopPriceAt(item, 10)).toBe(base);
+      expect(shopPriceAt(item, 30)).toBe(base);
     }
   });
 });

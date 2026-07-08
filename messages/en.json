@@ -977,6 +977,7 @@
     "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
     "warpToFriendStarted": "🌀 Warping to your friend...",
     "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones",
+    "hofClaimed": "🏅 Hall of Fame reward claimed!",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -1194,6 +1195,18 @@
           "warpVictoryFix": "🔧 Bugfix: warping back to town after a boss victory no longer gets stuck",
           "ninja": "🔪 The 4th special class \"Ninja\" has arrived! Shortest range in the game, highest attack speed with twin daggers, plus a dash that blinks straight into its target — unlocks the 4th character slot once your account has all 3 base classes (Sword/Bow/Magic) at tier 3"
         }
+      },
+      "2026-07-09b": {
+        "items": {
+          "titles": "🏆 The Hall of Fame now hands out monthly titles! Ranks 1-3 of level/power/gold/online-time each earn a seasonal title — pick which one to show in Settings",
+          "aura": "✨ Every board's rank-1 champion (except online time) gets a monthly gold champion aura, visible above their head to everyone",
+          "honorBoard": "🏛️ A town honor plaque now engraves this month's champion of every category",
+          "rank1Reward": "🎁 Rank-1 champions (level/power/gold) get a free \"Fortifier\" — claim it from the Hall of Fame",
+          "badges": "🏅 Every rank-1 champion earns a permanent badge on their profile — losing the title later never removes it",
+          "flatPrices": "💰 Everything Pah Pu sells is now one flat price for the whole game! HP potion 60 / mana potion 45 / return scroll 150 / friend-warp scroll 200 — prices no longer climb with depth",
+          "worldBossFix": "👔 Sia Jong fixes: he no longer haunts the town after killing you, and fleeing his zone no longer ends your hour — come back within the 15-minute window and finish the fight (only a real kill closes the window)",
+          "daggerFix": "🔪 Fixed ninja daggers never dropping — they now drop at their normal rates"
+        }
       }
     }
   },
@@ -1223,6 +1236,27 @@
       "archer": "Bow",
       "mage": "Magic",
       "ninja": "Ninja"
+    },
+    "titles": {
+      "level": { "1": "Grandmaster of the Realm", "2": "Elite Warrior", "3": "Warrior" },
+      "power": { "1": "Titan of Strength", "2": "Iron Fist", "3": "The Disciplined" },
+      "gold": { "1": "Tycoon", "2": "Wealthy Merchant", "3": "Apprentice Trader" },
+      "online": { "1": "Chief Watchman", "2": "Senior Watchman", "3": "Junior Watchman" }
+    },
+    "champions": {
+      "title": "🏆 Monthly Champions",
+      "noSeason": "No season has closed yet — check back after the first month ends",
+      "empty": "No champion yet",
+      "myUnclaimed": "My unclaimed rewards",
+      "claimButton": "Claim",
+      "claiming": "Claiming...",
+      "claimed": "Claimed ✓",
+      "claimError": "Claim failed — try again"
+    },
+    "badgesTitle": "🏅 Badges",
+    "titlePicker": {
+      "groupTitle": "Displayed Title",
+      "noneOption": "Don't show a title"
     }
   },
   "friends": {

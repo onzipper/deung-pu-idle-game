@@ -257,6 +257,28 @@ export const PALETTE = {
   /** Nameplate/HP-bar gold trim (a touch brighter than `worldBossGold` so the
    * UI chrome pops against the arena background). */
   worldBossPlateGold: 0xffe27a,
+
+  // ---- HOF seasonal rewards (docs/hof-rewards-design.md §3, render wave) ----
+  /** Champion gold aura (`fx/championAura.ts`) — a deliberately richer, more
+   * saturated amber than every other gold family already in the game (plain
+   * `gold` evolution accent, `worldBossGold`'s paler lemon-yellow, and
+   * `refinePrestige`'s near-white glow) so a #1-ranked hero's full-body halo
+   * reads as its OWN "royal" tier at a glance; composition (tall double ring +
+   * orbiting motes vs. every other gold aura's flat ground ellipse/weapon
+   * flame) carries the rest of the distinctiveness — see that module's doc. */
+  championGold: 0xdba024,
+  /** Bright motes/inner-ring core. */
+  championGoldCore: 0xfff0c2,
+  /** Dark bronze outline accent (mote rim). */
+  championGoldDeep: 0x6b4400,
+  /** Town honor-board plaque body — muted worked stone, kept inside the
+   * desaturated-scenery family (this is a SCENERY prop, not an entity-layer
+   * accent — see `environment/townHonorBoard.ts`). */
+  honorPlateStone: 0x5a5a66,
+  honorPlateStoneShade: 0x36363f,
+  /** Engraved gold-leaf trim/text tone — soft, not jewel-bright (still
+   * scenery, distinct from `championGold`'s vivid entity-layer aura). */
+  honorPlateGold: 0xc9a24a,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

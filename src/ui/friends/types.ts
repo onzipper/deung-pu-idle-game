@@ -19,6 +19,12 @@ export interface FriendWire {
   /** "mapId:zoneIdx" composite, or null if the friend has never saved a location. */
   lastZone: string | null;
   lastSeenAt: string | null;
+  /** HOF seasonal chosen display title id ("<board>.<rank>"), validated
+   *  server-side, or null — see `src/server/hofSeason.ts`'s `titlesForCharacters`
+   *  and `ui/hof/titles.ts` for the localizer. */
+  title: string | null;
+  /** Holds a gold-aura title (rank-1 of level/power/gold — NOT online). */
+  champion: boolean;
 }
 
 export interface IncomingRequestWire {
@@ -42,6 +48,9 @@ export interface PartyMemberWire {
   online: boolean;
   currentCharacter: CurrentCharacterWire | null;
   lastZone: string | null;
+  /** See `FriendWire.title`'s doc. */
+  title: string | null;
+  champion: boolean;
 }
 
 export interface PartyWire {

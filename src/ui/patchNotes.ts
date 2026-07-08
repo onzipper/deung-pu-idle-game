@@ -202,6 +202,26 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09.items.ninja",
     ],
   },
+  // HOF seasonal rewards (owner-approved docs/hof-rewards-design.md): monthly
+  // titles + gold champion aura + town honor board + rank-1 fortifier claim +
+  // permanent collectible badges. PLUS the owner's "every change this round gets
+  // announced" sweep: flat shop pricing + the world-boss zone-lifecycle hotfix +
+  // the ninja dagger drop-claim hotfix (PR #27 shipped without notes — recorded
+  // here so players see them).
+  {
+    id: "2026-07-09b",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09b.items.titles",
+      "releases.2026-07-09b.items.aura",
+      "releases.2026-07-09b.items.honorBoard",
+      "releases.2026-07-09b.items.rank1Reward",
+      "releases.2026-07-09b.items.badges",
+      "releases.2026-07-09b.items.flatPrices",
+      "releases.2026-07-09b.items.worldBossFix",
+      "releases.2026-07-09b.items.daggerFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

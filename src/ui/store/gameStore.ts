@@ -1054,6 +1054,16 @@ export interface HudState {
   /** World boss "เสี่ยจ๋อง" countdown-banner state — see `WorldBossStatus`'s doc. */
   worldBossStatus: WorldBossStatus;
 
+  // ---- HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) ----
+  /** MY OWN chosen title (already localized, via `ui/hof/titles.ts`) + champion
+   *  aura flag while SOLO — `GameClient.tsx` refreshes this off `GET
+   *  /api/hof/rewards` on every town arrival and feeds it into the
+   *  `renderer.setHeroSocialBadges` seam for hero id `state.heroes[0].id`. In a
+   *  cohort, per-member badges instead come straight off the friends-poll
+   *  `party` rows (already carry `title`/`champion`) — this field is unused
+   *  there. `null` before the first fetch resolves. */
+  mySocialBadge: { title: string | null; champion: boolean } | null;
+
   // ---- M7.9 server-wide high-refine announcement feed (no websockets — the
   // feed is polled off the existing autosave/boot response, see
   // `GameClient.tsx`) ----
@@ -1362,6 +1372,8 @@ export interface HudState {
   /** `GameClient.tsx`-only: reflect the cohort session's current state into the HUD
    * chip — see `cohortStatus`'s doc. */
   setCohortStatus: (status: CohortStatusState) => void;
+  /** `GameClient.tsx`-only: see `mySocialBadge`'s doc. */
+  setMySocialBadge: (badge: { title: string | null; champion: boolean } | null) => void;
 
   // ---- World boss "เสี่ยจ๋อง" ----
   /** `GameClient.tsx`-only: push the countdown-banner state on a TRANSITION (see
@@ -1459,6 +1471,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   party: null,
   cohortStatus: { kind: "solo" },
   worldBossStatus: { kind: "idle" },
+  mySocialBadge: null,
 
   myCharacterId: null,
   announcementQueue: [],
@@ -1745,6 +1758,7 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   setParty: (party) => set({ party }),
   setCohortStatus: (status) => set({ cohortStatus: status }),
+  setMySocialBadge: (badge) => set({ mySocialBadge: badge }),
 
   setWorldBossStatus: (status) => set({ worldBossStatus: status }),
   queueSpawnWorldBoss: (windowId, remainingSeconds) =>

@@ -15,6 +15,7 @@ import type { HeroClass } from "@/engine";
 import { HERO_ICONS } from "@/ui/labels";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { useGameStore } from "@/ui/store/gameStore";
+import { titleLabel } from "@/ui/hof/titles";
 import { FRIEND_EMOJI_ALLOWLIST } from "@/ui/friends/types";
 import type {
   FriendCandidateWire,
@@ -54,6 +55,26 @@ const ERROR_KEY_BY_CODE: Record<string, string> = {
 
 function errorMessage(code: string, t: Translator): string {
   return t(ERROR_KEY_BY_CODE[code] ?? "errorGeneric");
+}
+
+/** HOF seasonal title chip (owner-approved docs/hof-rewards-design.md) — a
+ * small pill shown beside a friend/party-member name, localized through the
+ * shared `titleLabel` helper. `champion` (rank-1 of level/power/gold) gets a
+ * gold-aura treatment; renders nothing for a member holding no chosen title. */
+function TitleChip({ title, champion, tHof }: { title: string | null; champion: boolean; tHof: Translator }) {
+  const label = titleLabel(title, tHof);
+  if (!label) return null;
+  return (
+    <span
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${
+        champion
+          ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
+          : "border-ddp-border-soft bg-black/30 text-ddp-ink-muted"
+      }`}
+    >
+      {label}
+    </span>
+  );
 }
 
 function zoneLabelFor(composite: string | null, tFriends: Translator, tWorld: Translator, tMaps: Translator): string {
@@ -397,6 +418,7 @@ function FriendRow({
   const [actionError, setActionError] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const tHof = useTranslations("hof");
 
   async function handleSendEmoji(emoji: string) {
     setPickerOpen(false);
@@ -438,6 +460,7 @@ function FriendRow({
         />
         {cls && <span aria-hidden className="shrink-0 text-sm">{HERO_ICONS[cls] ?? ""}</span>}
         <span className="min-w-0 flex-1 truncate text-xs font-bold text-ddp-ink">{name}</span>
+        <TitleChip title={friend.title} champion={friend.champion} tHof={tHof} />
         {friend.currentCharacter && (
           <span className="shrink-0 text-[10px] text-ddp-ink-muted tabular-nums">
             {tCommon("levelBadge", { level: friend.currentCharacter.level })}
@@ -596,6 +619,7 @@ function PartyMemberRow({
 }) {
   const name = member.displayName ?? t("unknownPlayer");
   const cls = member.currentCharacter?.class as HeroClass | undefined;
+  const tHof = useTranslations("hof");
   // M8 party P4b: a one-line same-zone hint — the lockstep cohort itself is driven
   // relay-side (see `ui/party/CohortStatus.tsx`'s HUD chip), this is purely a
   // "you'll see each other" nudge read straight off the ALREADY-throttled world
@@ -621,6 +645,7 @@ function PartyMemberRow({
         )}
         {cls && <span aria-hidden className="shrink-0 text-sm">{HERO_ICONS[cls] ?? ""}</span>}
         <span className="min-w-0 flex-1 truncate text-xs font-bold text-ddp-ink">{name}</span>
+        <TitleChip title={member.title} champion={member.champion} tHof={tHof} />
         {member.currentCharacter && (
           <span className="shrink-0 text-[10px] text-ddp-ink-muted tabular-nums">
             {tCommon("levelBadge", { level: member.currentCharacter.level })}

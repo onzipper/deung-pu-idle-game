@@ -132,6 +132,8 @@ import {
   sameWorldBossStatus,
   shouldQueueWorldBossSpawn,
 } from "@/ui/worldBoss/schedule";
+import { fetchHofRewards } from "@/ui/hof/rewardsApi";
+import { HOF_REWARD_BOARDS, titleLabel } from "@/ui/hof/titles";
 import { resolveCatchUp } from "./catchUp";
 import {
   PartyHandshake,
@@ -682,6 +684,14 @@ export function GameClient() {
   const tNoticesRef = useRef(tNotices);
   tNoticesRef.current = tNotices;
 
+  // HOF seasonal rewards (owner-approved docs/hof-rewards-design.md): the
+  // translator `titleLabel` needs to localize a title id BEFORE it reaches the
+  // `setHeroSocialBadges`/`setTownChampions` render seams (both want an
+  // already-localized string) — same ref-captured pattern as `tNoticesRef`.
+  const tHof = useTranslations("hof");
+  const tHofRef = useRef(tHof);
+  tHofRef.current = tHof;
+
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
   // log but this never does, React never hydrated even though scripts ran.
@@ -784,6 +794,13 @@ export function GameClient() {
     let cohortPrevWaiting = false;
     let lastZoneKey: string | null = null;
 
+    // ---- HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) ----
+    /** At most one `/api/hof/rewards` fetch in flight — refreshed on every town
+     * arrival (cheap read; also the lazy-finalize trigger, see `refreshHofOnTownArrival`'s
+     * doc). No queued retry (unlike the world-boss claim): a dropped refresh just
+     * gets picked up on the NEXT town trip. */
+    let hofFetchInFlight = false;
+
     // ---- World boss "เสี่ยจ๋อง" schedule (server-clock aligned; see `serverNowMs`'s
     // doc) ----
     /** `serverNow - Date.now()` at boot (from the `/api/save` GET response's
@@ -817,6 +834,87 @@ export function GameClient() {
       if (!cohortActive) return;
       useGameStore.getState().setCohortStatus({ kind: "active", names: [...cohortMemberNames.values()] });
       renderer.setHeroDisplayNames(currentHeroDisplayNames());
+      pushHeroSocialBadges();
+    }
+
+    /** HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) — the
+     * `heroId -> {title, champion}` map `GameRenderer.setHeroSocialBadges` wants
+     * (nameplate aura + chosen-title seam, mirrors `currentHeroDisplayNames`'
+     * shape/doc). Cohort: resolved straight off the friends-poll `party` rows
+     * (already carry server-VALIDATED `title`/`champion` — see `ui/friends/types.ts`),
+     * matched to a cohort hero id the same way `currentHeroDisplayNames` does
+     * (peer via `cohortMemberIds`'s ticket slot, "me" is the one party member
+     * whose userId is NOT one of the resolved peers). Solo: just my own
+     * `mySocialBadge` (kept fresh by `refreshHofOnTownArrival`) on hero 0. */
+    function currentHeroSocialBadges(): Map<string, { title: string | null; champion: boolean }> {
+      const badges = new Map<string, { title: string | null; champion: boolean }>();
+      if (cohortActive) {
+        const party = useGameStore.getState().party;
+        if (!party) return badges;
+        const peerUserIds = new Set(cohortMemberIds.values());
+        for (const m of party.members) {
+          let heroId: number | undefined;
+          if (!peerUserIds.has(m.userId)) {
+            // The one party member who is NOT a resolved peer is me.
+            heroId = state.heroes[myCohortIndex]?.id;
+          } else {
+            let ticketSlot: number | undefined;
+            for (const [slot, uid] of cohortMemberIds) {
+              if (uid === m.userId) {
+                ticketSlot = slot;
+                break;
+              }
+            }
+            if (ticketSlot === undefined) continue;
+            const idx = lastCohortSlots.indexOf(ticketSlot);
+            heroId = idx >= 0 ? state.heroes[idx]?.id : undefined;
+          }
+          if (heroId === undefined) continue;
+          badges.set(String(heroId), { title: titleLabel(m.title, tHofRef.current), champion: m.champion });
+        }
+      } else {
+        const mine = useGameStore.getState().mySocialBadge;
+        const hero = state.heroes[0];
+        if (mine && hero) badges.set(String(hero.id), mine);
+      }
+      return badges;
+    }
+
+    function pushHeroSocialBadges(): void {
+      renderer.setHeroSocialBadges(currentHeroSocialBadges());
+    }
+
+    /** HOF seasonal rewards: refresh the town honor board + MY OWN solo aura off
+     * `GET /api/hof/rewards` on every town arrival (`townArrived` frame event
+     * below) — cheap read, and the request is ALSO the server's lazy-finalize
+     * trigger for a just-ended month (see `src/server/hofSeason.ts`'s doc), so
+     * riding it here means a season closes the moment any player walks into
+     * town after the cutoff. Fire-and-forget; a dropped refresh is silently
+     * retried on the NEXT town trip (no queued retry, unlike the world-boss
+     * claim — nothing here is a one-shot entitlement). */
+    function refreshHofOnTownArrival(): void {
+      if (hofFetchInFlight) return;
+      hofFetchInFlight = true;
+      const characterId = useGameStore.getState().myCharacterId;
+      void fetchHofRewards(characterId).then((res) => {
+        hofFetchInFlight = false;
+        if (res.kind !== "ok") return;
+        const data = res.data;
+
+        const entries: { board: string; name: string; title: string }[] = [];
+        for (const board of HOF_REWARD_BOARDS) {
+          const top = data.champions[board][0];
+          if (!top) continue;
+          const label = titleLabel(top.titleId, tHofRef.current);
+          if (label) entries.push({ board, name: top.charName, title: label });
+        }
+        renderer.setTownChampions(entries);
+
+        const champion = data.me?.titles.some((mt) => mt.rank === 1 && mt.board !== "online") ?? false;
+        const title = data.me ? titleLabel(data.me.displayTitle, tHofRef.current) : null;
+        useGameStore.getState().setMySocialBadge({ title, champion });
+        pushHeroSocialBadges();
+      });
     }
 
     /** Rebuild `cohortMemberNames` (ticket slot -> friendly name) by resolving each
@@ -877,6 +975,7 @@ export function GameClient() {
       renderer.setHeroDisplayNames(null);
       renderer.setPovHeroIndex(0);
       useGameStore.getState().setCohortStatus({ kind: "solo" });
+      pushHeroSocialBadges(); // switch the nameplate/aura seam back to my solo badge
     }
 
     /** Begin (or restart) the zone-boundary re-seed handshake for a fresh cohort
@@ -1557,6 +1656,9 @@ export function GameClient() {
             useGameStore.getState().pushStoneFeed(ev.qty);
           }
         } else if (ev.type === "townArrived") {
+          // HOF seasonal rewards: refresh the town honor board + my solo aura —
+          // see `refreshHofOnTownArrival`'s doc (fire-and-forget, every arrival).
+          refreshHofOnTownArrival();
           // M7.5 sell-trip bot: the engine restocked already (engine-side);
           // the CLIENT owns item instances, so a "sell"/"restockSell" arrival
           // is where the auto-sell rules actually run (fire-and-forget — a

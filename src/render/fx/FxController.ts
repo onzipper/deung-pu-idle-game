@@ -35,6 +35,7 @@ import { ArrowSwarmPool } from "@/render/fx/arrowSwarm";
 import { BossEcho } from "@/render/fx/bossEcho";
 import { CameraPunch } from "@/render/fx/cameraPunch";
 import { CastAuraController } from "@/render/fx/castAura";
+import { ChampionAuraController } from "@/render/fx/championAura";
 import { TargetLockReticle } from "@/render/fx/commandMarkers";
 import { CorpseEchoPool } from "@/render/fx/corpseEcho";
 import { CrescentPool } from "@/render/fx/crescent";
@@ -76,6 +77,7 @@ import { enemyColorFor } from "@/render/views/enemySpecies";
 import { WORLD_BOSS_CY } from "@/render/views/worldBossView";
 import {
   getArmorAnchorPos,
+  getChampionAnchorPos,
   getSwordTipPos,
   getWeaponAnchorPos,
   isCastHolding,
@@ -852,6 +854,20 @@ export class FxController {
    * own. See `updateGearFx()`. */
   private readonly refinePrestige: RefinePrestigeFx;
 
+  /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
+   * the rank-1 champion gold aura — same continuous-per-frame convention as
+   * `gearAura`/`warCryAura`. See `updateChampionAura()`. */
+  private readonly championAura: ChampionAuraController;
+  /** Per-hero-id social badge map (title + champion flag), mirroring
+   * `GameRenderer.heroDisplayNames`'s own defensive-read convention — set via
+   * `setHeroSocialBadges()`, read every frame in `updateChampionAura()`.
+   * `null` (default/unset) means "no champion this season", matching every
+   * existing solo/sim call site that never calls the new seam. */
+  private heroSocialBadges: ReadonlyMap<
+    string,
+    { title: string | null; champion: boolean }
+  > | null = null;
+
   /** Owner request: on-character aura while a hero's War Cry ATK buff
    * (`hero.atkBuffTimer`) is active — same continuous-per-frame convention as
    * `gearAura`/`gearSparkle` above, but keyed off the buff timer instead of
@@ -918,6 +934,9 @@ export class FxController {
    * allocation), same convention as `tipScratch` above. */
   private readonly weaponAnchorScratch = { x: 0, y: 0 };
   private readonly armorAnchorScratch = { x: 0, y: 0 };
+  /** Reused every frame by `updateChampionAura()` — same zero-steady-state-
+   * allocation convention as `weaponAnchorScratch`/`armorAnchorScratch`. */
+  private readonly championAnchorScratch = { x: 0, y: 0 };
   /** Reused every frame by `updateWarCryFx()` — same chest anchor
    * (`getArmorAnchorPos()`) the armor sparkle already reads, kept as its own
    * scratch point (not reused) so the two effects never stomp each other's
@@ -1057,6 +1076,7 @@ export class FxController {
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
     this.warCryAura = new WarCryAuraController(this.heroFxLayer);
+    this.championAura = new ChampionAuraController(this.heroFxLayer);
     this.arrowSwarm = new ArrowSwarmPool(this.heroFxLayer);
     this.travelPortal = new TravelPortalController(this.heroFxLayer);
     // Manual play (M7.8): the persistent target-lock reticle lives in the
@@ -1114,6 +1134,18 @@ export class FxController {
    * before this seam existed. */
   setPovHeroIndex(index: number): void {
     this.povHeroIndex = index;
+  }
+
+  /** HOF seasonal rewards seam (mirrors `setPovHeroIndex()`/
+   * `GameRenderer.setHeroDisplayNames()`) — registers the per-hero-id social
+   * badge map (`title`/`champion`) the champion gold aura reads every frame
+   * in `updateChampionAura()`. `null` clears every champion aura. Safe to call
+   * any time; unset behaves identically to before this seam existed (no
+   * champion aura ever activates). */
+  setHeroSocialBadges(
+    badges: ReadonlyMap<string, { title: string | null; champion: boolean }> | null,
+  ): void {
+    this.heroSocialBadges = badges;
   }
 
   /** React to this frame's (already-collected, cross-sub-step) events. */
@@ -1370,6 +1402,7 @@ export class FxController {
     this.detectBossEntrance(state);
     this.updateWorldBossTracking(state);
     this.updateGearFx(dt, state);
+    this.updateChampionAura(dt, state);
     this.updateWarCryFx(dt, state);
     this.updateTargetLock(dt, state);
     this.travelPortal.update(dt);
@@ -1401,6 +1434,7 @@ export class FxController {
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
+    this.championAura.destroy();
     this.warCryAura.destroy();
     this.arrowSwarm.destroy();
     this.travelPortal.destroy();
@@ -1505,6 +1539,29 @@ export class FxController {
     });
     this.gearAura.update(dt);
     this.gearSparkle.update(dt);
+  }
+
+  /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
+   * continuous, not event-driven — same convention as `updateGearFx()`. Per
+   * hero slot, activates the champion gold aura when `heroSocialBadges` marks
+   * that hero id a current champion, else eases the slot back to invisible.
+   * `null`/unset badges map (every existing call site) means this is always a
+   * no-op loop over `active=false`, so solo/sim output stays byte-identical
+   * until `setHeroSocialBadges()` is ever called. */
+  private updateChampionAura(dt: number, state: GameState): void {
+    state.heroes.forEach((h, slot) => {
+      const view = h.dead ? null : this.lookupHeroView(h.id);
+      const champion = this.heroSocialBadges?.get(String(h.id))?.champion ?? false;
+      const active =
+        champion && !!view && getChampionAnchorPos(view, this.championAnchorScratch);
+      this.championAura.setSlot(
+        slot,
+        active,
+        this.championAnchorScratch.x,
+        this.championAnchorScratch.y,
+      );
+    });
+    this.championAura.update(dt);
   }
 
   /** Owner request: a visible on-character effect while a hero's War Cry ATK

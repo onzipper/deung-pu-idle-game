@@ -12,9 +12,14 @@
  */
 
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { GEAR_SLOT_ICONS, HERO_ICONS, prestigeNameClass } from "@/ui/labels";
 import type { HofEntry } from "@/ui/hof/types";
+import { fetchHofRewards } from "@/ui/hof/rewardsApi";
+import type { HofBadgeRow } from "@/ui/hof/rewardsTypes";
+import { titleLabel } from "@/ui/hof/titles";
+import { useGameStore } from "@/ui/store/gameStore";
 
 const SLOT_ORDER: readonly ("weapon" | "armor")[] = ["weapon", "armor"];
 
@@ -30,15 +35,41 @@ function classNameKeyForTier(tier: 1 | 2 | 3): "name" | "evolvedName" | "tier3Na
 
 export interface HofProfileModalProps {
   entry: HofEntry;
+  /** True when `entry` is confirmed (by `HallOfFamePanel.tsx`, via the exact
+   * rank-match check) to be the VIEWER'S OWN character — see this file's
+   * module doc for why that's the only case badges can be resolved for. */
+  isMe?: boolean;
   onClose: () => void;
 }
 
-export function HofProfileModal({ entry, onClose }: HofProfileModalProps) {
+/** One-shot fetch of the caller's OWN permanent rank-1 badge history, only
+ * when `isMe` — see this file's module doc for the `characterId` gap this
+ * works around. Returns `null` while loading/unavailable (badges are a pure
+ * bonus flourish, never blocking the rest of the profile). */
+function useMyBadges(isMe: boolean): HofBadgeRow[] | null {
+  const myCharacterId = useGameStore((s) => s.myCharacterId);
+  const [badges, setBadges] = useState<HofBadgeRow[] | null>(null);
+
+  useEffect(() => {
+    if (!isMe || !myCharacterId) return;
+    const controller = new AbortController();
+    fetchHofRewards(myCharacterId, controller.signal).then((res) => {
+      if (res.kind !== "ok") return;
+      setBadges(res.data.badges ?? []);
+    });
+    return () => controller.abort();
+  }, [isMe, myCharacterId]);
+
+  return badges;
+}
+
+export function HofProfileModal({ entry, isMe = false, onClose }: HofProfileModalProps) {
   const t = useTranslations("hof");
   const tCommon = useTranslations("common");
   const tContent = useTranslations("content");
   const tContentItems = useTranslations("content.items");
   const tInventory = useTranslations("inventory");
+  const badges = useMyBadges(isMe);
 
   const nameCls = prestigeNameClass(
     Math.max(entry.profile.refineLevels.weapon, entry.profile.refineLevels.armor),
@@ -119,6 +150,27 @@ export function HofProfileModal({ entry, onClose }: HofProfileModalProps) {
               );
             })}
           </div>
+
+          {isMe && badges !== null && badges.length > 0 && (
+            <div className="flex flex-col gap-1.5 border-t border-ddp-border-soft pt-2">
+              <h3 className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted uppercase">
+                {t("badgesTitle")}
+              </h3>
+              <div className="flex flex-col gap-1">
+                {badges.map((b, i) => (
+                  <div
+                    key={`${b.titleId}-${b.month}-${i}`}
+                    className="flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/5 px-2.5 py-1.5 text-xs font-semibold text-ddp-gold-bright"
+                  >
+                    <span aria-hidden>{"\u{1F3C5}"}</span>
+                    <span className="truncate">
+                      {titleLabel(b.titleId, t) ?? b.titleId} · {b.month}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </ModalPortal>

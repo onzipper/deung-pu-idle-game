@@ -17,6 +17,7 @@ import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { AccountSection } from "@/ui/components/settings/AccountSection";
+import { TitleSection } from "@/ui/components/settings/TitleSection";
 
 export interface SettingsPanelProps {
   onClose: () => void;
@@ -61,6 +62,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <LocaleSwitch />
             </div>
           </section>
+
+          <TitleSection />
 
           <AccountSection />
         </div>
