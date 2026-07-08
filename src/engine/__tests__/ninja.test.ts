@@ -204,7 +204,7 @@ describe("ninja skills", () => {
   });
 
   it("เงาสังหาร (chain-dash ultimate): blinks to + strikes up to `targets` distinct foes", () => {
-    const s = ninjaState(15, 2, 20); // tier-2 Lv15, +INT so the 90-mana pool affords it
+    const s = ninjaState(15, 2, 20); // tier-2 Lv15, +INT so the pool affords the massacre cost
     const h = s.heroes[0];
     const def = SKILLS.ninja_massacre;
     h.x = 210;
@@ -217,12 +217,12 @@ describe("ninja skills", () => {
     const perHit = Math.round(heroAtkOf(h) * def.mult);
     castOnly(s, def.id);
     for (const e of foes) expect(e.maxHp - e.hp).toBe(perHit);
-    // One dash per chain hop (3 reachable foes here, ≤ the 8-target cap).
+    // One dash per chain hop (3 reachable foes here, ≤ the `targets` cap).
     expect(eventTypes(s, "heroDashed")).toBe(foes.length);
   });
 
   it("พันเงานิรันดร์ (skill-4): strikes EVERY field target ×mult (no spectacle event)", () => {
-    const s = ninjaState(40, 3); // tier-3 Lv40; pool 60+tier3Bonus affords the 170 cost
+    const s = ninjaState(40, 3); // tier-3 Lv40; pool 60+tier3Bonus affords the eternal cost
     const h = s.heroes[0];
     const def = SKILLS.ninja_eternal;
     const foes = [

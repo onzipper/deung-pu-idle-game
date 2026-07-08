@@ -62,7 +62,10 @@ const SEEDS = (process.env.SEEDS ?? "1,2,3,42,1337")
 const CLASSES: HeroClass[] = (process.env.CLASSES ?? "swordsman,archer,mage")
   .split(",")
   .map((s) => s.trim())
-  .filter((s): s is HeroClass => s === "swordsman" || s === "archer" || s === "mage");
+  .filter(
+    (s): s is HeroClass =>
+      s === "swordsman" || s === "archer" || s === "mage" || s === "ninja",
+  );
 // GEAR=1 → the autopilot auto-equips the best-for-class drop it sees (M7 drop-
 // equilibrium run). Default (unset) → drops are ignored (NO-GEAR run: must match
 // the balance-m6 tables, since unarmored combat is byte-identical to pre-M7).
@@ -337,7 +340,9 @@ function baseStatsOf(cls: HeroClass) {
     ? { str: 8, dex: 4, int: 3, vit: 6 }
     : cls === "archer"
       ? { str: 4, dex: 8, int: 3, vit: 5 }
-      : { str: 3, dex: 4, int: 8, vit: 4 };
+      : cls === "ninja"
+        ? { str: 5, dex: 8, int: 3, vit: 4 }
+        : { str: 3, dex: 4, int: 8, vit: 4 };
 }
 
 /** Idle-player auto-slot fill (unchanged from the M5 harness).
@@ -1328,8 +1333,8 @@ const ISO_STATS: Record<HeroClass, { str: number; dex: number; int: number; vit:
   swordsman: { str: 188, dex: 4, int: 48, vit: 51 },
   archer: { str: 4, dex: 224, int: 57, vit: 5 },
   mage: { str: 3, dex: 4, int: 210, vit: 72 },
-  // Ninja (SAVE v18): 3 DEX : 1 VIT draft ratio on ~270 points, on top of the ninja base.
-  ninja: { str: 5, dex: 210, int: 3, vit: 72 },
+  // Ninja (SAVE v18): 4 DEX : 1 VIT : 1 INT sim ratio on ~267 points, on top of the ninja base.
+  ninja: { str: 5, dex: 186, int: 47, vit: 48 },
 };
 // NINJA gear (SAVE v18): the REAL ninja DAGGER templates (classReq "ninja", GEAR wave 2)
 // now drive the ninja iso runs; armor is the shared universal line. Ninja is NOT in the
@@ -1495,9 +1500,11 @@ function allocStats(cls: HeroClass, level: number): Stats {
   }
   if (cls === "archer") return { str: b.str, dex: b.dex + pts, int: b.int, vit: b.vit };
   if (cls === "ninja") {
-    // Ninja DRAFT ratio (SAVE v18): 3 DEX : 1 VIT (docs/ninja-design.md §2).
-    const v = Math.round(pts / 4);
-    return { str: b.str, dex: b.dex + (pts - v), int: b.int, vit: b.vit + v };
+    // Ninja SIM ratio (SAVE v18, ninja balance wave): 4 DEX : 1 VIT : 1 INT — DEX majority
+    // (damage+tempo), VIT floors the thin melee body, INT deepens the mana pool (massacre).
+    const v = Math.round(pts / 6);
+    const int = Math.round(pts / 6);
+    return { str: b.str, dex: b.dex + (pts - v - int), int: b.int + int, vit: b.vit + v };
   }
   const v = Math.round(pts / 4);
   return { str: b.str, dex: b.dex, int: b.int + (pts - v), vit: b.vit + v };

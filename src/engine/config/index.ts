@@ -857,8 +857,8 @@ export const CONFIG = {
     // field-wide leap. The chain (เงาสังหาร) + ult (พันเงานิรันดร์) pass Infinity (unbounded)
     // so they genuinely blink across the whole field; skill cast `range` gates reachability.
     dashMaxReach: 300,
-    // TWIN FANG (คมเงาคู่) r80 splash: neighbours of the primary take this fraction of a hit.
-    twinSplashFrac: 0.5,
+    // TWIN FANG (คมเงาคู่) r`radius` splash: neighbours of the primary take this fraction of a hit.
+    twinSplashFrac: 0.6,
   },
 
   // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
@@ -998,10 +998,14 @@ export const CONFIG = {
       swordsman: { str: 4, vit: 1, int: 1 },
       archer: { dex: 4, int: 1 },
       mage: { int: 3, vit: 1 },
-      // Ninja DRAFT ratio (SAVE v18, docs/ninja-design.md §2): 3 DEX : 1 VIT — DEX is the
-      // damage + tempo primary, a VIT trickle floors the thin body's survivability. The
-      // ninja SIM wave (5) confirms/overrules this (auto-alloc v2 lesson: sim decides).
-      ninja: { dex: 3, vit: 1 },
+      // Ninja SIM ratio (SAVE v18) — OVERRULES the draft 3 DEX : 1 VIT (docs/ninja-design.md §2).
+      // Mirrors the sword's 4:1:1 shape: DEX the 4/6 damage+tempo MAJORITY, a VIT third to floor
+      // the thin melee body (a range-70 melee eats the aggressive belt — dropping VIT to 4 DEX:1
+      // INT reached s30 only 4/5; the VIT third buys consistency, exactly like the sword), and an
+      // INT third to deepen the mana pool. INT is sized at 1/6 (not 1/5) deliberately: 1/5 INT
+      // (3:1:1 or 4:1) drifts mana burn to ~94 pot/run — near the mage's comfort — while 1/6 keeps
+      // it at ~114 in the MARTIAL pressure band the pacing rule wants. Sweep in docs/balance-ninja.md.
+      ninja: { dex: 4, vit: 1, int: 1 },
     } as Record<HeroClass, Partial<Record<StatKey, number>>>,
   },
 
@@ -1547,13 +1551,22 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     projSpeed: 360,
     aoe: 46,
   },
-  // NINJA (นินจา, SAVE v18) — DEX-primary short-range melee bruiser. FIRST-PASS draft
-  // numbers (docs/ninja-design.md §1/§8); the ninja SIM wave (5) finalizes them. Identity:
+  // NINJA (นินจา, SAVE v18) — DEX-primary short-range melee bruiser. SIM-TUNED (ninja balance
+  // wave, docs/balance-ninja.md); overrules the docs/ninja-design.md §1/§8 draft where the sim
+  // proved a value unviable. Identity:
   //   - `range` 70 = the SHORTEST reach in the game (sword 96) — trades reach for tempo.
   //   - `atkSpeed` 0.45 = the FASTEST base cadence (sword 0.5 / archer 0.72 / mage 1.15).
   //   - `multiHit` 2 × `multiHitMult` 0.55 = the dagger DOUBLE-HIT (2 swings ≈ 1.1× atk/attack)
-  //     → basic DPS a touch above the sword's, paying for its short reach + thinner body.
-  //   - `hpMult` 1.15 = squishier than the sword TANK (1.5), tougher than the mage (0.95).
+  //     → basic DPS a touch above the sword's, paying for its short reach. Kept 0.55: the raw
+  //     ~+22% basic is offset by short-range repositioning + a mana-gated kit → EFFECTIVE boss
+  //     DPS is only ~+6% over sword in BOSSISO (s20 +17% / s25 +4% / s30 −4%), inside a fair
+  //     band — no trim needed (the draft feared an over-strong basic; the sim disproved it).
+  //   - `hpMult` 1.35 = squishier than the sword TANK (1.5), tougher than the ranged classes
+  //     (archer 1.0 / mage 0.95). OVERRULES the draft 1.15: a 1.15 range-70 melee death-spirals
+  //     the aggressive frontier (a squishy MELEE can't kite the belt like the archer does at
+  //     350) — draft = 723 deaths, walls s15/s16, never reaches tier 3. 1.35 keeps the "thinner
+  //     than the tank" identity while reaching the s30 soft-wall (deaths ~560, archer hard-mode
+  //     band). See docs/balance-ninja.md "hpMult overrule".
   // DEX drives both its ATK (PRIMARY_STAT) and the universal atk-speed factor (stats.ts).
   ninja: {
     offset: 30,
@@ -1561,7 +1574,7 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     range: 70,
     atkSpeed: 0.45,
     dmgMult: 1.0,
-    hpMult: 1.15,
+    hpMult: 1.35,
     projSpeed: 0,
     aoe: 0,
     multiHit: 2,
@@ -1859,45 +1872,58 @@ const SKILL_LIST = [
   },
 
   // ---- ninja (นินจา, SAVE v18 — blink assassin) ----
-  // FIRST-PASS draft numbers (docs/ninja-design.md §3); the ninja SIM wave (5) tunes them
-  // under the shape the owner approved. Mana sits MID-SPECTRUM (pricier than the sword's flat
-  // pool, cheaper than the mage's) — the ninja should "feel" its mana per the pacing-governor
-  // rule. All DETERMINISTIC (fixed offsets, `dash` primitive; NO RNG, NO new ProjectileKind).
+  // SIM-TUNED (ninja balance wave, docs/balance-ninja.md) under the owner-approved shape. Mana
+  // sits in the MARTIAL band (sword/archer neighbourhood ~114 pot/run, above the mage's ~87) —
+  // the ninja "feels" its mana per the pacing-governor rule but is NOT bankrupted. Unlike the
+  // sword (whose field-wide quake/skyfall + strong basics do most of the clearing), the ninja
+  // is SKILL-RELIANT for clear (single-target basics), so its whole kit is spammed — costs are
+  // tuned down from the draft so that reliance lands in-band, not at the draft's 341 pot/run.
+  // All DETERMINISTIC (fixed offsets, `dash` primitive; NO RNG, NO new ProjectileKind).
   //
   // Signature: SHADOW BLINK (เงาพริบ) — a `dash` THROUGH the nearest in-range target + one
   // strike. cost/cd = 5.0/s ≤ baseRegen 7 so the flat pool sustains it (the M5 no-hard-stall
   // signature guarantee), like the sword whirl / archer rain / mage meteor.
   {
     id: "ninja_dashstrike", cls: "ninja", tier: 1, unlockLevel: 1, kind: "dash",
-    cost: 20, cd: 4, radius: 0, mult: 1.8, targets: 0, projSpeed: 0, range: 260,
+    cost: 16, cd: 4, radius: 0, mult: 1.8, targets: 0, projSpeed: 0, range: 260,
     buffMult: 1, buffDuration: 0,
   },
   // TWIN FANG (คมเงาคู่, Lv6) — a stationary `targets`-hit flurry on the nearest foe + an
-  // r80 splash at `ninja.twinSplashFrac` (0.5) to its neighbours: single-target burst with
-  // a little cleave. Utility (kept distinct in role, NOT nuke-ified — like powershot/frost).
+  // r120 splash at `ninja.twinSplashFrac` (0.6) to its neighbours: single-target burst with a
+  // real cleave. Utility, but sized up from the draft (r80/0.5, cd 8) toward a sustained clear
+  // tool — the ninja has NO AoE signature (sword/archer/mage all do), so twinfang + massacre
+  // carry its field clear vs the dense killGoal fields.
   {
     id: "ninja_twinfang", cls: "ninja", tier: 1, unlockLevel: 6, kind: "multistrike",
-    cost: 35, cd: 8, radius: 80, mult: 0.6, targets: 5, projSpeed: 0, range: 110,
+    cost: 20, cd: 7, radius: 120, mult: 0.6, targets: 5, projSpeed: 0, range: 110,
     buffMult: 1, buffDuration: 0,
   },
   // SHADOW MASSACRE (เงาสังหาร, tier-2 ULTIMATE) — the class SIGNATURE: a CHAIN of `targets`
-  // (8) dashes that blink the ninja to each nearest un-hit foe across the whole field, one
-  // strike each. cost 90 gates it (a flat-pool class), moderate cd (owner: ultimates aren't
-  // long-cd). `range` is the per-hop chain reach. Reuses the `dash` primitive — no projectile.
+  // (10) dashes that blink the ninja to each nearest un-hit foe across the whole field, one
+  // strike each. cost 40 — CRITICAL FIX: the draft's 90 was UNCASTABLE from a DEX ninja's flat
+  // 60 pool (its tier-2 ult never fired all game; the other classes' tier-2 ults cost ≤50 for
+  // exactly this reason). 40 is affordable from the base pool AND from the tier-2 pool with the
+  // 4:1:1 INT share, so it actually fires in the auto-cast rotation. `range` = per-hop chain
+  // reach. Reuses the `dash` primitive — no projectile. See docs/balance-ninja.md "massacre mana".
   {
     id: "ninja_massacre", cls: "ninja", tier: 2, unlockLevel: 15, kind: "chaindash",
-    cost: 90, cd: 20, radius: 0, mult: 1.4, targets: 8, projSpeed: 0, range: 320,
+    cost: 40, cd: 12, radius: 0, mult: 2.0, targets: 10, projSpeed: 0, range: 320,
     buffMult: 1, buffDuration: 0,
   },
   // ETERNAL SHADOWS (พันเงานิรันดร์, tier-3 skill-4) — the real body blinks to the enemy
   // centroid, then shadow clones strike EVERY target on the field ×mult. Field-wide (ignores
   // radius gating — iterates all targets). The จอสลัว + time-freeze spectacle is render/
   // timeDirector's job, keyed off the `skillCast` event (reuses skyDarken etc.) — the engine
-  // emits NO new spectacle event. cost 170 (deep, tier-3-pool-fed) gates it; cd 45s. Learned
-  // at tier 3 + level 40 (auto-slot 4, tier-gated) → s1-15 has no ninja skill-4.
+  // emits NO new spectacle event. REWORKED from the draft (cost 170 / cd 45 / mult 2.2): at cd
+  // 45 it barely fired, so the ninja had no tier-3 deep-farm clear engine and death-spiralled
+  // map5-6. cost 72 / cd 14 / mult 9.0 puts it in the other skill-4 band (skyfall 80/14, storm
+  // 45/13, apoc 120/16) — a real field-clear that breaks the deep spiral. Single-target boss
+  // contribution stays modest (9× / 14s = 0.64×/s < skyfall's 0.71×/s), so eternal is a FARM
+  // tool, not a boss nuke — the ninja leans on basics vs bosses. Learned at tier 3 + level 40
+  // (auto-slot 4, tier-gated) → s1-15 has no ninja skill-4.
   {
     id: "ninja_eternal", cls: "ninja", tier: 3, unlockLevel: 40, kind: "shadowstorm",
-    cost: 170, cd: 45, radius: 500, mult: 2.2, targets: 0, projSpeed: 0, range: 900,
+    cost: 72, cd: 14, radius: 500, mult: 9.0, targets: 0, projSpeed: 0, range: 900,
     buffMult: 1, buffDuration: 0,
   },
 ] as const satisfies readonly SkillType[];
