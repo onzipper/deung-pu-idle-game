@@ -57,6 +57,10 @@ export {
   // M7.9b tier-3 quest BOSS objective: the UI surfaces the "challenge the young Sovereign"
   // affordance from `isTier3BossObjectiveActive` (kill objective banked, boss pending).
   isTier3BossObjectiveActive,
+  // M8 "party feel pack": QUEST-boss (evolution exam) detection — drives the party HP
+  // headcount scale in startBossFight (STAGE bosses stay melty; exams don't).
+  isQuestBossFight,
+  isClassChangeBossFight,
 } from "@/engine/systems/quests";
 
 // M8 Wave A — MAIN quest line reads (the UI's chapter tracker derives from these; the

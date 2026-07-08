@@ -68,6 +68,32 @@ function huntTarget(targets: readonly CombatTarget[], x: number): CombatTarget |
 }
 
 /**
+ * TARGET-SPREAD (M8 "party feel pack") — nearest alive target whose id is NOT already
+ * CLAIMED by a lower-index hero this step, tie-broken by lower id (same determinism as
+ * `huntTarget`). Returns null when every target is claimed (the caller then falls back to
+ * plain `huntTarget` = sharing). Lets a cohort fan out over a farm field instead of all
+ * dog-piling the single nearest mob (the "มอนไม่พอแบ่ง" starvation flag). Only ever used in
+ * the multi-hero, non-boss, no-engaged-boss case — solo / boss / world-boss keep `huntTarget`.
+ */
+function nearestUnclaimed(
+  targets: readonly CombatTarget[],
+  x: number,
+  claimed: ReadonlySet<number>,
+): CombatTarget | null {
+  let best: CombatTarget | null = null;
+  let bd = Infinity;
+  for (const target of targets) {
+    if (claimed.has(target.id)) continue;
+    const d = Math.abs(target.x - x);
+    if (d < bd || (d === bd && best !== null && target.id < best.id)) {
+      bd = d;
+      best = target;
+    }
+  }
+  return best;
+}
+
+/**
  * The x a hero WALKS toward to engage `tgt`: melee closes to `contactGap` (stopping
  * `meleeApproachGap` short), ranged holds at its standoff (kites back if crowded).
  * Shared by AUTO-HUNT (systems/combat.updateHeroes) and a MANUAL attack command
@@ -329,6 +355,24 @@ export function updateHeroes(state: GameState): void {
   const commandTargets = bossPhase ? [] : getTargets(state);
   const minX = hunt.heroMinX;
   const maxX = fieldMaxX(state) - hunt.fieldRightMargin;
+
+  // TARGET-SPREAD + BOSS DOG-PILE (M8 "party feel pack", owner "แต่มีบอส ทุกคนต้องรุม"). Only a
+  // MULTI-HERO cohort spreads — solo keeps plain `huntTarget` (byte-identical). A boss ALWAYS
+  // pulls the WHOLE party: the stage/quest-boss phase (`bossPhase`) clears the enemy list so all
+  // heroes already target the boss, and an ENGAGED world boss (passive-until-hit → hp < maxHp)
+  // is a `forcedBoss` every auto hero converges on, EXEMPT from the claim/spread (claimable by
+  // all). Spread applies ONLY to ordinary farm mobs with no engaged boss present.
+  const multi = state.heroes.length > 1;
+  const wb = state.worldBoss;
+  const forcedBoss: CombatTarget | null =
+    multi && !bossPhase && wb && wb.active && wb.entity && wb.entity.hp < wb.entity.maxHp
+      ? wb.entity
+      : null;
+  // The world-boss id is NEVER claimed even before it engages (a boss is everyone's target).
+  const wbId = wb && wb.active && wb.entity ? wb.entity.id : null;
+  const allowSpread = multi && !bossPhase && !forcedBoss;
+  const claimed: Set<number> | null = allowSpread ? new Set<number>() : null;
+
   for (const h of state.heroes) {
     if (h.dead) continue;
     const t = HERO_TYPES[h.cls];
@@ -396,7 +440,25 @@ export function updateHeroes(state: GameState): void {
       // mobs coming AT the hero are just targets that arrive early. The multi-actor
       // machinery is retained for M8 — each party member hunts independently here, and
       // the per-class `offset` (formation spacing) is preserved in config for it.
-      const hntTgt = huntTarget(targets, h.x);
+      // Pick the approach target: everyone dog-piles a forced boss; else a cohort fans out
+      // over UNCLAIMED farm mobs (sharing when all are claimed / fewer mobs than heroes); solo
+      // + boss keep plain nearest (`claimed` null → byte-identical). Claiming the chosen mob
+      // reserves it from lower-index... i.e. from HIGHER-index heroes later this step. The world
+      // boss is never claimed (a boss belongs to all heroes at once).
+      // Spread only MELEE approach: melee heroes physically CONVERGE on a mob's position, so
+      // dog-piling one mob is the visible "มอนไม่พอแบ่ง" bunching. RANGED heroes fire from a
+      // standoff and barely move, so forcing them onto a farther unclaimed mob only adds travel
+      // (measured: it dropped archer throughput) for no gain on a spawn-rate-capped field —
+      // they keep plain nearest (byte-identical to pre-spread) and do not claim.
+      let hntTgt: CombatTarget | null;
+      if (forcedBoss) {
+        hntTgt = forcedBoss;
+      } else if (claimed && t.attack === "melee") {
+        hntTgt = nearestUnclaimed(targets, h.x, claimed) ?? huntTarget(targets, h.x);
+        if (hntTgt && hntTgt.id !== wbId) claimed.add(hntTgt.id);
+      } else {
+        hntTgt = huntTarget(targets, h.x);
+      }
       goalX = hntTgt ? approachGoalX(h, t, hntTgt) : h.x;
       // Melee retaliates against the nearest foe within its range on EITHER side
       // (symmetric |Δx| ≤ range) so a monster in melee contact is never a free
@@ -415,10 +477,19 @@ export function updateHeroes(state: GameState): void {
             // balance pacing — is unchanged.
             (nearestTarget(targets, h.x, 0, t.range) ??
             nearestWithin(targets, h.x, t.range));
+      // Forced-boss dog-pile: focus-FIRE the engaged world boss when it's in reach (melee
+      // symmetric, ranged forward), so the party gangs it instead of peeling to farm mobs;
+      // still retaliate to a threat while closing (atkTgt keeps its normal value out of reach).
+      if (forcedBoss) {
+        const d = forcedBoss.x - h.x;
+        const inReach = t.attack === "melee" ? Math.abs(d) <= t.range : d >= 0 && d <= t.range;
+        if (inReach) atkTgt = forcedBoss;
+      }
       // Face the foe being fired at, else the one being approached — so a kiting
       // ranged hero faces (and shoots) its target while retreating. Boss phase
-      // routes here too (the boss is in `targets`), so boss fights are covered.
-      aimTarget = atkTgt ?? hntTgt;
+      // routes here too (the boss is in `targets`), so boss fights are covered. A forced
+      // boss is always FACED (the whole party orients on it even while approaching).
+      aimTarget = forcedBoss ?? atkTgt ?? hntTgt;
     }
 
     // Publish this step's combat aim (render-only facing). Null when not engaging

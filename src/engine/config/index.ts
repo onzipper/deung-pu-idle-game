@@ -90,30 +90,41 @@ const enemyHpDamp = (n: number): number =>
 //     emergent CO-OP SURVIVAL snowball (fewer deaths per body → deeper reach → xp/kill grows
 //     geometrically), so the share only needs a small lift over the survival floor to seat
 //     the well-behaved classes in-band.
-//   PARTY_EXP_BUFF_PER_MEMBER (0.04): a cohort-wide xp BUFF added per EXTRA member on ALL xp
-//     earned (2p → ×1.04, 3p → ×1.08). Kept SMALL by a hard structural finding: a per-member
-//     buff gives a 3p cohort 2× the boost of a 2p one, and solving "sword-2p ≥ 1.2 AND
-//     archer-3p < 1.6" forces buff×share → 0 — any larger buff pushes the frontier-friction
-//     archer's 3p over the "not-mandatory" ceiling. 0.04 keeps the buff mechanic genuinely
-//     live without breaching the guard for the well-behaved classes.
+//   PARTY_EXP_BUFF_PER_MEMBER (0.10): a cohort-wide xp BUFF added per EXTRA member on ALL xp
+//     earned — OWNER SPEC (2026-07-08 "party feel pack"): +10% per ADDITIONAL cohort member,
+//     so 2p → ×1.10, 3p → ×1.20, … 6p → ×1.50 (`partyExpBuff(size)` = 1 + 0.10×(size−1)). This
+//     REPLACES the earlier +0.04 tune (kept small by the buff-vs-ceiling finding below). The
+//     owner chose the larger number knowingly (a clear same-zone incentive); the combined net
+//     multiplier (this buff × share × the new target-spread throughput lift) is REPORTED to him
+//     with a compensating lever (share-rate trim) if it overshoots the old 1.2-1.5 band — the
+//     spec is NOT silently reduced. See docs/balance-m79.md "Party feel pack".
 //   PARTY_SPAWN_SCALE_PER_MEMBER (0.5): the mob-pool `maxAlive` grows per extra member so a
 //     shared field reads FULL for N bodies (2p → ×1.5, 3p → ×2.0). It barely moves throughput
 //     (clustering-bound, below) — its job is target AVAILABILITY + a busy group field, NOT a
 //     starvation fix. Scales DENSITY only — NOT killGoal (zone-unlock quotas stay personal/
 //     unchanged) and NOT the spawn DRAW order (kind→temperament→placement→makeEnemy is
 //     unperturbed; a bigger cap just lets the same seeded sequence fill further).
-// Result (1800s×5 seeds, "Cohort exp pass" in docs/balance-m79.md): per-member xp/hr sword
-// ×1.25/1.26, mage ×1.32/1.34 (2p/3p — in band); archer ×1.57/1.66 (FLAGGED — a denominator
-// artifact of the known solo-archer frontier death-spiral, not an over-tuned reward).
-// OPEN FLAGS: (1) kills/hero/min ~45-65% of solo = auto-hunt TARGET-CLUSTERING (both heroes
-// chase the nearest mob; raising maxAlive barely helps) — below the ~70% "no starvation" goal;
-// real fix = spatial target-spreading in auto-hunt (structural, game-engine-specialist). The
-// reward is carried by SHARED xp, so per-member PROGRESSION is still clearly ahead. (2) s5/s10
-// bosses clear in ~0.1-0.5× solo time at 2-3 bodies (headcount melt) — boss HP-per-headcount
-// scaling is a DESIGN decision for the owner (do NOT silently buff boss HP).
+// M8 "party feel pack" (2026-07-08) closed the three "Cohort exp pass" flags: (1) auto-hunt
+// TARGET-CLUSTERING is fixed by the deterministic target-SPREAD in systems/combat.updateHeroes
+// (each hero prefers the nearest UNCLAIMED farm mob; boss/quest-boss/world-boss = whole party
+// dog-piles, per owner "แต่มีบอส ทุกคนต้องรุม"), lifting kills/hero/min out of the 45-65% starve
+// band; (2) STAGE bosses stay melty (a party reward), but QUEST bosses now scale HP by headcount
+// (PARTY_QUEST_BOSS_HP_PER_MEMBER above); (3) the xp buff is the owner's +10%/extra-member spec
+// (see docs/balance-m79.md "Party feel pack" for the measured post-change per-member xp/hr).
 const PARTY_EXP_SHARE_RATE = 0.6;
-const PARTY_EXP_BUFF_PER_MEMBER = 0.04;
+const PARTY_EXP_BUFF_PER_MEMBER = 0.1;
 const PARTY_SPAWN_SCALE_PER_MEMBER = 0.5;
+// M8 "party feel pack" (2026-07-08) — QUEST-boss HP headcount scaling. STAGE bosses stay as-is
+// (owner: melting at headcount is a party REWARD, a feature). QUEST bosses — the tier-1 class-
+// change exam boss + the tier-2 young-Glacial-Sovereign — must NOT melt to a party ("ไม่มีการ
+// จ้างเพื่อนมาสอบผ่าน" / no hiring friends to pass your exam): their HP scales by cohort size so a
+// 2-3p exam takes roughly its SOLO duration. Pure fn of headcount (no RNG/wall-clock → all cohort
+// clients agree); IDENTITY at solo (size 1) so a 1-hero fight is byte-identical. atk is NOT scaled
+// (HP only — the fight lasts longer, it doesn't hit harder). Sim-tuned: 0.8 keeps a 3p quest boss
+// near its solo clear time (×(1+0.8×2)=×2.6 hp vs ~2-3× the DPS).
+const PARTY_QUEST_BOSS_HP_PER_MEMBER = 0.8;
+const partyQuestBossHpScale = (size: number): number =>
+  size <= 1 ? 1 : 1 + PARTY_QUEST_BOSS_HP_PER_MEMBER * (size - 1);
 // Cohort-wide xp buff from group size S (>=1): 1 at solo, +PARTY_EXP_BUFF_PER_MEMBER per
 // extra member. Pure; deterministic (only + - *).
 const partyExpBuff = (size: number): number =>
@@ -499,6 +510,11 @@ export const CONFIG = {
     expBuffPerMember: PARTY_EXP_BUFF_PER_MEMBER,
     /** `maxAlive` growth per extra member so more heroes don't starve one field. */
     spawnScalePerMember: PARTY_SPAWN_SCALE_PER_MEMBER,
+    /** QUEST-boss (class-change exam + young-Sovereign) HP scale per extra member. */
+    questBossHpPerMember: PARTY_QUEST_BOSS_HP_PER_MEMBER,
+    // QUEST-boss HP × cohort size (class-change exam + tier-3 young Sovereign only; STAGE
+    // bosses untouched). Read by systems/boss.startBossFight. Solo → 1 (byte-identical).
+    questBossHpScale: partyQuestBossHpScale,
     // Cohort xp BUFF from group size (design §answers "exp buff"). Solo → 1.
     expBuff: partyExpBuff,
     // Per-hero-per-kill xp multiplier (buff × equal share of killer-1.0 + others-share).
