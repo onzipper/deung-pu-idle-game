@@ -167,6 +167,16 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
 
   const kind = zoneAt(state.location).kind;
   if (kind === "town") {
+    if (state.heroes.length > 1) {
+      // COHORT (M8, owner v1 2026-07-08): the bot never INITIATES a town trip (guarded
+      // below), but if the shared party is standing in town with the bot on it must not
+      // get STUCK — walk it back out to the farm frontier. No restock/sell chore here: a
+      // cohort town visit is not a bot trip. Deterministic (same `botFarmTarget` on every
+      // client); fires ONCE — beginTransit sets `traveling`, which the top-of-function
+      // guard then short-circuits until arrival at the farm zone.
+      botReturnToFarm(state);
+      return;
+    }
     // Already STANDING at the shop (death respawn while waiting, manual visit,
     // 2026-07-06 report: a full-bag hero parked in town never sold): restock
     // in place, and a due sell starts the SAME dwell+event a trip arrival
@@ -185,6 +195,13 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
   }
   if (kind !== "farm") return; // trips initiate from farming
   if (!needRestock && !needSell) return;
+  // COHORT (M8, owner v1 2026-07-08): NEVER initiate a town trip when heroes.length > 1.
+  // Location is cohort-shared, so one client's restock/sell decision would DRAG the whole
+  // party to town (owner-confirmed live bug). Suppressed here at the decision point —
+  // deterministic (same state on every client, so no desync). The UI surfaces the "potions
+  // low" hint by DERIVING it from consumable counts + bot targets (hpShort/mpShort above),
+  // so no new engine event is needed; the party tops up at a zone boundary, not mid-run.
+  if (state.heroes.length > 1) return;
 
   beginBotTrip(state, needRestock, needSell);
 }

@@ -30,7 +30,7 @@ import { creditKillGold } from "@/engine/systems/economy";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
-import { onBossKilled } from "@/engine/systems/boss";
+import { bossRetreat, onBossKilled } from "@/engine/systems/boss";
 import { respawnToTown } from "@/engine/systems/world";
 import {
   aliveHeroes,
@@ -137,11 +137,17 @@ function findAliveTargetIn(list: readonly CombatTarget[], id: number): CombatTar
  * cast, so a freshly-regenerated point can fund a cast the same step.
  */
 export function decayHeroTimers(state: GameState): void {
-  // M6: a TOTAL wipe (solo hero down, or a whole party down) revives via the WORLD
-  // respawn (dead hero walks home to town -> revives there; see combat.resolveDeaths
-  // -> world.respawnToTown). Only a PARTIAL party loss (some heroes still up — the
-  // M8 party case) revives IN PLACE here on the per-hero revive timer.
-  const totalWipe = aliveHeroes(state).length === 0;
+  // M6: a SOLO total wipe revives via the WORLD respawn (the dead hero walks home to
+  // town -> revives there; see combat.resolveDeaths -> world.respawnToTown). A PARTIAL
+  // party loss (some heroes still up — the M8 party case) revives IN PLACE here on the
+  // per-hero revive timer.
+  //
+  // COHORT (M8, owner v1 2026-07-08): a cohort (heroes.length > 1) NEVER treks the
+  // shared party to town on death — a full cohort wipe is therefore NOT a "total wipe"
+  // for this purpose, so every dead cohort hero revives IN PLACE on its own timer (a
+  // boss-room cohort wipe instead RETREATS the boss; see resolveDeaths). Only a SOLO
+  // hero (length === 1) can total-wipe to town, keeping the solo path byte-identical.
+  const totalWipe = state.heroes.length === 1 && aliveHeroes(state).length === 0;
   for (const h of state.heroes) {
     if (h.dead && !totalWipe) {
       h.reviveTimer -= FIXED_DT;
@@ -734,6 +740,16 @@ export function resolveDeaths(state: GameState): void {
   // (respawnToTown sets `traveling`, and the next steps only tick the walk). Kills
   // banked toward a zone/quest are kept (no progress penalty).
   if (aliveHeroes(state).length === 0 && !state.traveling) {
-    respawnToTown(state);
+    if (state.heroes.length > 1) {
+      // COHORT (M8, owner v1 2026-07-08): a full-party wipe must NEVER drag the shared
+      // party to town. In a BOSS ROOM the boss RETREATS — the whole team revives to
+      // full HP in place and can retry (the spec's "retreats on player loss"), no town
+      // transit. On the FIELD there is no respawn call at all: each dead hero revives
+      // IN the zone on its per-hero timer (decayHeroTimers keeps totalWipe false for a
+      // cohort). Solo (length === 1) still walks home to town — byte-identical.
+      if (state.phase === "boss") bossRetreat(state);
+    } else {
+      respawnToTown(state);
+    }
   }
 }

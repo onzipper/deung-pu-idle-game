@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { CONFIG, SKILLS, initGameState, step } from "@/engine";
 import type { FrameInput, GameState } from "@/engine";
 import { makeParty, makeStubEnemy, soloSave } from "./helpers";
+import { startBossFight } from "@/engine/systems/boss";
 
 /**
  * M8 party P1b — multi-hero engine determinism + per-hero routing/config isolation,
@@ -201,6 +202,46 @@ describe("M8 party P1b — one hero's death does not stall the others", () => {
     expect(allyKilledSomething).toBe(true); // the sim kept advancing for the living hero
     expect(s.traveling).toBeNull(); // no respawn-to-town: not a TOTAL wipe
     expect(s.location).toEqual(locBefore);
+  });
+});
+
+describe("M8 cohort — a FULL wipe never treks the shared party to town (owner v1)", () => {
+  it("both heroes down on the FIELD revive IN the zone; no respawn-to-town transit", () => {
+    const s = twoHeroParty(31);
+    s.spawnPaused = true;
+    s.enemies = [];
+    const locBefore = { ...s.location };
+    for (const h of s.heroes) {
+      h.dead = true;
+      h.reviveTimer = 1; // short in-place timer for a fast test
+    }
+    let sawTravel = false;
+    for (let i = 0; i < 60 * 3; i++) {
+      step(s, [{}, {}]);
+      if (s.traveling !== null) sawTravel = true;
+    }
+    expect(sawTravel).toBe(false); // NEVER a town transit (a solo total wipe would walk home)
+    expect(s.heroes.every((h) => !h.dead)).toBe(true); // both revived on their own timers
+    expect(s.phase).toBe("battle");
+    expect(s.location).toEqual(locBefore); // still standing in the same field zone
+  });
+
+  it("a full cohort wipe in a BOSS ROOM retreats the boss (revive in place, no town)", () => {
+    const s = twoHeroParty(37);
+    startBossFight(s);
+    expect(s.phase).toBe("boss");
+    for (const h of s.heroes) {
+      h.dead = true;
+      h.reviveTimer = 100; // stay down THROUGH decayHeroTimers so resolveDeaths sees the wipe
+    }
+    step(s, [{}, {}]);
+    // bossRetreat (the spec's "retreats on player loss"): boss gone, phase back to
+    // battle, whole team revived to full HP in place — and crucially NO town transit.
+    expect(s.boss).toBeNull();
+    expect(s.phase).toBe("battle");
+    expect(s.heroes.every((h) => !h.dead && h.hp === h.maxHp)).toBe(true);
+    expect(s.traveling).toBeNull();
+    expect(s.events.some((e) => e.type === "bossRetreat")).toBe(true);
   });
 });
 

@@ -18,7 +18,8 @@ import {
   type FrameInput,
   type GameState,
 } from "@/engine";
-import { soloSave } from "./helpers";
+import { makeParty, soloSave } from "./helpers";
+import { townLocation } from "@/engine/systems/world";
 
 /**
  * M7.5 "Sell, Bots & Inventory UX" (engine): the potion-restock + sell-trip bots,
@@ -910,5 +911,80 @@ describe("determinism + smoke", () => {
     // Never stuck mid boss / stranded — ends alive and reachable.
     expect(zoneAt(s.location).kind).not.toBe("boss");
     expect(isZoneUnlocked(s, s.lastFarmZone)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cohort (heroes.length > 1): the bot never drags the SHARED party to town
+// (M8, owner-confirmed live bug 2026-07-08). Location is cohort-shared, so one
+// client's restock/sell decision must not warp everyone — trips are suppressed at
+// the decision point, and a cohort parked in town walks itself back out (no wedge).
+// ---------------------------------------------------------------------------
+
+describe("cohort — the bot never initiates a shared-party town trip", () => {
+  /** A 2-hero farming cohort, restock bot ON, potions EMPTY + gold flush — the exact
+   * state where a SOLO hero WOULD trip to town (see the potion-restock suite above). */
+  function farmingCohort(): GameState {
+    const s = makeParty(1, 3);
+    s.heroes = s.heroes.slice(0, 2); // 2-hero cohort (shared location)
+    unlockAll(s);
+    s.gold = 100_000;
+    s.bot = {
+      ...defaultBotSettings(),
+      enabled: true,
+      hpPotionTarget: 15,
+      mpPotionTarget: 15,
+      scrollReserve: 3,
+    };
+    s.consumables.hpPotion = 0;
+    s.consumables.manaPotion = 0;
+    s.spawnPaused = true; // isolate the bot decision from combat noise
+    s.enemies = [];
+    return s;
+  }
+
+  it("suppresses the restock trip in a cohort — never leaves the field", () => {
+    const s = farmingCohort();
+    expect(zoneAt(s.location).kind).toBe("farm");
+    for (let i = 0; i < 3000; i++) step(s, [{}, {}]);
+    expect(s.events.some((e) => e.type === "townArrived")).toBe(false);
+    expect(s.botPending).toBeNull();
+    expect(s.botWalk).toBeNull();
+    expect(s.traveling).toBeNull();
+    expect(zoneAt(s.location).kind).toBe("farm"); // never dragged to town
+
+    // Contrast: the SAME empty-potion + gold state as a LONE hero DOES trip to town —
+    // proving the cohort guard (not the affordability gate) is what suppresses it.
+    const solo = farmingCohort();
+    solo.heroes = solo.heroes.slice(0, 1);
+    solo.spawnPaused = false; // let it farm + walk normally
+    const tripped = runUntilInput(
+      solo,
+      {},
+      (st) => st.events.some((e) => e.type === "townArrived"),
+      4000,
+    );
+    expect(tripped).toBe(true);
+  });
+
+  it("a cohort parked in town with the bot ON walks BACK to the farm (not stuck)", () => {
+    const s = farmingCohort();
+    const town = townLocation();
+    expect(town).not.toBeNull();
+    s.location = { ...town! }; // the party met at the hub, standing in town
+    expect(zoneAt(s.location).kind).toBe("town");
+
+    // The bot must not wedge the party in town — it walks them back out to the last
+    // farm zone (the stuck state the owner reported becomes unreachable).
+    let leftToFarm = false;
+    for (let i = 0; i < 6000; i++) {
+      step(s, [{}, {}]);
+      if (s.traveling === null && zoneAt(s.location).kind === "farm") {
+        leftToFarm = true;
+        break;
+      }
+    }
+    expect(leftToFarm).toBe(true);
+    expect(zoneAt(s.location).kind).toBe("farm");
   });
 });
