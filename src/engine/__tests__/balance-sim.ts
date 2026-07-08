@@ -1805,23 +1805,29 @@ const HARD_REFLVLS = (process.env.REFLVL ?? "8,9,10")
   .map((n) => Math.round(Number(n.trim())))
   .filter((n) => Number.isFinite(n) && n >= 0 && n <= 10);
 const HARD_LEVEL = Math.round(Number(process.env.HARD_LEVEL ?? 65));
+// HARD_START: seat the fixture at THIS asura depth (0..9) with only that zone onward
+// unlocked — band-isolation so a +9 run can be measured directly in z4-7 (start 3) and a
+// +10 run in z8-10 (start 7) WITHOUT grinding through the whole ladder. Default 0 = the
+// full z1 climb (the organic run).
+const HARD_START = Math.max(0, Math.min(CONFIG.asura.farmZones - 1, Math.round(Number(process.env.HARD_START ?? 0))));
 
-function makeAsuraSave(cls: HeroClass, refine: number, level: number): SaveData {
+function makeAsuraSave(cls: HeroClass, refine: number, level: number, startDepth = 0): SaveData {
   const g = ISO_GEAR[cls]; // t10 endgame gear at the swept refine
   return {
     version: SAVE_VERSION,
-    stage: CONFIG.asura.stageBase,
+    stage: CONFIG.asura.stageBase + startDepth,
     gold: 0,
     goldEarned: 0,
     bossBest: {},
     levelCapAt: null,
     zoneKills: {},
-    // Enter at asura z1; ONLY z1 unlocked so each zone must be FARMED (its quota) to open the
-    // next — survival gates progress (the depth ladder). map1-6 fully unlocked so the s30 gate is
-    // moot for the fixture.
-    location: { mapId: "asura", zoneIdx: 0 },
-    unlockedZones: { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6, asura: 1 },
-    lastFarmZone: { mapId: "asura", zoneIdx: 0 },
+    // Enter at asura z(startDepth+1); ONLY that zone onward is unlocked so each zone must be
+    // FARMED (its quota) to open the next — survival gates progress (the depth ladder). map1-6
+    // fully unlocked so the s30 gate is moot for the fixture. HARD_START seats a band-isolation
+    // run directly at a deeper band (z4-7 / z8-10) to measure it without the full z1 climb.
+    location: { mapId: "asura", zoneIdx: startDepth },
+    unlockedZones: { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6, asura: startDepth + 1 },
+    lastFarmZone: { mapId: "asura", zoneIdx: startDepth },
     consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3, warpScroll: 0 },
     bot: { enabled: false, sellTripEnabled: false, hpPotionTarget: 15, mpPotionTarget: 15, scrollReserve: 3, goldReserve: 0 },
     autoHunt: true,
@@ -1864,6 +1870,11 @@ interface AsuraDepthStat {
   stage: number;
   deaths: number;
   cleared: boolean;
+  enterTime: number;
+  clearTime: number | null; // enter → quota-unlock (s); null = never cleared
+  hpPot: number;
+  mpPot: number;
+  kills: number;
 }
 
 interface AsuraResult {
@@ -1877,10 +1888,12 @@ interface AsuraResult {
   essence: number;
   stones: number;
   finalLevel: number;
+  xpEarned: number;
+  goldEarned: number;
 }
 
 function runAsuraSeed(cls: HeroClass, seed: number, refine: number): AsuraResult {
-  const s = initGameState(seed, makeAsuraSave(cls, refine, HARD_LEVEL));
+  const s = initGameState(seed, makeAsuraSave(cls, refine, HARD_LEVEL, HARD_START));
   s.autoCast = true;
   s.autoAllocate = true;
   s.autoReturn = true;
@@ -1890,16 +1903,21 @@ function runAsuraSeed(cls: HeroClass, seed: number, refine: number): AsuraResult
   const ensure = (depth: number): AsuraDepthStat => {
     let st = perDepth.get(depth);
     if (!st) {
-      st = { depth, stage: CONFIG.asura.stageBase + depth, deaths: 0, cleared: false };
+      st = {
+        depth, stage: CONFIG.asura.stageBase + depth, deaths: 0, cleared: false,
+        enterTime: s.time, clearTime: null, hpPot: 0, mpPot: 0, kills: 0,
+      };
       perDepth.set(depth, st);
     }
     return st;
   };
-  let curDepth = 0;
-  ensure(0);
-  let deepest = 0;
+  let curDepth = HARD_START;
+  ensure(HARD_START);
+  let deepest = HARD_START;
   let elites = 0;
   let stones = 0;
+  const xpStart = totalXpOf(s.heroes[0]);
+  const goldStart = s.gold;
   let prevDead = s.heroes[0].dead;
 
   for (let i = 0; i < STEPS; i++) {
@@ -1910,13 +1928,20 @@ function runAsuraSeed(cls: HeroClass, seed: number, refine: number): AsuraResult
     for (const e of s.events) {
       if (e.type === "zoneEntered" && e.mapId === "asura" && e.kind === "farm") {
         curDepth = e.zoneIdx;
-        ensure(curDepth);
+        const st = ensure(curDepth);
+        if (st.enterTime === 0 || st.kills === 0) st.enterTime = s.time; // first real entry
         if (curDepth > deepest) deepest = curDepth;
       }
       if (e.type === "zoneUnlocked" && e.mapId === "asura") {
-        // The zone we're standing in just cleared its quota → mark it cleared.
+        // The zone we're standing in just cleared its quota → mark it cleared (once).
         const cur = s.location.mapId === "asura" ? s.location.zoneIdx : curDepth;
-        ensure(cur).cleared = true;
+        const st = ensure(cur);
+        if (!st.cleared) { st.cleared = true; st.clearTime = s.time - st.enterTime; }
+      }
+      if (e.type === "kill") ensure(curDepth).kills++;
+      if (e.type === "consumableUsed") {
+        if (e.item === "hpPotion") ensure(curDepth).hpPot++;
+        else if (e.item === "manaPotion") ensure(curDepth).mpPot++;
       }
       if (e.type === "eliteKilled") elites++;
       if (e.type === "stoneDrop") stones += e.qty;
@@ -1938,6 +1963,8 @@ function runAsuraSeed(cls: HeroClass, seed: number, refine: number): AsuraResult
     essence: s.asuraEssence,
     stones,
     finalLevel: s.heroes[0].level,
+    xpEarned: totalXpOf(s.heroes[0]) - xpStart,
+    goldEarned: s.gold - goldStart,
   };
 }
 
@@ -1949,12 +1976,28 @@ function runAsuraHard(): void {
       `  hp mult/zone:  ${CONFIG.asura.hpMultByDepth.map((m, i) => `z${i + 1}:${m}`).join(" ")}\n` +
       `  atk mult/zone: ${CONFIG.asura.atkMultByDepth.map((m, i) => `z${i + 1}:${m}`).join(" ")}`,
   );
+  if (HARD_START > 0) console.log(`  BAND-ISOLATION: seated at z${HARD_START + 1} (only z${HARD_START + 1}+ unlocked)`);
   for (const cls of CLASSES) {
     console.log(`\n=== ${cls.toUpperCase()} ===`);
     console.log(
       "  " + pad("refine", 8) + pad("deepest", 9) + pad("deaths", 8) +
-        pad("elites", 8) + pad("essence", 9) + pad("stones", 8) + "per-zone deaths (z1..z10; * = cleared)",
+        pad("elites", 8) + pad("essence", 9) + pad("stones", 8) + "per-zone (z1..z10; * = cleared)",
     );
+    // deaths/100-kills normalizes out killGoal so survivability is the signal, not grind volume.
+    const perZoneRow = (
+      pick: (x: AsuraDepthStat) => number,
+      fmt: (v: number, cleared: boolean, seen: boolean) => string,
+    ) => (results: AsuraResult[]): string[] => {
+      const cells: string[] = [];
+      for (let d = 0; d < CONFIG.asura.farmZones; d++) {
+        const ds = results.map((r) => r.perDepth.find((p) => p.depth === d));
+        const seen = ds.some((x) => x !== undefined);
+        if (!seen) { cells.push("-"); continue; }
+        const v = mean(ds.filter((x): x is AsuraDepthStat => !!x).map(pick));
+        cells.push(fmt(v, ds.some((x) => x?.cleared), seen));
+      }
+      return cells;
+    };
     for (const refine of HARD_REFLVLS) {
       const results = SEEDS.map((seed) => runAsuraSeed(cls, seed, refine));
       const deepest = mean(results.map((r) => r.deepest + 1)); // 1-based zone reached
@@ -1962,20 +2005,33 @@ function runAsuraHard(): void {
       const elites = mean(results.map((r) => r.elites));
       const essence = mean(results.map((r) => r.essence));
       const stones = mean(results.map((r) => r.stones));
-      // Per-zone deaths (mean across seeds), tagged * if cleared on any seed.
-      const cells: string[] = [];
-      for (let d = 0; d < CONFIG.asura.farmZones; d++) {
-        const ds = results.map((r) => r.perDepth.find((p) => p.depth === d));
-        const seen = ds.some((x) => x !== undefined);
-        if (!seen) { cells.push("-"); continue; }
-        const dd = mean(ds.map((x) => x?.deaths ?? 0));
-        const cleared = ds.some((x) => x?.cleared);
-        cells.push(`${dd.toFixed(0)}${cleared ? "*" : ""}`);
-      }
+      const deathCells = perZoneRow((x) => x.deaths, (v, c) => `${v.toFixed(0)}${c ? "*" : ""}`)(results);
+      // deaths per 100 kills — the killGoal-independent survivability signal.
+      const dphkCells = perZoneRow(
+        (x) => (x.kills > 0 ? (100 * x.deaths) / x.kills : 0),
+        (v) => v.toFixed(1),
+      )(results);
+      const clrCells = perZoneRow((x) => x.clearTime ?? NaN, (v) => (Number.isNaN(v) ? "·" : v.toFixed(0)))(results);
+      const potCells = perZoneRow((x) => x.hpPot, (v) => v.toFixed(0))(results);
       console.log(
         "  " + pad(`+${refine}`, 8) + pad(deepest.toFixed(1), 9) + pad(deaths.toFixed(0), 8) +
           pad(elites.toFixed(0), 8) + pad(essence.toFixed(0), 9) + pad(stones.toFixed(0), 8) +
-          cells.join(" "),
+          deathCells.join(" "),
+      );
+      console.log("  " + pad("", 50) + "d/100kill: " + dphkCells.join(" "));
+      console.log("  " + pad("", 50) + "clear s:   " + clrCells.join(" "));
+      console.log("  " + pad("", 50) + "hpPot:     " + potCells.join(" "));
+      // Income + runway: xp/hr → days of ACTIVE farming to reach L90 from the fixture level.
+      const xpHr = mean(results.map((r) => r.xpEarned)) / HOURS;
+      const goldHr = mean(results.map((r) => r.goldEarned)) / HOURS;
+      const finalLvl = mean(results.map((r) => r.finalLevel));
+      let xpTo90 = 0;
+      for (let l = HARD_LEVEL; l < 90; l++) xpTo90 += CONFIG.leveling.xpToLevel(l);
+      const daysTo90 = xpHr > 0 ? xpTo90 / xpHr / 24 : Infinity;
+      console.log(
+        "  " + pad("", 50) +
+          `income: xp/hr ${xpHr.toFixed(0)}  gold/hr ${goldHr.toFixed(0)}  finalLvl ${finalLvl.toFixed(1)}  ` +
+          `→ L${HARD_LEVEL}→90 ≈ ${daysTo90.toFixed(1)} active-days`,
       );
     }
   }

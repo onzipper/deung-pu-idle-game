@@ -76,18 +76,38 @@ const enemyHpDamp = (n: number): number =>
 // ดินแดนอสูร (ASURA) hard-map difficulty overlay (endgame v1, docs/endgame-design.md).
 // The 7th map "asura" is a 10-zone (stages 31-40) hard endgame run gated behind the s30
 // boss (see the `world.maps` block + systems/asura.ts). Its DEPTH-LADDER difficulty is
-// owner-locked: a +8-refined L60-70 char BARELY survives z1-3, needs +9 for z4-7, +10 for
+// owner-target: a +8-refined L60-70 char BARELY survives z1-3, needs +9 for z4-7, +10 for
 // z8-10 (below +8 = a wall). These per-zone-depth multipliers apply ON TOP of the base
 // geometric enemy curve — but ONLY to the asura stages (31-40), so every s1-30 stage stays
 // BYTE-IDENTICAL (the mults are 1 for n < 31). Stages 31-40 are UNIQUE to asura (no other map
 // uses them), so keying the overlay off the stage number is equivalent to keying off the map.
-// FIRST-CUT numbers: the sim wave (HARD=1 + REFLVL=8|9|10 fixture-gear sweep) finalizes them.
+// WAVE-4 TUNED (docs/balance-asura.md): the overlay produces a smooth, MONOTONIC total-difficulty
+// climb tuned to the SWORD reference (z1-3 real pressure → z4-7 comfy → z8-10 comfy-at-+10). The
+// deep-zone mults DAMP (fall z8→z10) to tame the base curve's ~2.3× atk / ~3× hp s31→s40 explosion
+// so +10 stays survivable. KEY FINDING (loud flag in the doc): a GLOBAL mult scales all refine
+// levels equally, so +8/+9/+10 land near-identical d/100kill — the mults CANNOT gate bands; making
+// refine "the key" needs a hard refine-DOOR (game-engine-specialist). Class outliers: mage trivial
+// (ceiling), ninja walls z8 / archer runs hot (floor) — global fit can't equalize a ~3× eHP spread.
 // Indexed by asura DEPTH (0..9 = z1..z10); the boss room (stage 40) resolves to depth 9.
 const ASURA_MAP_ID = "asura";
 const ASURA_STAGE_BASE = 31; // asura farm zones = stages 31..40
 const ASURA_FARM_ZONES = 10;
-const ASURA_HP_MULT_BY_DEPTH = [1.0, 1.0, 1.0, 1.35, 1.35, 1.4, 1.4, 1.75, 1.85, 2.0];
-const ASURA_ATK_MULT_BY_DEPTH = [1.0, 1.0, 1.05, 1.15, 1.18, 1.2, 1.22, 1.32, 1.38, 1.45];
+// ---- band difficulty overlay (endgame v1, wave 4 sim-tuned) ----
+// The owner GATE (docs/balance-asura.md): a +8-refined L60-70 char BARELY survives z1-3 (real
+// deaths + potion burn, progresses but does NOT wall), needs +9 for z4-7, +10 for z8-10; +7 and
+// below = a hard wall at z1. The refine level must be THE key that opens each band, so each band
+// BOUNDARY (z3→z4, z7→z8) costs ≈ +1 refine worth of survivability (~8-10% enemy atk), while
+// WITHIN a band the ramp is gentle (no death cliffs). ATK mult drives incoming damage = deaths
+// (the primary gate lever); HP mult drives TTK = clear pace (secondary). z1 is deliberately NOT
+// trivial — a +8 hero must feel z1-3 (that is the whole point of the +8 barely-survives band).
+const ASURA_HP_MULT_BY_DEPTH = [1.15, 1.18, 1.21, 1.3, 1.33, 1.36, 1.39, 1.35, 1.3, 1.25];
+const ASURA_ATK_MULT_BY_DEPTH = [1.18, 1.2, 1.22, 1.28, 1.29, 1.3, 1.3, 1.24, 1.18, 1.12];
+// ศิลาโซน-INDEPENDENT zone-UNLOCK quota override for asura. The base killGoal(n)=24+12n makes the
+// s31-40 quota 396-504 kills/zone — FAR too grindy for zone advancement (owner: pace should feel
+// like maps 4-6). asura uses a FLAT quota so climbing the ladder feels like maps 4-6; the long
+// tail (the "climb every zone once" craft proof) is the SEPARATE zoneStoneGoal counter (80). Only
+// applies to stages ≥ 31, so s1-30 killGoal is BYTE-IDENTICAL.
+const ASURA_KILLGOAL = 130;
 const asuraDepthOfStage = (n: number): number =>
   Math.max(0, Math.min(ASURA_FARM_ZONES - 1, n - ASURA_STAGE_BASE));
 const asuraEnemyHpMult = (n: number): number =>
@@ -337,6 +357,9 @@ export const CONFIG = {
     stageBase: ASURA_STAGE_BASE,
     /** Farm-zone count (the depth ladder's rungs). */
     farmZones: ASURA_FARM_ZONES,
+    /** Flat zone-UNLOCK quota for every asura zone (overrides base killGoal for s≥31) — maps-4-6
+     *  advance pace, NOT the 396-504 grind. The craft "climb once" proof is zoneStoneGoal. */
+    killGoal: ASURA_KILLGOAL,
     /** Per-zone-depth enemy stat overlay (also folded into enemyHp/enemyAtk above) — the
      *  owner-locked depth ladder. Exposed here so the sim + UI can read the band shape. */
     hpMultByDepth: ASURA_HP_MULT_BY_DEPTH,
@@ -820,7 +843,11 @@ export const CONFIG = {
   // class-change-at-s5, potion-sink %s, the map3 wall) are PRESERVED EXACTLY (24+12n =
   // 1.5×(16+8n), so the product killGoal×perKill is byte-identical to the M6 baseline)
   // — same methodology as the M6 task-4 density retune (sim-verified, balance-m7 "M7.7").
-  killGoal: (n: number): number => 24 + n * 12,
+  // ASURA override (endgame v1): stages ≥ 31 use a FLAT quota (ASURA_KILLGOAL) so zone-advance
+  // pace feels like maps 4-6 instead of the 396-504-kill grind the base curve would impose; the
+  // long-tail "climb every zone once" proof is the SEPARATE asura.zoneStoneGoal counter. Identity
+  // for n < 31 → s1-30 zone-unlock pace is BYTE-IDENTICAL.
+  killGoal: (n: number): number => (n >= ASURA_STAGE_BASE ? ASURA_KILLGOAL : 24 + n * 12),
   // M4 tune: HP scaling exponent 1.23 -> 1.20. `heroAtk` is ADDITIVE
   // (base*(1+per*level)) while enemy/boss HP is GEOMETRIC, so the atk level (and
   // its geometric cost) needed to keep pace grows super-linearly with stage — a

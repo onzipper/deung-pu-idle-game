@@ -111,18 +111,44 @@ describe("ดินแดนอสูร — depth-ladder difficulty overlay (s1
     expect(r).toBeLessThan(1.2);
   });
 
-  it("applies the per-depth HP/atk multiplier ON TOP of the base curve inside asura", () => {
-    // Within a band (z1→z2, both hp-mult 1.0) the step is the plain damped-geometric ratio (<1.2).
+  it("applies the per-depth HP/atk overlay ON TOP of the base curve inside asura (wave-4 shape)", () => {
+    // Within the +8 band (z1→z2, gentle entry ramp) the step stays near the damped-geometric
+    // ratio (<1.2) for BOTH hp and atk.
     expect(CONFIG.enemyHp(32) / CONFIG.enemyHp(31)).toBeLessThan(1.2);
-    // Across the z7→z8 band jump (hp-mult 1.4 → 1.75) the step is visibly BIGGER than geometric.
-    expect(CONFIG.enemyHp(38) / CONFIG.enemyHp(37)).toBeGreaterThan(1.2);
-    // atk mult jump z2→z3 (1.0 → 1.05) nudges the atk step above the pure geometric one.
-    expect(CONFIG.enemyAtk(33) / CONFIG.enemyAtk(32)).toBeGreaterThan(
-      CONFIG.enemyAtk(32) / CONFIG.enemyAtk(31),
+    expect(CONFIG.enemyAtk(32) / CONFIG.enemyAtk(31)).toBeLessThan(1.2);
+    // The z3→z4 BAND BOUNDARY (entering the +9 band) is a visible step-up — bigger than the
+    // within-band z2→z3 step, for both hp and atk.
+    expect(CONFIG.enemyHp(34) / CONFIG.enemyHp(33)).toBeGreaterThan(
+      CONFIG.enemyHp(33) / CONFIG.enemyHp(32),
     );
+    expect(CONFIG.enemyAtk(34) / CONFIG.enemyAtk(33)).toBeGreaterThan(
+      CONFIG.enemyAtk(33) / CONFIG.enemyAtk(32),
+    );
+    // DEPTH-LADDER INVARIANT: enemy hp AND atk rise MONOTONICALLY across every asura zone
+    // (s31→s40) — deeper is always harder in absolute terms. The deep-zone overlay is a DAMP
+    // (< the mid-band peak) that keeps the (very steep, ~2.3× atk / ~3× hp s31→s40) base
+    // geometric curve survivable at +10, WITHOUT ever making a deeper zone easier — see
+    // docs/balance-asura.md for the total-difficulty rationale.
+    for (let n = 32; n <= 40; n++) {
+      expect(CONFIG.enemyHp(n)).toBeGreaterThan(CONFIG.enemyHp(n - 1));
+      expect(CONFIG.enemyAtk(n)).toBeGreaterThan(CONFIG.enemyAtk(n - 1));
+    }
+    // The z8-10 (+10 band) overlay DAMPS: its atk mult is below the mid-band (z6) peak.
+    expect(CONFIG.asura.atkMultByDepth[9]).toBeLessThan(CONFIG.asura.atkMultByDepth[5]);
     // The exposed band table matches the folded overlay.
     expect(CONFIG.asura.hpMultByDepth).toHaveLength(CONFIG.asura.farmZones);
     expect(CONFIG.asura.atkMultByDepth).toHaveLength(CONFIG.asura.farmZones);
+  });
+
+  it("uses a FLAT asura zone-unlock quota (killGoal override) — maps-4-6 pace, s1-30 identical", () => {
+    // s1-30 killGoal is the base curve (24 + 12n) — BYTE-IDENTICAL.
+    expect(CONFIG.killGoal(30)).toBe(24 + 30 * 12);
+    expect(CONFIG.killGoal(1)).toBe(24 + 1 * 12);
+    // Every asura stage (s31-40) uses the flat override — NOT the 396-504 grind the base curve
+    // would impose. The "climb every zone once" proof is the SEPARATE zoneStoneGoal counter.
+    for (let n = 31; n <= 40; n++) expect(CONFIG.killGoal(n)).toBe(CONFIG.asura.killGoal);
+    expect(CONFIG.asura.killGoal).toBeLessThan(24 + 31 * 12); // strictly gentler than the base curve
+    expect(CONFIG.asura.killGoal).toBeGreaterThan(0);
   });
 });
 
