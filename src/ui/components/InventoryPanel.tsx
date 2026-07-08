@@ -45,6 +45,8 @@ import {
   type GearSlot,
   type HeroClass,
 } from "@/engine";
+import { executeAwakenLegendary } from "@/ui/asura/awakenFlow";
+import { awakenGate } from "@/ui/asura/awakenView";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
 import { executeSell } from "@/ui/gear/sellFlow";
@@ -244,8 +246,14 @@ function DetailCard({
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
+  const tTome = useTranslations("asura.tome");
   const template = lookupTemplate(item.templateId);
   const sellGuard = useConfirmGuard();
+  // Awakening ("ปลุกพลัง") reads the same live gold/stone balances as the tome panel.
+  const gold = useGameStore((s) => s.gold);
+  const materials = useGameStore((s) => s.materials);
+  const pushNotice = useGameStore((s) => s.pushNotice);
+  const [awakening, setAwakening] = useState(false);
   if (!template) return null;
 
   const equipped = item.equippedSlot !== null;
@@ -256,9 +264,23 @@ function DetailCard({
   // (endgame v1.3, craft-only — never sold) always gets the gold-violet gradient instead.
   const prestigeCls = gearNameClass(item.templateId, item.refineLevel);
   const legendary = isLegendaryTemplate(item.templateId);
+  // "ปลุกพลัง" awaken affordance (legendaries only) — the shared pure gate (server order).
+  const awaken = legendary ? awakenGate(item.templateId, item.refineLevel, gold, materials) : null;
 
   function handleSell(): void {
     sellGuard.trigger(needsConfirm, () => onSell(item));
+  }
+
+  async function handleAwaken(): Promise<void> {
+    if (awakening) return;
+    setAwakening(true);
+    const res = await executeAwakenLegendary(item.instanceId);
+    setAwakening(false);
+    if (res.ok) {
+      pushNotice("asuraAwakened", { level: res.refineLevel });
+    } else {
+      pushNotice("asuraAwakenFailed", { reason: tTome(`awaken.error.${res.reason}`) });
+    }
   }
 
   const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
@@ -345,6 +367,44 @@ function DetailCard({
           </button>
         )}
       </div>
+
+      {/* "ปลุกพลัง" AWAKENING (endgame v1.3) — the legendary's guaranteed +0..+5 progression
+          path (the smith's refine station rejects legendaries). 100% success, never breaks. */}
+      {awaken && (
+        <div className="flex flex-col gap-1.5 rounded-(--ddp-radius-md) border border-fuchsia-400/30 bg-fuchsia-400/5 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold text-fuchsia-200">
+              <span aria-hidden>🔮</span>
+              {tTome("awaken.title")}
+            </span>
+            <span className="shrink-0 text-[11px] font-black tabular-nums text-fuchsia-300">
+              {tTome("awaken.levelReadout", { current: awaken.current, max: awaken.max })}
+            </span>
+          </div>
+          {awaken.status === "maxed" ? (
+            <p className="text-center text-[11px] font-bold text-emerald-300">{tTome("awaken.maxed")}</p>
+          ) : (
+            <button
+              type="button"
+              disabled={awakening || awaken.status !== "ready"}
+              onClick={() => void handleAwaken()}
+              className="min-h-10 w-full rounded-(--ddp-radius-md) border border-fuchsia-400 bg-fuchsia-400/15 px-3 text-[12px] font-black text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {awakening
+                ? tTome("awaken.awakeningButton")
+                : awaken.status === "gold"
+                  ? tTome("awaken.needGold")
+                  : awaken.status === "stones"
+                    ? tTome("awaken.needStones")
+                    : tTome("awaken.buttonCost", {
+                        target: awaken.target,
+                        gold: awaken.cost.gold.toLocaleString(),
+                        stones: awaken.cost.stones.toLocaleString(),
+                      })}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

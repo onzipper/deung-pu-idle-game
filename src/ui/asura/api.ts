@@ -5,7 +5,11 @@
  * `{ ok: false, reason }` rather than throwing.
  */
 
-import type { AsuraCraftApiResult, AsuraSigilApiResult } from "@/ui/asura/types";
+import type {
+  AsuraAwakenApiResult,
+  AsuraCraftApiResult,
+  AsuraSigilApiResult,
+} from "@/ui/asura/types";
 import type { ItemInstanceWire } from "@/ui/gear/types";
 
 /** POST /api/asura/sigil — claim today's daily z10 ตราอสูร sigil. */
@@ -44,6 +48,36 @@ export async function postCraftLegendary(instanceId: string): Promise<AsuraCraft
       return { ok: false, reason };
     }
     return { ok: true, item: json.item };
+  } catch {
+    return { ok: false, reason: "network" };
+  }
+}
+
+/** POST /api/asura/awaken — GUARANTEED +1 ("ปลุกพลัง") on the legendary at
+ * `instanceId` (server-validated: ownership, kind legendary, +5 cap, funds).
+ * Non-2xx resolves to `{ ok: false, reason }` via the route's `code` field
+ * (falls back to `error`, then "unknown") — same shape as `postRefine`. */
+export async function postAwakenLegendary(instanceId: string): Promise<AsuraAwakenApiResult> {
+  try {
+    const res = await fetch("/api/asura/awaken", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instanceId }),
+    });
+    const json = (await res.json().catch(() => null)) as
+      | Omit<Extract<AsuraAwakenApiResult, { ok: true }>, "ok">
+      | { error?: string; code?: string }
+      | null;
+    if (!res.ok || !json) {
+      const reason =
+        json && "code" in json && json.code
+          ? json.code
+          : json && "error" in json && json.error
+            ? json.error
+            : "unknown";
+      return { ok: false, reason };
+    }
+    return { ok: true, ...(json as Omit<Extract<AsuraAwakenApiResult, { ok: true }>, "ok">) };
   } catch {
     return { ok: false, reason: "network" };
   }

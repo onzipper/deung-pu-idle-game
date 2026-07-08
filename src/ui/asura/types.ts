@@ -19,3 +19,18 @@ export type AsuraSigilApiResult = { ok: true } | { ok: false; reason: string };
 export type AsuraCraftApiResult =
   | { ok: true; item: ItemInstanceWire }
   | { ok: false; reason: string };
+
+/** POST /api/asura/awaken ("ปลุกพลัง") — GUARANTEED +1 on an owned legendary.
+ * The server debits stones (authoritative `Character.materials`) + checks gold
+ * (save-blob balance) and returns the new +level plus the signed deltas the
+ * client applies via its `materialsDelta` + gold intents (the refine shape). */
+export type AsuraAwakenApiResult =
+  | {
+      ok: true;
+      refineLevel: number;
+      materials: number;
+      materialsDelta: number;
+      goldDelta: number;
+      cost: { gold: number; stones: number };
+    }
+  | { ok: false; reason: string };

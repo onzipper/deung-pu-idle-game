@@ -1043,6 +1043,8 @@
       "page3": "📜 The last page?! Rush it over to lungdueng"
     },
     "asuraSigilClaimed": "🔥 Claimed 1 asura sigil (total {count})",
+    "asuraAwakened": "🔮 Awakening succeeded! Legendary now +{level}",
+    "asuraAwakenFailed": "Couldn't awaken: {reason}",
     "asuraCraftBlocked": {
       "locked": "The tome isn't unlocked yet",
       "essence": "Not enough asura essence",
@@ -1584,6 +1586,25 @@
         "unknown": "Something went wrong — try again"
       },
       "craftSuccess": "Forged! {name} is now yours",
+      "awaken": {
+        "title": "Awaken Power",
+        "levelReadout": "+{current}/{max}",
+        "button": "Awaken to +{target} (100%)",
+        "buttonCost": "Awaken +{target} · {gold}g · {stones} stones",
+        "awakeningButton": "Awakening...",
+        "needGold": "Not enough gold to awaken",
+        "needStones": "Not enough stones to awaken",
+        "maxed": "Fully awakened (+5) — at its peak power",
+        "error": {
+          "not_found": "That legendary isn't in your bag",
+          "not_legendary": "Only a legendary weapon can be awakened",
+          "max": "Already fully awakened (+5)",
+          "insufficient_gold": "Not enough gold",
+          "insufficient_materials": "Not enough stones",
+          "network": "Network hiccup — try again",
+          "unknown": "Something went wrong — try again"
+        }
+      },
       "assembled": {
         "title": "The Legend Tome is Complete",
         "line1": "lungdueng fits the last page against the other two, his hands trembling slightly.",

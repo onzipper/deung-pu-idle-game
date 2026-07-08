@@ -29,7 +29,13 @@
 
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { LEGENDARY_FOR_CLASS, lookupTemplate } from "@/engine/config/items";
+import {
+  LEGENDARY_FOR_CLASS,
+  LEGENDARY_MAX_AWAKEN,
+  awakenCost,
+  clampRefineForTemplate,
+  lookupTemplate,
+} from "@/engine/config/items";
 import type { HeroClass } from "@/engine";
 import { prisma } from "@/lib/db";
 import { serverDayFor } from "@/server/dailyQuests";
@@ -248,6 +254,144 @@ export async function craftLegendaryWeapon(
       if (dto) return { ok: true, status: "existing", item: dto };
     }
     if (err instanceof CraftOpError) return { ok: false, reason: err.reason };
+    throw err;
+  }
+}
+
+// ── Legendary awakening ("ปลุกพลัง" — the +0..+5 progression path) ─────────────
+//
+// A crafted legendary sits at +0 FOREVER without this: the server refine endpoint rejects
+// kind "legendary" (awakening is NOT a rolling +10/break path). Awakening is the legendary's
+// OWN progression — a GUARANTEED +1 (owner design: 100% success, NEVER breaks) that rides the
+// same `refineLevel` field ordinary refine uses, capped at `LEGENDARY_MAX_AWAKEN` (+5) by
+// `clampRefineForTemplate`. It is a pure SINK: escalating gold + เศษศิลา stones (`awakenCost`).
+//
+// Trust split mirrors `refineItem` (there is no roll to protect, so it is strictly simpler):
+//   • STONES are server-authoritative — debited atomically from `Character.materials` (the same
+//     column the refine/salvage/stone-claim endpoints own; the save blob never writes it back).
+//   • GOLD is client-authoritative (save blob, MVP gap) — the route passes the PERSISTED balance
+//     for a BALANCE CHECK only; it is returned as `goldDelta` for the client's gold intent, never
+//     debited server-side (identical to `refineItem`).
+// The +1 is applied via a compare-and-set on the CURRENT level (a concurrent/retried request that
+// already moved the level matches 0 rows → tx aborts, stones restored → no double-charge). An
+// `awakened` ItemEvent is the ledger record.
+
+/** Awaken body: the legendary instance to power up (+1). */
+export const awakenSchema = z.object({ instanceId: z.string().min(1).max(64) }).strict();
+export type AwakenInput = z.infer<typeof awakenSchema>;
+
+export type AwakenResult =
+  | {
+      ok: true;
+      /** New awaken +level after this guaranteed step (1..LEGENDARY_MAX_AWAKEN). */
+      refineLevel: number;
+      /** New authoritative `Character.materials` (stone) balance after debiting. */
+      materials: number;
+      /** Deltas for the client to apply via engine intents (materialsDelta + gold). */
+      materialsDelta: number;
+      goldDelta: number;
+      cost: { gold: number; stones: number };
+    }
+  | {
+      ok: false;
+      reason: "not_found" | "not_legendary" | "max" | "insufficient_gold" | "insufficient_materials";
+    };
+
+/** Internal control-flow error so a tx callback can abort with a typed reason. */
+class AwakenOpError extends Error {
+  constructor(
+    public readonly reason: "not_found" | "not_legendary" | "max" | "insufficient_gold" | "insufficient_materials",
+  ) {
+    super(reason);
+  }
+}
+
+/**
+ * Awaken (+1) one owned legendary weapon for `characterId` — GUARANTEED, no roll, no break. One
+ * `prisma.$transaction`:
+ *   1. re-read the instance in-tx (owned + live); missing → not_found (404);
+ *   2. it MUST be a "ตำราตำนาน" legendary (kind "legendary"); anything else → not_legendary (409)
+ *      — ordinary gear goes through the refine endpoint, not here;
+ *   3. reject if already at `LEGENDARY_MAX_AWAKEN` (+5) → max (409);
+ *   4. cost = `awakenCost(current+1)`; gold-balance check against the passed `goldBalance` (save
+ *      blob; returned as a delta, never debited) → insufficient_gold (409);
+ *   5. atomic stone (materials) check-and-set on `Character.materials` (`>= cost.stones`); count 0
+ *      → insufficient_materials (409, nothing charged);
+ *   6. compare-and-set +1 on the item (`refineLevel: <the value read>` guard — a concurrent/retried
+ *      awaken that already moved the level matches 0 rows → abort, stones restored) → not_found;
+ *   7. append an `awakened` ItemEvent (meta {from,to,cost}).
+ * Returns the new +level, the authoritative stone balance, and the materials/gold DELTAS the client
+ * feeds into its `materialsDelta` + gold intents (the `refineItem` response shape).
+ */
+export async function awakenLegendary(
+  characterId: string,
+  instanceId: string,
+  goldBalance: number,
+): Promise<AwakenResult> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const item = await tx.itemInstance.findFirst({
+        where: { id: instanceId, ownerId: characterId, deletedAt: null },
+        select: { id: true, templateId: true, refineLevel: true },
+      });
+      if (!item) throw new AwakenOpError("not_found");
+
+      const tpl = lookupTemplate(item.templateId);
+      if (!tpl || tpl.kind !== "legendary") throw new AwakenOpError("not_legendary");
+
+      // The raw persisted level is the compare-and-set guard; the CLAMPED level drives the target
+      // (defensive against an out-of-range column) — both agree in practice for a legendary [0,5].
+      const rawLevel = item.refineLevel ?? 0;
+      const current = clampRefineForTemplate(item.templateId, rawLevel);
+      if (current >= LEGENDARY_MAX_AWAKEN) throw new AwakenOpError("max");
+      const target = current + 1;
+      const cost = awakenCost(target);
+      if (!cost) throw new AwakenOpError("max"); // defensive (out of the +1..+5 table)
+
+      // Gold is client-authoritative (save blob) — balance check only, returned as a delta.
+      if (goldBalance < cost.gold) throw new AwakenOpError("insufficient_gold");
+
+      // Atomic stone (materials) check-and-set on the authoritative Character column (locks the
+      // row → serialises this character's concurrent awakens). Count 0 = not enough → abort.
+      const debit = await tx.character.updateMany({
+        where: { id: characterId, materials: { gte: cost.stones } },
+        data: { materials: { decrement: cost.stones } },
+      });
+      if (debit.count === 0) throw new AwakenOpError("insufficient_materials");
+
+      // Guaranteed +1 — compare-and-set on the level READ above (retry/concurrent awaken that
+      // already advanced the level matches 0 rows → abort, stones restored → no double-apply).
+      const applied = await tx.itemInstance.updateMany({
+        where: { id: instanceId, ownerId: characterId, deletedAt: null, refineLevel: rawLevel },
+        data: { refineLevel: target },
+      });
+      if (applied.count === 0) throw new AwakenOpError("not_found");
+
+      await tx.itemEvent.create({
+        data: {
+          itemId: instanceId,
+          type: "awakened",
+          fromCharacterId: characterId,
+          meta: JSON.stringify({ from: current, to: target, cost }),
+        },
+      });
+
+      const after = await tx.character.findUnique({
+        where: { id: characterId },
+        select: { materials: true },
+      });
+
+      return {
+        ok: true as const,
+        refineLevel: target,
+        materials: after?.materials ?? 0,
+        materialsDelta: -cost.stones,
+        goldDelta: -cost.gold,
+        cost,
+      };
+    });
+  } catch (err) {
+    if (err instanceof AwakenOpError) return { ok: false, reason: err.reason };
     throw err;
   }
 }

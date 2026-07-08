@@ -15,10 +15,12 @@
 
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { ASURA_MAP_ID, CONFIG, lookupTemplate } from "@/engine";
+import { ASURA_MAP_ID, CONFIG, isLegendaryTemplate, lookupTemplate } from "@/engine";
 import { Coin, MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { executeClaimAsuraSigil, executeCraftLegendary } from "@/ui/asura/tomeFlow";
+import { executeAwakenLegendary } from "@/ui/asura/awakenFlow";
+import { awakenGate } from "@/ui/asura/awakenView";
 import { useGameStore } from "@/ui/store/gameStore";
 
 const TOME_COST = CONFIG.asura.tome.craft;
@@ -122,6 +124,113 @@ function ZoneStoneDots({
   );
 }
 
+/**
+ * "ปลุกพลัง" AWAKENING section (endgame v1.3) — the post-craft progression path.
+ * Lists every owned legendary with its current awaken +N/5, the NEXT step's gold +
+ * stone cost, and a guaranteed-success button (100%, never breaks). Hidden until the
+ * player actually owns a legendary. `awakenGate` is the shared pure cost/gate logic
+ * (same order the server enforces); the toast lands via `pushNotice`.
+ */
+function AwakenSection({
+  legendaries,
+  gold,
+  materials,
+  t,
+  tContent,
+}: {
+  legendaries: { instanceId: string; templateId: string; refineLevel: number }[];
+  gold: number;
+  materials: number;
+  t: ReturnType<typeof useTranslations>;
+  tContent: ReturnType<typeof useTranslations>;
+}) {
+  const pushNotice = useGameStore((s) => s.pushNotice);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function handleAwaken(instanceId: string): Promise<void> {
+    if (busyId) return;
+    setBusyId(instanceId);
+    const res = await executeAwakenLegendary(instanceId);
+    setBusyId(null);
+    if (res.ok) {
+      pushNotice("asuraAwakened", { level: res.refineLevel });
+    } else {
+      pushNotice("asuraAwakenFailed", { reason: t(`awaken.error.${res.reason}`) });
+    }
+  }
+
+  if (legendaries.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-fuchsia-400/30 bg-fuchsia-400/5 p-3">
+      <h3 className="flex items-center gap-1.5 text-[12px] font-bold text-fuchsia-200">
+        <span aria-hidden>🔮</span>
+        {t("awaken.title")}
+      </h3>
+      {legendaries.map((leg) => {
+        const gate = awakenGate(leg.templateId, leg.refineLevel, gold, materials);
+        const busy = busyId === leg.instanceId;
+        return (
+          <div
+            key={leg.instanceId}
+            className="flex flex-col gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 p-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-[12px] font-bold text-ddp-ink">
+                {tContent(`${leg.templateId}.name`)}
+              </span>
+              <span className="shrink-0 text-[11px] font-black tabular-nums text-fuchsia-300">
+                {t("awaken.levelReadout", { current: gate.current, max: gate.max })}
+              </span>
+            </div>
+
+            {gate.status === "maxed" ? (
+              <p className="text-center text-[11px] font-bold text-emerald-300">
+                {t("awaken.maxed")}
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center justify-center gap-3 text-[11px] font-bold tabular-nums">
+                  <span
+                    className={`flex items-center gap-1 ${
+                      gold >= gate.cost.gold ? "text-ddp-ink-muted" : "text-rose-300"
+                    }`}
+                  >
+                    <Coin className="h-3.5 w-3.5" />
+                    {gate.cost.gold.toLocaleString()}
+                  </span>
+                  <span
+                    className={`flex items-center gap-1 ${
+                      materials >= gate.cost.stones ? "text-ddp-ink-muted" : "text-rose-300"
+                    }`}
+                  >
+                    <MaterialIcon className="h-3.5 w-3.5" />
+                    {gate.cost.stones.toLocaleString()}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy || gate.status !== "ready"}
+                  onClick={() => void handleAwaken(leg.instanceId)}
+                  className="min-h-10 w-full rounded-(--ddp-radius-md) border border-fuchsia-400 bg-fuchsia-400/15 px-3 text-[12px] font-black text-fuchsia-100 transition-transform duration-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {busy
+                    ? t("awaken.awakeningButton")
+                    : gate.status === "gold"
+                      ? t("awaken.needGold")
+                      : gate.status === "stones"
+                        ? t("awaken.needStones")
+                        : t("awaken.button", { target: gate.target })}
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AsuraTomePanel({ onClose }: { onClose: () => void }) {
   const t = useTranslations("asura.tome");
   const tContent = useTranslations("content.items");
@@ -153,6 +262,13 @@ export function AsuraTomePanel({ onClose }: { onClose: () => void }) {
         return !!tpl && tpl.tier === 10 && (tpl.classReq === null || tpl.classReq === heroCls);
       }),
     [inventory, heroCls],
+  );
+
+  // Owned "ตำราตำนาน" legendaries — the awakening ("ปลุกพลัง") targets. One per class,
+  // but list any the bag holds (kind-tagged, so distinct from same-rarity epics).
+  const legendaries = useMemo(
+    () => inventory.filter((i) => isLegendaryTemplate(i.templateId)),
+    [inventory],
   );
 
   async function handleClaimSigil(): Promise<void> {
@@ -302,6 +418,14 @@ export function AsuraTomePanel({ onClose }: { onClose: () => void }) {
             >
               {crafting ? t("craftingButton") : t("craftButton")}
             </button>
+
+            <AwakenSection
+              legendaries={legendaries}
+              gold={gold}
+              materials={materials}
+              t={t}
+              tContent={tContent}
+            />
           </div>
         </div>
       </div>

@@ -28,6 +28,8 @@ vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
 
 import { Prisma } from "@prisma/client";
 import {
+  awakenLegendary,
+  awakenSchema,
   claimAsuraSigil,
   craftLegendaryWeapon,
   craftSchema,
@@ -36,6 +38,7 @@ import {
 } from "@/server/asura";
 import { refineItem } from "@/server/items";
 import { serverDayFor } from "@/server/dailyQuests";
+import { awakenCost } from "@/engine/config/items";
 
 const CHAR = "char_1";
 const NOW = new Date("2026-07-08T05:00:00Z"); // ~12:00 Bangkok
@@ -205,6 +208,119 @@ describe("craftSchema", () => {
     expect(craftSchema.safeParse({ instanceId: "w1" }).success).toBe(true);
     expect(craftSchema.safeParse({ instanceId: "" }).success).toBe(false);
     expect(craftSchema.safeParse({ instanceId: "w1", extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("awakenLegendary (ปลุกพลัง — guaranteed +1, no roll/break)", () => {
+  const BIG_GOLD = 10_000_000;
+
+  it("awakens +0 → +1: debits stones from Character.materials, patches refineLevel, returns signed deltas", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(instanceRow({ refineLevel: 0 }));
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 1 }); // stone debit succeeded
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 1 }); // compare-and-set +1
+    mockPrisma.itemEvent.create.mockResolvedValue({});
+    mockPrisma.character.findUnique.mockResolvedValue({ materials: 4321 });
+
+    const r = await awakenLegendary(CHAR, "leg_1", BIG_GOLD);
+
+    const cost = awakenCost(1)!;
+    expect(r).toEqual({
+      ok: true,
+      refineLevel: 1,
+      materials: 4321,
+      materialsDelta: -cost.stones,
+      goldDelta: -cost.gold,
+      cost,
+    });
+    // Stones debited atomically with the `>= cost.stones` guard.
+    expect(mockPrisma.character.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: CHAR, materials: { gte: cost.stones } },
+        data: { materials: { decrement: cost.stones } },
+      }),
+    );
+    // Compare-and-set on the level READ (guard refineLevel: 0), applied +1.
+    expect(mockPrisma.itemInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "leg_1", deletedAt: null, refineLevel: 0 }),
+        data: { refineLevel: 1 },
+      }),
+    );
+    expect(mockPrisma.itemEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "awakened" }) }),
+    );
+  });
+
+  it("caps at +5 (max) — nothing debited", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(instanceRow({ refineLevel: 5 }));
+    const r = await awakenLegendary(CHAR, "leg_1", BIG_GOLD);
+    expect(r).toEqual({ ok: false, reason: "max" });
+    expect(mockPrisma.character.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-legendary item (not_legendary) — the refine path owns ordinary gear", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue({
+      id: "g1",
+      templateId: "w_sword_t10_apocalypse", // ordinary t10 gear, not kind legendary
+      refineLevel: 3,
+    });
+    const r = await awakenLegendary(CHAR, "g1", BIG_GOLD);
+    expect(r).toEqual({ ok: false, reason: "not_legendary" });
+    expect(mockPrisma.character.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing / unowned instance (not_found)", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(null);
+    const r = await awakenLegendary(CHAR, "nope", BIG_GOLD);
+    expect(r).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("insufficient gold: balance below the target cost → insufficient_gold, stones untouched", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(instanceRow({ refineLevel: 0 }));
+    const cost = awakenCost(1)!;
+    const r = await awakenLegendary(CHAR, "leg_1", cost.gold - 1);
+    expect(r).toEqual({ ok: false, reason: "insufficient_gold" });
+    expect(mockPrisma.character.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("insufficient stones: the atomic materials guard matches 0 rows → insufficient_materials", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(instanceRow({ refineLevel: 0 }));
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 0 }); // not enough stones
+    const r = await awakenLegendary(CHAR, "leg_1", BIG_GOLD);
+    expect(r).toEqual({ ok: false, reason: "insufficient_materials" });
+    // The item level was never touched (tx would roll the debit back too).
+    expect(mockPrisma.itemInstance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("idempotent-safety: a concurrent/retried awaken that already moved the level matches 0 rows → not_found (no double-apply)", async () => {
+    mockPrisma.itemInstance.findFirst.mockResolvedValue(instanceRow({ refineLevel: 0 }));
+    mockPrisma.character.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.itemInstance.updateMany.mockResolvedValue({ count: 0 }); // level already advanced
+    const r = await awakenLegendary(CHAR, "leg_1", BIG_GOLD);
+    expect(r).toEqual({ ok: false, reason: "not_found" });
+    expect(mockPrisma.itemEvent.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("awakenSchema", () => {
+  it("requires a bounded instanceId and rejects extras", () => {
+    expect(awakenSchema.safeParse({ instanceId: "leg_1" }).success).toBe(true);
+    expect(awakenSchema.safeParse({ instanceId: "" }).success).toBe(false);
+    expect(awakenSchema.safeParse({ instanceId: "leg_1", extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("awakenCost ladder (owner-tuned long-tail sink)", () => {
+  it("escalates gold + stones across +1..+5 and is undefined past the cap", () => {
+    expect(awakenCost(1)).toEqual({ gold: 100_000, stones: 250 });
+    expect(awakenCost(5)).toEqual({ gold: 1_500_000, stones: 3_000 });
+    expect(awakenCost(6)).toBeNull();
+    // Strictly increasing on both axes.
+    for (let lvl = 2; lvl <= 5; lvl++) {
+      expect(awakenCost(lvl)!.gold).toBeGreaterThan(awakenCost(lvl - 1)!.gold);
+      expect(awakenCost(lvl)!.stones).toBeGreaterThan(awakenCost(lvl - 1)!.stones);
+    }
   });
 });
 
