@@ -222,6 +222,11 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09b.items.daggerFix",
     ],
   },
+  {
+    id: "2026-07-09c",
+    date: "2026-07-09",
+    items: ["releases.2026-07-09c.items.hofRedesign"],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
