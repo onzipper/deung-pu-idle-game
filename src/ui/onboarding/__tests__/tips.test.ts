@@ -20,6 +20,7 @@ function snapshot(overrides: Partial<OnboardingSnapshot> = {}): OnboardingSnapsh
     autoAllocate: false,
     autoHunt: true,
     inTown: false,
+    fortifierCount: 0,
     // Non-zero cooldown so a bare `snapshot()` is a true "nothing to report"
     // baseline (autoCastAvailable's trigger checks "any hero ready", which a
     // bare `skillCd: 0` would satisfy by default).
@@ -214,6 +215,19 @@ describe("individual tip triggers", () => {
     const arriveNext = snapshot({ inTown: true });
     expect(tip.trigger(bootPrev, bootNext)).toBe(false);
     expect(tip.trigger(arrivePrev, arriveNext)).toBe(true);
+  });
+
+  it("fortifierGained fires only on a RISING fortifier count, not merely nonzero at boot", () => {
+    const tip = idOf("fortifierGained");
+    const bootPrev = snapshot({ fortifierCount: 1 });
+    const bootNext = snapshot({ fortifierCount: 1 });
+    const gainPrev = snapshot({ fortifierCount: 0 });
+    const gainNext = snapshot({ fortifierCount: 1 });
+    const secondGainPrev = snapshot({ fortifierCount: 1 });
+    const secondGainNext = snapshot({ fortifierCount: 2 });
+    expect(tip.trigger(bootPrev, bootNext)).toBe(false);
+    expect(tip.trigger(gainPrev, gainNext)).toBe(true);
+    expect(tip.trigger(secondGainPrev, secondGainNext)).toBe(true);
   });
 });
 

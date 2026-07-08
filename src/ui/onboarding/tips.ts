@@ -183,6 +183,27 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
     mood: "excited",
     trigger: (prev, next) => !prev.inTown && next.inTown,
   },
+  /**
+   * `fortifierGained` (HOF/world-boss seasonal rewards): the first time EVER
+   * the player's fortifier count rises — fires identically whether the
+   * "แกร่ง" came from a Hall of Fame claim or a world-boss "เสี่ยจ๋อง" claim
+   * (both just `mergeInventory` a `fort_weapon`/`fort_armor` instance; this
+   * tip doesn't care which flow granted it, only that the count went up).
+   * Teaches the 3 things a player can't otherwise discover on their own: (1)
+   * they just got a "แกร่ง" item, (2) where it lives (the fortifier row in
+   * the inventory panel), (3) how to spend it (the "ใช้แกร่ง" guaranteed-
+   * success button at ลุงดึ๋ง's refine station). A RISING edge, not merely
+   * "count > 0" — a returning player who already held one before this tip
+   * shipped is not retroactively taught (same reasoning as `autoSlotUnlocked`
+   * comparing against `prev`, not a bare threshold). No anchor: it points at
+   * the inventory/refine-station concept, not a currently-visible HUD control
+   * (same as `manualPlayHint`/`townNpcTapHint`).
+   */
+  {
+    id: "fortifierGained",
+    mood: "excited",
+    trigger: (prev, next) => next.fortifierCount > prev.fortifierCount,
+  },
 ];
 
 /**

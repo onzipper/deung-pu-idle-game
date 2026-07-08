@@ -30,8 +30,14 @@ import {
   tipById,
   type ContextualTipDef,
 } from "@/ui/onboarding/tips";
+import { FORTIFIER_TEMPLATES } from "@/engine";
 import { toOnboardingSnapshot, type OnboardingSnapshot } from "@/ui/onboarding/steps";
 import { readStoredSeenTips, useGameStore, writeSeenTip } from "@/ui/store/gameStore";
+
+/** The "แกร่ง" fortifier template ids (`fort_weapon`/`fort_armor`) — read off
+ * the engine's own catalog (`FORTIFIER_TEMPLATES`) rather than hardcoded, so
+ * a future 3rd fortifier slot needs no change here. */
+const FORTIFIER_TEMPLATE_IDS = new Set(Object.keys(FORTIFIER_TEMPLATES));
 
 export interface ContextualTipController {
   /** The active tip def, or `undefined` when nothing should show. */
@@ -52,6 +58,11 @@ export function useContextualTips(): ContextualTipController {
   const autoHunt = useGameStore((s) => s.autoHunt);
   const inTown = useGameStore((s) => s.world.kind === "town");
   const heroes = useGameStore((s) => s.heroes);
+  // Owner-scoped guide (HOF/world-boss reward rewards): a UI-owned inventory
+  // count, not engine state — see `OnboardingSnapshot.fortifierCount`'s doc.
+  const fortifierCount = useGameStore(
+    (s) => s.inventory.filter((i) => FORTIFIER_TEMPLATE_IDS.has(i.templateId)).length,
+  );
 
   const snapshot = toOnboardingSnapshot({
     gold,
@@ -62,6 +73,7 @@ export function useContextualTips(): ContextualTipController {
     autoAllocate,
     autoHunt,
     inTown,
+    fortifierCount,
     heroes,
   });
   const prevSnapshotRef = useRef<OnboardingSnapshot>(snapshot);
@@ -98,6 +110,7 @@ export function useContextualTips(): ContextualTipController {
     autoAllocate,
     autoHunt,
     inTown,
+    fortifierCount,
     heroes,
     hasSyncedOnce,
     ftueCompleted,

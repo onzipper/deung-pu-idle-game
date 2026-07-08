@@ -292,6 +292,10 @@
       "questBoardHint": {
         "title": "The village elder has quests!",
         "body": "Tap the elder in town to open the Quest Board — a story-driven main quest and 3 daily quests to do each day (miss a day, lose nothing)."
+      },
+      "fortifierGained": {
+        "title": "You got a Fortifier!",
+        "body": "You just received a Fortifier item (weapon or armor) — check the inventory (the Fortifier row) to see how many you have, then take it to Uncle Dueng's refine station in town. Tap \"Use Fortifier\" for a guaranteed 100% refine success, once."
       }
     }
   },
@@ -975,8 +979,8 @@
     "rewardManaPotion": "+{amount} mana potions",
     "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
     "warpToFriendStarted": "🌀 Warping to your friend...",
-    "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones",
-    "hofClaimed": "🏅 Hall of Fame reward claimed!",
+    "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones +1 {item} — check your inventory's Fortifier row, then use \"Use Fortifier\" at Uncle Dueng's refine station",
+    "hofClaimed": "🏅 Hall of Fame reward claimed! Got 1 {item} — check your inventory's Fortifier row, then use \"Use Fortifier\" at Uncle Dueng's refine station",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",

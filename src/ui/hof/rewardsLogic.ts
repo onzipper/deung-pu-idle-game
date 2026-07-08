@@ -51,6 +51,26 @@ export function resolveTitlePickerState(
   return { kind: "ready", titles: me.titles, displayTitle: me.displayTitle };
 }
 
+/**
+ * The settings title picker (`TitleSection.tsx`) writes straight into the
+ * store's `mySocialBadge` the instant `POST /api/hof/title` succeeds, so the
+ * nameplate/aura render seam (`GameClient.tsx`'s `setHeroSocialBadges`) picks
+ * it up on the very next frame instead of waiting for the next `townArrived`
+ * refresh (which is the ONLY other writer). The `champion` flag is untouched
+ * by a title pick — it's derived from rank-1 board membership, not from
+ * which title is currently DISPLAYED — so it's carried over from whatever the
+ * store already had (defaulting to `false` for the edge case where no
+ * `townArrived` refresh has landed yet this session). Pure so the "carry
+ * champion over / only title changes" decision is headlessly testable without
+ * a translator or a store.
+ */
+export function nextSocialBadgeAfterTitlePick(
+  current: { title: string | null; champion: boolean } | null,
+  label: string | null,
+): { title: string | null; champion: boolean } {
+  return { title: label, champion: current?.champion ?? false };
+}
+
 // ── Podium strip (HOF panel redesign) ───────────────────────────────────────
 // `PodiumStrip.tsx` renders rank-1 (+ an expandable rank 2-3 reveal) for
 // WHICHEVER board is currently selected in `HallOfFamePanel.tsx` — a single

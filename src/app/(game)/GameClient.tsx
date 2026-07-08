@@ -623,12 +623,18 @@ let pendingWorldBossClaim: { windowId: number } | null = null;
  *    refine use, credit the known fixed materials reward, merge the minted
  *    fortifier into the inventory slice (its OWN drop-feed toast resolves the
  *    item's translated name — no cross-namespace lookup needed here), and push
- *    a generic gold+stones notice.
+ *    a gold+stones+ITEM notice (`resolveItemName` — module-scope, so it can't
+ *    reach a React `useTranslations` hook directly; the caller passes
+ *    `tContentItemsRef.current` through, same reasoning `titleLabel`'s
+ *    `tHofRef` plumbing already established for this file).
  * IN A COHORT every member calls this independently for their OWN character —
  * the shared sim's `worldBossDefeated` event fires identically on every
  * client, and each one claims into its own save row (by design).
  */
-async function attemptWorldBossClaim(windowId: number): Promise<void> {
+async function attemptWorldBossClaim(
+  windowId: number,
+  resolveItemName: (templateId: string) => string,
+): Promise<void> {
   if (worldBossClaimInFlight) {
     pendingWorldBossClaim = { windowId };
     return;
@@ -654,6 +660,7 @@ async function attemptWorldBossClaim(windowId: number): Promise<void> {
     store.pushNotice("worldBossClaimed", {
       gold: res.goldCredit.toLocaleString(),
       stones: WORLD_BOSS_REWARD_MATERIALS,
+      item: resolveItemName(res.item.templateId),
     });
   } finally {
     worldBossClaimInFlight = false;
@@ -691,6 +698,12 @@ export function GameClient() {
   const tHof = useTranslations("hof");
   const tHofRef = useRef(tHof);
   tHofRef.current = tHof;
+
+  // World-boss "เสี่ยจ๋อง" claim toast: names WHICH fortifier landed (see
+  // `attemptWorldBossClaim`'s doc) — same ref-captured pattern as `tHofRef`.
+  const tContentItems = useTranslations("content.items");
+  const tContentItemsRef = useRef(tContentItems);
+  tContentItemsRef.current = tContentItems;
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -1267,6 +1280,10 @@ export function GameClient() {
     // M8 party P4b: unsubscribe handle for the `party` store subscription (see
     // `partySession.setParty`'s call site below).
     let unsubscribeParty: (() => void) | undefined;
+    // HOF seasonal rewards: unsubscribe handle for the `mySocialBadge` store
+    // subscription (see the settings title-picker call site below) — the
+    // nameplate/aura seam otherwise only refreshes on the next `townArrived`.
+    let unsubscribeSocialBadge: (() => void) | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
@@ -1719,7 +1736,9 @@ export function GameClient() {
           // World boss "เสี่ยจ๋อง": the engine grants NO xp/gold itself (rewards are
           // SERVER-claimed) — fire the claim POST for MY character. In a cohort every
           // member sees this same shared-sim event and claims independently (by design).
-          void attemptWorldBossClaim(ev.windowId);
+          void attemptWorldBossClaim(ev.windowId, (id) =>
+            tContentItemsRef.current(`${id}.name`),
+          );
         }
       }
 
@@ -1860,7 +1879,9 @@ export function GameClient() {
       if (pendingWorldBossClaim && !worldBossClaimInFlight) {
         const claim = pendingWorldBossClaim;
         pendingWorldBossClaim = null;
-        void attemptWorldBossClaim(claim.windowId);
+        void attemptWorldBossClaim(claim.windowId, (id) =>
+          tContentItemsRef.current(`${id}.name`),
+        );
       }
     }
 
@@ -2324,6 +2345,17 @@ export function GameClient() {
       });
       partySession.setParty(useGameStore.getState().party);
 
+      // HOF seasonal rewards: the Settings title picker (`TitleSection.tsx`)
+      // writes a fresh `mySocialBadge` straight into the store the instant
+      // `POST /api/hof/title` succeeds — this subscription is the ONLY thing
+      // that re-pushes it to the nameplate/aura render seam without waiting
+      // for the next `townArrived` refresh. Solo-only in effect (cohort reads
+      // the friends-poll `party` rows instead — see `currentHeroSocialBadges`),
+      // but re-pushing is harmless either way.
+      unsubscribeSocialBadge = useGameStore.subscribe((next, prev) => {
+        if (next.mySocialBadge !== prev.mySocialBadge) pushHeroSocialBadges();
+      });
+
       lastTime = performance.now();
       lastActiveAt = Date.now();
       rafId = requestAnimationFrame(frame);
@@ -2344,6 +2376,7 @@ export function GameClient() {
       if (autosaveTimer) clearInterval(autosaveTimer);
       unsubscribeReload?.();
       unsubscribeParty?.();
+      unsubscribeSocialBadge?.();
       partySession.teardown();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);

@@ -5,6 +5,7 @@ import {
   hasAnyUnclaimedAward,
   isMyEntry,
   isRewardBoard,
+  nextSocialBadgeAfterTitlePick,
   rankFromTitleId,
   resolveBoardFetchDecision,
   resolveMyUnclaimedForBoard,
@@ -71,6 +72,26 @@ describe("resolveTitlePickerState (Settings title picker)", () => {
       titles: oneTitle,
       displayTitle: null,
     });
+  });
+});
+
+describe("nextSocialBadgeAfterTitlePick (Settings title picker -> nameplate seam)", () => {
+  it("carries over the current champion flag while swapping the title", () => {
+    expect(nextSocialBadgeAfterTitlePick({ title: "old", champion: true }, "new")).toEqual({
+      title: "new",
+      champion: true,
+    });
+  });
+
+  it("clears the title (picking 'none') without touching champion", () => {
+    expect(nextSocialBadgeAfterTitlePick({ title: "old", champion: true }, null)).toEqual({
+      title: null,
+      champion: true,
+    });
+  });
+
+  it("defaults champion to false when no badge exists yet", () => {
+    expect(nextSocialBadgeAfterTitlePick(null, "new")).toEqual({ title: "new", champion: false });
   });
 });
 

@@ -64,6 +64,11 @@ export function useOnboardingController(): OnboardingController {
     autoAllocate,
     autoHunt,
     inTown,
+    // Irrelevant to the linear FTUE's own steps (no step reads it) — a
+    // constant `0` avoids subscribing this controller to the inventory
+    // slice for no benefit. `useContextualTips.ts` is the one that feeds
+    // the real count (it's what drives `fortifierGained`).
+    fortifierCount: 0,
     heroes,
   });
   const prevSnapshotRef = useRef<OnboardingSnapshot>(snapshot);
