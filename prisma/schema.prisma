@@ -126,6 +126,9 @@ model Character {
   dailyClaims DailyClaim[]
   // World boss "เสี่ยจ๋อง": the per-character hourly-window claim ledger (anti-double-claim).
   worldBossClaims WorldBossClaim[]
+  // Endgame "ดินแดนอสูร" (docs/endgame-design.md v1.3): the per-character DAILY z10
+  // ตราอสูร sigil claim ledger (anti-double-claim; DailyClaim/WorldBossClaim pattern).
+  asuraSigilClaims AsuraSigilClaim[]
 
   @@index([userId]) // list an account's characters
   @@index([userId, deletedAt]) // count/enumerate LIVE slots (<=3 rule)
@@ -250,6 +253,11 @@ model SoldItem {
 //                  src/server/leaderboard.ts). SINGLETON: exactly-once globally.
 //   - "rankOne"  — a character NEWLY took #1 on the power board (M7.95). Throttled
 //                  to at most one per character per 24h.
+//   - "legendaryCraft" — the FIRST character to forge a class's "ตำราตำนาน" legendary
+//                  weapon (endgame v1.3, src/server/asura.ts). SINGLETON PER CLASS:
+//                  singletonKey "legendary:<cls>" → exactly-once per class globally.
+//                  `templateId` carries the crafted legendary (client derives the class
+//                  for its copy); `refineLevel` is null.
 // A row can never exist without the underlying event having actually landed.
 //
 // Deliberately NOT a relation to Character (raw denormalized fields, mirrors
@@ -455,6 +463,30 @@ model WorldBossClaim {
 
   @@unique([characterId, windowId]) // at most one claim per hourly window per character
   @@index([characterId, windowId]) // "did this character claim window W" + cascade-side reads
+}
+
+// Endgame "ดินแดนอสูร" (docs/endgame-design.md v1.3) — the per-(character, day) DAILY
+// z10 ตราอสูร sigil claim AUDIT gate, modelled exactly on DailyClaim / WorldBossClaim.
+// The asura z10 boss yields ONE sigil per Asia/Bangkok (UTC+7) day; the ENGINE holds the
+// sigil COUNT (client-authoritative v1 — the `claimAsuraSigil` intent adds it), and THIS
+// table is the honesty anchor: a one-row-per (character, `day`) ledger whose @@unique
+// makes a second claim on the same server-day impossible at the DB layer (a retry/dup
+// collides on P2002 → the endpoint returns 409 already_claimed — the SoldItem/DailyClaim
+// idempotency pattern). `day` is the SERVER-computed Asia/Bangkok day-epoch integer
+// (same axis as DailyClaim.serverDay — client clocks never trusted, like SaveState.lastSeen).
+// NOT re-derivable from the save blob — it is authoritative. Deliberately NO reward column
+// (the sigil count is engine-side economy, same trust tier as gold). `claimedAt` is
+// server-stamped for a future audit sweep. Cascades from Character so a deleted character's
+// claim history is purged with it.
+model AsuraSigilClaim {
+  id          String    @id @default(cuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  day         Int // Asia/Bangkok (UTC+7) day-epoch the sigil claim landed on
+  claimedAt   DateTime  @default(now()) // server-stamped (client clocks never trusted)
+
+  @@unique([characterId, day]) // at most one sigil claim per day per character
+  @@index([characterId, day]) // "did this character claim today" + cascade-side reads
 }
 
 // ============================================================================
