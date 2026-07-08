@@ -46,6 +46,7 @@ import {
   sweepWorldBossPresence,
   resolveWorldBossDeath,
 } from "@/engine/systems/worldBoss";
+import { applyAsuraHotZone } from "@/engine/systems/asura";
 import { evolveHero } from "@/engine/systems/evolution";
 import { acceptQuest } from "@/engine/systems/quests";
 import { processStatAllocation } from "@/engine/systems/allocation";
@@ -307,6 +308,16 @@ export interface FrameInput {
    * it — as does leaving the zone). Applied from every lane in slot order.
    */
   spawnWorldBoss?: { windowId: number; remainingSeconds: number };
+  /**
+   * ดินแดนอสูร (ASURA) daily HOT-ZONE (endgame v1). The CLIENT computes the Asia/Bangkok day-key
+   * off its wall clock (the engine never reads a clock — same split as `spawnWorldBoss`) and
+   * injects it here; the engine resolves the day's hot asura zone deterministically
+   * (`asuraHotZoneFor`, FNV over the day-key) and stores it, applying a reward multiplier to
+   * xp/gold/stone earned IN that zone. STICKY — re-injected on zone beats, not every step. A
+   * negative/non-finite `dayKey` clears the hot zone. Lead intent (lane 0); idempotent. Applied
+   * once per drained input.
+   */
+  setAsuraHotZone?: { dayKey: number };
 }
 
 /**
@@ -417,6 +428,10 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     const v = laneFor(i).setAutoHunt;
     if (v !== undefined) applyHeroConfig(state.heroes[i], { autoHunt: v });
   }
+  // ดินแดนอสูร daily HOT ZONE (endgame v1): resolve the day's hot asura zone from the client's
+  // day-key (lead lane 0). Applied here (before the early returns) so `state.asuraHotZone` is
+  // always current; the reward multiplier is read in `resolveDeaths`. Dormant/idempotent otherwise.
+  if (primary.setAsuraHotZone) applyAsuraHotZone(state, primary.setAsuraHotZone.dayKey);
   // Equip / unequip gear (M7) — per hero from its own lane; validated inside equipItem.
   // `refineLevel` (M7.6) is the server-decided +N (default 0).
   for (let i = 0; i < state.heroes.length; i++) {

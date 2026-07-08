@@ -541,7 +541,7 @@ describe("archer dash-evade (ranged emergency escape)", () => {
 // ---------------------------------------------------------------------------
 
 describe("SAVE v18 ninja migration", () => {
-  it("bumps to 18 and loads an old v17 (non-ninja) save unchanged", () => {
+  it("bumps to the current version and loads an old v17 (non-ninja) save unchanged", () => {
     const m = migrate({
       version: 17,
       stage: 8,
@@ -549,7 +549,7 @@ describe("SAVE v18 ninja migration", () => {
       hero: { cls: "archer", level: 22, xp: 5, tier: 2 },
       lastSeen: 0,
     });
-    expect(m.version).toBe(18);
+    expect(m.version).toBe(SAVE_VERSION);
     expect(m.hero.cls).toBe("archer"); // domain widening — the old class is untouched
     expect(m.hero.level).toBe(22);
     expect(m.hero.tier).toBe(2);

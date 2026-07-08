@@ -139,6 +139,8 @@ function rollStoneDrop(
   mobId: number,
   rollId: string,
   isBoss: boolean,
+  elite: boolean,
+  qtyMult: number,
 ): void {
   const cfg = CONFIG.stoneDrops;
   const tier = mapTierForStage(state.stage);
@@ -149,11 +151,18 @@ function rollStoneDrop(
     }
     return;
   }
+  // ONE stoneDrop event per kill (the server claim key `…:stone:${rollId}` is per-kill idempotent),
+  // so an ELITE's guaranteed burst + the normal chance roll are COMBINED into a single qty. The
+  // stone stream is STILL consumed identically per counter (elite or not), so the sequence for a
+  // given (salt, counter) is unchanged; `qtyMult` (the ดินแดนอสูร hot-zone bonus, 1 elsewhere)
+  // scales the qty. All asura-only inputs are inert for s1-30 → byte-identical there.
+  let qty = 0;
+  if (elite) qty += Math.round(CONFIG.asura.elite.stoneBonus * qtyMult);
   const chance = cfg.baseChance + (tier - 1) * cfg.chancePerMapTier;
   if (stoneFloat(state.lootSalt, state.lootCounter) < chance) {
-    const qty = cfg.qtyBase + (tier - 1) * cfg.qtyPerMapTier;
-    state.events.push({ type: "stoneDrop", rollId, qty, x, y, mobId });
+    qty += Math.round((cfg.qtyBase + (tier - 1) * cfg.qtyPerMapTier) * qtyMult);
   }
+  if (qty > 0) state.events.push({ type: "stoneDrop", rollId, qty, x, y, mobId });
 }
 
 /**
@@ -166,9 +175,13 @@ function rollStoneDrop(
  * `rollId` — sharing this kill's single counter tick, so the gear sequence is
  * unchanged (the stone stream is a separate domain-tagged hash).
  */
-export function rollEnemyDrop(state: GameState, e: Enemy): void {
+export function rollEnemyDrop(
+  state: GameState,
+  e: Enemy,
+  opts?: { stoneQtyMult?: number },
+): void {
   const rollId = String(state.lootCounter);
-  rollStoneDrop(state, e.x, e.y, e.id, rollId, false);
+  rollStoneDrop(state, e.x, e.y, e.id, rollId, false, e.elite === true, opts?.stoneQtyMult ?? 1);
   const r = lootFloat(state.lootSalt, state.lootCounter);
   state.lootCounter++;
   const table = dropTableForStage(state.stage, gatedLootClass(state));
@@ -197,7 +210,7 @@ export function rollEnemyDrop(state: GameState, e: Enemy): void {
  */
 export function rollBossDrop(state: GameState, boss: Boss): void {
   const rollId = String(state.lootCounter);
-  rollStoneDrop(state, boss.x, boss.y, boss.id, rollId, true);
+  rollStoneDrop(state, boss.x, boss.y, boss.id, rollId, true, false, 1);
   const r = lootFloat(state.lootSalt, state.lootCounter);
   state.lootCounter++;
   const table = bossDropTableForStage(state.stage, gatedLootClass(state));

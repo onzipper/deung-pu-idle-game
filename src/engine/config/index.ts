@@ -73,6 +73,29 @@ const enemyHpDamp = (n: number): number =>
   n <= STAGE_HP_DAMP_FROM ? 1 : dpow(STAGE_HP_DAMP_BASE, n - STAGE_HP_DAMP_FROM);
 
 // ---------------------------------------------------------------------------
+// ดินแดนอสูร (ASURA) hard-map difficulty overlay (endgame v1, docs/endgame-design.md).
+// The 7th map "asura" is a 10-zone (stages 31-40) hard endgame run gated behind the s30
+// boss (see the `world.maps` block + systems/asura.ts). Its DEPTH-LADDER difficulty is
+// owner-locked: a +8-refined L60-70 char BARELY survives z1-3, needs +9 for z4-7, +10 for
+// z8-10 (below +8 = a wall). These per-zone-depth multipliers apply ON TOP of the base
+// geometric enemy curve — but ONLY to the asura stages (31-40), so every s1-30 stage stays
+// BYTE-IDENTICAL (the mults are 1 for n < 31). Stages 31-40 are UNIQUE to asura (no other map
+// uses them), so keying the overlay off the stage number is equivalent to keying off the map.
+// FIRST-CUT numbers: the sim wave (HARD=1 + REFLVL=8|9|10 fixture-gear sweep) finalizes them.
+// Indexed by asura DEPTH (0..9 = z1..z10); the boss room (stage 40) resolves to depth 9.
+const ASURA_MAP_ID = "asura";
+const ASURA_STAGE_BASE = 31; // asura farm zones = stages 31..40
+const ASURA_FARM_ZONES = 10;
+const ASURA_HP_MULT_BY_DEPTH = [1.0, 1.0, 1.0, 1.35, 1.35, 1.4, 1.4, 1.75, 1.85, 2.0];
+const ASURA_ATK_MULT_BY_DEPTH = [1.0, 1.0, 1.05, 1.15, 1.18, 1.2, 1.22, 1.32, 1.38, 1.45];
+const asuraDepthOfStage = (n: number): number =>
+  Math.max(0, Math.min(ASURA_FARM_ZONES - 1, n - ASURA_STAGE_BASE));
+const asuraEnemyHpMult = (n: number): number =>
+  n < ASURA_STAGE_BASE ? 1 : ASURA_HP_MULT_BY_DEPTH[asuraDepthOfStage(n)];
+const asuraEnemyAtkMult = (n: number): number =>
+  n < ASURA_STAGE_BASE ? 1 : ASURA_ATK_MULT_BY_DEPTH[asuraDepthOfStage(n)];
+
+// ---------------------------------------------------------------------------
 // M8 party — SAME-ZONE COHORT tuning scalars (docs/party-design-m8.md §3 + answers;
 // "Cohort exp pass" in docs/balance-m79.md). Owner rule: farming together in ONE zone
 // is REWARDED (exp buff + shared exp) but must NOT become a mandatory meta; drops/gold
@@ -275,12 +298,90 @@ export const CONFIG = {
         id: "map6", zoneStageIds: [26, 27, 28, 29, 30], bossStageId: 30, fieldWidth: 900,
         hunt: { maxAlive: 16, respawnDelay: 0.45, aggroStart: 0.09, aggroEnd: 0.13, aggroRadius: 142 },
       },
+      // ---- ดินแดนอสูร (ASURA) — hard endgame map (endgame v1, docs/endgame-design.md) ----
+      // The 7th map: 10 farm zones (stages 31-40) + a boss-room capstone (stage 40). Follows
+      // the EXACT structural formula of maps 1-6 (buildZones appends its boss room), so it needs
+      // no world-layout special-casing — combat inside a zone is driven by `state.stage` through
+      // the same parametric curves. Its owner-locked DEPTH-LADDER difficulty (+8 barely survives
+      // z1-3, +9 z4-7, +10 z8-10) rides the ASURA stat overlay folded into enemyHp/enemyAtk
+      // (identity for s1-30 → the canonical s1-30 sim stays byte-identical). UNLOCK is automatic:
+      // appended AFTER map6, so clearing the s30 boss unlocks asura z1 through the existing
+      // `onBossRoomCleared` map-gate (the tier3GateCleared-style persist gate — see
+      // systems/asura.isAsuraUnlocked). Dense field + wide (but trimmed) aggro belt — the frontier
+      // of frontiers. The elite roaming mob, แก่นอสูร essence, ศิลาโซน counters, and daily hot
+      // zone all live in systems/asura.ts (v1 = map + accrual; craft/secret-quest are a later
+      // patch). The s40 boss room is the structural capstone (its daily z10-boss ตราอสูร reward
+      // lands with the craft patch); on v1 it is an intentionally hard wall with no reward.
+      {
+        id: "asura", zoneStageIds: [31, 32, 33, 34, 35, 36, 37, 38, 39, 40], bossStageId: 40, fieldWidth: 900,
+        hunt: { maxAlive: 18, respawnDelay: 0.45, aggroStart: 0.1, aggroEnd: 0.16, aggroRadius: 148 },
+      },
     ],
     townMapId: "map1",
     // Deterministic walk transit per hop (seconds). Negligible vs clear times;
     // render animates the actual multi-zone walk (a later task). Death respawn
     // reuses `heroReviveTime` as its walk-home time (unchanged death cost).
     transitSeconds: 0.6,
+  },
+
+  // ---- ดินแดนอสูร (ASURA) hard-map knobs (endgame v1, docs/endgame-design.md) ----
+  // The map itself is `world.maps[6]` (id "asura", stages 31-40); THIS block holds the
+  // endgame-v1 accrual systems that ride it (systems/asura.ts). All FIRST-CUT numbers —
+  // the sim wave (HARD=1 + REFLVL=8|9|10 fixture-gear sweep) + wave 4 finalize them; v1
+  // only BANKS these materials (the craft menu + secret quest are a later patch). Every
+  // hook is inert / identity outside asura (stage < 31), so s1-30 stays byte-identical.
+  asura: {
+    /** The asura map id (mirrors `world.maps[].id`). */
+    mapId: ASURA_MAP_ID,
+    /** First asura stage (= s31; the 10 farm zones are s31..s40). */
+    stageBase: ASURA_STAGE_BASE,
+    /** Farm-zone count (the depth ladder's rungs). */
+    farmZones: ASURA_FARM_ZONES,
+    /** Per-zone-depth enemy stat overlay (also folded into enemyHp/enemyAtk above) — the
+     *  owner-locked depth ladder. Exposed here so the sim + UI can read the band shape. */
+    hpMultByDepth: ASURA_HP_MULT_BY_DEPTH,
+    atkMultByDepth: ASURA_ATK_MULT_BY_DEPTH,
+    /** Which refine level each depth band TARGETS (UI hint + sim readout): z1-3 +8, z4-7 +9,
+     *  z8-10 +10 (inclusive 0-based depth ranges). */
+    refineBands: [
+      { minDepth: 0, maxDepth: 2, refine: 8 },
+      { minDepth: 3, maxDepth: 6, refine: 9 },
+      { minDepth: 7, maxDepth: 9, refine: 10 },
+    ],
+    // ELITE roaming mob (deterministic — NO combat-RNG contamination): every `cadence`-th
+    // asura farm spawn is promoted to an elite via a plain transient COUNTER (state.asuraSpawnTally),
+    // NOT a seeded-stream draw, so spawn composition/placement stays unperturbed. An elite is a
+    // NORMAL enemy (spread rules apply — no boss dog-pile) with boosted stats + a big xp/gold/stone
+    // burst on kill, and it banks แก่นอสูร essence.
+    elite: {
+      /** One elite per this many asura farm spawns (rarity knob). */
+      cadence: 60,
+      /** HP multiplier vs a normal same-stage asura mob. */
+      hpMult: 6,
+      /** ATK multiplier vs a normal same-stage asura mob. */
+      atkMult: 2.2,
+      /** Kill xp multiplier (the burst). */
+      xpMult: 8,
+      /** Kill gold multiplier (the burst). */
+      goldMult: 10,
+      /** GUARANTEED bonus refine stones on an elite kill (on top of the normal roll). */
+      stoneBonus: 20,
+      /** แก่นอสูร essence banked per elite kill (accrue-only in v1; craft consumes it later). */
+      essence: 1,
+    },
+    // ศิลาโซน — a per-asura-zone LIFETIME kill counter (SAVE v19 `asuraZoneKills`). Reaching the
+    // goal earns that zone's ศิลา (a craft material — banked in v1, spent later). Distinct from the
+    // zone-UNLOCK quota (killGoal): this is the "climb every zone once" first-clear proof.
+    zoneStoneGoal: 80, // ~60-100 knob
+    // DAILY HOT ZONE — one of the 10 asura zones runs hot each Bangkok day (+reward). The client
+    // computes the day-key off its wall clock and injects it via the `setAsuraHotZone` intent; the
+    // engine resolves the zone deterministically (FNV over the day-key, mod farmZones) and applies
+    // the multiplier to xp/gold/stone earned IN that zone — mirroring the world-boss schedule split
+    // (pure helper client-side, deterministic apply engine-side; the engine never reads a clock).
+    hotZone: {
+      /** xp/gold/stone multiplier while farming the day's hot zone (+40%, owner band +30-50%). */
+      rewardMult: 1.4,
+    },
   },
 
   // ---- hunting field ("สนามล่ามอน", M6 combat rework, decided 2026-07-05) ----
@@ -730,8 +831,13 @@ export const CONFIG = {
   // M7.9: the geometric base is UNCHANGED (s1-15 byte-identical); the s16-30 overlay
   // (enemyHpDamp / enemyAtkDamp, identity for the frozen bands) damps only the deep
   // frontier — see the overlay block above CONFIG for the rationale + curve values.
-  enemyHp: (n: number): number => Math.round(25 * dpow(1.2, n - 1) * enemyHpDamp(n)),
-  enemyAtk: (n: number): number => Math.round(6 * dpow(1.19, n - 1) * enemyAtkDamp(n)),
+  // ASURA overlay (endgame v1): `asuraEnemyHpMult`/`asuraEnemyAtkMult` are 1 for every
+  // stage < 31, so s1-30 is BYTE-IDENTICAL; they only bend the depth-laddered asura band
+  // (s31-40) per the owner's +8/+9/+10 gate. See the overlay block near the damps above.
+  enemyHp: (n: number): number =>
+    Math.round(25 * dpow(1.2, n - 1) * enemyHpDamp(n) * asuraEnemyHpMult(n)),
+  enemyAtk: (n: number): number =>
+    Math.round(6 * dpow(1.19, n - 1) * enemyAtkDamp(n) * asuraEnemyAtkMult(n)),
   bossHp: (n: number): number => Math.round(25 * dpow(1.2, n - 1) * 16),
   bossAtk: (n: number): number => Math.round(6 * dpow(1.19, n - 1) * 2.1),
   // M4 tune: gold/kill was purely linear (5 + 2n) while upgrade costs are

@@ -32,6 +32,7 @@ import { advanceQuestObjective } from "@/engine/systems/quests";
 import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
 import { bossRetreat, onBossKilled } from "@/engine/systems/boss";
 import { respawnToTown } from "@/engine/systems/world";
+import { asuraRewardMult, onAsuraFarmKill } from "@/engine/systems/asura";
 import {
   aliveHeroes,
   getTargets,
@@ -677,13 +678,26 @@ function stepProjectile(state: GameState, p: Projectile): boolean {
 
 export function resolveDeaths(state: GameState): void {
   if (state.phase !== "boss") {
+    // ดินแดนอสูร (endgame v1): the daily HOT-ZONE reward multiplier (1 outside asura / off the
+    // hot zone) scales this zone's kill xp/gold/stone. Constant per resolveDeaths call (depends
+    // only on `location`), so compute it once. Identity (1) for s1-30 → byte-identical.
+    const hotMult = asuraRewardMult(state);
+    const eliteCfg = CONFIG.asura.elite;
     state.enemies = state.enemies.filter((e) => {
       if (e.hp <= 0) {
         state.kills++;
-        const goldGained = CONFIG.goldPerKill(state.stage);
+        // ELITE burst (endgame v1): a big xp/gold multiplier on top of the hot-zone mult.
+        // `elite` is only ever true for an asura mob, so a normal kill is byte-identical.
+        const elite = e.elite === true;
+        const goldGained = Math.round(
+          CONFIG.goldPerKill(state.stage) * hotMult * (elite ? eliteCfg.goldMult : 1),
+        );
         creditKillGold(state, goldGained);
         // Every alive hero banks kill XP (dead heroes earn nothing).
-        grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
+        grantKillXp(
+          state,
+          CONFIG.leveling.xpPerKill(state.stage) * hotMult * (elite ? eliteCfg.xpMult : 1),
+        );
         state.events.push({
           type: "kill",
           kind: e.kind,
@@ -695,8 +709,13 @@ export function resolveDeaths(state: GameState): void {
         advanceQuestObjective(state, "kill");
         // M8 Wave A: count toward the "killAnywhere" daily (inert until a roster exists).
         advanceDailyProgress(state, "killAnywhere", 1);
-        // M7: roll a farm drop for this kill (stateless hash; NEVER the wave RNG).
-        rollEnemyDrop(state, e);
+        // M7: roll a farm drop for this kill (stateless hash; NEVER the wave RNG). ดินแดนอสูร
+        // scales the stone qty by the hot-zone mult + grants an elite stone burst (one event
+        // per kill so the server claim key stays idempotent) — see gear.rollEnemyDrop.
+        rollEnemyDrop(state, e, { stoneQtyMult: hotMult });
+        // ดินแดนอสูร accrual: ศิลาโซน per-zone counter + แก่นอสูร essence on an elite (no loot
+        // stream touched — gear/stone byte-identical). No-op off asura.
+        onAsuraFarmKill(state, e);
         return false;
       }
       return true;

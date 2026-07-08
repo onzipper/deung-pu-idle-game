@@ -216,10 +216,12 @@ describe("SAVE v7 -> v8 migration", () => {
   it("clamps a stage beyond the frontier to the last farm zone", () => {
     const m = migrate({ version: 7, stage: 99, hero: { cls: "mage", level: 40, tier: 1 } });
     expect(zoneAt(m.location).kind).toBe("farm");
-    // M7.9 "Grand Expansion": the frontier moved from map3/s15 to map6/s30. The clamp
-    // still resolves an over-range stage to the LAST farm zone in the world.
-    expect(m.location.mapId).toBe("map6");
-    expect(m.stage).toBe(30); // last farm zone's stage
+    // ดินแดนอสูร (endgame v1): the globally LAST farm zone is now asura z10 (s40), so an over-range
+    // clamp resolves there. Only a corrupt/hand-edited > s40 stage ever reaches this — a real save
+    // clamps ≤ s30, and initGameState's strand guard relocates a hero placed in an un-unlocked
+    // asura zone to their real frontier. The clamp contract itself (globally last farm zone) holds.
+    expect(m.location.mapId).toBe("asura");
+    expect(m.stage).toBe(40); // last farm zone's stage
   });
 
   it("round-trips a v8 save through initGameState + toSaveData unchanged", () => {

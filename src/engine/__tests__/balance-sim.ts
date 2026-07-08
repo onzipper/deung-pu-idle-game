@@ -322,6 +322,9 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
     lootCounter: 0,
     // M7.6 ตีบวก: cold start holds no refine materials.
     materials: 0,
+    // ดินแดนอสูร (endgame v1): cold start has no essence / zone counters.
+    asuraEssence: 0,
+    asuraZoneKills: {},
     hero: {
       cls,
       level: 1,
@@ -1380,6 +1383,8 @@ function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: 
     lootSalt: 1,
     lootCounter: 0,
     materials: 0,
+    asuraEssence: 0,
+    asuraZoneKills: {},
     hero: {
       cls,
       level: 90,
@@ -1785,7 +1790,202 @@ function runWorldBossMode(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ดินแดนอสูร DEPTH-LADDER mode (HARD=1) — endgame v1 first-cut verifier.
+// Seats a fixture L~65 tier-3 t10 hero at REFINE +N (sweep REFLVL=8|9|10) at the START of the
+// asura map (z1, only z1 unlocked) and farms FORWARD on autopilot (farm-only — never the boss
+// room). Each asura zone unlocks the next only when its kill quota is met, so PROGRESS gates on
+// SURVIVAL: the owner target is +8 barely survives z1-3, +9 needs it for z4-7, +10 for z8-10,
+// below +8 = a wall. Reports deepest zone reached + per-zone deaths + elites/essence/stones so the
+// sim wave (4) can finalize the CONFIG.asura depth multipliers. bot potions ON (as the owner spec).
+// Env: HARD=1, REFLVL="8,9,10", HARD_LEVEL (65), SEEDS, CLASSES, SIM_SECONDS (raise for depth).
+// ---------------------------------------------------------------------------
+const HARD_REFLVLS = (process.env.REFLVL ?? "8,9,10")
+  .split(",")
+  .map((n) => Math.round(Number(n.trim())))
+  .filter((n) => Number.isFinite(n) && n >= 0 && n <= 10);
+const HARD_LEVEL = Math.round(Number(process.env.HARD_LEVEL ?? 65));
+
+function makeAsuraSave(cls: HeroClass, refine: number, level: number): SaveData {
+  const g = ISO_GEAR[cls]; // t10 endgame gear at the swept refine
+  return {
+    version: SAVE_VERSION,
+    stage: CONFIG.asura.stageBase,
+    gold: 0,
+    goldEarned: 0,
+    bossBest: {},
+    levelCapAt: null,
+    zoneKills: {},
+    // Enter at asura z1; ONLY z1 unlocked so each zone must be FARMED (its quota) to open the
+    // next — survival gates progress (the depth ladder). map1-6 fully unlocked so the s30 gate is
+    // moot for the fixture.
+    location: { mapId: "asura", zoneIdx: 0 },
+    unlockedZones: { map1: 7, map2: 6, map3: 6, map4: 6, map5: 6, map6: 6, asura: 1 },
+    lastFarmZone: { mapId: "asura", zoneIdx: 0 },
+    consumables: { hpPotion: 99, manaPotion: 99, returnScroll: 3, warpScroll: 0 },
+    bot: { enabled: false, sellTripEnabled: false, hpPotionTarget: 15, mpPotionTarget: 15, scrollReserve: 3, goldReserve: 0 },
+    autoHunt: true,
+    equipped: { weapon: g.weapon, armor: g.armor, refine: { weapon: refine, armor: refine } },
+    lootSalt: 1,
+    lootCounter: 0,
+    materials: 0,
+    asuraEssence: 0,
+    asuraZoneKills: {},
+    hero: {
+      cls,
+      level,
+      xp: 0,
+      tier: 3,
+      statPoints: 0,
+      stats: { ...allocStats(cls, level) },
+      mana: 300,
+      autoSlots: [SIGNATURE_SKILL[cls], null, null, null],
+      quest: null,
+      mainClaimed: [],
+      dailies: { serverDay: 0, quests: [] },
+    },
+    lastSeen: 0,
+  };
+}
+
+/** Farm-only forward autopilot for the asura ladder: walk into the next zone only once it
+ *  unlocks AND it is a FARM zone (never challenge the boss-room capstone). */
+function asuraNavInput(s: GameState): FrameInput {
+  if (s.traveling || s.phase !== "battle") return {};
+  const r = worldNav(s).right;
+  if (r && r.unlocked && r.zone.kind === "farm") {
+    return { walkToZone: { mapId: r.zone.mapId, zoneIdx: r.zone.zoneIdx } };
+  }
+  return {};
+}
+
+interface AsuraDepthStat {
+  depth: number;
+  stage: number;
+  deaths: number;
+  cleared: boolean;
+}
+
+interface AsuraResult {
+  cls: HeroClass;
+  refine: number;
+  seed: number;
+  deepest: number;
+  totalDeaths: number;
+  perDepth: AsuraDepthStat[];
+  elites: number;
+  essence: number;
+  stones: number;
+  finalLevel: number;
+}
+
+function runAsuraSeed(cls: HeroClass, seed: number, refine: number): AsuraResult {
+  const s = initGameState(seed, makeAsuraSave(cls, refine, HARD_LEVEL));
+  s.autoCast = true;
+  s.autoAllocate = true;
+  s.autoReturn = true;
+  s.consumables = { hpPotion: 999999, manaPotion: 999999, returnScroll: 3, warpScroll: 0 };
+
+  const perDepth = new Map<number, AsuraDepthStat>();
+  const ensure = (depth: number): AsuraDepthStat => {
+    let st = perDepth.get(depth);
+    if (!st) {
+      st = { depth, stage: CONFIG.asura.stageBase + depth, deaths: 0, cleared: false };
+      perDepth.set(depth, st);
+    }
+    return st;
+  };
+  let curDepth = 0;
+  ensure(0);
+  let deepest = 0;
+  let elites = 0;
+  let stones = 0;
+  let prevDead = s.heroes[0].dead;
+
+  for (let i = 0; i < STEPS; i++) {
+    const input: FrameInput = { ...asuraNavInput(s) };
+    const slots = fillAutoSlots(s.heroes[0]);
+    if (slots.length) input.setAutoSlots = slots;
+    step(s, input);
+    for (const e of s.events) {
+      if (e.type === "zoneEntered" && e.mapId === "asura" && e.kind === "farm") {
+        curDepth = e.zoneIdx;
+        ensure(curDepth);
+        if (curDepth > deepest) deepest = curDepth;
+      }
+      if (e.type === "zoneUnlocked" && e.mapId === "asura") {
+        // The zone we're standing in just cleared its quota → mark it cleared.
+        const cur = s.location.mapId === "asura" ? s.location.zoneIdx : curDepth;
+        ensure(cur).cleared = true;
+      }
+      if (e.type === "eliteKilled") elites++;
+      if (e.type === "stoneDrop") stones += e.qty;
+    }
+    const nowDead = s.heroes[0].dead;
+    if (nowDead && !prevDead && s.location.mapId === "asura") ensure(curDepth).deaths++;
+    prevDead = nowDead;
+  }
+
+  const totalDeaths = [...perDepth.values()].reduce((a, d) => a + d.deaths, 0);
+  return {
+    cls,
+    refine,
+    seed,
+    deepest,
+    totalDeaths,
+    perDepth: [...perDepth.values()].sort((a, b) => a.depth - b.depth),
+    elites,
+    essence: s.asuraEssence,
+    stones,
+    finalLevel: s.heroes[0].level,
+  };
+}
+
+function runAsuraHard(): void {
+  console.log(
+    `[ดินแดนอสูร HARD] depth-ladder first cut — L${HARD_LEVEL} tier-3 t10 gear, refine sweep ` +
+      `[${HARD_REFLVLS.join(",")}] · ${SIM_SECONDS}s × ${SEEDS.length} seeds · classes ${CLASSES.join("/")}\n` +
+      `  owner gate: +8 barely survives z1-3 · +9 needed z4-7 · +10 needed z8-10 · <+8 = wall\n` +
+      `  hp mult/zone:  ${CONFIG.asura.hpMultByDepth.map((m, i) => `z${i + 1}:${m}`).join(" ")}\n` +
+      `  atk mult/zone: ${CONFIG.asura.atkMultByDepth.map((m, i) => `z${i + 1}:${m}`).join(" ")}`,
+  );
+  for (const cls of CLASSES) {
+    console.log(`\n=== ${cls.toUpperCase()} ===`);
+    console.log(
+      "  " + pad("refine", 8) + pad("deepest", 9) + pad("deaths", 8) +
+        pad("elites", 8) + pad("essence", 9) + pad("stones", 8) + "per-zone deaths (z1..z10; * = cleared)",
+    );
+    for (const refine of HARD_REFLVLS) {
+      const results = SEEDS.map((seed) => runAsuraSeed(cls, seed, refine));
+      const deepest = mean(results.map((r) => r.deepest + 1)); // 1-based zone reached
+      const deaths = mean(results.map((r) => r.totalDeaths));
+      const elites = mean(results.map((r) => r.elites));
+      const essence = mean(results.map((r) => r.essence));
+      const stones = mean(results.map((r) => r.stones));
+      // Per-zone deaths (mean across seeds), tagged * if cleared on any seed.
+      const cells: string[] = [];
+      for (let d = 0; d < CONFIG.asura.farmZones; d++) {
+        const ds = results.map((r) => r.perDepth.find((p) => p.depth === d));
+        const seen = ds.some((x) => x !== undefined);
+        if (!seen) { cells.push("-"); continue; }
+        const dd = mean(ds.map((x) => x?.deaths ?? 0));
+        const cleared = ds.some((x) => x?.cleared);
+        cells.push(`${dd.toFixed(0)}${cleared ? "*" : ""}`);
+      }
+      console.log(
+        "  " + pad(`+${refine}`, 8) + pad(deepest.toFixed(1), 9) + pad(deaths.toFixed(0), 8) +
+          pad(elites.toFixed(0), 8) + pad(essence.toFixed(0), 9) + pad(stones.toFixed(0), 8) +
+          cells.join(" "),
+      );
+    }
+  }
+}
+
 function main(): void {
+  if (process.env.HARD === "1") {
+    runAsuraHard();
+    return;
+  }
   if (process.env.WORLDBOSS === "1") {
     runWorldBossMode();
     return;

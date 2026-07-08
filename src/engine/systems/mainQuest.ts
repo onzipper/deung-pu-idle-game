@@ -35,11 +35,15 @@ export function mainChapterDefs(): readonly MainChapterDef[] {
   return CONFIG.mainQuest.chapters as readonly MainChapterDef[];
 }
 
-/** The map that immediately FOLLOWS `mapId` in the world order, or null (last map). */
+/** The map of the chapter that immediately FOLLOWS `mapId`'s chapter, or null (last CHAPTER).
+ * Derived from the CHAPTER list (not `world.maps`) so an optional endgame map appended after the
+ * final chapter — ดินแดนอสูร (endgame v1) has NO main-quest chapter — never demotes the last core
+ * chapter (map6) from its `bossBest`-keyed "final" completion rule. For maps 1-5 the next chapter
+ * map equals the next world map (chapters are the consecutive core maps), so this is unchanged. */
 function nextMapIdOf(mapId: string): string | null {
-  const maps = CONFIG.world.maps;
-  const i = maps.findIndex((m) => m.id === mapId);
-  return i >= 0 && i + 1 < maps.length ? maps[i + 1].id : null;
+  const chapters = mainChapterDefs();
+  const i = chapters.findIndex((c) => c.mapId === mapId);
+  return i >= 0 && i + 1 < chapters.length ? chapters[i + 1].mapId : null;
 }
 
 /** The boss stage id that gates `mapId` (its boss-room content stage), or null. */

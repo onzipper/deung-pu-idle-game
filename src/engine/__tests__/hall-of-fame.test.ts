@@ -238,8 +238,8 @@ describe("SAVE v16 migration (M7.95)", () => {
     quest: null,
   });
 
-  it("SAVE_VERSION is 18", () => {
-    expect(SAVE_VERSION).toBe(18);
+  it("SAVE_VERSION is 19", () => {
+    expect(SAVE_VERSION).toBe(19);
   });
 
   it("v14 -> v16: goldEarned 0 (not fabricated from gold), empty bossBest, null levelCapAt", () => {

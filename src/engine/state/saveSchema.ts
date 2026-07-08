@@ -183,6 +183,11 @@ export const saveDataSchema = z
     // M7.6 ตีบวก material counter (SAVE v14). OPTIONAL so a pre-v14 (or trimmed)
     // payload is backfilled to 0 by `migrate()` — same resilience as the fields above.
     materials: z.number().int().min(0).optional(),
+    // ดินแดนอสูร accrual (endgame v1, SAVE v19). Both OPTIONAL so a pre-v19 (or trimmed)
+    // payload is backfilled by `migrate()` (essence -> 0, counters -> {}). Loose non-negative
+    // ints — `migrate`'s `normalizeZoneKills` drops garbage, so a stale entry never needlessly 400s.
+    asuraEssence: z.number().int().min(0).optional(),
+    asuraZoneKills: z.record(z.string(), z.number().int().nonnegative()).optional(),
     // M7.95 "Hall of Fame" observers (SAVE v16). All OPTIONAL so a pre-v16 (or
     // trimmed) payload is backfilled by `migrate()` (goldEarned -> 0, bossBest -> {},
     // levelCapAt -> null). Loose non-negative numbers — `normalizeBossBest` /

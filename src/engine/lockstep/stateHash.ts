@@ -177,6 +177,10 @@ function hashEnemy(h: number, e: Enemy): number {
   h = bool(h, e.aggressive);
   h = num(h, e.aggroRadius);
   h = bool(h, e.engaged);
+  // ดินแดนอสูร ELITE flag (endgame v1) — sim-relevant (drives kill xp/gold/stone bursts +
+  // essence). Folded ONLY when true (present-only) so an ordinary mob hashes byte-identically
+  // to pre-endgame (the canonical / determinism suites stay green — no per-enemy bool always folded).
+  if (e.elite) h = mix(h, 0x656c6974 /* "elit" */);
   return h;
 }
 
@@ -315,6 +319,31 @@ export function stateHash(state: GameState): number {
       h = hashBoss(h, wb.entity);
     } else {
       h = mix(h, 0x77626530 /* "wbe0" = entity retired */);
+    }
+  }
+
+  // --- ดินแดนอสูร (ASURA) endgame v1 accrual + schedule state. Sim-affecting (essence/counters
+  // are write observers that reload identically; the hot-zone mult + elite tally DRIVE xp/gold/
+  // spawns), but folded ONLY when NON-DEFAULT (present-only) so a state that never touched asura
+  // (every s1-30 run, the canonical/determinism suites) hashes byte-identically to pre-endgame. ---
+  if (state.asuraHotZone !== null) {
+    h = mix(h, 0x6168747a /* "ahtz" */);
+    h = num(h, state.asuraHotZone);
+  }
+  if (state.asuraSpawnTally > 0) {
+    h = mix(h, 0x61737470 /* "astp" */);
+    h = num(h, state.asuraSpawnTally);
+  }
+  if (state.asuraEssence > 0) {
+    h = mix(h, 0x61657373 /* "aess" */);
+    h = num(h, state.asuraEssence);
+  }
+  {
+    const keys = Object.keys(state.asuraZoneKills).sort();
+    if (keys.length > 0) {
+      h = mix(h, 0x617a6b73 /* "azks" */);
+      h = mix(h, keys.length);
+      for (const k of keys) h = num(str(h, k), state.asuraZoneKills[k]);
     }
   }
 

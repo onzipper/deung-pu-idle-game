@@ -266,6 +266,8 @@ describe("events are transient (never persisted)", () => {
       "lootCounter",
       "lootSalt",
       "materials",
+      "asuraEssence",
+      "asuraZoneKills",
       "lastSeen",
     ]);
   });

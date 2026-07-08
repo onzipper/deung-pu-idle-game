@@ -530,6 +530,14 @@ export interface Enemy {
    * Before that it idle-wanders. Transient.
    */
   engaged: boolean;
+  /**
+   * ดินแดนอสูร ELITE roaming mob (endgame v1, systems/asura.ts). Set true when a rare
+   * asura farm spawn is promoted (deterministic counter cadence — NO RNG draw): boosted
+   * stats + a big xp/gold/stone burst + แก่นอสูร essence on kill. It stays a NORMAL enemy
+   * for targeting (the spread rules apply — no boss dog-pile). OPTIONAL/undefined for every
+   * ordinary mob (a plain mob is byte-identical to pre-endgame). Transient (never persisted).
+   */
+  elite?: boolean;
 }
 
 /**

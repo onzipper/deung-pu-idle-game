@@ -23,7 +23,10 @@ const NEW_MAP_STAGES: Record<string, number[]> = {
 describe("M7.9 world structure: maps 4/5/6", () => {
   it("adds exactly three new maps following the maps-1-3 formula", () => {
     const ids = CONFIG.world.maps.map((m) => m.id);
-    expect(ids).toEqual(["map1", "map2", "map3", "map4", "map5", "map6"]);
+    // ดินแดนอสูร (endgame v1) appends a 7th map "asura" after map6 — the core s16-30 structure
+    // this suite locks is unchanged (maps 1-6 in order); asura's own structure is covered in
+    // asura.test.ts.
+    expect(ids).toEqual(["map1", "map2", "map3", "map4", "map5", "map6", "asura"]);
   });
 
   for (const mapId of NEW_MAPS) {
