@@ -8,7 +8,7 @@
     "infoTipAria": "More info"
   },
   "hud": {
-    "stageLabel": "Stage",
+    "stageLabel": "Zone",
     "botMasterOn": "Bot: ON",
     "botMasterOff": "Bot: OFF",
     "botMasterAriaOn": "Turn the bot off (disables all automation)",
@@ -909,7 +909,7 @@
     "fastTravelClose": "Close",
     "fastTravelCurrent": "You're here",
     "fastTravelChanneling": "Warping to {map}…",
-    "fastTravelStageRange": "Stage {min}–{max}",
+    "fastTravelStageRange": "Zone {min}–{max}",
     "asuraBossMystery": "???",
     "asuraTeaserRow": "The Asura Territories ???",
     "asuraHotZoneBadge": "Today's hot zone"
@@ -1033,6 +1033,7 @@
     "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
     "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
+    "smithTripTraveling": "🔨 Heading to Uncle Dueng…",
     "questRewardClaimed": "🎁 Quest reward: {summary}",
     "rewardGold": "+{amount} gold",
     "rewardMaterials": "+{amount} materials",
@@ -1083,7 +1084,7 @@
     "chatRateLimited": "Sending too fast — wait a moment and try again"
   },
   "refine": {
-    "openButton": "Refine",
+    "openButton": "🔨 Refine",
     "title": "Refine Station",
     "emptyHint": "Nothing to refine in this slot",
     "townOnlyHint": "Refining only works in town",

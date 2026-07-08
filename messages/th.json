@@ -8,7 +8,7 @@
     "infoTipAria": "ข้อมูลเพิ่มเติม"
   },
   "hud": {
-    "stageLabel": "ด่าน",
+    "stageLabel": "โซน",
     "botMasterOn": "บอท: เปิด",
     "botMasterOff": "บอท: ปิด",
     "botMasterAriaOn": "ปิดสวิตช์บอท (ปิดระบบอัตโนมัติทั้งหมด)",
@@ -909,7 +909,7 @@
     "fastTravelClose": "ปิด",
     "fastTravelCurrent": "อยู่ตรงนี้",
     "fastTravelChanneling": "กำลังวาร์ปไปยัง {map}…",
-    "fastTravelStageRange": "ด่าน {min}–{max}",
+    "fastTravelStageRange": "โซน {min}–{max}",
     "asuraBossMystery": "???",
     "asuraTeaserRow": "ดินแดนอสูร ???",
     "asuraHotZoneBadge": "โซนฮอตวันนี้"
@@ -1033,6 +1033,7 @@
     "guideBossTier3": "ถึงทุ่งแล้วกดปุ่มท้าบอสได้เลย",
     "guideGatedTier3Frontier": "พาไปหน้าด่านของคุณ — ปลดโซนต่อไปเรื่อย ๆ จนถึงประตูบอสแมพ 3",
     "walkToLungdueng": "เดินไปหาลุงดึ๋งก่อนนะ",
+    "smithTripTraveling": "🔨 กำลังเดินทางไปหาลุงดึ๋ง…",
     "questRewardClaimed": "🎁 ได้รางวัลเควส: {summary}",
     "rewardGold": "+{amount} ทอง",
     "rewardMaterials": "+{amount} วัสดุ",
@@ -1083,7 +1084,7 @@
     "chatRateLimited": "พิมพ์เร็วไปหน่อย รอแป๊บนึงแล้วส่งใหม่นะ"
   },
   "refine": {
-    "openButton": "ตีบวก",
+    "openButton": "🔨 ตีบวก",
     "title": "ตู้ตีบวก",
     "emptyHint": "ช่องนี้ไม่มีของให้ตีบวก",
     "townOnlyHint": "ตีบวกได้เฉพาะในเมือง",

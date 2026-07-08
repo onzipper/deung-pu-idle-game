@@ -2502,6 +2502,11 @@ export function GameClient() {
         } else if (ev.type === "fastTravelBlocked") {
           useGameStore.getState().clearFastTravelChannel();
           useGameStore.getState().pushNotice(`fastTravelBlocked.${ev.reason}`);
+          // Owner UX round (2026-07-09): a blocked ปุ่มตีบวก trip (boss phase
+          // locked, etc.) already surfaces via the notice above — cancel the
+          // smith trip too so it doesn't linger waiting for a town arrival
+          // that was never actually queued.
+          useGameStore.getState().cancelSmithTrip();
         } else if (ev.type === "npcTrade") {
           // Town NPCs phase 3 (final): flavor-only — the bot's transaction
           // itself is already engine-side (systems/bots.ts); this NEVER opens

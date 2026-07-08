@@ -1,14 +1,19 @@
 "use client";
 
 /**
- * Top HUD strip: stage badge + gold. Reads only the throttled snapshot fields
- * it needs. (The wave badge was retired with the M6 "สนามล่ามอน" combat
- * rework — there are no waves.)
+ * Top HUD strip: zone badge + warp button + gold. Reads only the throttled
+ * snapshot fields it needs. (The wave badge was retired with the M6
+ * "สนามล่ามอน" combat rework — there are no waves.)
  *
  * The zone-unlock kill-progress bar that used to live here moved into
  * `GoalLadder.tsx` (M6 goal-ladder task) — it's one of the ladder's rungs
  * now, integrated there rather than duplicated in both places (see that
  * component's doc comment; the `kill-progress` FTUE anchor moved with it).
+ *
+ * Owner UX round (2026-07-09): the warp/fast-travel button moved HERE, right
+ * beside the zone label ("ปุ่มวาปย้ายไปอยู่ตรงบนซ้ายแถวๆ คำว่าโซน") — it used
+ * to live in `WalkControls.tsx`'s bottom nav row; per the "warp = ONE place,
+ * no satellites" house rule it's been REMOVED from there, not duplicated.
  *
  * Hierarchy (task 86d3k2tap, readability pass 86d3jv7m3): gold is the
  * player's heartbeat — PRIMARY tier, biggest/boldest numerals + tabular-nums
@@ -18,6 +23,8 @@
  */
 
 import { useTranslations } from "next-intl";
+import { useState } from "react";
+import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
 import { MaterialIcon } from "@/ui/components/icons";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { useGameStore } from "@/ui/store/gameStore";
@@ -26,7 +33,11 @@ export function HudBar() {
   const stage = useGameStore((s) => s.stage);
   const gold = useGameStore((s) => s.gold);
   const materials = useGameStore((s) => s.materials);
+  const worldTraveling = useGameStore((s) => s.world.traveling);
+  const channeling = useGameStore((s) => s.fastTravelChannel !== null);
+  const [fastTravelOpen, setFastTravelOpen] = useState(false);
   const t = useTranslations("hud");
+  const tWorld = useTranslations("world");
 
   const goldPulse = usePulseOnIncrease(gold);
   const materialsPulse = usePulseOnIncrease(materials);
@@ -39,6 +50,17 @@ export function HudBar() {
         </span>
         <span className="text-lg font-bold text-emerald-300 tabular-nums">{stage}</span>
       </span>
+      <button
+        type="button"
+        disabled={worldTraveling || channeling}
+        onClick={() => setFastTravelOpen(true)}
+        title={tWorld("fastTravelButton")}
+        aria-label={tWorld("fastTravelButton")}
+        className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border border-sky-400/50 bg-sky-400/10 text-lg text-sky-300 shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <span aria-hidden>🌀</span>
+      </button>
+      {fastTravelOpen && <FastTravelPicker onClose={() => setFastTravelOpen(false)} />}
       <div className="flex-1" />
       <div className="flex items-center gap-2 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/10 px-3 py-1.5">
         {/* CSS-drawn coin: the 🪙 emoji (Unicode 13) has no glyph on Windows 10 */}

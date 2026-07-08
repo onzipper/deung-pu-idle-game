@@ -42,6 +42,7 @@ import { NoticeToast } from "@/ui/components/NoticeToast";
 import { RefineButton } from "@/ui/components/RefineButton";
 import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
+import { SmithTripWatcher } from "@/ui/components/SmithTripWatcher";
 import { StatPanel } from "@/ui/components/StatPanel";
 import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
 import { TownNpcPanelHost } from "@/ui/components/TownNpcPanelHost";
@@ -145,6 +146,9 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           tap-again-to-talk gated (see `TownNpcPanelHost.tsx`), not an always-on
           panel anymore. */}
       <TownNpcPanelHost />
+      {/* Owner UX round (2026-07-09): drives the ปุ่มตีบวก "smith trip" state
+          machine to completion — renders nothing, see SmithTripWatcher.tsx. */}
+      <SmithTripWatcher />
 
       <GoalLadder />
 

@@ -25,7 +25,7 @@
  */
 
 import { create } from "zustand";
-import { CONFIG, defaultBotSettings } from "@/engine";
+import { CONFIG, defaultBotSettings, townNpcConfig } from "@/engine";
 import type {
   BossHint,
   BotSettings,
@@ -60,6 +60,7 @@ import {
   type RawChatEntry,
 } from "@/ui/chat/chatMessages";
 import type { PartyWire } from "@/ui/friends/types";
+import { nextSmithTripStep, type SmithTripPhase } from "@/ui/world/smithTrip";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -1172,6 +1173,18 @@ export interface HudState {
    * (or left town outright). */
   activeTownPanel: TownPanelId | null;
 
+  /**
+   * Owner UX round (2026-07-09) — "ปุ่มตีบวก works from anywhere": the
+   * in-flight "smith trip" `RefineButton.tsx` kicks off when pressed away
+   * from ลุงดึ๋ง's talk range. `"idle"` = no trip in flight (the common
+   * case). `"traveling"` = a fast-travel-to-town channel was queued (button
+   * pressed outside town); `"walking"` = standing in town, walking toward
+   * his anchor. `SmithTripWatcher.tsx` advances this off the throttled
+   * snapshot via `advanceSmithTrip` — see `ui/world/smithTrip.ts`'s pure
+   * transition function for the actual logic. Session-only (does NOT need
+   * to survive a reload, per the task brief) — never part of `SaveData`. */
+  smithTrip: SmithTripPhase;
+
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
    * `docs/persistence-m7.md`), seeded from the `/api/save` boot payload's
@@ -1490,6 +1503,22 @@ export interface HudState {
   /** Queue a manual play (M7.8) cancel of the active move/attack command. */
   queueCancelCommand: () => void;
 
+  // ---- Owner UX round (2026-07-09): ปุ่มตีบวก works from anywhere ----
+  /** `RefineButton.tsx`-only: start (or instantly resolve) a "smith trip" —
+   * see `smithTrip`'s doc for the full decision. Reads `world`/`npcInRange`
+   * synchronously off the current store state at press-time. */
+  startSmithTrip: () => void;
+  /** Cancel any in-flight trip, silently (no notice) — called on death or a
+   * conflicting manual move/attack (see `queueMoveTo`/`queueAttackTarget`).
+   * A no-op while already `"idle"`. */
+  cancelSmithTrip: () => void;
+  /** `SmithTripWatcher.tsx`-only: advance an in-flight trip by one throttled-
+   * snapshot tick — a thin store-side wrapper around the pure
+   * `ui/world/smithTrip.ts#nextSmithTripStep`, applying whichever effect it
+   * returns (queue the walk-to-smith `moveTo`, or open the panel + end the
+   * trip). A no-op while `"idle"`. */
+  advanceSmithTrip: () => void;
+
   // ---- M8 quest Wave C ----
   /** Install/refresh today's daily roster (from a save GET/POST response's
    * `dailies` field) — see `PendingInput.setDailies`'s doc. Safe to call on
@@ -1693,6 +1722,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   craftBlockReason: null,
   tomeAssembledCelebration: false,
   activeTownPanel: null,
+  smithTrip: "idle",
 
   inventory: [],
   dropFeed: [],
@@ -1936,11 +1966,22 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
+  // A manual move/attack order is "the player tapping elsewhere" (owner UX
+  // round 2026-07-09) — silently cancels any in-flight smith trip so it never
+  // fights a real player-directed command. The trip's OWN internal moveTo
+  // (`startSmithTrip`/`advanceSmithTrip` below) writes `pendingInput.moveTo`
+  // directly rather than calling this action, so it never self-cancels.
   queueMoveTo: (x) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, moveTo: { x } } })),
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, moveTo: { x } },
+      smithTrip: s.smithTrip === "idle" ? s.smithTrip : "idle",
+    })),
 
   queueAttackTarget: (id) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, attackTarget: { id } } })),
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, attackTarget: { id } },
+      smithTrip: s.smithTrip === "idle" ? s.smithTrip : "idle",
+    })),
 
   queueCancelCommand: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, cancelCommand: true } })),
@@ -1964,6 +2005,59 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   openTownPanel: (panel) => set({ activeTownPanel: panel }),
   closeTownPanel: () => set({ activeTownPanel: null }),
+
+  // ---- Owner UX round (2026-07-09): ปุ่มตีบวก works from anywhere ----
+  startSmithTrip: () => {
+    const s = get();
+    if (s.world.kind === "town") {
+      if (s.npcInRange["npc:lungdueng"]) {
+        set({ activeTownPanel: "lungdueng" });
+        return;
+      }
+      set((st) => ({
+        smithTrip: "walking",
+        pendingInput: {
+          ...st.pendingInput,
+          moveTo: { x: townNpcConfig("npc:lungdueng").x },
+        },
+      }));
+      get().pushNotice("walkToLungdueng");
+      return;
+    }
+    set((st) => ({
+      smithTrip: "traveling",
+      pendingInput: {
+        ...st.pendingInput,
+        fastTravel: { mapId: CONFIG.world.townMapId, zoneIdx: 0 },
+      },
+    }));
+    get().pushNotice("smithTripTraveling");
+  },
+
+  cancelSmithTrip: () => set((s) => (s.smithTrip === "idle" ? {} : { smithTrip: "idle" })),
+
+  advanceSmithTrip: () => {
+    const s = get();
+    if (s.smithTrip === "idle") return;
+    const result = nextSmithTripStep(s.smithTrip, {
+      inTown: s.world.kind === "town",
+      inRange: s.npcInRange["npc:lungdueng"],
+      dead: s.heroes[0]?.dead ?? false,
+    });
+    if (result.effect === "openPanel") {
+      set({ smithTrip: "idle", activeTownPanel: "lungdueng" });
+    } else if (result.effect === "walkToSmith") {
+      set((st) => ({
+        smithTrip: "walking",
+        pendingInput: {
+          ...st.pendingInput,
+          moveTo: { x: townNpcConfig("npc:lungdueng").x },
+        },
+      }));
+    } else if (result.phase !== s.smithTrip) {
+      set({ smithTrip: result.phase });
+    }
+  },
 
   setInventory: (items) => set({ inventory: items }),
   mergeInventory: (claimed) =>
