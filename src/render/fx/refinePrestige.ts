@@ -1,8 +1,15 @@
 /**
  * M7.6+ refine-prestige ladder — the "+9"/"+10" steps of the owner's 3-step
  * high-refine escalation (the "+8" step is handled in-place by
- * `gearAura.ts`/`gearSparkle.ts`'s own `boosted` flag; see those modules'
- * doc comments). Per anchor (weapon OR armor, per hero slot):
+ * `gearSparkle.ts`'s own `boosted` flag; see that module's doc comment).
+ *
+ * ARMOR-ONLY since the M9 pixel-fx weapon port: `FxController.updateGearFx()`
+ * now calls this module with ONLY the `${slot}-armor` key — the WEAPON side
+ * (which used to ride `gearAura.ts`'s anchor, now deleted) was retired in
+ * favor of `refineFxRecipes.ts`'s own +8/+9/+10 recipe steps
+ * (crackle/molten/beat), which cover the whole weapon ladder on their own.
+ * The class itself stays generic (any caller-chosen key still works — see
+ * the tests), only its ONE live call site narrowed. Per anchor:
  *
  *  - **+9**: an intermittent accent crackle — a small spark burst at the
  *    anchor every `CRACKLE_INTERVAL`-ish real seconds ("almost there").

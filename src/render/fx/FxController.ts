@@ -42,14 +42,12 @@ import { CrescentPool } from "@/render/fx/crescent";
 import { CurtainSweepPool } from "@/render/fx/curtainSweep";
 import { FlashLinePool } from "@/render/fx/flashLines";
 import { FloatingTextPool } from "@/render/fx/floatingText";
-import { GearAuraController } from "@/render/fx/gearAura";
 import { GearSparklePool } from "@/render/fx/gearSparkle";
 import { GhostBladePool } from "@/render/fx/ghostBlade";
 import { GroundCrackPool } from "@/render/fx/groundCrack";
 import { HazardBandOverlay } from "@/render/fx/hazardBand";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
-import { LegendaryFxController } from "@/render/fx/legendaryFx";
 import { LevelUpBurstPool } from "@/render/fx/levelUp";
 import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
@@ -60,8 +58,10 @@ import {
   ParticlePool,
   shower,
 } from "@/render/fx/particles";
+import { createPixelWeaponFx, type PixelWeaponFx } from "@/render/fx/pixelWeaponFx";
 import { PortalPool } from "@/render/fx/portal";
 import { GroundArrowPool, RainShadowPool } from "@/render/fx/rainScene";
+import { resolveRefineFxRecipe } from "@/render/fx/refineFxRecipes";
 import { RefinePrestigeFx } from "@/render/fx/refinePrestige";
 import { RingPool } from "@/render/fx/rings";
 import { RuneGlyphPool } from "@/render/fx/runeGlyph";
@@ -406,15 +406,27 @@ const ITEM_DROP_POP_Y = GROUND_Y - 6;
 /** M7.6 ตีบวก — refine +level thresholds that step the M7 gear-wow hooks up
  * one notch early (see `updateGearFx`'s doc). Chosen to land on the spec's own
  * "+7/+10" band language (+7 = the "พลาดลดขั้น" ceiling, +10 = max). */
-const REFINE_AURA_THRESHOLD = 7;
 const REFINE_SPARKLE_THRESHOLD = 7;
 
 /** M7.6+ refine-prestige ladder (owner spec "make +8/+9/+10 visually
- * prestigious") — the "+8: clearly stronger presence" step for whichever
- * piece (weapon aura / armor sparkle) is already active per the thresholds
- * above; see `gearAura.ts`/`gearSparkle.ts`'s `boosted` param doc. The +9/+10
- * steps are `fx/refinePrestige.ts`'s own thresholds, applied below. */
+ * prestigious") — the "+8: clearly stronger presence" step for the armor
+ * sparkle once it's already active per the threshold above; see
+ * `gearSparkle.ts`'s `boosted` param doc. The +9/+10 steps are
+ * `fx/refinePrestige.ts`'s own thresholds, applied below. Weapon-side +7/+8/
+ * +9/+10 escalation now lives entirely inside the M9 pixel-fx recipe ladder
+ * (`refineFxRecipes.ts`) instead — see `updateWeaponFx()`. */
 const REFINE_PRESTIGE_BOOST_THRESHOLD = 8;
+
+/** M9 pixel-fx weapon port — one `PixelWeaponFx` instance per hero slot,
+ * created lazily on first non-null recipe (mobile GPU budget). Same
+ * MAX_SLOTS=3 party-cap convention as every other per-hero-slot fx module
+ * (`gearSparkle.ts`/`championAura.ts`/`warCryAura.ts`). */
+const WEAPON_FX_MAX_SLOTS = 3;
+const WEAPON_FX_POOL_SIZE = 140;
+/** Constant local origin, reused (never mutated) as the `toLocal` input that
+ * resolves `view.weaponArm`'s own pivot point — zero per-frame allocation. */
+const WEAPON_FX_ORIGIN = { x: 0, y: 0 };
+const WEAPON_FX_PIXEL_SIZE = 2;
 
 // ---- M7.8 "Manual Play" command feedback (tap-to-move / tap-to-attack) ----
 // Ground click-marker (`moveOrdered`): 3 concentric fading rings via the
@@ -913,27 +925,42 @@ export class FxController {
   private readonly soulWisps: SoulWispPool;
   private readonly lightPillars: LightPillarPool;
 
-  // ---- M7 gear-wow: tier-6/epic weapon aura + tier-5+ armor sparkle -------
+  // ---- M7 gear-wow: tier-5+ armor sparkle ----------------------------------
   // Continuous (not event-driven) — driven every frame in `updateGearFx()`
   // from live `GameState`, same convention as `updateWeaponTrail()`/
   // `updateCastAura()`.
-  private readonly gearAura: GearAuraController;
   private readonly gearSparkle: GearSparklePool;
-  /** M7.6+ refine-prestige ladder's +9/+10 steps — reuses `this.particles`/
-   * `this.rings` (constructed below), adds zero new pooled Graphics of its
-   * own. See `updateGearFx()`. */
+  /** M7.6+ refine-prestige ladder's armor-side +9/+10 steps — reuses
+   * `this.particles`/`this.rings` (constructed below), adds zero new pooled
+   * Graphics of its own. See `updateGearFx()`. (The WEAPON side of this
+   * ladder was retired in the M9 pixel-fx port below — `weaponFx`'s recipe
+   * system covers +0..+10 on its own.) */
   private readonly refinePrestige: RefinePrestigeFx;
 
-  /** "ตำราตำนาน" LEGENDARY weapon fx (endgame v1.2/v1.3): the per-class idle
-   * ambient signature + cross-class attack-swing trail — continuous, same
-   * convention as `gearAura`/`gearSparkle` above (see `updateLegendaryFx()`).
-   * A legendary weapon does NOT also get `gearAura`'s flame (see that
-   * method's `!isLegendaryTemplate` gate) — this replaces it. */
-  private readonly legendaryFx: LegendaryFxController;
+  /** M9 pixel-fx weapon port (owner-approved `/lab` refineLadder look):
+   * replaces the OLD `gearAura.ts` tier-6/epic flame aura + `refinePrestige.ts`
+   * weapon-side +9/+10 steps + `legendaryFx.ts`'s per-class idle signature/
+   * swing trail — for EVERY weapon (normal AND legendary alike; the owner's
+   * mid-task amendment retired `legendaryFx.ts` entirely in favor of this same
+   * recipe system at `resolveRefineFxRecipe(rarity, refine, true)`). One
+   * `PixelWeaponFx` per hero slot, created LAZILY on first non-null recipe
+   * (mobile GPU budget — a common/rare +0 weapon never allocates one). Runs
+   * the sim SMOOTH 60fps in-game (`setStepFps(60)`) — the module's own
+   * stepped-12fps mode exists to match PIXEL-ART sprite hosts; this game's
+   * weapons are smooth code-drawn vectors (owner eye-verdict, same call
+   * `/lab`'s refineLadder experiment already defaults to). See
+   * `updateWeaponFx()`. */
+  private readonly weaponFx: (PixelWeaponFx | null)[] = new Array(WEAPON_FX_MAX_SLOTS).fill(
+    null,
+  );
+  /** Rising-edge swing detect per weapon-fx slot (same convention as
+   * `legendaryFx.ts`'s old `isHeroAttackSwinging()` sampling) — `notifySwing()`
+   * fires once per NEW swing window, not every frame one is active. */
+  private readonly weaponFxWasSwinging: boolean[] = new Array(WEAPON_FX_MAX_SLOTS).fill(false);
 
   /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
    * the rank-1 champion gold aura — same continuous-per-frame convention as
-   * `gearAura`/`warCryAura`. See `updateChampionAura()`. */
+   * `gearSparkle`/`warCryAura`. See `updateChampionAura()`. */
   private readonly championAura: ChampionAuraController;
   /** Per-hero-id social badge map (title + champion flag), mirroring
    * `GameRenderer.heroDisplayNames`'s own defensive-read convention — set via
@@ -947,7 +974,7 @@ export class FxController {
 
   /** Owner request: on-character aura while a hero's War Cry ATK buff
    * (`hero.atkBuffTimer`) is active — same continuous-per-frame convention as
-   * `gearAura`/`gearSparkle` above, but keyed off the buff timer instead of
+   * `weaponFx`/`gearSparkle` above, but keyed off the buff timer instead of
    * equipped-gear tier/rarity. See `updateWarCryFx()`. */
   private readonly warCryAura: WarCryAuraController;
 
@@ -1001,7 +1028,7 @@ export class FxController {
 
   // ---- M7.8 "Manual Play" command feedback ---------------------------------
   // Continuous per-frame read of `state.heroes[0].command` (same convention
-  // as `gearAura`/`castAura` above) — see `updateTargetLock()`.
+  // as `weaponFx`/`castAura` above) — see `updateTargetLock()`.
   private readonly targetLock: TargetLockReticle;
 
   // ---- M7.5 world-gate navigation (fast-travel channel swirl) --------------
@@ -1019,6 +1046,12 @@ export class FxController {
    * scratch point (not reused) so the two effects never stomp each other's
    * in-flight value within the same frame. */
   private readonly warCryAnchorScratch = { x: 0, y: 0 };
+  /** Reused every frame by `updateWeaponFx()` — the weapon-arm PIVOT (local
+   * origin `(0,0)` of `view.weaponArm`, converted into `view.parent`-local
+   * space) that `weaponAnchorScratch − this` gives the blade DIRECTION for
+   * `PixelWeaponFx.setAnchor()`'s optional dir args, same technique
+   * `/lab/experiments/refineLadder.tsx`'s `updateFxAnchor()` uses. */
+  private readonly weaponFxPivotScratch = { x: 0, y: 0 };
 
   /** Last-seen "does a boss currently exist" — `state.boss` transitions
    * null -> object with no dedicated event (the player's `challengeBoss`
@@ -1150,9 +1183,10 @@ export class FxController {
     // glyph or two plus one meteor rune" headroom.
     this.runeGlyphs = new RuneGlyphPool(this.heroFxLayer, 12);
     this.castAura = new CastAuraController(this.heroFxLayer);
-    this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
-    this.legendaryFx = new LegendaryFxController(this.heroFxLayer);
+    // `weaponFx` slots are NOT constructed here — each is created lazily on
+    // first non-null recipe inside `updateWeaponFx()` (mobile GPU budget: a
+    // solo common/rare +0 weapon session never allocates one at all).
     this.warCryAura = new WarCryAuraController(this.heroFxLayer);
     this.championAura = new ChampionAuraController(this.heroFxLayer);
     this.arrowSwarm = new ArrowSwarmPool(this.heroFxLayer);
@@ -1530,9 +1564,8 @@ export class FxController {
     this.skyDarken.destroy();
     this.hazardBand.destroy();
     this.castAura.destroy();
-    this.gearAura.destroy();
     this.gearSparkle.destroy();
-    this.legendaryFx.destroy();
+    for (const fx of this.weaponFx) fx?.destroy();
     this.championAura.destroy();
     this.warCryAura.destroy();
     this.arrowSwarm.destroy();
@@ -1555,19 +1588,22 @@ export class FxController {
   }
 
   /** M7 gear-wow (continuous, not event-driven — same convention as
-   * `updateWeaponTrail()`/`updateCastAura()`): per hero slot, activates the
-   * tier-6/epic weapon aura (`gearAura`) and/or tier-5+ armor sparkle
-   * (`gearSparkle`) when that hero's live view + equipped template say so,
-   * else eases the slot back to invisible. Reads `ITEM_TEMPLATES` directly
-   * (not `HeroView.gearWeaponTier`/`gearArmorRarity`, though those exist too)
-   * since `state.heroes` is already being walked here regardless.
+   * `updateWeaponTrail()`/`updateCastAura()`): per hero slot, drives the M9
+   * pixel-fx recipe weapon system (`updateWeaponFx()`, below) and the
+   * tier-5+ armor sparkle (`gearSparkle`) when that hero's live view +
+   * equipped template say so, else eases the slot back to invisible. Reads
+   * `ITEM_TEMPLATES` directly (not `HeroView.gearWeaponTier`/`gearArmorRarity`,
+   * though those exist too) since `state.heroes` is already being walked here
+   * regardless.
    *
-   * M7.6+ refine-prestige ladder (owner spec, on top of the above): once the
-   * aura/sparkle is active at all (+7), `weaponRefine`/`armorRefine` further
-   * gate a 3-step escalation — +8 boosts the SAME pooled aura/sparkle in
-   * place (`gearAura`/`gearSparkle`'s own `boosted` param), +9/+10 add an
-   * intermittent crackle / continuous signature beat via `refinePrestige`
-   * (zero new pooled Graphics — see that module's doc comment). */
+   * M7.6+ refine-prestige ladder (owner spec) still applies to ARMOR: once the
+   * sparkle is active at all (+7), `armorRefine` further gates a 3-step
+   * escalation — +8 boosts the SAME pooled sparkle in place (`gearSparkle`'s
+   * own `boosted` param), +9/+10 add an intermittent crackle / continuous
+   * signature beat via `refinePrestige` (zero new pooled Graphics — see that
+   * module's doc comment). The WEAPON half of this ladder was retired in the
+   * M9 pixel-fx port (`updateWeaponFx()` — `refineFxRecipes.ts` covers the
+   * whole +0..+10 weapon ladder on its own, including the +8/+9/+10 steps). */
   private updateGearFx(dt: number, state: GameState): void {
     state.heroes.forEach((h, slot) => {
       const view = h.dead ? null : this.lookupHeroView(h.id);
@@ -1577,52 +1613,14 @@ export class FxController {
       const armorTier = h.equipped.armor
         ? (ITEM_TEMPLATES[h.equipped.armor]?.tier ?? 0)
         : 0;
-      // M7.6 ตีบวก: a heavily-refined weapon/armor earns the SAME aura/sparkle
-      // hooks a naturally-tier-6/epic piece would, one step earlier than the
-      // catalog's own +10 max would otherwise imply — a subtle "this thing is
-      // special now" readout without any new rig geometry (per spec).
+      // M7.6 ตีบวก: a heavily-refined armor piece earns the same sparkle hook
+      // a naturally-tier-5+ piece would, one step earlier than the catalog's
+      // own +10 max would otherwise imply — a subtle "this thing is special
+      // now" readout without any new rig geometry (per spec).
       const weaponRefine = refineOf(h.equipped, "weapon");
       const armorRefine = refineOf(h.equipped, "armor");
 
-      // "ตำราตำนาน" legendary weapons get their OWN dedicated fx
-      // (`legendaryFx` — idle signature + attack-swing trail, see
-      // `updateLegendaryFx()`) instead of stacking the ordinary tier-6/epic
-      // flame aura on top (a legendary's catalog `rarity` is "epic" for
-      // UI-compat reasons — see items.ts — so without this gate it would
-      // otherwise trigger `auraOn` below like any other epic drop).
-      const auraOn =
-        !!view &&
-        !isLegendaryTemplate(h.equipped.weapon) &&
-        (weaponRarity === "epic" || weaponRefine >= REFINE_AURA_THRESHOLD) &&
-        getWeaponAnchorPos(view, this.weaponAnchorScratch);
-      // Class-flavored aura (owner request 2026-07-07): the same flame rig
-      // reads great on the big blade but drowned on the bow/staff silhouettes
-      // in the sword's warm palette — each class now burns in its own family
-      // (sword = flame, archer = emerald/wind, mage = azure/arcane).
-      const auraColor =
-        h.cls === "archer"
-          ? PALETTE.archerEmerald
-          : h.cls === "mage"
-            ? PALETTE.mageAzure
-            : PALETTE.auraFlame;
-      this.gearAura.setSlot(
-        slot,
-        auraOn,
-        this.weaponAnchorScratch.x,
-        this.weaponAnchorScratch.y,
-        auraColor,
-        weaponRefine >= REFINE_PRESTIGE_BOOST_THRESHOLD,
-      );
-      // +9/+10 steps ride the SAME anchor/active-gate as the aura above — a
-      // naturally-epic (refine +0) weapon's aura stays exactly as it was
-      // (refineLevel 0 here, below both prestige thresholds).
-      this.refinePrestige.update(
-        dt,
-        `${slot}-weapon`,
-        auraOn ? weaponRefine : 0,
-        this.weaponAnchorScratch.x,
-        this.weaponAnchorScratch.y,
-      );
+      this.updateWeaponFx(slot, view, weaponRarity, weaponRefine, isLegendaryTemplate(h.equipped.weapon));
 
       const sparkleOn =
         !!view &&
@@ -1643,40 +1641,71 @@ export class FxController {
         this.armorAnchorScratch.y,
       );
     });
-    this.gearAura.update(dt);
     this.gearSparkle.update(dt);
-    this.updateLegendaryFx(dt, state);
+    for (const fx of this.weaponFx) fx?.update(dt);
   }
 
-  /** "ตำราตำนาน" LEGENDARY weapon fx (endgame v1.2/v1.3, render wave):
-   * continuous, not event-driven — same convention as `updateGearFx()`,
-   * called from within it (right after the ordinary aura/sparkle pass) since
-   * it reuses the SAME `getWeaponAnchorPos()` per-hero read. Per hero slot,
-   * activates the per-class idle ambient signature + (while an attack swing
-   * is actively playing) samples the attack-swing trail, when that hero has a
-   * legendary weapon equipped, else eases the slot's ambient signature back
-   * to invisible and stops sampling the trail (existing trail points still
-   * finish decaying on their own real-time clock). */
-  private updateLegendaryFx(dt: number, state: GameState): void {
-    state.heroes.forEach((h, slot) => {
-      const view = h.dead ? null : this.lookupHeroView(h.id);
-      const legendary = !!view && isLegendaryTemplate(h.equipped.weapon);
-      const active = legendary && getWeaponAnchorPos(view!, this.weaponAnchorScratch);
-      // "ยิ่งปลุกยิ่งเดือด": a legendary's own `refineOf(...)` value doubles as
-      // its 0..LEGENDARY_MAX_AWAKEN (+0..+5) awaken level — see
-      // `legendaryFx.ts`'s `awakenParamsFor()` for the step-lookup this feeds.
-      const awakenLevel = active ? refineOf(h.equipped, "weapon") : 0;
-      this.legendaryFx.setSlot(
-        slot,
-        active,
-        active ? h.cls : null,
-        this.weaponAnchorScratch.x,
-        this.weaponAnchorScratch.y,
-        active && isHeroAttackSwinging(view!),
-        awakenLevel,
-      );
-    });
-    this.legendaryFx.update(dt);
+  /** M9 pixel-fx weapon port (owner-approved `/lab` refineLadder look) — see
+   * this class's `weaponFx` field doc for the full replacement story
+   * (`gearAura.ts` + weapon-side `refinePrestige.ts` + `legendaryFx.ts`, ALL
+   * retired in favor of this ONE recipe-driven system for every weapon,
+   * normal AND legendary alike). Called once per hero slot per frame from
+   * `updateGearFx()`; `fx.update(dt)` itself is batched once at the end of
+   * that caller (matching `gearAura.update(dt)`'s old per-frame-once
+   * convention), not per-slot here. */
+  private updateWeaponFx(
+    slot: number,
+    view: HeroView | null,
+    rarity: ItemRarity | undefined,
+    refineLevel: number,
+    isLegendary: boolean,
+  ): void {
+    if (slot < 0 || slot >= WEAPON_FX_MAX_SLOTS) return;
+
+    const anchorOk = !!view && !!rarity && getWeaponAnchorPos(view, this.weaponAnchorScratch);
+    const recipe = anchorOk ? resolveRefineFxRecipe(rarity!, refineLevel, isLegendary) : null;
+
+    if (!recipe) {
+      this.weaponFx[slot]?.setRecipe(null);
+      this.weaponFxWasSwinging[slot] = false;
+      return;
+    }
+
+    let fx = this.weaponFx[slot];
+    if (!fx) {
+      fx = createPixelWeaponFx(this.heroFxLayer, { poolSize: WEAPON_FX_POOL_SIZE });
+      fx.setGroundY(GROUND_Y);
+      fx.setPixelSize(WEAPON_FX_PIXEL_SIZE);
+      // Owner eye-verdict: the sim runs SMOOTH 60fps in-game — the module's
+      // stepped-12fps mode exists to match PIXEL-ART sprite hosts, but this
+      // game's weapons are smooth code-drawn vectors (same default `/lab`'s
+      // refineLadder experiment already ships).
+      fx.setStepFps(60);
+      fx.setDensity(1);
+      this.weaponFx[slot] = fx;
+    }
+    fx.setRecipe(recipe);
+
+    // Direction = anchor − weaponArm pivot (both resolved into `view.parent`-
+    // local space, the SAME coordinate frame `this.heroFxLayer` renders in —
+    // see `getWeaponAnchorPos()`'s own doc comment), mirroring
+    // `/lab/experiments/refineLadder.tsx`'s `updateFxAnchor()` technique.
+    view!.parent!.toLocal(WEAPON_FX_ORIGIN, view!.weaponArm, this.weaponFxPivotScratch);
+    let dx = this.weaponAnchorScratch.x - this.weaponFxPivotScratch.x;
+    let dy = this.weaponAnchorScratch.y - this.weaponFxPivotScratch.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) {
+      dx = 1;
+      dy = 0;
+    } else {
+      dx /= len;
+      dy /= len;
+    }
+    fx.setAnchor(this.weaponAnchorScratch.x, this.weaponAnchorScratch.y, dx, dy);
+
+    const swinging = isHeroAttackSwinging(view!);
+    if (swinging && !this.weaponFxWasSwinging[slot]) fx.notifySwing();
+    this.weaponFxWasSwinging[slot] = swinging;
   }
 
   /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):

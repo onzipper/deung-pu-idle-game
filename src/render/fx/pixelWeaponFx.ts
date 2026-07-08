@@ -1,8 +1,16 @@
 /**
- * `/lab` experiment ⑦ "weaponFx" support module — a self-contained pixel-art
- * particle system for weapon elemental effects (fire/electric/sparkle),
- * written clean enough to lift straight into `src/render/fx/` later. NO
- * engine/store/render imports — Pixi only, so it's provably a leaf module.
+ * Self-contained pixel-art particle system for weapon fx (fire/electric/
+ * sparkle legacy elements from `/lab` experiment ⑦ "weaponFx", plus the
+ * refine/rarity recipe layer from experiment ⑧ "refineLadder" — see
+ * `setRecipe` below). NO engine/store imports — Pixi only, so it's provably a
+ * leaf module.
+ *
+ * Lives in `render/fx/` since M9: this is now the LIVE GAME's weapon fx
+ * engine too (`FxController.ts`'s `updateWeaponFx()`, one pooled instance per
+ * hero slot, created lazily on first non-null recipe) — NOT just a `/lab`
+ * experiment support module anymore. `/lab` experiments ⑦/⑧ import it back
+ * via `@/render/fx/pixelWeaponFx` (lab importing render is the correct
+ * direction for the ESLint engine/render/ui boundary).
  *
  * Pixel-art rules baked in on purpose (see the task brief — these ARE the
  * experiment, not incidental style):
@@ -27,15 +35,16 @@
  */
 
 import { Container, Graphics } from "pixi.js";
-import type { RefineFxLayer, RefineFxRecipe } from "@/lab/refineFxRecipes";
+import type { RefineFxLayer, RefineFxRecipe } from "@/render/fx/refineFxRecipes";
 
 export type WeaponFxElement = "none" | "fire" | "electric" | "sparkle";
 
 export interface PixelWeaponFx {
   setElement(el: WeaponFxElement): void;
   /**
-   * Experiment ⑧ "refineLadder" — a declarative, rarity/refine-driven layer
-   * stack (`@/lab/refineFxRecipes`), running ADDITIVE and INDEPENDENT of
+   * Experiment ⑧ "refineLadder" (and, since M9, the LIVE GAME's own weapon fx
+   * — see this file's header) — a declarative, rarity/refine-driven layer
+   * stack (`@/render/fx/refineFxRecipes`), running ADDITIVE and INDEPENDENT of
    * `setElement`'s legacy fire/electric/sparkle path (separate module state,
    * separate accumulators, separate pool-slot `Kind`s) so ⑦'s behavior stays
    * byte-identical. `null` clears it. Value-compared internally (NOT
@@ -107,7 +116,7 @@ const SPAWN_SPREAD = 24;
  * share this fixed span (same default the legacy element path itself uses). */
 const RECIPE_EVENT_SPREAD = SPAWN_SPREAD;
 
-const POOL_SIZE = 340;
+const DEFAULT_POOL_SIZE = 340;
 
 type Kind =
   | "fire"
@@ -197,12 +206,16 @@ function clampPositive(v: number, min = 0): number {
   return Math.max(min, v);
 }
 
-export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
+export function createPixelWeaponFx(
+  parent: Container,
+  opts?: { poolSize?: number },
+): PixelWeaponFx {
   const layer = new Container();
   parent.addChild(layer);
 
+  const poolSize = opts?.poolSize ?? DEFAULT_POOL_SIZE;
   const pool: Slot[] = [];
-  for (let i = 0; i < POOL_SIZE; i++) pool.push(makeSlot(layer));
+  for (let i = 0; i < poolSize; i++) pool.push(makeSlot(layer));
 
   let element: WeaponFxElement = "none";
   let pixelSize = 4;

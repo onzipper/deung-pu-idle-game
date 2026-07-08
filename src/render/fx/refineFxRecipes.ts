@@ -1,8 +1,16 @@
 /**
- * `/lab` experiment ⑧ "refineLadder" — PURE recipe resolver: refine level +
- * item rarity → declarative pixel-fx layers. No Pixi/DOM imports (provably a
- * leaf module, same discipline as `pixelWeaponFx.ts`'s own header) so it's
- * unit-testable headless and safe to read as a design document.
+ * Weapon refine/rarity fx recipe resolver — PURE: refine level + item rarity
+ * → declarative pixel-fx layers. No Pixi/DOM imports (provably a leaf module,
+ * same discipline as `pixelWeaponFx.ts`'s own header) so it's unit-testable
+ * headless and safe to read as a design document.
+ *
+ * Lives in `render/fx/` since M9 — this recipe resolver now drives BOTH the
+ * live game's NORMAL/LEGENDARY weapon fx (`FxController.ts`'s
+ * `updateWeaponFx()`, replacing the old `gearAura.ts`/`legendaryFx.ts` weapon
+ * stack) AND `/lab` experiments ⑦ "weaponFx" / ⑧ "refineLadder" (which import
+ * it back via `@/render/fx/refineFxRecipes` — lab importing render is the
+ * correct direction for the ESLint engine/render/ui boundary; render must
+ * never import lab).
  *
  * This file IS the design doc in code — every number below is an
  * owner-approved threshold/palette from the plan, not a placeholder:

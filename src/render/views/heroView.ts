@@ -990,10 +990,11 @@ function drawWeaponFlourish(
  * magic); replaced with a QUIET static base — a small soft violet
  * presence-shadow glow (deliberately NOT a hoop) plus a scatter of 2-3
  * uneven gold gleam ticks hugging the anchor. Build-once path draw, same
- * convention as every other ornament in this file — the CONTINUOUS idle
- * particle signature (ember arc / starfall / rune orbit / shadow wisp) and
- * the attack-swing motion trail are `fx/legendaryFx.ts`'s job, driven every
- * frame off `getWeaponAnchorPos()` below, never drawn here. Footgun 10:
+ * convention as every other ornament in this file — the CONTINUOUS pixel-fx
+ * recipe layers (M9 pixel-fx weapon port: `fx/pixelWeaponFx.ts` +
+ * `fx/refineFxRecipes.ts`, `resolveRefineFxRecipe(rarity, awakenLevel, true)`)
+ * are driven every frame off `getWeaponAnchorPos()` below, never drawn here.
+ * Footgun 10:
  * solid fills only, default (normal) blend, never additive. */
 function drawLegendaryOrnament(
   g: Graphics,
@@ -1005,8 +1006,8 @@ function drawLegendaryOrnament(
   // "ตลกจัดๆ" (pretty silly). Replaced with a QUIET static base: a small
   // presence-shadow glow, not a hoop, plus a scatter of uneven gold gleams
   // ("จุดประกายทอง") instead of an evenly-spaced ring (evenness itself was
-  // half of the "compass" read). The moving magic stays entirely
-  // `fx/legendaryFx.ts`'s job (idle signature + swing trail) — untouched.
+  // half of the "compass" read). The moving magic stays entirely the M9
+  // pixel-fx recipe system's job (`fx/pixelWeaponFx.ts`) — untouched.
   const glowR = baseR * 1.3;
   g.circle(anchor.x, anchor.y, safeRadius(glowR)).fill({
     color: PALETTE.legendaryVioletDark,
@@ -2284,8 +2285,10 @@ export function isSwordSwinging(view: HeroView): boolean {
  * while ANY attack animation is actively playing EXCEPT the mage's
  * stationary `castHold` channel (docs/endgame-design.md's legendary motion
  * trail should ride an actual swing/shot/thrust, not a held pose). Used by
- * `fx/legendaryFx.ts`'s cross-class attack-swing trail — `isSwordSwinging`
- * stays swordsman-only for `fx/weaponTrail.ts`'s own dedicated ribbon. */
+ * `fx/FxController.ts`'s `updateWeaponFx()` (M9 pixel-fx weapon port) to
+ * gate `pixelWeaponFx.ts`'s `notifySwing()`/swing-trail recipe layer across
+ * EVERY weapon, normal and legendary alike — `isSwordSwinging` stays
+ * swordsman-only for `fx/weaponTrail.ts`'s own dedicated ribbon. */
 export function isHeroAttackSwinging(view: HeroView): boolean {
   const kind = view.anim.attack?.kind;
   return kind != null && kind !== "castHold";

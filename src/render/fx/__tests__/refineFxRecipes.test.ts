@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRefineFxRecipe } from "@/lab/refineFxRecipes";
+import { resolveRefineFxRecipe } from "@/render/fx/refineFxRecipes";
 import type { ItemRarity } from "@/engine/config/items";
 
 function totalRate(rarity: ItemRarity, refine: number, legendary: boolean): number {

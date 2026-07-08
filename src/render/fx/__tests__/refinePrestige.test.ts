@@ -5,32 +5,20 @@
  * path-building), asserting the POC-crash class of bug (negative/zero radius)
  * never throws and that every effect stays within its existing pooling cap
  * (no new uncapped emitters, per the mobile-GPU constraint).
+ *
+ * WEAPON-side coverage (the old `gearAura.ts` "boosted +8" describe block)
+ * was removed here in the M9 pixel-fx weapon port — `gearAura.ts` is deleted,
+ * weapon +8/+9/+10 now lives entirely in `refineFxRecipes.ts`'s recipe ladder
+ * (see `refineFxRecipes.test.ts`). ARMOR-side `gearSparkle`/`RefinePrestigeFx`
+ * coverage below is untouched.
  */
 
 import { Container } from "pixi.js";
 import { describe, expect, it } from "vitest";
-import { GearAuraController } from "@/render/fx/gearAura";
 import { GearSparklePool } from "@/render/fx/gearSparkle";
 import { ParticlePool } from "@/render/fx/particles";
 import { RefinePrestigeFx } from "@/render/fx/refinePrestige";
 import { RingPool } from "@/render/fx/rings";
-
-describe("gearAura boosted (+8 refine-prestige step)", () => {
-  it("boosted vs. plain slots never throw and never grow the pooled Graphics count", () => {
-    const container = new Container();
-    const aura = new GearAuraController(container);
-    const before = container.children.length;
-
-    expect(() => {
-      aura.setSlot(0, true, 10, 20, 0xff7a1a, false); // +7 plain
-      aura.setSlot(1, true, -5, -5, 0xff7a1a, true); // +8 boosted, negative pos
-      for (let i = 0; i < 30; i++) aura.update(1 / 60);
-    }).not.toThrow();
-
-    expect(container.children.length).toBe(before);
-    aura.destroy();
-  });
-});
 
 describe("gearSparkle boosted (+8 refine-prestige step)", () => {
   it("boosted vs. plain slots never throw and never grow the pooled Graphics count", () => {

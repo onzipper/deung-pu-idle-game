@@ -5,9 +5,11 @@
  * pixel fx and asked for a second version showing how the REAL code-drawn
  * gear (`@/render/views/heroView`, read-only import — never forked) reads
  * across the +0..+10 refine ladder, with fx identity driven by RARITY only
- * (`@/lab/refineFxRecipes` — the pure design-doc-in-code resolver;
- * `@/lab/pixelWeaponFx`'s new `setRecipe` turns it into pooled particles,
- * additive/independent of ⑦'s `setElement` path — see that module's header).
+ * (`@/render/fx/refineFxRecipes` — the pure design-doc-in-code resolver, now
+ * also the LIVE GAME's weapon fx recipe source, `FxController.ts`'s
+ * `updateWeaponFx()`); `@/render/fx/pixelWeaponFx`'s `setRecipe` turns it into
+ * pooled particles, additive/independent of ⑦'s `setElement` path — see that
+ * module's header).
  *
  * Two view modes:
  *   - "single": one rig, real weapon at the selected class/tier (or the
@@ -33,8 +35,8 @@ import type { FrameSet } from "@/lab/frames";
 import type { LabExperiment, LabScene } from "@/lab/registry";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { createHeroView, getWeaponAnchorPos, updateHeroView, type HeroRenderModel, type HeroView } from "@/render/views/heroView";
-import { createPixelWeaponFx, type PixelWeaponFx } from "@/lab/pixelWeaponFx";
-import { resolveRefineFxRecipe } from "@/lab/refineFxRecipes";
+import { createPixelWeaponFx, type PixelWeaponFx } from "@/render/fx/pixelWeaponFx";
+import { resolveRefineFxRecipe } from "@/render/fx/refineFxRecipes";
 import { ITEM_TEMPLATES, LEGENDARY_FOR_CLASS, LEGENDARY_TEMPLATES, type ItemRarity } from "@/engine/config/items";
 import type { HeroClass } from "@/engine/entities";
 
