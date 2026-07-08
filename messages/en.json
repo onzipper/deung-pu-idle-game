@@ -394,6 +394,10 @@
       "boss-map6": {
         "title": "Infernal Sovereign (stage 30) — Field Hazard",
         "body": "The hell city's boss unleashes a telegraphed arena-wide hazard strike that damages you no matter where you stand — heal up and out-DPS it before the strike lands."
+      },
+      "worldAsura": {
+        "title": "The Asura Territories",
+        "body": "A forbidden land past stage 30 — the same monsters you know, but far harsher. The deeper you go, the higher a refine you need. They say something glows strangely in there... and there are odd rumors about a charred scrap of paper someone once found."
       }
     }
   },
@@ -713,6 +717,9 @@
       },
       "map6": {
         "name": "Infernal City"
+      },
+      "asura": {
+        "name": "The Asura Territories"
       }
     }
   },
@@ -865,7 +872,10 @@
     "fastTravelClose": "Close",
     "fastTravelCurrent": "You're here",
     "fastTravelChanneling": "Warping to {map}…",
-    "fastTravelStageRange": "Stage {min}–{max}"
+    "fastTravelStageRange": "Stage {min}–{max}",
+    "asuraBossMystery": "???",
+    "asuraTeaserRow": "The Asura Territories ???",
+    "asuraHotZoneBadge": "Today's hot zone"
   },
   "shop": {
     "title": "Town Shop",
@@ -952,7 +962,8 @@
         "boots": "Boots",
         "amulet": "Amulet"
       }
-    }
+    },
+    "asuraEssenceHint": "Asura essence — hang onto these. Nobody knows what they are for yet..."
   },
   "dropFeed": {
     "gotItem": "Item obtained: {name}",
@@ -1009,7 +1020,10 @@
       "bagFull": "Bag's full — can't buy that back",
       "network": "Network hiccup — try again",
       "unknown": "Something went wrong — try again"
-    }
+    },
+    "asuraEliteSpawned": "👹 Something unnaturally powerful appeared in this zone...",
+    "asuraEliteKilled": "✨ You brought it down! +{essence} asura essence",
+    "asuraZoneStoneEarned": "🪨 Zone mastered — its stone is now yours"
   },
   "refine": {
     "openButton": "Refine",
@@ -1256,6 +1270,15 @@
           "buffOverlay": "Buff badges moved to floating icons in the arena corner — no longer push the screen down",
           "paperDoll": "New bag view: see what's equipped at a glance + mystery slots..."
         }
+      },
+      "2026-07-09h": {
+        "items": {
+          "asura1": "🌋 New land unlocked: The Asura Territories — a forbidden land past stage 30, deeper and harsher than anything before. 10 zones await heroes brave enough to prove their refine.",
+          "asura2": "⚔️ Adventurers who made it back all tell the same story... sometimes an unnaturally powerful monster wanders in there. It glows strangely — but whoever brings it down gets an equally strange reward.",
+          "asura3": "📜 ...and there are odd rumors that someone once came back clutching a charred, unreadable scrap of paper. Nobody knows what it is... if you find one, go ask the elders in town.",
+          "reconnectFix": "🔌 Fixed a bug where joining a friend's party sometimes failed to connect (a CORS issue blocking the server wake-up) — connections are much smoother now.",
+          "cohortTitleFix": "🏅 Fixed party members' titles/champion auras sometimes showing on the wrong nameplate — everyone's tag is correct now."
+        }
       }
     }
   },
@@ -1287,10 +1310,26 @@
       "ninja": "Ninja"
     },
     "titles": {
-      "level": { "1": "Grandmaster of the Realm", "2": "Elite Warrior", "3": "Warrior" },
-      "power": { "1": "Titan of Strength", "2": "Iron Fist", "3": "The Disciplined" },
-      "gold": { "1": "Tycoon", "2": "Wealthy Merchant", "3": "Apprentice Trader" },
-      "online": { "1": "Chief Watchman", "2": "Senior Watchman", "3": "Junior Watchman" }
+      "level": {
+        "1": "Grandmaster of the Realm",
+        "2": "Elite Warrior",
+        "3": "Warrior"
+      },
+      "power": {
+        "1": "Titan of Strength",
+        "2": "Iron Fist",
+        "3": "The Disciplined"
+      },
+      "gold": {
+        "1": "Tycoon",
+        "2": "Wealthy Merchant",
+        "3": "Apprentice Trader"
+      },
+      "online": {
+        "1": "Chief Watchman",
+        "2": "Senior Watchman",
+        "3": "Junior Watchman"
+      }
     },
     "champions": {
       "title": "🏆 Monthly Champions",
@@ -1475,5 +1514,12 @@
         "desc": "Defeat any boss {count} time(s)"
       }
     }
+  },
+  "asura": {
+    "bandHint": "This zone favors +{refine} refine and up",
+    "zoneStoneHint": "This zone's stone: {count}/{goal} (lifetime)",
+    "bossMysteryHint": "No one has ever made it through this room...",
+    "hotZoneHere": "Today this zone is HOT! Bonus rewards apply",
+    "hotZoneElsewhere": "Today's hot zone is zone {n}"
   }
 }

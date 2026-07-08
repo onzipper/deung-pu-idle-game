@@ -275,6 +275,21 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
     date: "2026-07-09",
     items: ["releases.2026-07-09g.items.buffOverlay"],
   },
+  // Endgame v1 "ดินแดนอสูร" (docs/endgame-design.md) + the same-day connection
+  // fixes riding this release: relay CORS/reconnect hardening (the /health
+  // pre-wake no longer gets silently CORS-blocked) and the cohort HOF-title
+  // nameplate fix (titles no longer mis-assign/blank in a party).
+  {
+    id: "2026-07-09h",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09h.items.asura1",
+      "releases.2026-07-09h.items.asura2",
+      "releases.2026-07-09h.items.asura3",
+      "releases.2026-07-09h.items.reconnectFix",
+      "releases.2026-07-09h.items.cohortTitleFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

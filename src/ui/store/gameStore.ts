@@ -348,6 +348,17 @@ export interface EngineSnapshot {
    * panel's daily section (the `!` badge on ผู้ใหญ่บ้าน is a render-only read,
    * not this store slice — see `GameRenderer.ts`). */
   dailies: DailyBoardSummary;
+  /** ดินแดนอสูร (ASURA) endgame v1 accrual (SAVE v19) — straight throttled reads off
+   * `state.asuraEssence` (lifetime แก่นอสูร count) + `state.asuraZoneKills` (per-zone
+   * "asura:idx" -> LIFETIME kill count, ศิลาโซน progress toward `CONFIG.asura.zoneStoneGoal`).
+   * Accrual-only display in v1 (no craft menu reads these yet) — mysterious tone, never
+   * spelled out as a recipe ingredient anywhere in the UI. */
+  asuraEssence: number;
+  asuraZoneKills: Record<string, number>;
+  /** ดินแดนอสูร daily HOT ZONE — the throttled read of `state.asuraHotZone` (the resolved
+   * farm-DEPTH index 0..9, or `null` before `GameClient.tsx` has injected today's day-key /
+   * off-map). Drives `AsuraHotZoneBanner.tsx`'s chip while standing in asura. */
+  asuraHotZoneIdx: number | null;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -446,6 +457,11 @@ export interface PendingInput {
    * check, never a direct player action — last-wins per frame). The engine's own
    * `trySpawnWorldBoss` is idempotent per windowId, so a repeat is a safe no-op. */
   spawnWorldBoss: { windowId: number; remainingSeconds: number } | null;
+  /** ดินแดนอสูร daily HOT-ZONE day-key (queued by `GameClient.tsx`'s own schedule
+   * check while standing in asura — never a direct player action, last-wins per
+   * frame). The engine resolves the zone deterministically off this — see
+   * `PendingInput.spawnWorldBoss`'s doc for the same idempotent-intent shape. */
+  setAsuraHotZone: { dayKey: number } | null;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -475,6 +491,7 @@ function emptyPendingInput(): PendingInput {
     claimMainReward: null,
     useWarpScroll: null,
     spawnWorldBoss: null,
+    setAsuraHotZone: null,
   };
 }
 
@@ -1016,6 +1033,11 @@ export interface HudState {
   mainChapters: MainChapterSummary[];
   /** M8 quest Wave C daily roster — see `EngineSnapshot.dailies`'s doc. */
   dailies: DailyBoardSummary;
+  /** ดินแดนอสูร accrual (SAVE v19) — see `EngineSnapshot.asuraEssence`'s doc. */
+  asuraEssence: number;
+  asuraZoneKills: Record<string, number>;
+  /** ดินแดนอสูร daily hot zone — see `EngineSnapshot.asuraHotZoneIdx`'s doc. */
+  asuraHotZoneIdx: number | null;
 
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
@@ -1395,6 +1417,12 @@ export interface HudState {
    * `PendingInput.spawnWorldBoss`'s doc. */
   queueSpawnWorldBoss: (windowId: number, remainingSeconds: number) => void;
 
+  // ---- ดินแดนอสูร (ASURA) endgame v1 ----
+  /** `GameClient.tsx`-only: queue today's Bangkok day-key while standing in
+   * asura (last-wins per frame, re-queued only on change) — see
+   * `PendingInput.setAsuraHotZone`'s doc. */
+  queueSetAsuraHotZone: (dayKey: number) => void;
+
   // ---- M7.9 server-wide high-refine announcement feed ----
   /** Boot-only: record this client's own characterId (see `myCharacterId`'s doc). */
   setMyCharacterId: (characterId: string | null) => void;
@@ -1470,6 +1498,9 @@ export const useGameStore = create<HudState>((set, get) => ({
   deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
   mainChapters: [],
   dailies: { serverDay: 0, quests: [] },
+  asuraEssence: 0,
+  asuraZoneKills: {},
+  asuraHotZoneIdx: null,
   activeTownPanel: null,
 
   inventory: [],
@@ -1776,6 +1807,9 @@ export const useGameStore = create<HudState>((set, get) => ({
     set((s) => ({
       pendingInput: { ...s.pendingInput, spawnWorldBoss: { windowId, remainingSeconds } },
     })),
+
+  queueSetAsuraHotZone: (dayKey) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, setAsuraHotZone: { dayKey } } })),
 
   setMyCharacterId: (characterId) => set({ myCharacterId: characterId }),
   ingestAnnouncementFeed: (wire) =>

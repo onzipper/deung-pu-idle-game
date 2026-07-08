@@ -64,6 +64,9 @@ export const CODEX_ENTRIES: readonly CodexEntryDef[] = [
 
   // "world" (M7.9 "Grand Expansion"): the 6-map/30-stage world overview.
   { id: "worldMaps", category: "world" },
+  // Endgame v1: ดินแดนอสูร — deliberately vague/mysterious copy (docs/endgame-
+  // design.md's teaser-lore direction), no numbers/mechanics spelled out.
+  { id: "worldAsura", category: "world" },
 
   // "character" (M5 Character Pivot): the single-hero systems that replaced
   // the old team + upgrade lines — creation slots, base stats, mana/skills +

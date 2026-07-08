@@ -82,6 +82,7 @@ import {
   effectiveUnlockedZones,
   wantsBotTownTrip,
   zoneAt,
+  isAsuraLocation,
   type GameEvent,
   type GameState,
   type Hero,
@@ -135,6 +136,7 @@ import {
   sameWorldBossStatus,
   shouldQueueWorldBossSpawn,
 } from "@/ui/worldBoss/schedule";
+import { asuraDayKeyForMs } from "@/ui/asura/schedule";
 import { fetchHofRewards } from "@/ui/hof/rewardsApi";
 import { HOF_REWARD_BOARDS, titleLabel } from "@/ui/hof/titles";
 import { resolveCatchUp } from "./catchUp";
@@ -529,6 +531,11 @@ function buildSnapshot(state: GameState): EngineSnapshot {
         }),
       };
     })(),
+    // ดินแดนอสูร (ASURA) endgame v1 accrual — plain throttled reads, same one-way
+    // "engine carries it, store just reflects it" pattern as `materials`.
+    asuraEssence: state.asuraEssence,
+    asuraZoneKills: { ...state.asuraZoneKills },
+    asuraHotZoneIdx: state.asuraHotZone,
   };
 }
 
@@ -872,6 +879,10 @@ export function GameClient() {
      * transitions only (see `sameWorldBossStatus`'s doc: comparing `secondsLeft`
      * too gives the countdown its ~1Hz cadence for free). */
     let lastWorldBossStatus: WorldBossStatus = { kind: "idle" };
+    /** ดินแดนอสูร daily hot zone: the last Bangkok day-key QUEUED via
+     * `setAsuraHotZone` — re-queued only when it changes (idempotent, same
+     * shape as `lastWorldBossStatus`'s "only push on transition" idiom). */
+    let lastAsuraDayKeyQueued: number | null = null;
 
     /** Rebuild the `heroId -> displayName` map `GameRenderer.setHeroDisplayNames`
      * wants (keyed by hero id, not slot/index — see its doc). `null` while solo. */
@@ -1495,6 +1506,19 @@ export function GameClient() {
         store.queueSpawnWorldBoss(worldBossPhase.windowId, Math.ceil(worldBossPhase.msRemaining / 1000));
       }
 
+      // ดินแดนอสูร (ASURA) daily hot zone: cheap per-frame day-key check, same
+      // server-clock-aligned `serverNowMs()` the world-boss schedule uses. Only
+      // queued while standing IN asura (the zone the intent actually affects),
+      // and only re-queued when the day-key CHANGES (idempotent — the engine's
+      // `applyAsuraHotZone` is itself a plain set, safe to repeat).
+      if (isAsuraLocation(state.location)) {
+        const asuraDayKey = asuraDayKeyForMs(serverNowMs());
+        if (lastAsuraDayKeyQueued !== asuraDayKey) {
+          lastAsuraDayKeyQueued = asuraDayKey;
+          store.queueSetAsuraHotZone(asuraDayKey);
+        }
+      }
+
       // M7.5 bot-status toasts ("มันเกิดขึ้นไวไป มองไม่ทัน" — owner request):
       // capture pre-step consumable counts so a town restock this frame can be
       // reported with real numbers after the sub-steps run.
@@ -1824,6 +1848,14 @@ export function GameClient() {
           void attemptWorldBossClaim(ev.windowId, (id) =>
             tContentItemsRef.current(`${id}.name`),
           );
+        } else if (ev.type === "eliteSpawned") {
+          // ดินแดนอสูร elite roaming mob — flavor-only toast (mysterious tone, no
+          // stats/rewards spoiled here; the reward beat is `eliteKilled` below).
+          useGameStore.getState().pushNotice("asuraEliteSpawned");
+        } else if (ev.type === "eliteKilled") {
+          useGameStore.getState().pushNotice("asuraEliteKilled", { essence: ev.essence });
+        } else if (ev.type === "asuraZoneStoneEarned") {
+          useGameStore.getState().pushNotice("asuraZoneStoneEarned");
         }
       }
 

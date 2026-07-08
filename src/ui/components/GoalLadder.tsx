@@ -33,7 +33,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CONFIG } from "@/engine";
+import { ASURA_MAP_ID, CONFIG, asuraRefineBandForStage } from "@/engine";
 import { HallOfFamePanel } from "@/ui/hof/HallOfFamePanel";
 import {
   buildGoalLadder,
@@ -502,10 +502,13 @@ function CoreLoopCard() {
   const killGoal = useGameStore((s) => s.killGoal);
   const world = useGameStore((s) => s.world);
   const unlockedZones = useGameStore((s) => s.unlockedZones);
+  const asuraZoneKills = useGameStore((s) => s.asuraZoneKills);
   const t = useTranslations("ladder");
   const tHud = useTranslations("hud");
+  const tAsura = useTranslations("asura");
 
   const detail = selectZoneBossDetail(phase, bossReady);
+  const inAsura = world.mapId === ASURA_MAP_ID;
 
   if (detail === "victory") {
     return (
@@ -529,6 +532,26 @@ function CoreLoopCard() {
       <span className="text-sm font-semibold text-ddp-ink-muted">
         {t("zoneBoss.fightingHint")}
       </span>
+    );
+  }
+
+  if (detail === "ready" && inAsura) {
+    // ดินแดนอสูร s40 boss room (item 6): an intentional unbeatable wall in v1 —
+    // no real numbers here, deliberately "???" so nobody grinds a wall they
+    // can't see the shape of. The challenge button still functions (the wall
+    // is real stat scaling, not an engine block) — just no encouragement.
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-red-300/90">{tAsura("bossMysteryHint")}</span>
+        <button
+          type="button"
+          onClick={challengeBoss}
+          aria-label={tHud("challengeBossAriaReady")}
+          className="min-h-11 shrink-0 rounded-(--ddp-radius-md) border border-red-800/60 bg-red-950/40 px-5 py-2.5 text-sm font-extrabold text-red-200 shadow-(--ddp-shadow-btn) transition-all duration-100 hover:brightness-110 active:translate-y-0.5 active:scale-[0.97]"
+        >
+          ❓ {tHud("challengeBossButton")}
+        </button>
+      </div>
     );
   }
 
@@ -610,23 +633,44 @@ function CoreLoopCard() {
     );
   }
   const pct = killGoal > 0 ? Math.min(100, (kills / killGoal) * 100) : 0;
+  // ดินแดนอสูร (item 3): a "which +N this zone wants" depth-band hint + (item 4)
+  // a mysterious per-zone ศิลาโซน accrual hint — both inert outside asura.
+  const asuraBand = inAsura && world.kind === "farm" ? asuraRefineBandForStage(world.stage) : null;
+  const asuraZoneStoneCount = inAsura
+    ? (asuraZoneKills[`${world.mapId}:${world.zoneIdx}`] ?? 0)
+    : 0;
   return (
-    <div data-onboarding-anchor="kill-progress" className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between text-sm font-medium text-ddp-ink-muted">
-        <span className="flex items-center gap-1.5">
-          {/* 🔓 (Unicode 6.0) — Win10-safe, unlike newer emoji (footgun #4) */}
-          <span aria-hidden>🔓</span> {tHud("zoneUnlockLabel")}
-        </span>
-        <span className="font-semibold text-ddp-ink tabular-nums">
-          {kills} / {killGoal}
-        </span>
+    <div className="flex flex-col gap-1.5">
+      <div data-onboarding-anchor="kill-progress" className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between text-sm font-medium text-ddp-ink-muted">
+          <span className="flex items-center gap-1.5">
+            {/* 🔓 (Unicode 6.0) — Win10-safe, unlike newer emoji (footgun #4) */}
+            <span aria-hidden>🔓</span> {tHud("zoneUnlockLabel")}
+          </span>
+          <span className="font-semibold text-ddp-ink tabular-nums">
+            {kills} / {killGoal}
+          </span>
+        </div>
+        <div className="h-3 w-full overflow-hidden rounded-full bg-black/40 ring-1 ring-ddp-border-soft ring-inset">
+          <div
+            className="h-full rounded-full bg-emerald-400 transition-[width] duration-300 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
       </div>
-      <div className="h-3 w-full overflow-hidden rounded-full bg-black/40 ring-1 ring-ddp-border-soft ring-inset">
-        <div
-          className="h-full rounded-full bg-emerald-400 transition-[width] duration-300 ease-out"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      {asuraBand !== null && (
+        <span className="text-[11px] font-semibold text-red-300/80">
+          {tAsura("bandHint", { refine: asuraBand })}
+        </span>
+      )}
+      {inAsura && world.kind === "farm" && (
+        <span className="text-[11px] text-ddp-ink-muted/70">
+          {tAsura("zoneStoneHint", {
+            count: asuraZoneStoneCount,
+            goal: CONFIG.asura.zoneStoneGoal,
+          })}
+        </span>
+      )}
     </div>
   );
 }

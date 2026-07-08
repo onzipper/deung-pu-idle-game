@@ -26,6 +26,7 @@
 
 import { forwardRef, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/ui/components/AnnouncementBanner";
+import { AsuraHotZoneBanner } from "@/ui/components/AsuraHotZoneBanner";
 import { BuffBadgeHub } from "@/ui/components/BuffBadgeHub";
 import { CodexButton } from "@/ui/components/CodexButton";
 import { ConsumableBar } from "@/ui/components/ConsumableBar";
@@ -93,6 +94,9 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       {/* World boss "เสี่ยจ๋อง": hourly countdown/found-it banner — renders nothing
           outside the pre-announce/active windows, see WorldBossBanner.tsx. */}
       <WorldBossBanner />
+      {/* ดินแดนอสูร (endgame v1): today's hot zone — renders nothing outside
+          asura, see AsuraHotZoneBanner.tsx. */}
+      <AsuraHotZoneBanner />
       <HudBar />
 
       <div

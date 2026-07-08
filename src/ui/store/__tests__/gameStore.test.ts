@@ -103,6 +103,9 @@ function makeSnapshot(
     deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
     mainChapters: [],
     dailies: { serverDay: 0, quests: [] },
+    asuraEssence: 0,
+    asuraZoneKills: {},
+    asuraHotZoneIdx: null,
   };
 }
 

@@ -312,6 +312,9 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   const tContent = useTranslations("content.items");
   const inventory = useGameStore((s) => s.inventory);
   const materials = useGameStore((s) => s.materials);
+  // ดินแดนอสูร (endgame v1): accrual-only, mysterious tone — see the module's
+  // asuraEssence doc (never named as a recipe ingredient anywhere in copy).
+  const asuraEssence = useGameStore((s) => s.asuraEssence);
   const heroCls = useGameStore((s) => s.heroes[0]?.cls);
   const inTown = useGameStore((s) => s.world.kind === "town");
   const sessionKnownTemplateIds = useGameStore((s) => s.sessionKnownTemplateIds);
@@ -467,6 +470,17 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             <MaterialIcon className="h-3 w-3" />
             {materials.toLocaleString()}
           </span>
+          {/* ดินแดนอสูร essence (endgame v1) — hidden until the player has ever
+              gotten one (mirrors the fortifier chips below), mysterious tone. */}
+          {asuraEssence > 0 && (
+            <span
+              title={t("asuraEssenceHint")}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-red-800/50 bg-red-950/25 px-2 py-0.5 text-[10px] font-bold tabular-nums text-red-300"
+            >
+              <span aria-hidden>✨</span>
+              {asuraEssence.toLocaleString()}
+            </span>
+          )}
         </div>
 
         {/* World-boss wave: owned "แกร่ง" fortifier readout (inert — no equip/sell

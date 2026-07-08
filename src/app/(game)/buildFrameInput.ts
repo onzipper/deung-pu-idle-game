@@ -64,6 +64,9 @@ export function buildFrameInput(
     // direct player action) while standing in the window's boss zone — plain
     // passthrough, no hero-index remap needed (it's location-based, not per-hero).
     spawnWorldBoss: pending.spawnWorldBoss ?? undefined,
+    // ดินแดนอสูร daily hot zone: same "GameClient's own schedule check queues this"
+    // shape as `spawnWorldBoss` above — plain passthrough, location-based not per-hero.
+    setAsuraHotZone: pending.setAsuraHotZone ?? undefined,
   };
 }
 
