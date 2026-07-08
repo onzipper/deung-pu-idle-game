@@ -1346,6 +1346,16 @@
           "botToggleFix": "🔁 Fixed the bot on/off switch in a party — each member's toggle now only affects their OWN hero.",
           "rename": "✏️ You can now rename your account and characters in Settings / the character-select screen (once per day)."
         }
+      },
+      "2026-07-09j": {
+        "items": {
+          "ghosts": "🌍 The world is alive! You can now see other players walking around your zone (never interferes with your play — can be turned off in Settings).",
+          "chat": "💬 World chat is here — talk to the whole server via the chat button (messages kept for the last 30 minutes).",
+          "signal": "📶 The party status got a new look: signal bars at the arena's top-right — tap to see each friend's ping.",
+          "dropCorner": "🎁 Loot messages moved to a compact corner stack and no longer cover the top HUD (epic drops still pop center-screen).",
+          "townSolo": "🏘️ In town everyone now walks freely — your bot's potion trip no longer stalls when a friend is standing in town.",
+          "partyFixes": "🛠️ Big party bug-fix set: your position survives reconnects, the bot switch truly sticks, and the zone-unlock gauge never resets (party kills count in full for everyone)."
+        }
       }
     }
   },

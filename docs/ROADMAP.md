@@ -163,6 +163,18 @@
 
 > **งานแทรกระหว่าง M8 (เจ้าของขอ 2026-07-08, เสร็จหมด):** บัฟมานา (ดาบ −48%/ธนู −47% ยา/รอบ, เกตครบ, balance-m79 "Mana relief pass") · **หินเสริมพลัง** แทนการย่อย (ดรอปจากมอน เข้าตัวนับเดิม ของเก่าอยู่ครบ, แท็บย่อยหาย, บอทขายอย่างเดียว, ยอด/รอบ ±5% ของยุคย่อย) · sprite sandbox (`scripts/sprite-sandbox/`) + **หน้า /lab** (ทดลอง art 6 โหมด, อัปโหลดเก็บถาวร public/lab-assets, ซ่อนบน prod) + **ลามะเมือง** (ภาพวาดเจ้าของ, แตะแล้วกระโดด+หัวใจ, ไม่มีไฟล์ = เงียบ) — ดีเทลใน commit log
 
+## ✅ M8.6 — World Layer: Ghost Presence + World Chat + Party UX (เสร็จ 2026-07-09, ดีไซน์ = docs/ghost-presence-design.md, เจ้าของอนุมัติทุกข้อ)
+
+> **วิสัยทัศน์เจ้าของ:** "อยากได้ open world ที่เห็นคนอื่นด้วยเลย" + กติกาเหล็ก "ระวังเรื่องไป control คนอื่นให้มากๆ" → ghost = render-only มี invariant 6 ข้อ + guard test ยัดข้อมูลขยะแล้ว hash lockstep ต้องไม่ขยับ
+
+- [x] **แก้บัคปาร์ตี้ 4 ตัว (รายงานจากเล่นจริง)**: เมืองไม่ตั้งวง lockstep แล้ว (บอทวาปซื้อยาไม่ค้าง) · จำตำแหน่งตอน collapse/reconnect · ปุ่มบอทหลักติดจริงในตี้ (wish latch) · เกจปลดโซนไม่รีเซ็ต — ตีในตี้เครดิตเต็มทุกคน (settle-then-rebase)
+- [x] **Relay world layer** (additive, redeploy ครั้งเดียว): ห้อง presence ต่อโซน (pub/sub ไม่มี seq, last-value cache, cap 12) · world chat ห้องเดียว (ring buffer 30 นาที, 120 ตัวอักษร, 1 ข้อความ/2 วิ, ชื่อจาก HMAC ticket ปลอมไม่ได้) · ping→pong ตรงตัว · POST /api/presence/ticket (kind แยกจาก party ticket ทั้งสองทาง)
+- [x] **Ghost layer** (ท่าเดิน/ยืนเท่านั้น ทุกโซน, เจ้าของตัดท่าตี): world socket แยกจาก party socket เด็ดขาด · ghostStore lerp 350ms/prune 10s/cap 12 + fps valve 12→6→0 · rig เต็มตัว+ป้ายชื่อ วาดใต้ฮีโร่จริง อยู่นอก hitTest · toggle ในตั้งค่า
+- [x] **World chat UI**: ปุ่ม 💬 ลอย + badge ยังไม่อ่าน + แผง ModalPortal (มือถือ bottom sheet/เดสก์ท็อป 360px) · เก็บ 30 นาที client-side
+- [x] **ชิปสัญญาณปาร์ตี้** แทนแถบ "เล่นกับ xxx ในโซนนี้": ขีด 4 ระดับสีตาม RTT มุมขวาบนสนาม + แตะดู lane lag รายคน (ping 5s + EMA, perSlotLag จาก turn engine)
+- [x] **DropFeed จัดระเบียบ**: ของธรรมดา/หินย้ายมุมขวาล่างสนาม ยุบรวม cap 3 + ตัวนับ +N · epic เด้งกลางจอเหมือนเดิม
+- [ ] **ค้างตรวจ**: เทสมือ 2 แท็บ (ghost/chat) + มือถือ (ชิป/แผงแชท) · เจ้าของเล่นจริงก่อน merge · **deploy: redeploy relay (จำเป็น — presence/chat/ping) + web, ไม่มี db push**
+
 ## M9 — Economy & Competition
 
 - [ ] ตลาดกลาง: ลงขาย/ซื้อด้วยเงินในเกม + atomic transaction + audit trail + anti-dupe
