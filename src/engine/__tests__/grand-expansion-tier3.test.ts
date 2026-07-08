@@ -685,6 +685,31 @@ describe("M7.9 mage APOCALYPSE meteor volley", () => {
     // Staggered spawn heights => the volley lands across a window (not one lump).
     expect(new Set(meteors.map((p) => p.y)).size).toBe(8);
   });
+
+  it("field-wide buff: the volley tiles the ENTIRE spawn band from any centroid", () => {
+    // Owner buff 2026-07-08 ("ระเบิดทั่ว map"): contiguous coverage — every gap between
+    // sorted impact points must be bridged by the blast radius, and from the worst-case
+    // centroids (both edges of the spawn band) the blasts must still reach the far edge.
+    const r = SKILLS.mage_apocalypse.radius;
+    const dxs = CONFIG.apocalypseOffsets.map((o) => o.dx).sort((a, b) => a - b);
+    for (let i = 1; i < dxs.length; i++) {
+      expect(dxs[i] - dxs[i - 1]).toBeLessThanOrEqual(2 * r); // no dead gap inside the spread
+    }
+    const field = CONFIG.world.maps[0].fieldWidth;
+    const bandMin = field * CONFIG.hunt.spawnMinXFrac;
+    const bandMax = field * CONFIG.hunt.spawnMaxXFrac;
+    expect(bandMin + dxs[dxs.length - 1] + r).toBeGreaterThanOrEqual(bandMax); // left-edge centroid reaches right edge
+    expect(bandMax + dxs[0] - r).toBeLessThanOrEqual(bandMin); // right-edge centroid reaches left edge
+  });
+
+  it("field-wide buff is NOT a boss buff: a lone boss eats exactly 3 of the 8 blasts", () => {
+    // The widened table is calibrated so single-target (boss) damage stays where the old
+    // ±300/r150 table put it (3 near-center hits). If a retune changes this count, the
+    // mage's boss DPS silently shifts — re-adjudicate with the sim before accepting.
+    const r = SKILLS.mage_apocalypse.radius;
+    const hits = CONFIG.apocalypseOffsets.filter((o) => Math.abs(o.dx) < r).length;
+    expect(hits).toBe(3);
+  });
 });
 
 describe("M7.9 auto-cast slot 4 (tier-3 gated)", () => {

@@ -1033,15 +1033,22 @@ export const CONFIG = {
   // (NO new SkillKind, NO new ProjectileKind — footgun #6). `dx` scatters the impacts
   // around the nearest-target centroid; `ry` spreads the landings (at projSpeed 360 the
   // ry ramp 0 -> 980 gives a ≈2.7s volley window). Deterministic (constant table).
+  //
+  // FIELD-WIDE spread (owner buff 2026-07-08 "ระเบิดทั่ว map"): dx spans −650..+640 with
+  // every gap ≤ 230 so at the skill's radius 200 the blasts tile the field with NO dead
+  // gap; from any centroid inside the spawn band (0.22–0.98 × fieldWidth 900) the volley
+  // covers the ENTIRE band. Deliberately calibrated so a LONE boss still eats exactly 3
+  // of the 8 meteors (|dx| < 200: −80/60/190 — same count as the old ±300 table at r150):
+  // this is a field-clear buff, NOT a stealth single-target/boss buff.
   apocalypseOffsets: [
-    { dx: -240, ry: 0 },
-    { dx: 180, ry: 140 },
-    { dx: -120, ry: 280 },
-    { dx: 260, ry: 420 },
-    { dx: -300, ry: 560 },
-    { dx: 60, ry: 700 },
-    { dx: -60, ry: 840 },
-    { dx: 200, ry: 980 },
+    { dx: -650, ry: 0 },
+    { dx: 420, ry: 140 },
+    { dx: -250, ry: 280 },
+    { dx: 640, ry: 420 },
+    { dx: -80, ry: 560 },
+    { dx: 190, ry: 700 },
+    { dx: -450, ry: 840 },
+    { dx: 60, ry: 980 },
   ] as const,
 
   // ---- skills ----
@@ -2188,9 +2195,12 @@ const SKILL_LIST = [
   // spawns MANY when `targets > 0` (NO new SkillKind / ProjectileKind — footgun #6).
   // `targets` MUST equal apocalypseOffsets.length. cost 120 gates it (the mage's deep
   // INT pool affords it, but continuous spam still drains). Learned at tier 3 + level 40.
+  // radius 150 -> 200 (owner field-wide buff 2026-07-08): pairs with the widened
+  // apocalypseOffsets so the 8 blasts tile the whole spawn band; the offset table is
+  // calibrated to keep the lone-boss hit count at 3/8 (see apocalypseOffsets comment).
   {
     id: "mage_apocalypse", cls: "mage", tier: 3, unlockLevel: 40, kind: "meteor",
-    cost: 120, cd: 16, radius: 150, mult: 8.0, targets: 8, projSpeed: 360, range: 520,
+    cost: 120, cd: 16, radius: 200, mult: 8.0, targets: 8, projSpeed: 360, range: 520,
     buffMult: 1, buffDuration: 0,
   },
 
