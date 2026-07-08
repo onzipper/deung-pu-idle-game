@@ -1,15 +1,44 @@
 import { describe, expect, it } from "vitest";
 import {
+  botSettingsFrom,
   desiredHeroConfig,
   dropAssignedIndex,
   heroConfigDiff,
   myAutoHuntDisplay,
   nextAutoHuntWish,
+  nextBotSettingsWish,
   virtualWallet,
   walletSliceFrom,
+  type AutomationPrefs,
   type WalletSlice,
 } from "../cohortWallet";
-import { initGameState, makeHero, step, type GameState, type HeroConfig } from "@/engine";
+import { initGameState, makeHero, step, type BotSettings, type GameState, type HeroConfig } from "@/engine";
+
+/** The six per-hero bot fields at their cold defaults (all OFF / 0) — spread into HeroConfig
+ * and AutomationPrefs fixtures so a change to one is a one-liner. */
+const BOT0 = {
+  enabled: false,
+  sellTripEnabled: false,
+  hpPotionTarget: 0,
+  mpPotionTarget: 0,
+  scrollReserve: 0,
+  goldReserve: 0,
+} as const;
+
+/** A full AutomationPrefs with the auto-* half supplied and the bot half defaulted to BOT0. */
+function autoPrefs(over: Partial<AutomationPrefs>): AutomationPrefs {
+  return {
+    autoHunt: true,
+    autoCast: false,
+    autoAllocate: false,
+    autoHpPotion: false,
+    autoManaPotion: false,
+    autoHpThreshold: 0.5,
+    autoManaThreshold: 0.3,
+    ...BOT0,
+    ...over,
+  };
+}
 
 function wallet(
   gold: number,
@@ -214,19 +243,22 @@ describe("desiredHeroConfig + heroConfigDiff", () => {
     autoManaPotion: false,
     autoHpThreshold: 0.5,
     autoManaThreshold: 0.3,
+    ...BOT0,
     ...over,
   });
 
   it("ANDs every sub-behavior against the bot master switch (autoHunt)", () => {
-    const off = desiredHeroConfig({
-      autoHunt: false,
-      autoCast: true,
-      autoAllocate: true,
-      autoHpPotion: true,
-      autoManaPotion: true,
-      autoHpThreshold: 0.6,
-      autoManaThreshold: 0.4,
-    });
+    const off = desiredHeroConfig(
+      autoPrefs({
+        autoHunt: false,
+        autoCast: true,
+        autoAllocate: true,
+        autoHpPotion: true,
+        autoManaPotion: true,
+        autoHpThreshold: 0.6,
+        autoManaThreshold: 0.4,
+      }),
+    );
     expect(off).toEqual(
       cfg({
         autoHunt: false,
@@ -241,16 +273,46 @@ describe("desiredHeroConfig + heroConfigDiff", () => {
   });
 
   it("passes sub-behaviors through when the master is on", () => {
-    const on = desiredHeroConfig({
-      autoHunt: true,
-      autoCast: true,
-      autoAllocate: false,
-      autoHpPotion: true,
-      autoManaPotion: false,
-      autoHpThreshold: 0.5,
-      autoManaThreshold: 0.3,
-    });
+    const on = desiredHeroConfig(
+      autoPrefs({
+        autoHunt: true,
+        autoCast: true,
+        autoAllocate: false,
+        autoHpPotion: true,
+        autoManaPotion: false,
+        autoHpThreshold: 0.5,
+        autoManaThreshold: 0.3,
+      }),
+    );
     expect(on).toEqual(cfg({ autoCast: true, autoHpPotion: true }));
+  });
+
+  it("passes idle-bot fields through RAW (NOT ANDed with the master switch)", () => {
+    // Bot fields must pass through even when the master (autoHunt) is OFF — the solo
+    // mirror copies state.bot verbatim, so a cohort member's config must too.
+    const out = desiredHeroConfig(
+      autoPrefs({
+        autoHunt: false,
+        enabled: true,
+        sellTripEnabled: true,
+        hpPotionTarget: 40,
+        mpPotionTarget: 30,
+        scrollReserve: 5,
+        goldReserve: 1000,
+      }),
+    );
+    expect(out.enabled).toBe(true);
+    expect(out.sellTripEnabled).toBe(true);
+    expect(out.hpPotionTarget).toBe(40);
+    expect(out.mpPotionTarget).toBe(30);
+    expect(out.scrollReserve).toBe(5);
+    expect(out.goldReserve).toBe(1000);
+  });
+
+  it("heroConfigDiff detects a bot-field-only change", () => {
+    expect(heroConfigDiff(cfg({ enabled: true }), cfg())).toEqual(cfg({ enabled: true }));
+    expect(heroConfigDiff(cfg({ hpPotionTarget: 25 }), cfg())).toEqual(cfg({ hpPotionTarget: 25 }));
+    expect(heroConfigDiff(cfg({ goldReserve: 500 }), cfg())).toEqual(cfg({ goldReserve: 500 }));
   });
 
   it("heroConfigDiff returns null when configs match", () => {
@@ -324,6 +386,7 @@ describe("2-client cohort bot-toggle scenario (regression for the live bug)", ()
     autoManaPotion: false,
     autoHpThreshold: 0.5,
     autoManaThreshold: 0.3,
+    ...BOT0,
   });
 
   it("client A toggling OFF never touches client B's hero, and never oscillates", () => {
@@ -340,24 +403,12 @@ describe("2-client cohort bot-toggle scenario (regression for the live bug)", ()
     const aView = s; // hero 0 owner: heroes[0] already mine
     const bView = { ...s, heroes: [s.heroes[1], s.heroes[0]] }; // hero 1 owner: reordered
 
-    const aDesired = desiredHeroConfig({
-      autoHunt: !myAutoHuntDisplay(aView), // A clicks the toggle -> OFF
-      autoCast: false,
-      autoAllocate: false,
-      autoHpPotion: false,
-      autoManaPotion: false,
-      autoHpThreshold: 0.5,
-      autoManaThreshold: 0.3,
-    });
-    const bDesired = desiredHeroConfig({
-      autoHunt: myAutoHuntDisplay(bView), // B does nothing -> unchanged (still true)
-      autoCast: false,
-      autoAllocate: false,
-      autoHpPotion: false,
-      autoManaPotion: false,
-      autoHpThreshold: 0.5,
-      autoManaThreshold: 0.3,
-    });
+    const aDesired = desiredHeroConfig(
+      autoPrefs({ autoHunt: !myAutoHuntDisplay(aView) }), // A clicks the toggle -> OFF
+    );
+    const bDesired = desiredHeroConfig(
+      autoPrefs({ autoHunt: myAutoHuntDisplay(bView) }), // B does nothing -> unchanged (still true)
+    );
     const aDiff = heroConfigDiff(aDesired, s.heroes[0].config);
     const bDiff = heroConfigDiff(bDesired, s.heroes[1].config);
     expect(aDiff).toEqual(cfg(false));
@@ -369,26 +420,75 @@ describe("2-client cohort bot-toggle scenario (regression for the live bug)", ()
 
     // Re-derive both clients' desired config against the now-converged state: neither
     // produces a diff (the old bug re-sent a stale shared-derived config forever).
-    const aDesired2 = desiredHeroConfig({
-      autoHunt: myAutoHuntDisplay(s),
-      autoCast: false,
-      autoAllocate: false,
-      autoHpPotion: false,
-      autoManaPotion: false,
-      autoHpThreshold: 0.5,
-      autoManaThreshold: 0.3,
-    });
+    const aDesired2 = desiredHeroConfig(autoPrefs({ autoHunt: myAutoHuntDisplay(s) }));
     const bView2 = { ...s, heroes: [s.heroes[1], s.heroes[0]] };
-    const bDesired2 = desiredHeroConfig({
-      autoHunt: myAutoHuntDisplay(bView2),
-      autoCast: false,
-      autoAllocate: false,
-      autoHpPotion: false,
-      autoManaPotion: false,
-      autoHpThreshold: 0.5,
-      autoManaThreshold: 0.3,
-    });
+    const bDesired2 = desiredHeroConfig(autoPrefs({ autoHunt: myAutoHuntDisplay(bView2) }));
     expect(heroConfigDiff(aDesired2, s.heroes[0].config)).toBeNull();
     expect(heroConfigDiff(bDesired2, s.heroes[1].config)).toBeNull();
+  });
+});
+
+describe("nextBotSettingsWish (2026-07-09 — bot SETTINGS panel in a cohort)", () => {
+  const conf = (over: Partial<HeroConfig> = {}): HeroConfig => ({
+    autoCast: false,
+    autoAllocate: false,
+    autoHunt: true,
+    autoHpPotion: false,
+    autoManaPotion: false,
+    autoHpThreshold: 0.5,
+    autoManaThreshold: 0.3,
+    ...BOT0,
+    ...over,
+  });
+
+  it("latches a freshly-drained patch field while config hasn't caught up", () => {
+    expect(nextBotSettingsWish(null, { enabled: true }, conf())).toEqual({ enabled: true });
+    expect(nextBotSettingsWish(null, { hpPotionTarget: 40 }, conf())).toEqual({ hpPotionTarget: 40 });
+  });
+
+  it("holds a latched wish across stale drains (no pending patch, config not caught up)", () => {
+    const prev: Partial<BotSettings> = { enabled: true };
+    expect(nextBotSettingsWish(prev, undefined, conf())).toEqual({ enabled: true });
+    expect(nextBotSettingsWish(prev, null, conf())).toEqual({ enabled: true });
+  });
+
+  it("releases each field PER FIELD once config confirms it (returns null when empty)", () => {
+    // enabled landed but hpPotionTarget hasn't -> only the unconfirmed field stays latched.
+    const prev: Partial<BotSettings> = { enabled: true, hpPotionTarget: 40 };
+    expect(nextBotSettingsWish(prev, undefined, conf({ enabled: true }))).toEqual({ hpPotionTarget: 40 });
+    // both landed -> fully released.
+    expect(nextBotSettingsWish(prev, undefined, conf({ enabled: true, hpPotionTarget: 40 }))).toBeNull();
+  });
+
+  it("merges pending over prev per field, last-wins", () => {
+    const prev: Partial<BotSettings> = { enabled: true, goldReserve: 100 };
+    // A new patch changes goldReserve and adds sellTripEnabled; enabled stays from prev.
+    const out = nextBotSettingsWish(prev, { goldReserve: 500, sellTripEnabled: true }, conf());
+    expect(out).toEqual({ enabled: true, goldReserve: 500, sellTripEnabled: true });
+  });
+
+  it("a patch that already matches the current config latches nothing", () => {
+    expect(nextBotSettingsWish(null, { enabled: false }, conf({ enabled: false }))).toBeNull();
+  });
+});
+
+describe("botSettingsFrom", () => {
+  it("extracts the six bot fields off a HeroConfig", () => {
+    const s = initGameState(1);
+    s.bot = { ...s.bot, enabled: true, hpPotionTarget: 22, goldReserve: 750 };
+    step(s, {}); // syncPrimaryHeroConfig mirrors state.bot -> heroes[0].config
+    expect(botSettingsFrom(s.heroes[0].config, s.bot)).toEqual({
+      enabled: true,
+      sellTripEnabled: s.bot.sellTripEnabled,
+      hpPotionTarget: 22,
+      mpPotionTarget: s.bot.mpPotionTarget,
+      scrollReserve: s.bot.scrollReserve,
+      goldReserve: 750,
+    });
+  });
+
+  it("falls back to the provided BotSettings when config is undefined", () => {
+    const s = initGameState(1);
+    expect(botSettingsFrom(undefined, s.bot)).toEqual(s.bot);
   });
 });

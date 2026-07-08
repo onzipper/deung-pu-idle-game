@@ -14,14 +14,8 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { rttTone, signalChipView, type SignalTone } from "@/ui/party/signalChip";
+import { formatMemberLag, rttTone, signalChipView, type SignalTone } from "@/ui/party/signalChip";
 import { useGameStore } from "@/ui/store/gameStore";
-
-/** Mirrors `engine/lockstep`'s `TURN_MS` (100ms/turn) as a plain display constant — the
- *  ui/ layer reaches the engine ONLY through `@/engine`'s barrel (which doesn't
- *  re-export lockstep internals), and this one number is stable/unlikely to drift
- *  unnoticed (a lockstep cadence change is a whole-system event, not a quiet tweak). */
-const TURN_MS_DISPLAY = 100;
 
 const BAR_BG: Record<SignalTone, string> = {
   emerald: "bg-emerald-400",
@@ -117,16 +111,22 @@ export function PartySignalChip() {
           ) : (
             <ul className="flex flex-col gap-1">
               {net.perMember.map((m) => {
-                const ms = m.lagTurns * TURN_MS_DISPLAY;
+                const lag = formatMemberLag(m.lagTurns);
                 return (
                   <li key={m.slot} className="flex items-center justify-between gap-2">
                     <span className="truncate">
                       {m.name ?? t("signalUnknownMember")}
                       {m.shadowed ? ` (${t("signalShadowed")})` : ""}
                     </span>
-                    <span className={`shrink-0 font-bold tabular-nums ${TEXT_TONE[rttTone(ms)]}`}>
-                      {Math.round(ms)}ms
-                    </span>
+                    {lag.kind === "caughtUp" ? (
+                      <span className="shrink-0 font-bold tabular-nums text-emerald-300">
+                        {t("caughtUp")}
+                      </span>
+                    ) : (
+                      <span className={`shrink-0 font-bold tabular-nums ${TEXT_TONE[rttTone(lag.ms)]}`}>
+                        {Math.round(lag.ms)}ms
+                      </span>
+                    )}
                   </li>
                 );
               })}

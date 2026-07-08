@@ -42,6 +42,7 @@ import { juiceExperiment } from "@/lab/experiments/juice";
 import { playgroundExperiment } from "@/lab/experiments/playground";
 import { townPreviewExperiment } from "@/lab/experiments/townPreview";
 import { weaponFxExperiment } from "@/lab/experiments/weaponFx";
+import { refineLadderExperiment } from "@/lab/experiments/refineLadder";
 
 export const LAB_EXPERIMENTS: readonly LabExperiment[] = [
   animPlayerExperiment,
@@ -51,4 +52,5 @@ export const LAB_EXPERIMENTS: readonly LabExperiment[] = [
   playgroundExperiment,
   townPreviewExperiment,
   weaponFxExperiment,
+  refineLadderExperiment,
 ];

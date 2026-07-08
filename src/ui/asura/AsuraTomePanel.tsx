@@ -243,6 +243,11 @@ export function AsuraTomePanel({ onClose }: { onClose: () => void }) {
   const materials = useGameStore((s) => s.materials);
   const inventory = useGameStore((s) => s.inventory);
   const heroCls = useGameStore((s) => s.heroes[0]?.cls);
+  // Legendary craft is DISABLED while in an active cohort (2026-07-09): crafting spends
+  // แก่นอสูร (a per-member mean-field share of the shared pot) — allowing it mid-cohort would
+  // risk cross-member essence dupes. "solo" covers both "no party" and "partied but alone in
+  // my zone", so only an actively lockstepping cohort blocks the craft.
+  const inCohort = useGameStore((s) => s.cohortStatus.kind !== "solo");
 
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
@@ -294,7 +299,7 @@ export function AsuraTomePanel({ onClose }: { onClose: () => void }) {
 
   const cost = TOME_COST;
   const canPickWeapon = t10Weapons.length > 0;
-  const craftDisabled = !canCraftLegendary || !selectedInstanceId || crafting;
+  const craftDisabled = !canCraftLegendary || !selectedInstanceId || crafting || inCohort;
 
   return (
     <ModalPortal>
@@ -400,6 +405,9 @@ export function AsuraTomePanel({ onClose }: { onClose: () => void }) {
 
             {!hasAllZoneStones && (
               <p className="text-center text-[11px] text-amber-300">{t("blockReason.stones")}</p>
+            )}
+            {inCohort && (
+              <p className="text-center text-[11px] text-amber-300">{t("craftPartyBlocked")}</p>
             )}
             {craftError && (
               <p className="text-center text-[11px] text-rose-300">{t(`craftError.${craftError}`)}</p>

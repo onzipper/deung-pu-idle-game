@@ -43,6 +43,22 @@ export function rttBars(rttMs: number | null): number {
  * The chip's full visual state for a given `cohortStatus` + current RTT sample.
  * `null` = render nothing (solo — not in a cohort, the overwhelming common case).
  */
+/** Mirrors `engine/lockstep`'s `TURN_MS` (100ms/turn) as a plain display constant — the
+ *  ui/ layer reaches the engine ONLY through `@/engine`'s barrel (which doesn't
+ *  re-export lockstep internals), and this one number is stable/unlikely to drift
+ *  unnoticed (a lockstep cadence change is a whole-system event, not a quiet tweak). */
+export const TURN_MS_DISPLAY = 100;
+
+export type MemberLagView = { kind: "caughtUp" } | { kind: "ms"; ms: number };
+
+/** A member's lag row: `lagTurns` is clamped >=0 upstream (healthy peers send 2 turns
+ *  ahead of the authority, which nets to 0 here) — "0ms" reads as broken/no-connection
+ *  to a player, so caught-up peers get a distinct label instead of a bogus latency. */
+export function formatMemberLag(lagTurns: number): MemberLagView {
+  if (lagTurns <= 0) return { kind: "caughtUp" };
+  return { kind: "ms", ms: lagTurns * TURN_MS_DISPLAY };
+}
+
 export function signalChipView(status: CohortStatusState, rttMs: number | null): SignalChipView | null {
   switch (status.kind) {
     case "solo":

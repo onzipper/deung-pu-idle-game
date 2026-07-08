@@ -1040,6 +1040,7 @@
     "rewardManaPotion": "+{amount} mana potions",
     "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
     "warpToFriendStarted": "🌀 Warping to your friend...",
+    "cohortZoneUnlocked": "🗺️ New zone unlocked! You can advance now",
     "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones +1 {item} — check your inventory's Fortifier row, then use \"Use Fortifier\" at Uncle Dueng's refine station",
     "hofClaimed": "🏅 Hall of Fame reward claimed! Got 1 {item} — check your inventory's Fortifier row, then use \"Use Fortifier\" at Uncle Dueng's refine station",
     "fastTravelBlocked": {
@@ -1508,7 +1509,8 @@
     "signalRelayRow": "To server",
     "signalNoMembers": "No teammates yet",
     "signalUnknownMember": "Teammate",
-    "signalShadowed": "disconnected"
+    "signalShadowed": "disconnected",
+    "caughtUp": "✓ in sync"
   },
   "chat": {
     "openButton": "Open chat",
@@ -1651,6 +1653,7 @@
         "unknown": "Something went wrong — try again"
       },
       "craftSuccess": "Forged! {name} is now yours",
+      "craftPartyBlocked": "You're in a party — leave it to forge a legendary weapon",
       "awaken": {
         "title": "Awaken Power",
         "levelReadout": "+{current}/{max}",

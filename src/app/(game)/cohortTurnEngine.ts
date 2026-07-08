@@ -223,21 +223,7 @@ export class CohortTurnEngine {
    */
   tick(elapsedMs: number, nowMs: number, io: CohortTickIO): { waiting: boolean } {
     // ── ISSUE ── emit my lane once per turn boundary, scheduled INPUT_DELAY_TURNS ahead.
-    // A long frame that crosses two boundaries drains twice: the second drain naturally
-    // returns an idle-ish input (the store emptied on the first) — no `issuedMine` flag.
-    this.issueAccumMs += elapsedMs;
-    while (this.issueAccumMs >= TURN_MS) {
-      this.issueAccumMs -= TURN_MS;
-      const input = io.drainInput();
-      const msg: TurnMessage = {
-        slot: this.myIndex,
-        executeTurn: this.issueTurn + INPUT_DELAY_TURNS,
-        input,
-      };
-      this.deliver(msg); // self-deliver immediately — never wait on the relay echo
-      io.send(msg);
-      this.issueTurn++;
-    }
+    this.runIssuePhase(elapsedMs, io);
 
     // ── EXECUTE ── meter sub-steps out on real time so motion is smooth (not a 100ms burst).
     this.execAccumMs += elapsedMs;
@@ -281,5 +267,95 @@ export class CohortTurnEngine {
     return {
       waiting: stalledAtBoundary && nowMs - this.lastProgressAt > COHORT_WAITING_MS,
     };
+  }
+
+  /**
+   * ISSUE phase — emit my lane once per turn boundary, scheduled INPUT_DELAY_TURNS ahead of
+   * the issue cursor. Shared verbatim by `tick` (rAF-driven) and `issueOnly` (hidden-tab
+   * keepalive, FIX 5) so the two drivers are interchangeable across a hide/show boundary:
+   * both advance the SAME `issueAccumMs`/`issueTurn`, so a turn boundary emits exactly once
+   * no matter which driver crossed it (never double-issued, never skipped). A long frame
+   * that crosses two boundaries drains twice: the second drain naturally returns an idle-ish
+   * input (the store emptied on the first) — no `issuedMine` flag needed.
+   */
+  private runIssuePhase(
+    elapsedMs: number,
+    io: Pick<CohortTickIO, "drainInput" | "send">,
+  ): void {
+    this.issueAccumMs += elapsedMs;
+    while (this.issueAccumMs >= TURN_MS) {
+      this.issueAccumMs -= TURN_MS;
+      const input = io.drainInput();
+      const msg: TurnMessage = {
+        slot: this.myIndex,
+        executeTurn: this.issueTurn + INPUT_DELAY_TURNS,
+        input,
+      };
+      this.deliver(msg); // self-deliver immediately — never wait on the relay echo
+      io.send(msg);
+      this.issueTurn++;
+    }
+  }
+
+  /**
+   * HIDDEN-TAB LANE-KEEPALIVE (FIX 5, "พับจอ/สลับแท็บ ต้องไม่หยุดทั้งตี้"). Advance ONLY the issue
+   * phase from `elapsedMs` of wall time — emit my due lanes to peers WITHOUT executing any
+   * sub-step locally. Called while my tab is hidden and the rAF loop (the normal `tick`
+   * driver) is paused, so peers keep receiving my (idle) lanes and the whole cohort never
+   * stalls waiting on me. The execute cursor stays frozen; the backlog of turns issued here
+   * (plus the peer lanes buffered via `deliver` while hidden) is drained by `burstExecute`
+   * on resume. Determinism is untouched: an idle lane is ordinary input, applied identically
+   * by every peer — only WHEN my own client runs it (much later, on resume) differs.
+   */
+  issueOnly(elapsedMs: number, io: Pick<CohortTickIO, "drainInput" | "send">): void {
+    this.runIssuePhase(elapsedMs, io);
+  }
+
+  /**
+   * RESUME-FROM-HIDDEN backlog burst (FIX 5). Execute up to `maxSubSteps` buffered sub-steps
+   * as fast as possible — bypassing `tick`'s real-time metering (`execAccumMs`) AND the
+   * stall-debt cap — to drain the turns issued/received while my tab was hidden. Stops early
+   * (`caughtUp: true`) when either (a) the current turn's lane is INCOMPLETE (I've reached a
+   * genuinely-missing peer lane — nothing more to burn; normal `tick` + the waiting chip take
+   * over from here), or (b) the buffered backlog has fallen to normal network-jitter depth
+   * (`<= CATCHUP_BONUS_DEPTH` complete turns ahead — the real-time cadence can resume). The
+   * caller runs this in a wall-clock-budgeted loop (a few ms per rAF frame) so the UI never
+   * janks, and discards the replayed events (like the solo offline catch-up) to avoid an
+   * fx/audio flood. Assembles lanes byte-identically to `tick`'s execute block, so this only
+   * changes WHEN my client runs already-assembled sub-steps, never WHAT it runs.
+   */
+  burstExecute(
+    io: CohortTickIO,
+    maxSubSteps: number,
+    nowMs: number,
+  ): { caughtUp: boolean; ran: number } {
+    let ran = 0;
+    while (ran < maxSubSteps) {
+      if (this.subIndex === 0) {
+        const lane = this.buffer.get(this.turn);
+        if (!this.laneComplete(lane)) {
+          if (ran > 0) this.lastProgressAt = nowMs;
+          return { caughtUp: true, ran }; // reached a genuinely-missing lane — as caught up as possible
+        }
+        const lanes: FrameInput[] = new Array(this.cohortSize);
+        for (let i = 0; i < this.cohortSize; i++) lanes[i] = lane?.get(i) ?? {};
+        io.runSubStep(lanes); // lanes apply on sub-step 0 ONLY (identical to tick)
+      } else {
+        io.runSubStep([]); // sub-steps 1..5 all-idle
+      }
+      ran++;
+      this.subIndex++;
+      if (this.subIndex >= SUB_STEPS_PER_TURN) {
+        this.buffer.delete(this.turn);
+        this.turn++;
+        this.subIndex = 0;
+        if (this.bufferedAhead() <= CATCHUP_BONUS_DEPTH) {
+          this.lastProgressAt = nowMs;
+          return { caughtUp: true, ran }; // backlog drained to jitter depth — resume cadence
+        }
+      }
+    }
+    this.lastProgressAt = nowMs;
+    return { caughtUp: false, ran }; // hit the batch budget — caller loops again within its ms budget
   }
 }

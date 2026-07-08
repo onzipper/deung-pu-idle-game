@@ -180,11 +180,15 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
     return;
   }
 
-  const bot = state.bot;
+  // Bot settings are now PER HERO (2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน"): the idle bot always
+  // acts through `heroes[0]`, so it reads that hero's own `config` (structurally a BotSettings).
+  // In SOLO `config` === `state.bot` every step (`syncPrimaryHeroConfig`) → byte-identical; the
+  // `?? state.bot` only covers a defensively-empty heroes array (never a real battle state).
+  const hero = state.heroes[0];
+  const bot: BotSettings = hero?.config ?? state.bot;
   if (!bot.enabled && !bot.sellTripEnabled) return;
   if (state.traveling || state.fastTravelCast) return;
   if (state.phase !== "battle") return; // never mid boss / victory
-  const hero = state.heroes[0];
   if (!hero || hero.dead) return;
 
   // A prior sell sweep gave up with the bag still at `sellTripWatermark` items —
@@ -324,13 +328,15 @@ function tickBotWalk(state: GameState): void {
  * 2026-07-07: every trip runs ALL enabled chores) — only its TRIGGER moved to the anchor.
  */
 function doBotBusiness(state: GameState, pending: { restock: boolean; sell: boolean }): void {
+  // Per-hero bot settings (2026-07-09): the acting hero is `heroes[0]` (solo: config === state.bot).
+  const bot: BotSettings = state.heroes[0]?.config ?? state.bot;
   // Opportunistic top-up: ANY bot trip restocks while at the shop (restock bot must be ON).
-  if (pending.restock || state.bot.enabled) botRestock(state);
+  if (pending.restock || bot.enabled) botRestock(state);
 
   // Opportunistic dispose: ANY bot trip runs the sell/salvage sweep when the sell bot is
   // ON. `pending.sell` alone marks a GENUINE full-bag trigger; `sellTriggered` carries
   // that to the client (it only shows the "nothing to dispose" notice for real sell trips).
-  const doSell = pending.sell || state.bot.sellTripEnabled;
+  const doSell = pending.sell || bot.sellTripEnabled;
   const reason: "restock" | "sell" | "restockSell" =
     pending.restock && doSell ? "restockSell" : doSell ? "sell" : "restock";
 
@@ -410,7 +416,8 @@ export function onBotTownArrival(state: GameState): void {
  * gold floor (spend only surplus above `goldReserve`). Reuses the town-only,
  * partial-safe `buyShopItem`; each buy is re-budgeted from the reduced gold. */
 function botRestock(state: GameState): void {
-  const bot = state.bot;
+  // Per-hero bot settings (2026-07-09): the acting hero is `heroes[0]` (solo: config === state.bot).
+  const bot: BotSettings = state.heroes[0]?.config ?? state.bot;
   buyToTarget(state, "hpPotion", bot.hpPotionTarget, bot.goldReserve);
   buyToTarget(state, "manaPotion", bot.mpPotionTarget, bot.goldReserve);
   buyToTarget(state, "returnScroll", bot.scrollReserve, bot.goldReserve);

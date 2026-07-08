@@ -89,12 +89,15 @@ import {
   hasAllZoneStones,
   canCraftLegendary,
   craftBlockReason,
+  TOME_ALL_PAGES,
+  type FrameInput,
   type GameEvent,
   type GameState,
   type Hero,
   type HeroClass,
   type SaveData,
   type TownNpcId,
+  type BotSettings,
 } from "@/engine";
 import { type TurnMessage } from "@/engine/lockstep";
 import { AudioController } from "@/render/audio";
@@ -174,21 +177,25 @@ import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFram
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
 import {
+  botSettingsFrom,
   desiredHeroConfig,
   dropAssignedIndex,
   heroConfigDiff,
   myAutoHuntDisplay,
   nextAutoHuntWish,
+  nextBotSettingsWish,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
 } from "./cohortWallet";
 import {
   applyProgressSlice,
-  liveZoneKills,
+  deriveUnlockedZones,
   progressSliceFrom,
   settleProgressSlice,
+  sharedProgressFrom,
   type ProgressSlice,
+  type SharedProgress,
 } from "./cohortProgress";
 import { TimeDirector } from "./timeDirector";
 import { WorldSession } from "./presence/worldSession";
@@ -268,6 +275,23 @@ const MAX_FRAME_SECONDS = 0.25;
  * elapsed time to that same clamp (tab switch, mobile screen fold, …).
  */
 const CATCHUP_MIN_HIDDEN_MS = 5_000;
+
+// ── FIX 5 (2026-07-09) hidden-tab lane-keepalive for an ACTIVE cohort ────────────────
+/** While a cohort member's tab is hidden the rAF loop pauses, so this fallback interval
+ * keeps ISSUING its idle lanes to peers so the cohort never stalls waiting on it.
+ * Background tabs throttle timers to ~1Hz, which is exactly this cadence (inbound peer
+ * messages drive it faster when they're active — see `onPartyGameMessage`). */
+const KEEPALIVE_ISSUE_INTERVAL_MS = 1_000;
+/** Cap on how long a tab may sit in lane-keepalive before resume falls back to the legacy
+ * leave -> solo catch-up -> re-handshake path (a huge buffered backlog isn't worth
+ * bursting; the bounded solo offline replay is cheaper). 30 min. */
+const HIDDEN_KEEPALIVE_MAX_MS = 30 * 60 * 1_000;
+/** Wall-clock budget per rAF frame for the resume backlog burst, so catching up a long
+ * hidden gap spreads over a few frames instead of janking one. */
+const CATCHUP_BURST_BUDGET_MS = 24;
+/** Sub-steps per burst batch between wall-clock checks (amortises the `performance.now()`
+ * read; `step()` is cheap enough that a batch of 128 fits well under one frame). */
+const CATCHUP_BURST_SUBSTEPS = 128;
 
 /** Wall time between periodic autosave POSTs. */
 const AUTOSAVE_INTERVAL_MS = 30_000;
@@ -520,8 +544,10 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     shop,
     // Idle-bot config (M7.5, read-only display source — see `HudState.bot`'s
     // doc) + per-map unlocked-zone counts (M6 SAVE v8 field, surfaced for the
-    // fast-travel picker's lock read).
-    bot: { ...state.bot },
+    // fast-travel picker's lock read). PER-HERO now (2026-07-09): read MY OWN hero's
+    // config (heroes[0] is my-hero-first in a cohort) so the BotSettings panel shows my
+    // own settings, not the shared lane-0 `state.bot`. Byte-identical in solo (config ≡ state.bot).
+    bot: botSettingsFrom(state.heroes[0]?.config, state.bot),
     // Bot MASTER switch display (M8 party live bug fix — see `myAutoHuntDisplay`'s doc):
     // MY OWN hero's config, never the shared `state.autoHunt` legacy field.
     autoHunt: myAutoHuntDisplay(state),
@@ -911,22 +937,57 @@ export function GameClient() {
      * active (`serialize()`) and restored verbatim on `collapseToSolo()` — the fix for the
      * "partying with a deep player permanently unlocked my zones" live bug. Null while solo. */
     let cohortProgressBase: ProgressSlice | null = null;
-    /** PROGRESSION-INTEGRITY, owner bug batch B: the SHARED cohort pot's `zoneKills` at the
-     * moment I joined (or re-seeded) — the baseline `settleProgressSlice` measures the pot's
-     * kill-delta against, so I get FULL credit for kills made while in the cohort without
-     * double-counting across re-seeds (mirrors `cohortSharedBase`'s role for the wallet).
-     * Null while solo. */
-    let cohortZoneKillsBase: Record<string, number> | null = null;
+    /** PROGRESSION-INTEGRITY, owner bug batch B + 2026-07-09 asura per-member accounting: the
+     * SHARED cohort pot's progression baseline (`zoneKills` + asura essence/zone-kills/tome
+     * pages) at the moment I joined (or re-seeded) — what `settleProgressSlice` measures the
+     * pot's delta against, so I get FULL credit for kills / my mean-field share of essence
+     * without double-counting across re-seeds (mirrors `cohortSharedBase`'s role for the
+     * wallet). Null while solo. */
+    let cohortSettleBase: SharedProgress | null = null;
+    /** 2026-07-09 asura per-member accounting: MY own count of successful daily z10 sigil
+     * claims made WHILE in this cohort. The `claimAsuraSigil` engine intent is lane-0-only
+     * (a member's would be dead) so it's STRIPPED in a cohort; the claim is server-ledgered
+     * (once/day/character) and this counter — incremented only when the POST-gated intent is
+     * drained — feeds `settleProgressSlice` so my own settled sigils reflect my own claims.
+     * Reset on activate (folded into the re-based slice) / collapse. */
+    let cohortSigilClaims = 0;
+    /** FIX 4 (2026-07-09): my last-seen DERIVED per-member unlocked-zone counts (see
+     * `deriveUnlockedZones`), to fire a one-shot "new zone unlocked!" notice when a zone
+     * flips unlocked for ME mid-cohort (the engine's `zoneUnlocked` event never fires in the
+     * shared state a deep friend already unlocked). Null while solo / until first derived. */
+    let cohortPrevDerivedUnlocked: Record<string, number> | null = null;
     /** Owner bug batch A #2: my CLIENT-LOCAL bot-master toggle wish latch (see
      * `nextAutoHuntWish`). Holds a pressed `autoHunt` value until my hero's replicated
      * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
     let cohortAutoHuntWish: boolean | null = null;
+    /** 2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน": my CLIENT-LOCAL bot-SETTINGS wish latch (see
+     * `nextBotSettingsWish`). Holds each pressed BotSettings field until my hero's replicated
+     * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
+    let cohortBotSettingsWish: Partial<BotSettings> | null = null;
     /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
      * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
     let cohortEngine: CohortTurnEngine | null = null;
     /** Last-seen `waiting` value from the engine, to detect chip transitions per frame. */
     let cohortPrevWaiting = false;
     let lastZoneKey: string | null = null;
+
+    // ── FIX 5 hidden-tab lane-keepalive state (see the constants block up top) ──
+    /** True while this tab is hidden AND in lane-keepalive (issuing but not executing).
+     * Set in `onVisibility(hidden)`; cleared on resume / true-close / collapse. */
+    let hiddenKeepaliveActive = false;
+    /** The 1s fallback issue-driver interval while hidden (undefined when not hidden). */
+    let keepaliveInterval: ReturnType<typeof setInterval> | undefined;
+    /** `performance.now()` of the last keepalive issue (message- OR interval-driven), so the
+     * shared issue accumulator advances by the true wall-clock delta between drivers. */
+    let keepaliveLastIssueAt = 0;
+    /** `Date.now()` when lane-keepalive engaged (for the `HIDDEN_KEEPALIVE_MAX_MS` cap). */
+    let hiddenKeepaliveStartedAt = 0;
+    /** True while resume is bursting the buffered backlog to catch the execute cursor up to
+     * the issue cursor (see `CohortTurnEngine.burstExecute`). Cleared once caught up. */
+    let cohortCatchUp = false;
+    /** Last relay connection status reported by `onPartyStatusChange` — read on resume to
+     * decide burst-catch-up vs. the legacy re-handshake fallback. */
+    let partyConnStatus: PartyConnStatus = "off";
 
     // ---- Wave 3 "signal chip" network HUD (docs/ghost-presence-design.md) ----
     /** EMA-smoothed RTT to the relay over the PARTY socket (`partySession.ping`'s pong
@@ -1118,8 +1179,14 @@ export function GameClient() {
      * `state`. Reads the live current-zone counter (`liveZoneKills`) so a kill made THIS
      * frame is credited immediately (both to the HUD gauge and to any save that lands). */
     function settledProgress(): ProgressSlice | null {
-      if (!cohortActive || !cohortProgressBase || !cohortZoneKillsBase) return null;
-      return settleProgressSlice(cohortProgressBase, cohortZoneKillsBase, liveZoneKills(state));
+      if (!cohortActive || !cohortProgressBase || !cohortSettleBase) return null;
+      return settleProgressSlice(
+        cohortProgressBase,
+        cohortSettleBase,
+        sharedProgressFrom(state),
+        Math.max(1, state.heroes.length),
+        cohortSigilClaims,
+      );
     }
 
     /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
@@ -1137,7 +1204,15 @@ export function GameClient() {
       // slice — kills I made inside the cohort accrue to my own `zoneKills`, so leaving the
       // party keeps them (and the accumulated count unlocks the zone once I'm solo).
       const settledProg = settledProgress();
+      // Bot settings are PER HERO now (2026-07-09): capture MY hero's own bot config BEFORE
+      // the extract (which rebuilds `state.bot` from the SHARED slice) so the post-collapse
+      // solo state keeps MY settings, not the authority's shared `state.bot`.
+      const myBot = botSettingsFrom(state.heroes[myCohortIndex]?.config, state.bot);
       state = extractSoloState(state, myCohortIndex, seed);
+      // Overwrite the rebuilt solo `state.bot` with my own — the next step's
+      // `syncPrimaryHeroConfig` then mirrors it onto heroes[0].config (so the solo bot behaves
+      // exactly as my in-cohort settings dictated).
+      state.bot = myBot;
       if (settled) {
         state.gold = settled.gold;
         state.goldEarned = settled.goldEarned;
@@ -1156,9 +1231,13 @@ export function GameClient() {
       cohortWalletBase = null;
       cohortSharedBase = null;
       cohortProgressBase = null;
-      cohortZoneKillsBase = null;
+      cohortSettleBase = null;
+      cohortSigilClaims = 0;
+      cohortPrevDerivedUnlocked = null;
       cohortAutoHuntWish = null;
+      cohortBotSettingsWish = null;
       cohortActive = false;
+      cohortCatchUp = false; // FIX 5: a collapse mid-burst exits catch-up mode
       handshake?.abort();
       handshake = null;
       handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS;
@@ -1235,10 +1314,18 @@ export function GameClient() {
       cohortWalletBase = preWallet;
       cohortSharedBase = walletSliceFrom(built);
       cohortProgressBase = preProgress;
-      // Baseline the pot's zoneKills for THIS cohort (what `settleProgressSlice` measures the
-      // shared kill-delta against) + clear the bot-toggle wish latch for the fresh cohort.
-      cohortZoneKillsBase = liveZoneKills(built);
+      // Baseline the pot's progression (zoneKills + asura essence/zone-kills/tome pages) for
+      // THIS cohort (what `settleProgressSlice` measures the shared delta against) + clear the
+      // bot-toggle wish latch and the per-member sigil/derived-unlock trackers for the fresh
+      // cohort — on a re-seed the OLD cohort's sigil claims are already folded into
+      // `preProgress.asuraSigils` (via `settledProgress()`), so resetting to 0 never
+      // double-counts.
+      cohortSettleBase = sharedProgressFrom(built);
+      cohortSigilClaims = 0;
+      cohortPrevDerivedUnlocked = null;
       cohortAutoHuntWish = null;
+      cohortBotSettingsWish = null;
+      cohortCatchUp = false; // FIX 5: a fresh re-handshake supersedes any in-flight burst
       handshake = null;
       handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS; // converged — reset the backoff
       cohortActive = true;
@@ -1264,6 +1351,7 @@ export function GameClient() {
     }
 
     function onPartyStatusChange(status: PartyConnStatus): void {
+      partyConnStatus = status;
       if (status === "reconnecting") {
         // Design C's abort path: a dropped/gapped relay connection breaks the ordered-
         // stream contract the WHOLE cohort rests on — discard any in-flight handshake
@@ -1377,6 +1465,10 @@ export function GameClient() {
       if (cohortActive && typeof rec.executeTurn === "number" && typeof rec.slot === "number") {
         cohortEngine?.deliver(payload as TurnMessage);
       }
+      // FIX 5 hidden-tab keepalive: a ws message still fires while my tab is hidden (~10/s),
+      // so use each inbound peer message as a wall-clock tick for the issue driver — my lanes
+      // keep flowing to peers without waiting on the 1s fallback interval. No-op when visible.
+      if (hiddenKeepaliveActive) issueOnlyTick();
     }
 
     /** Broadcast the leader-authored `setShadowed` lane-fill intent for a member of the
@@ -1667,6 +1759,81 @@ export function GameClient() {
       }
     }
 
+    /**
+     * Build MY cohort lane input for one issue boundary. Extracted from the inline
+     * `io.drainInput` so BOTH the rAF `frame()` loop AND the hidden-tab keepalive driver
+     * (`issueOnlyTick`, FIX 5) assemble it identically — draining `pendingInput` (zero-loss),
+     * latching the bot-toggle/bot-settings wishes, stripping the lane-0-only legacy intents,
+     * counting sigil claims, and replicating my hero-config diff. Returns `manualBuy` instead
+     * of touching the frame-local flag so the keepalive path (where it's irrelevant) can
+     * ignore it. Reads `useGameStore.getState()` fresh — the same live singleton snapshot the
+     * frame loop uses.
+     */
+    function drainCohortInput(): { input: FrameInput; manualBuy: boolean } {
+      const store = useGameStore.getState();
+      const pending = store.drainPendingInput();
+      const manualBuy = !!pending.buyShopItem;
+      const input = buildFrameInput(pending, store.inventory.length, myCohortIndex);
+      cohortAutoHuntWish = nextAutoHuntWish(
+        cohortAutoHuntWish,
+        input.setAutoHunt,
+        state.heroes[myCohortIndex]?.config.autoHunt ?? store.autoHunt,
+      );
+      cohortBotSettingsWish = nextBotSettingsWish(
+        cohortBotSettingsWish,
+        input.setBotSettings,
+        state.heroes[myCohortIndex]?.config,
+      );
+      input.setAutoHunt = undefined;
+      input.setBotSettings = undefined;
+      if (input.claimAsuraSigil) cohortSigilClaims += 1;
+      input.claimAsuraSigil = undefined;
+      input.craftLegendary = undefined;
+      const bot = { ...store.bot, ...(cohortBotSettingsWish ?? {}) };
+      const diff = heroConfigDiff(
+        desiredHeroConfig({
+          autoHunt: cohortAutoHuntWish ?? store.autoHunt,
+          autoCast: store.autoCast,
+          autoAllocate: store.autoAllocate,
+          autoHpPotion: store.autoHpPotion,
+          autoManaPotion: store.autoManaPotion,
+          autoHpThreshold: store.autoHpThreshold,
+          autoManaThreshold: store.autoManaThreshold,
+          enabled: bot.enabled,
+          sellTripEnabled: bot.sellTripEnabled,
+          hpPotionTarget: bot.hpPotionTarget,
+          mpPotionTarget: bot.mpPotionTarget,
+          scrollReserve: bot.scrollReserve,
+          goldReserve: bot.goldReserve,
+        }),
+        state.heroes[myCohortIndex]?.config,
+      );
+      if (diff) input.setHeroConfig = diff;
+      return { input, manualBuy };
+    }
+
+    // FIX 5: the io the hidden-tab keepalive driver feeds `issueOnly` — same lane assembly +
+    // relay send as the frame loop, minus `runSubStep` (nothing executes while hidden).
+    const keepaliveIo: Pick<CohortTickIO, "drainInput" | "send"> = {
+      drainInput: () => drainCohortInput().input,
+      send: (msg) => partySession.send(msg),
+    };
+
+    /**
+     * FIX 5 hidden-tab keepalive driver: advance the issue cursor by the true wall-clock
+     * delta since the last issue (message- OR interval-driven — both share
+     * `keepaliveLastIssueAt`), emitting my due lanes to peers WITHOUT executing locally.
+     * No-op unless a cohort is active AND we're in keepalive, so it's safe to call from both
+     * the 1s interval and `onPartyGameMessage`.
+     */
+    function issueOnlyTick(): void {
+      if (!hiddenKeepaliveActive || !cohortActive || !cohortEngine) return;
+      const nowP = performance.now();
+      const elapsed = Math.max(0, nowP - keepaliveLastIssueAt);
+      keepaliveLastIssueAt = nowP;
+      cohortEngine.issueOnly(elapsed, keepaliveIo);
+    }
+
     function frame(now: number) {
       rafId = requestAnimationFrame(frame);
 
@@ -1922,16 +2089,11 @@ export function GameClient() {
           zoneAt(state.location).kind === "farm"
         ) {
           const want = wantsBotTownTrip(
-            // A2: gate BOTH bot chores on MY hero's master switch (`config.autoHunt`) — the
-            // shared `state.bot.enabled`/`sellTripEnabled` flags are lane-0-owned, so without
-            // this a member whose master is OFF would still be dragged on a leader-driven trip
-            // (and a member with it ON couldn't trip if the leader's was off). AND-ing per
-            // hero makes the leave-decision honour MY own toggle.
-            {
-              ...state.bot,
-              enabled: state.bot.enabled && myHero.config.autoHunt,
-              sellTripEnabled: state.bot.sellTripEnabled && myHero.config.autoHunt,
-            },
+            // Bot settings are PER HERO now (2026-07-09): read MY hero's own config directly
+            // (structurally a BotSettings) — it holds MY enabled/sellTripEnabled/targets, set via
+            // the replicated `setHeroConfig`. No more ANDing the shared lane-0 `state.bot` with my
+            // master switch; the config IS my own, so the leave-decision honours my own settings.
+            myHero.config,
             { hpPotion: myWallet.consumables.hpPotion ?? 0, manaPotion: myWallet.consumables.manaPotion ?? 0 },
             myWallet.gold,
             shopStageOf(state),
@@ -1959,69 +2121,56 @@ export function GameClient() {
       if (cohortActive && cohortEngine) {
         const collected: GameEvent[] = [];
         const io: CohortTickIO = {
-          // Drained ONLY at issue boundaries (not per rAF frame) — no tap is lost.
+          // Drained ONLY at issue boundaries (not per rAF frame) — no tap is lost. Assembly
+          // is shared with the hidden-tab keepalive driver (FIX 5) via `drainCohortInput`.
           drainInput: () => {
-            const pending = store.drainPendingInput();
-            if (pending.buyShopItem) manualBuyThisFrame = true;
-            const input = buildFrameInput(pending, store.inventory.length, myCohortIndex);
-            // Bot-master toggle fix (owner bug batch A #2): LATCH the pressed `autoHunt` from
-            // this frame's drained intent (`input.setAutoHunt`) BEFORE stripping it. `store.
-            // autoHunt` is a mirror of the SHARED lane-0 field and never reflects my own
-            // toggle in a cohort, so feeding it raw into `desiredHeroConfig` below makes the
-            // diff perpetually null (the toggle does nothing). The wish holds my value until
-            // my hero's replicated config confirms it landed — then releases to the mirror.
-            cohortAutoHuntWish = nextAutoHuntWish(
-              cohortAutoHuntWish,
-              input.setAutoHunt,
-              state.heroes[myCohortIndex]?.config.autoHunt ?? store.autoHunt,
-            );
-            // Strip the LEGACY `setAutoHunt` intent: `step()` applies it lane-0-only
-            // (`primary.setAutoHunt`), so the leader's copy would mutate the SHARED
-            // `state.autoHunt` for everyone (and bleed into `SharedCohortSave`), and a
-            // member's copy is dead — the per-hero `setHeroConfig` replication below is the
-            // ONLY correct channel. Same for `setBotSettings` (also lane-0-only in `step()`:
-            // a leader's edit rewrites the shared `state.bot` under every member).
-            input.setAutoHunt = undefined;
-            input.setBotSettings = undefined;
-            // ECONOMY-INTEGRITY / mid-cohort automation: solo's global config mirror
-            // (`syncPrimaryHeroConfig`) no-ops at heroes.length >= 2, so a bot/auto-cast/
-            // potion toggle would be DEAD in a cohort. Derive my desired config from the
-            // store (same recipe as the solo frame block, but the master switch reads the
-            // latched wish), diff it against my hero's current config, and replicate any
-            // change on my lane — the engine applies it lane-index -> hero, so it lands
-            // (deterministically, on every client) within one turn. Re-sent until observed.
-            const diff = heroConfigDiff(
-              desiredHeroConfig({
-                autoHunt: cohortAutoHuntWish ?? store.autoHunt,
-                autoCast: store.autoCast,
-                autoAllocate: store.autoAllocate,
-                autoHpPotion: store.autoHpPotion,
-                autoManaPotion: store.autoManaPotion,
-                autoHpThreshold: store.autoHpThreshold,
-                autoManaThreshold: store.autoManaThreshold,
-              }),
-              state.heroes[myCohortIndex]?.config,
-            );
-            if (diff) input.setHeroConfig = diff;
-            return input;
+            const r = drainCohortInput();
+            if (r.manualBuy) manualBuyThisFrame = true;
+            return r.input;
           },
           send: (msg) => partySession.send(msg),
           runSubStep: (lanes) => {
             // Defense-in-depth (fix B): strip any zone-change field from EVERY lane before
             // step() — identical on all clients, so a stale peer build can't drag the party.
             step(state, sanitizeLanes(lanes));
-            collected.push(...state.events);
+            // FIX 5: during a resume backlog burst the replayed events are DISCARDED (like the
+            // solo offline catch-up) — collecting thousands would flood fx/audio. The next
+            // normal frame draws + sounds the post-burst state.
+            if (!cohortCatchUp) collected.push(...state.events);
           },
         };
-        const { waiting } = cohortEngine.tick(elapsed * 1000, now, io);
-        frameEvents = collected;
-        // Map the engine's waiting flag onto the HUD chip on TRANSITIONS only.
-        if (waiting && !cohortPrevWaiting) {
-          pushCohortStatus({ kind: "waiting" });
-        } else if (!waiting && cohortPrevWaiting) {
-          refreshCohortStatus(); // resumed — restore "active" (names)
+        if (cohortCatchUp) {
+          // FIX 5 RESUME: I'm back from a hidden tab that stayed in lane-keepalive. Keep
+          // issuing my lane (wall clock advanced), then drain the buffered backlog in a
+          // wall-clock-budgeted burst so the execute cursor catches the issue cursor without
+          // janking this frame. Spread across frames until `burstExecute` reports caught-up.
+          cohortEngine.issueOnly(elapsed * 1000, io);
+          const deadline = performance.now() + CATCHUP_BURST_BUDGET_MS;
+          let caughtUp = false;
+          do {
+            const r = cohortEngine.burstExecute(io, CATCHUP_BURST_SUBSTEPS, now);
+            if (r.caughtUp) {
+              caughtUp = true;
+              break;
+            }
+          } while (performance.now() < deadline);
+          if (caughtUp) {
+            cohortCatchUp = false;
+            cohortPrevWaiting = false;
+            refreshCohortStatus(); // back to normal cadence — restore "active"
+          }
+          frameEvents = collected; // empty (events discarded during the burst)
+        } else {
+          const { waiting } = cohortEngine.tick(elapsed * 1000, now, io);
+          frameEvents = collected;
+          // Map the engine's waiting flag onto the HUD chip on TRANSITIONS only.
+          if (waiting && !cohortPrevWaiting) {
+            pushCohortStatus({ kind: "waiting" });
+          } else if (!waiting && cohortPrevWaiting) {
+            refreshCohortStatus(); // resumed — restore "active" (names)
+          }
+          cohortPrevWaiting = waiting;
         }
-        cohortPrevWaiting = waiting;
       } else {
         // Drain the one-shot intent queue exactly once per real frame; only the first
         // fixed sub-step of this frame gets it (remaining sub-steps get empty input).
@@ -2284,12 +2433,27 @@ export function GameClient() {
           useGameStore.getState().pushNotice("asuraZoneStoneEarned");
         } else if (ev.type === "tomePageFound") {
           // "ตำราตำนาน" secret-quest breadcrumb (endgame v1.3, owner: discoverable WITHOUT
-          // patch notes) — a dramatic, mysterious toast, no spoilers.
-          useGameStore.getState().pushNotice(`tomePageFound.page${ev.page}`);
+          // patch notes) — a dramatic, mysterious toast, no spoilers. Cohort guard
+          // (2026-07-09): the shared state's page-found event fires for ALL members; skip the
+          // toast when MY frozen base already had this page bit (I've seen it before).
+          const pageBit = 1 << (ev.page - 1);
+          if (!(cohortActive && cohortProgressBase && cohortProgressBase.tomePages & pageBit)) {
+            useGameStore.getState().pushNotice(`tomePageFound.page${ev.page}`);
+          }
         } else if (ev.type === "tomeAssembled") {
           // The 3rd page landed — celebratory reveal dialog (mounted at the top level,
-          // see `AsuraTomeAssembledModal.tsx`), NOT a toast.
-          useGameStore.getState().showTomeAssembledCelebration();
+          // see `AsuraTomeAssembledModal.tsx`), NOT a toast. Cohort guard: skip when MY base
+          // already had the tome fully assembled (a member who long ago unlocked it must not
+          // re-see the reveal every time a partymate completes their own set).
+          if (
+            !(
+              cohortActive &&
+              cohortProgressBase &&
+              (cohortProgressBase.tomePages & TOME_ALL_PAGES) === TOME_ALL_PAGES
+            )
+          ) {
+            useGameStore.getState().showTomeAssembledCelebration();
+          }
         } else if (ev.type === "asuraSigilClaimed") {
           useGameStore.getState().pushNotice("asuraSigilClaimed", { count: ev.count });
         } else if (ev.type === "legendaryCraftBlocked") {
@@ -2328,21 +2492,54 @@ export function GameClient() {
           // reads `state.kills`) must show MY full-credit progress, not the shared pot's raw
           // counter — override it with my settled current-zone value (throwaway-view spread,
           // exactly like the wallet override; NEVER writes the live `state`, so it can't
-          // enter the hash). `unlockedZones` stays the shared live value (display only).
+          // enter the hash).
           const settledProg = settledProgress();
           const zk = `${state.location.mapId}:${state.location.zoneIdx}`;
           const kills = settledProg ? (settledProg.zoneKills[zk] ?? state.kills) : state.kills;
+          // FIX 4 (2026-07-09) + asura per-member accounting: override the progression fields
+          // `buildSnapshot` reads (`unlockedZones` via `effectiveUnlockedZones`/`worldNav`; the
+          // asura essence/zone-kills/sigils; tome pages/unlock + the derived `hasAllZoneStones`/
+          // `canCraftLegendary`/`craftBlockReason` gates) with MY OWN settled values, so every
+          // member sees their own gauge/walk-arrows/tome checklist — not the shared authority's.
+          // `unlockedZones` is DERIVED from my settled kills (`deriveUnlockedZones`, mirrors the
+          // engine's `checkZoneUnlock`) so a member who personally re-cleared a zone in the
+          // cohort sees it unlocked LIVE and can walk on.
+          let prog: Partial<GameState> = {};
+          if (settledProg) {
+            const derivedUnlocked = deriveUnlockedZones(settledProg);
+            // One-shot "new zone unlocked!" notice when a zone flips unlocked for ME (the
+            // engine's `zoneUnlocked` event never fires in the shared state the authority
+            // already unlocked). Compare against last frame's derived map.
+            if (cohortPrevDerivedUnlocked) {
+              for (const mapId of Object.keys(derivedUnlocked)) {
+                if ((derivedUnlocked[mapId] ?? 0) > (cohortPrevDerivedUnlocked[mapId] ?? 0)) {
+                  useGameStore.getState().pushNotice("cohortZoneUnlocked");
+                  break;
+                }
+              }
+            }
+            cohortPrevDerivedUnlocked = derivedUnlocked;
+            prog = {
+              unlockedZones: derivedUnlocked,
+              asuraEssence: settledProg.asuraEssence,
+              asuraZoneKills: settledProg.asuraZoneKills,
+              asuraSigils: settledProg.asuraSigils,
+              tomePages: settledProg.tomePages,
+              tomeUnlocked: settledProg.tomeUnlocked,
+            };
+          }
           snapState = w
             ? {
                 ...state,
                 heroes,
                 kills,
+                ...prog,
                 gold: w.gold,
                 goldEarned: w.goldEarned,
                 materials: w.materials,
                 consumables: { ...state.consumables, ...w.consumables },
               }
-            : { ...state, heroes, kills };
+            : { ...state, heroes, kills, ...prog };
         }
         store.syncFromEngine(buildSnapshot(snapState));
       }
@@ -2370,7 +2567,10 @@ export function GameClient() {
         // MY row (materials is server-authoritative on persist, but included for a coherent
         // blob). `myVirtualWallet` reads the live pot, never mutating it.
         const w = myVirtualWallet();
-        const base = { ...state, heroes: [mine] };
+        // Bot settings are PER HERO now (2026-07-09): persist MY OWN hero's bot config (not the
+        // shared lane-0 `state.bot`) so autosave/the hide beacon carry the settings I actually
+        // set in the cohort — `toSaveData` reads `state.bot`, so overlay it on the throwaway base.
+        const base = { ...state, heroes: [mine], bot: botSettingsFrom(mine.config, state.bot) };
         // PROGRESSION-INTEGRITY (cohortProgress.ts): same shape as the wallet override —
         // `base` is a THROWAWAY shallow clone (never the live `state`, so mutating its
         // scalar fields here can't desync the lockstep sim), overwritten with MY SETTLED
@@ -2587,33 +2787,90 @@ export function GameClient() {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
         flushSaveBeacon();
-        // Fix A.2: a hidden tab PAUSES rAF, so this client stops issuing lanes while its
-        // socket stays open — the relay never sees a drop, never fires grace/shadow, and the
-        // whole cohort freezes waiting on lanes that will never come. Actively LEAVE the
-        // session so peers get grace -> member-shadowed (their scheduler then auto-fills my
-        // lanes, fix A.1). Collapse my own sim to solo FIRST so the return catch-up replays
-        // the hidden gap through the ordinary solo offline path (it can't replay a cohort —
-        // there are no peer lanes for the hidden interval). Composes with the existing
-        // >5s-hidden catch-up: `handleReturnFromBackground` replays the now-solo `state`.
-        if (useGameStore.getState().party) {
-          collapseToSolo(); // no-op if not in an active cohort
-          partySession.teardown(); // closes the socket -> relay grace -> peers shadow me
+        const party = useGameStore.getState().party;
+        // FIX 5 LANE-KEEPALIVE (owner: "พับจอแล้วยัง active, และปิดจริงต้องไม่ค้าง"): if I'm in an
+        // ACTIVE cohort, do NOT teardown/collapse. The rAF loop pauses (no local execute), but
+        // I keep ISSUING my idle lanes to peers via `issueOnlyTick` (driven by inbound peer
+        // messages + a 1s fallback interval), so the whole cohort NEVER stalls waiting on me
+        // and my hero keeps "farming" in the shared sim. On resume I burst-execute the buffered
+        // backlog (the `cohortCatchUp` path in `frame()`) to catch my local state up. The TRUE
+        // -close / OS-freeze cases are handled by `onPageHide`/`onFreeze` (clean-close) + the
+        // relay heartbeat (silent death), NOT here — this branch is only the reversible hide.
+        if (cohortActive && cohortEngine && party) {
+          hiddenKeepaliveActive = true;
+          hiddenKeepaliveStartedAt = Date.now();
+          keepaliveLastIssueAt = performance.now();
+          if (!keepaliveInterval) {
+            keepaliveInterval = setInterval(issueOnlyTick, KEEPALIVE_ISSUE_INTERVAL_MS);
+          }
+        } else if (party) {
+          // Party but not in an active cohort (solo-in-party / town) — no peer lanes depend on
+          // me, so the legacy leave behavior is fine: collapse (no-op if not active) + teardown.
+          collapseToSolo();
+          partySession.teardown();
         }
         // Ghost presence: a hidden tab pauses rAF, so stop publishing + close the world
-        // socket clean (peers despawn my ghost on silence). Mirrors the party pattern.
+        // socket clean (peers despawn my ghost on silence). Unchanged by FIX 5.
         syncWorldSessionActive();
         return;
       }
       if (document.visibilityState === "visible") {
+        if (hiddenKeepaliveActive) {
+          // FIX 5 RESUME from lane-keepalive: stop the fallback interval and decide between the
+          // fast in-place catch-up and the legacy fallback.
+          hiddenKeepaliveActive = false;
+          if (keepaliveInterval) {
+            clearInterval(keepaliveInterval);
+            keepaliveInterval = undefined;
+          }
+          const hiddenMs = Date.now() - hiddenKeepaliveStartedAt;
+          const canBurst =
+            cohortActive &&
+            !!cohortEngine &&
+            partyConnStatus === "connected" &&
+            hiddenMs <= HIDDEN_KEEPALIVE_MAX_MS;
+          if (canBurst) {
+            // Drain the buffered backlog in budgeted bursts inside the rAF loop (see the
+            // `cohortCatchUp` branch in `frame()`). The burst IS the catch-up, so skip the solo
+            // offline replay; reset the frame clock so the first `elapsed` isn't a giant gap.
+            cohortCatchUp = true;
+            hiddenAt = null;
+            lastTime = performance.now();
+            lastActiveAt = Date.now();
+          } else {
+            // Hidden too long, or the socket died while away (a reconnect already collapsed me
+            // to solo) — fall back to the legacy path: leave cleanly, solo catch-up, re-handshake.
+            collapseToSolo();
+            partySession.teardown();
+            handleReturnFromBackground();
+            const party = useGameStore.getState().party;
+            if (party) partySession.setParty(party);
+          }
+          syncWorldSessionActive();
+          return;
+        }
         handleReturnFromBackground();
-        // Re-join with a FRESH ticket (teardown forgot the partyId): re-mints, re-beats my
-        // zone, re-handshakes into a cohort if peers are still here. `setParty` is idempotent
+        // Re-join with a FRESH ticket (a prior teardown forgot the partyId): re-mints, re-beats
+        // my zone, re-handshakes into a cohort if peers are still here. `setParty` is idempotent
         // when already live, so a hide that never actually tore down is a safe no-op.
         const party = useGameStore.getState().party;
         if (party) partySession.setParty(party);
         // Ghost presence: reopen the world socket if the feature is on (idempotent).
         syncWorldSessionActive();
       }
+    }
+
+    /** FIX 5: shared clean-close for the TRUE-close / OS-freeze paths — clears the keepalive
+     * driver and tears the party socket down with a clean 1000 so peers shadow me INSTANTLY
+     * (no ~35s relay-heartbeat wait). The next `visible`/`pageshow` re-handshakes. */
+    function teardownPartyForClose(): void {
+      if (keepaliveInterval) {
+        clearInterval(keepaliveInterval);
+        keepaliveInterval = undefined;
+      }
+      hiddenKeepaliveActive = false;
+      cohortCatchUp = false;
+      if (useGameStore.getState().party) partySession.teardown();
     }
 
     // bfcache restore (mobile back/forward navigation, some screen-fold cases)
@@ -2624,12 +2881,36 @@ export function GameClient() {
     // (`hiddenAt` is cleared after the first call).
     function onPageShow(e: PageTransitionEvent): void {
       if (e.persisted) {
+        // A bfcache restore may arrive without a preceding `visible` (some browsers) — if we
+        // were mid lane-keepalive, exit it and fall through to the standard rejoin (a frozen
+        // bfcache page couldn't keep issuing, so a clean re-handshake is the safe choice).
+        if (hiddenKeepaliveActive) teardownPartyForClose();
         handleReturnFromBackground();
         // Same rejoin as the visible path — a bfcache restore may have torn the session down
         // (or frozen the socket) while away. `setParty` is idempotent if still connected.
         const party = useGameStore.getState().party;
         if (party) partySession.setParty(party);
       }
+    }
+
+    // FIX 5 TRUE-CLOSE: `pagehide` fires on a real navigate-away / tab close. persisted===false
+    // = the page is being discarded → clean-close the party socket so peers shadow me INSTANTLY
+    // (the teardown-on-hide behavior moved here off `visibilitychange`, which now keeps the
+    // cohort alive for a reversible hide). persisted===true = bfcache freeze → leave the socket
+    // for `pageshow` to resume (JS is suspended; nothing useful to do here beyond the flush).
+    function onPageHide(e: PageTransitionEvent): void {
+      flushSaveBeacon();
+      if (!e.persisted) teardownPartyForClose();
+    }
+
+    // FIX 5 OS-FREEZE: Page Lifecycle `freeze` — the browser is about to suspend a backgrounded
+    // tab; its socket will die silently. Clean-close now (same as pagehide-non-persisted) so
+    // peers shadow me instantly instead of waiting on the relay heartbeat; the `resume`/
+    // `visible`/`pageshow` handler re-handshakes. Typed via a string listener (the Page
+    // Lifecycle events aren't in the DOM lib's `DocumentEventMap`).
+    function onFreeze(): void {
+      flushSaveBeacon();
+      teardownPartyForClose();
     }
 
     // Browsers block audio output until a real user gesture — resume() is
@@ -2896,6 +3177,8 @@ export function GameClient() {
       autosaveTimer = setInterval(autosave, AUTOSAVE_INTERVAL_MS);
       document.addEventListener("visibilitychange", onVisibility);
       window.addEventListener("pageshow", onPageShow);
+      window.addEventListener("pagehide", onPageHide);
+      document.addEventListener("freeze", onFreeze); // Page Lifecycle (not in DocumentEventMap)
 
       // Mid-session "new patch deployed" banner: the update button's ONLY
       // entry point into this effect's closure — `UpdateBanner.tsx` just
@@ -2994,6 +3277,9 @@ export function GameClient() {
       worldSession.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("freeze", onFreeze);
+      if (keepaliveInterval) clearInterval(keepaliveInterval);
       document.removeEventListener("pointerdown", onPointerDown, { capture: true });
       document.removeEventListener("keydown", onPointerDown, { capture: true });
       document.removeEventListener("visibilitychange", onVisibleResumeAudio);

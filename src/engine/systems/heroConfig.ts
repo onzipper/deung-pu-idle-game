@@ -27,6 +27,14 @@ export function applyHeroConfig(hero: Hero | undefined, patch: Partial<HeroConfi
   if (patch.autoManaPotion !== undefined) c.autoManaPotion = patch.autoManaPotion;
   if (patch.autoHpThreshold !== undefined) c.autoHpThreshold = patch.autoHpThreshold;
   if (patch.autoManaThreshold !== undefined) c.autoManaThreshold = patch.autoManaThreshold;
+  // Per-hero idle-bot settings (2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน"). A `setBotSettings`
+  // patch (Partial<BotSettings>) applies straight through here since the keys match verbatim.
+  if (patch.enabled !== undefined) c.enabled = patch.enabled;
+  if (patch.sellTripEnabled !== undefined) c.sellTripEnabled = patch.sellTripEnabled;
+  if (patch.hpPotionTarget !== undefined) c.hpPotionTarget = patch.hpPotionTarget;
+  if (patch.mpPotionTarget !== undefined) c.mpPotionTarget = patch.mpPotionTarget;
+  if (patch.scrollReserve !== undefined) c.scrollReserve = patch.scrollReserve;
+  if (patch.goldReserve !== undefined) c.goldReserve = patch.goldReserve;
 }
 
 /**
@@ -48,5 +56,8 @@ export function syncPrimaryHeroConfig(state: GameState): void {
     autoManaPotion: state.autoManaPotion,
     autoHpThreshold: state.autoHpThreshold,
     autoManaThreshold: state.autoManaThreshold,
+    // Idle-bot settings mirror the persisted GLOBAL `state.bot` (2026-07-09) — so the bot
+    // systems, now reading `heroes[0].config`, see exactly `state.bot` in solo (byte-identical).
+    ...state.bot,
   });
 }

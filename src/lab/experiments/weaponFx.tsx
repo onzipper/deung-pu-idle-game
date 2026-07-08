@@ -2,7 +2,7 @@
 
 /**
  * Experiment ⑦ — อาวุธ+เอฟเฟค (weaponFx). Lets the owner judge whether CODE
- * pixel-particle weapon effects (`@/lab/pixelWeaponFx`) read well next to a
+ * pixel-particle weapon effects (`@/render/fx/pixelWeaponFx`) read well next to a
  * pixel-art weapon sprite (Swordtember-style reference), in three modes:
  * the weapon alone, held by the REAL in-game hero rig (`@/render/views/
  * heroView`, read-only import — never forked here), and mid-attack (the same
@@ -39,7 +39,7 @@ import {
   type HeroRenderModel,
   type HeroView,
 } from "@/render/views/heroView";
-import { createPixelWeaponFx, type PixelWeaponFx, type WeaponFxElement } from "@/lab/pixelWeaponFx";
+import { createPixelWeaponFx, type PixelWeaponFx, type WeaponFxElement } from "@/render/fx/pixelWeaponFx";
 
 type Mode = "alone" | "held" | "attack";
 

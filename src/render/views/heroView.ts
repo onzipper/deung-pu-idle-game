@@ -984,48 +984,51 @@ function drawWeaponFlourish(
 
 /**
  * "ตำราตำนาน" LEGENDARY weapon flourish (endgame v1.2/v1.3, docs/endgame-
- * design.md) — the rarest look in the game: a two-tone gold-violet edge glow
- * at the weapon's business end (deliberately its OWN silhouette rather than
- * an extrapolated `drawApexOrnament` step, so a legendary never reads as
- * "just a bigger epic drop") plus a small ring of fixed radiant motes.
- * Build-once path draw, same convention as every other ornament in this
- * file — the CONTINUOUS idle particle signature (ember arc / starfall / rune
- * orbit / shadow wisp) and the attack-swing motion trail are
- * `fx/legendaryFx.ts`'s job, driven every frame off `getWeaponAnchorPos()`
- * below, never drawn here. Footgun 10: solid fills/strokes on the default
- * (normal) blend + a darker violet underlayer, never additive. */
+ * design.md) — the rarest look in the game. Owner round-2 in-browser
+ * feedback rejected the original concentric-ring + 5-orbit-mote treatment
+ * ("เข็มทิศติดดาบ ตลกจัดๆ" — read as a compass strapped to the sword, not
+ * magic); replaced with a QUIET static base — a small soft violet
+ * presence-shadow glow (deliberately NOT a hoop) plus a scatter of 2-3
+ * uneven gold gleam ticks hugging the anchor. Build-once path draw, same
+ * convention as every other ornament in this file — the CONTINUOUS pixel-fx
+ * recipe layers (M9 pixel-fx weapon port: `fx/pixelWeaponFx.ts` +
+ * `fx/refineFxRecipes.ts`, `resolveRefineFxRecipe(rarity, awakenLevel, true)`)
+ * are driven every frame off `getWeaponAnchorPos()` below, never drawn here.
+ * Footgun 10:
+ * solid fills only, default (normal) blend, never additive. */
 function drawLegendaryOrnament(
   g: Graphics,
   anchor: { x: number; y: number },
   baseR: number,
 ): void {
-  const outerR = baseR * 1.15;
-  const innerR = baseR * 0.7;
-  // Dark underlayer first (footgun 10's "darker outline" half) so the two
-  // bright rings above read as glowing edges, not flat strokes on scenery.
-  g.circle(anchor.x, anchor.y, safeRadius(outerR * 1.05)).stroke({
-    width: 1,
+  // Owner round-2 in-browser feedback: the old concentric-ring + 5-orbit-mote
+  // treatment read as "เข็มทิศติดดาบ" (a compass strapped to the sword) —
+  // "ตลกจัดๆ" (pretty silly). Replaced with a QUIET static base: a small
+  // presence-shadow glow, not a hoop, plus a scatter of uneven gold gleams
+  // ("จุดประกายทอง") instead of an evenly-spaced ring (evenness itself was
+  // half of the "compass" read). The moving magic stays entirely the M9
+  // pixel-fx recipe system's job (`fx/pixelWeaponFx.ts`) — untouched.
+  const glowR = baseR * 1.3;
+  g.circle(anchor.x, anchor.y, safeRadius(glowR)).fill({
     color: PALETTE.legendaryVioletDark,
-    alpha: 0.4,
+    alpha: 0.22,
   });
-  g.circle(anchor.x, anchor.y, safeRadius(outerR)).stroke({
-    width: 2,
-    color: PALETTE.legendaryViolet,
-    alpha: 0.5,
-  });
-  g.circle(anchor.x, anchor.y, safeRadius(innerR)).stroke({
-    width: 1.4,
-    color: PALETTE.legendaryGold,
-    alpha: 0.9,
-  });
-  const moteCount = 5;
-  for (let i = 0; i < moteCount; i++) {
-    const a = (Math.PI * 2 * i) / moteCount + Math.PI / 5;
-    const mx = anchor.x + Math.cos(a) * outerR * 1.08;
-    const my = anchor.y + Math.sin(a) * outerR * 1.08 * 0.55;
-    g.circle(mx, my, safeRadius(1.8)).fill({
-      color: PALETTE.legendaryGoldCore,
-      alpha: 0.9,
+
+  // Small solid-gold gleam ticks (tiny diamonds) hugging the anchor at
+  // deliberately UNEVEN angles/sizes — a scatter, never a symmetric ring.
+  const gleams: ReadonlyArray<{ angle: number; size: number; color: number }> = [
+    { angle: -0.35, size: 2.0, color: PALETTE.legendaryGold },
+    { angle: 1.15, size: 2.6, color: PALETTE.legendaryGoldCore },
+    { angle: 2.5, size: 1.7, color: PALETTE.legendaryGold },
+  ];
+  const gleamR = baseR * 0.55;
+  for (const gleam of gleams) {
+    const gx = anchor.x + Math.cos(gleam.angle) * gleamR;
+    const gy = anchor.y + Math.sin(gleam.angle) * gleamR * 0.55;
+    const s = safeRadius(gleam.size);
+    g.poly([gx, gy - s, gx + s, gy, gx, gy + s, gx - s, gy], true).fill({
+      color: gleam.color,
+      alpha: 0.95,
     });
   }
 }
@@ -2282,8 +2285,10 @@ export function isSwordSwinging(view: HeroView): boolean {
  * while ANY attack animation is actively playing EXCEPT the mage's
  * stationary `castHold` channel (docs/endgame-design.md's legendary motion
  * trail should ride an actual swing/shot/thrust, not a held pose). Used by
- * `fx/legendaryFx.ts`'s cross-class attack-swing trail — `isSwordSwinging`
- * stays swordsman-only for `fx/weaponTrail.ts`'s own dedicated ribbon. */
+ * `fx/FxController.ts`'s `updateWeaponFx()` (M9 pixel-fx weapon port) to
+ * gate `pixelWeaponFx.ts`'s `notifySwing()`/swing-trail recipe layer across
+ * EVERY weapon, normal and legendary alike — `isSwordSwinging` stays
+ * swordsman-only for `fx/weaponTrail.ts`'s own dedicated ribbon. */
 export function isHeroAttackSwinging(view: HeroView): boolean {
   const kind = view.anim.attack?.kind;
   return kind != null && kind !== "castHold";

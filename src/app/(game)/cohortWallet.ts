@@ -19,7 +19,7 @@
  * only shapes save payloads, HUD snapshots, and the post-collapse solo state.
  */
 
-import type { GameState, HeroConfig } from "@/engine";
+import type { BotSettings, GameState, HeroConfig } from "@/engine";
 
 /** The mutable-economy slice a member privately owns a view of, on top of the shared
  * cohort pot. `consumables` is an open record (the engine's `ConsumableCounts` is a
@@ -44,8 +44,10 @@ export function walletSliceFrom(state: GameState): WalletSlice {
 }
 
 /** One shared-pot field's personal value: my pre-cohort base PLUS my equal-mean-field
- * share of the pot's drift since I joined (`trunc` toward zero), clamped >= 0. */
-function splitField(base: number, sharedBase: number, sharedNow: number, size: number): number {
+ * share of the pot's drift since I joined (`trunc` toward zero), clamped >= 0. Exported
+ * so `cohortProgress.ts` can reuse the exact same mean-field split for แก่นอสูร essence
+ * (a spendable economy quantity, same dupe-risk shape as gold/materials). */
+export function splitField(base: number, sharedBase: number, sharedNow: number, size: number): number {
   return Math.max(0, base + Math.trunc((sharedNow - sharedBase) / size));
 }
 
@@ -141,6 +143,14 @@ export interface AutomationPrefs {
   autoManaPotion: boolean;
   autoHpThreshold: number;
   autoManaThreshold: number;
+  // Idle-bot settings, per hero (2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน"). Sourced from the
+  // store's `bot` block overlaid with the client-local `setBotSettings` wish latch (below).
+  enabled: boolean;
+  sellTripEnabled: boolean;
+  hpPotionTarget: number;
+  mpPotionTarget: number;
+  scrollReserve: number;
+  goldReserve: number;
 }
 
 /**
@@ -161,6 +171,15 @@ export function desiredHeroConfig(p: AutomationPrefs): HeroConfig {
     autoManaPotion: botOn && p.autoManaPotion,
     autoHpThreshold: p.autoHpThreshold,
     autoManaThreshold: p.autoManaThreshold,
+    // Idle-bot settings pass through RAW (NOT ANDed with the master switch) — the SOLO
+    // mirror (`syncPrimaryHeroConfig`) copies `state.bot` verbatim, so a cohort member's
+    // config must too, or the leave-decision / post-collapse solo bot would behave differently.
+    enabled: p.enabled,
+    sellTripEnabled: p.sellTripEnabled,
+    hpPotionTarget: p.hpPotionTarget,
+    mpPotionTarget: p.mpPotionTarget,
+    scrollReserve: p.scrollReserve,
+    goldReserve: p.goldReserve,
   };
 }
 
@@ -180,7 +199,14 @@ export function heroConfigDiff(desired: HeroConfig, current: HeroConfig | undefi
     desired.autoHpPotion !== current.autoHpPotion ||
     desired.autoManaPotion !== current.autoManaPotion ||
     desired.autoHpThreshold !== current.autoHpThreshold ||
-    desired.autoManaThreshold !== current.autoManaThreshold;
+    desired.autoManaThreshold !== current.autoManaThreshold ||
+    // Idle-bot settings (2026-07-09) — any one differing re-emits the full config.
+    desired.enabled !== current.enabled ||
+    desired.sellTripEnabled !== current.sellTripEnabled ||
+    desired.hpPotionTarget !== current.hpPotionTarget ||
+    desired.mpPotionTarget !== current.mpPotionTarget ||
+    desired.scrollReserve !== current.scrollReserve ||
+    desired.goldReserve !== current.goldReserve;
   return changed ? desired : null;
 }
 
@@ -250,4 +276,58 @@ export function nextAutoHuntWish(
  */
 export function myAutoHuntDisplay(state: Pick<GameState, "heroes" | "autoHunt">): boolean {
   return state.heroes[0]?.config.autoHunt ?? state.autoHunt;
+}
+
+/**
+ * Bot-settings client-local WISH LATCH (2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน") — the
+ * `setBotSettings`-panel analogue of `nextAutoHuntWish`. In a cohort every BotSettingsSection
+ * switch fires a `setBotSettings` intent that `step()` applied lane-0-only (leader) / dead
+ * (member) — and the HUD's `store.bot` mirrors MY hero's replicated `config`, so feeding it
+ * straight into `desiredHeroConfig` makes the `heroConfigDiff` perpetually null (the panel does
+ * nothing). Instead we latch each pressed FIELD here and feed it (overlaid on `store.bot`) into
+ * `desiredHeroConfig`, so a real per-hero `setHeroConfig` diff is emitted and replicated on MY
+ * lane. Each field releases the moment my hero's own `config` confirms the wished value landed.
+ *
+ * `prevWish`     — the currently latched partial wish (or `null`).
+ * `pendingPatch` — a freshly-drained `FrameInput.setBotSettings` this frame (or `null`/undefined).
+ *                  Last-wins PER FIELD: a new patch field supersedes a still-latched prior one.
+ * `currentConfig`— my hero's CURRENT replicated config (its bot fields confirm/release wishes).
+ *
+ * PURE — reads no state, writes nothing; the caller owns the `prevWish` storage.
+ */
+export function nextBotSettingsWish(
+  prevWish: Partial<BotSettings> | null,
+  pendingPatch: Partial<BotSettings> | null | undefined,
+  currentConfig: HeroConfig | undefined,
+): Partial<BotSettings> | null {
+  const merged: Partial<BotSettings> = { ...(prevWish ?? {}), ...(pendingPatch ?? {}) };
+  const out: Partial<BotSettings> = {};
+  const keep = <K extends keyof BotSettings>(k: K): void => {
+    const v = merged[k];
+    if (v === undefined) return;
+    if (currentConfig && currentConfig[k] === v) return; // config caught up — release this field
+    out[k] = v;
+  };
+  keep("enabled");
+  keep("sellTripEnabled");
+  keep("hpPotionTarget");
+  keep("mpPotionTarget");
+  keep("scrollReserve");
+  keep("goldReserve");
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Extract the six `BotSettings` fields off a `HeroConfig` (config is structurally a superset).
+ * Used to (a) show MY hero's own bot settings in the HUD snapshot and (b) overlay them onto the
+ * SaveData / post-collapse solo `state.bot` so a cohort member persists/keeps their own config. */
+export function botSettingsFrom(config: HeroConfig | undefined, fallback: BotSettings): BotSettings {
+  if (!config) return { ...fallback };
+  return {
+    enabled: config.enabled,
+    sellTripEnabled: config.sellTripEnabled,
+    hpPotionTarget: config.hpPotionTarget,
+    mpPotionTarget: config.mpPotionTarget,
+    scrollReserve: config.scrollReserve,
+    goldReserve: config.goldReserve,
+  };
 }

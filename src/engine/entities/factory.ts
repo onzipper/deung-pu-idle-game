@@ -44,6 +44,11 @@ export function defaultHeroConfig(): HeroConfig {
     autoManaPotion: CONFIG.shop.autoDefaults.manaPotion,
     autoHpThreshold: CONFIG.shop.autoDefaults.hpThreshold,
     autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
+    // Per-hero idle-bot settings (2026-07-09) seeded to the cold `state.bot` defaults —
+    // in SOLO these are overwritten each step by `syncPrimaryHeroConfig` (state.bot mirror),
+    // so a fresh/loaded hero's bot behaviour is byte-identical; a cohort hero carries its
+    // own until a `setHeroConfig`/`setBotSettings` intent changes it.
+    ...CONFIG.bot.defaults,
   };
 }
 

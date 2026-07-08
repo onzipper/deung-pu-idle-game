@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CohortStatusState } from "@/ui/store/gameStore";
-import { rttBars, rttTone, signalChipView } from "../signalChip";
+import { formatMemberLag, rttBars, rttTone, signalChipView } from "../signalChip";
 
 describe("rttTone", () => {
   it("reads gray for no sample yet", () => {
@@ -29,6 +29,19 @@ describe("rttBars", () => {
     expect(rttBars(200)).toBe(3);
     expect(rttBars(450)).toBe(2);
     expect(rttBars(900)).toBe(1);
+  });
+});
+
+describe("formatMemberLag", () => {
+  it("reads caught-up for zero lag (the healthy-peer clamp case)", () => {
+    expect(formatMemberLag(0)).toEqual({ kind: "caughtUp" });
+  });
+  it("reads caught-up for negative lag too (belt-and-suspenders)", () => {
+    expect(formatMemberLag(-2)).toEqual({ kind: "caughtUp" });
+  });
+  it("renders ms for positive lag", () => {
+    expect(formatMemberLag(1)).toEqual({ kind: "ms", ms: 100 });
+    expect(formatMemberLag(3)).toEqual({ kind: "ms", ms: 300 });
   });
 });
 
