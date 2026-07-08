@@ -81,6 +81,7 @@ function UnclaimedAwardCta({
   t: Translator;
 }) {
   const [state, setState] = useState<ClaimState>("idle");
+  const tContentItems = useTranslations("content.items");
 
   async function handleClaim() {
     setState("claiming");
@@ -90,7 +91,11 @@ function UnclaimedAwardCta({
       const store = useGameStore.getState();
       store.mergeInventory([res.item]);
       store.pushDropFeed(res.item.templateId, lookupTemplate(res.item.templateId)?.rarity ?? "epic");
-      store.pushNotice("hofClaimed");
+      // Name WHICH fortifier landed (the toast used to just say "claimed!"
+      // with no indication of where the reward went) — the first-ever claim
+      // is separately taught by the `fortifierGained` contextual tip
+      // (`ui/onboarding/tips.ts`); this toast covers every claim after that.
+      store.pushNotice("hofClaimed", { item: tContentItems(`${res.item.templateId}.name`) });
     }
     setState(next);
     if (next === "error") window.setTimeout(() => setState("idle"), 3000);

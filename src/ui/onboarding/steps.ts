@@ -68,6 +68,15 @@ export interface OnboardingSnapshot {
    * the Town NPCs phase 3 (final) "tap NPCs to talk" contextual tip (fires on
    * the first battle/boss -> town edge, not at boot). */
   inTown: boolean;
+  /** Count of "แกร่ง" fortifier item instances (`fort_weapon`/`fort_armor`,
+   * see `engine/config/items.ts`'s `FORTIFIER_TEMPLATES`) currently held in
+   * the inventory — a UI/client-owned slice, not engine state, but projected
+   * in here the same way as every other field so the `fortifierGained`
+   * contextual tip can diff it like anything else. Drives that tip's
+   * once-ever "you just got your first fortifier" guide (fires on the count
+   * RISING, never merely being nonzero — a returning player who already held
+   * one before this tip shipped is not retroactively taught). */
+  fortifierCount: number;
   heroes: OnboardingHeroSnapshot[];
 }
 
@@ -87,6 +96,7 @@ export function toOnboardingSnapshot(s: {
   autoAllocate: boolean;
   autoHunt: boolean;
   inTown: boolean;
+  fortifierCount: number;
   heroes: {
     skillCd: number;
     dead: boolean;
@@ -107,6 +117,7 @@ export function toOnboardingSnapshot(s: {
     autoAllocate: s.autoAllocate,
     autoHunt: s.autoHunt,
     inTown: s.inTown,
+    fortifierCount: s.fortifierCount,
     heroes: s.heroes.map((h) => ({
       skillCd: h.skillCd,
       dead: h.dead,

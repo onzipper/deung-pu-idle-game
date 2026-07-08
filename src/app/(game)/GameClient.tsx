@@ -80,6 +80,8 @@ import {
   worldNav,
   worldBossPhaseAt,
   effectiveUnlockedZones,
+  wantsBotTownTrip,
+  zoneAt,
   type GameEvent,
   type GameState,
   type Hero,
@@ -154,6 +156,7 @@ import {
 } from "./partySession";
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
+import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import {
   desiredHeroConfig,
   dropAssignedIndex,
@@ -430,6 +433,14 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       hpPotion: canUseConsumable(state, "hpPotion"),
       manaPotion: canUseConsumable(state, "manaPotion"),
     },
+    cds: {
+      hpPotion: state.consumableCds.hpPotion ?? 0,
+      manaPotion: state.consumableCds.manaPotion ?? 0,
+    },
+    maxCds: {
+      hpPotion: CONFIG.shop.items.hpPotion.cooldown,
+      manaPotion: CONFIG.shop.items.manaPotion.cooldown,
+    },
   };
 
   return {
@@ -623,12 +634,18 @@ let pendingWorldBossClaim: { windowId: number } | null = null;
  *    refine use, credit the known fixed materials reward, merge the minted
  *    fortifier into the inventory slice (its OWN drop-feed toast resolves the
  *    item's translated name — no cross-namespace lookup needed here), and push
- *    a generic gold+stones notice.
+ *    a gold+stones+ITEM notice (`resolveItemName` — module-scope, so it can't
+ *    reach a React `useTranslations` hook directly; the caller passes
+ *    `tContentItemsRef.current` through, same reasoning `titleLabel`'s
+ *    `tHofRef` plumbing already established for this file).
  * IN A COHORT every member calls this independently for their OWN character —
  * the shared sim's `worldBossDefeated` event fires identically on every
  * client, and each one claims into its own save row (by design).
  */
-async function attemptWorldBossClaim(windowId: number): Promise<void> {
+async function attemptWorldBossClaim(
+  windowId: number,
+  resolveItemName: (templateId: string) => string,
+): Promise<void> {
   if (worldBossClaimInFlight) {
     pendingWorldBossClaim = { windowId };
     return;
@@ -654,6 +671,7 @@ async function attemptWorldBossClaim(windowId: number): Promise<void> {
     store.pushNotice("worldBossClaimed", {
       gold: res.goldCredit.toLocaleString(),
       stones: WORLD_BOSS_REWARD_MATERIALS,
+      item: resolveItemName(res.item.templateId),
     });
   } finally {
     worldBossClaimInFlight = false;
@@ -691,6 +709,12 @@ export function GameClient() {
   const tHof = useTranslations("hof");
   const tHofRef = useRef(tHof);
   tHofRef.current = tHof;
+
+  // World-boss "เสี่ยจ๋อง" claim toast: names WHICH fortifier landed (see
+  // `attemptWorldBossClaim`'s doc) — same ref-captured pattern as `tHofRef`.
+  const tContentItems = useTranslations("content.items");
+  const tContentItemsRef = useRef(tContentItems);
+  tContentItemsRef.current = tContentItems;
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -1248,6 +1272,9 @@ export function GameClient() {
     let botPrevTravelReason: string | null = null;
     let botPrevDwell = false;
     let botTownActivityUntil = 0;
+    // M8 party (owner 2026-07-08): last `now` this client left the cohort for a bot
+    // restock/sell trip — see `cohortBotTrip.ts`'s `shouldLeaveCohortForBotTrip` doc.
+    let lastBotTripLeaveAtMs: number | null = null;
     // Town NPCs phase 3 (final): rotating greeting-line index per NPC (2-3
     // lines each, see messages/*.json's `townNpc.<id>.greetings`) — bumped
     // every tap-to-talk so repeat conversations don't feel like a broken
@@ -1267,6 +1294,10 @@ export function GameClient() {
     // M8 party P4b: unsubscribe handle for the `party` store subscription (see
     // `partySession.setParty`'s call site below).
     let unsubscribeParty: (() => void) | undefined;
+    // HOF seasonal rewards: unsubscribe handle for the `mySocialBadge` store
+    // subscription (see the settings title-picker call site below) — the
+    // nameplate/aura seam otherwise only refreshes on the next `townArrived`.
+    let unsubscribeSocialBadge: (() => void) | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
@@ -1513,6 +1544,54 @@ export function GameClient() {
       // covers it), the accepted tradeoff of beat-driven re-derivation.
       if (cohortActive && hasZoneChangeIntent(store.pendingInput)) collapseToSolo();
 
+      // M8 party (owner 2026-07-08, "ไม่ว่าจะเล่นเดี่ยวหรือปาร์ตี้ บอทยังคงต้องทำงานเหมือนเดิม"): the
+      // shared cohort state must never travel on one member's automation (8822f54's guard is
+      // correct), so when MY hero's bot wants a restock/sell trip, THIS client alone leaves
+      // the cohort via the SAME `collapseToSolo()` escape hatch the zone-change intent above
+      // uses — the now-solo engine's own `updateBots` (heroes.length back to 1) then runs the
+      // trip completely normally starting THIS SAME frame (walk to town, chores, walk back to
+      // the farm frontier), and the existing zone-beat protocol re-forms the party the moment
+      // I'm standing back in the same zone as my friends (identical mechanism to walking INTO
+      // a friend's zone — see `cohortBotTrip.ts`'s module doc). `wantsBotTownTrip` is evaluated
+      // against MY virtualized wallet slice (not the raw shared state.gold/consumables), so the
+      // decision matches what solo will actually see the instant `collapseToSolo()` settles it.
+      if (cohortActive) {
+        const myWallet = myVirtualWallet();
+        const myHero = state.heroes[myCohortIndex];
+        if (
+          myWallet &&
+          myHero &&
+          !myHero.dead &&
+          !state.traveling &&
+          !state.fastTravelCast &&
+          state.phase === "battle" && // never mid a shared boss fight
+          zoneAt(state.location).kind === "farm"
+        ) {
+          const want = wantsBotTownTrip(
+            state.bot,
+            { hpPotion: myWallet.consumables.hpPotion ?? 0, manaPotion: myWallet.consumables.manaPotion ?? 0 },
+            myWallet.gold,
+            shopStageOf(state),
+            store.inventory.length,
+            state.sellTripWatermark,
+          );
+          if (
+            shouldLeaveCohortForBotTrip({
+              cohortActive,
+              needRestock: want.needRestock,
+              needSell: want.needSell,
+              nowMs: now,
+              lastLeaveAtMs: lastBotTripLeaveAtMs,
+              debounceMs: BOT_TRIP_LEAVE_DEBOUNCE_MS,
+            })
+          ) {
+            lastBotTripLeaveAtMs = now;
+            collapseToSolo();
+            store.pushNotice("botLeftCohortForTrip");
+          }
+        }
+      }
+
       let frameEvents: GameEvent[];
       if (cohortActive && cohortEngine) {
         const collected: GameEvent[] = [];
@@ -1719,7 +1798,9 @@ export function GameClient() {
           // World boss "เสี่ยจ๋อง": the engine grants NO xp/gold itself (rewards are
           // SERVER-claimed) — fire the claim POST for MY character. In a cohort every
           // member sees this same shared-sim event and claims independently (by design).
-          void attemptWorldBossClaim(ev.windowId);
+          void attemptWorldBossClaim(ev.windowId, (id) =>
+            tContentItemsRef.current(`${id}.name`),
+          );
         }
       }
 
@@ -1860,7 +1941,9 @@ export function GameClient() {
       if (pendingWorldBossClaim && !worldBossClaimInFlight) {
         const claim = pendingWorldBossClaim;
         pendingWorldBossClaim = null;
-        void attemptWorldBossClaim(claim.windowId);
+        void attemptWorldBossClaim(claim.windowId, (id) =>
+          tContentItemsRef.current(`${id}.name`),
+        );
       }
     }
 
@@ -2324,6 +2407,17 @@ export function GameClient() {
       });
       partySession.setParty(useGameStore.getState().party);
 
+      // HOF seasonal rewards: the Settings title picker (`TitleSection.tsx`)
+      // writes a fresh `mySocialBadge` straight into the store the instant
+      // `POST /api/hof/title` succeeds — this subscription is the ONLY thing
+      // that re-pushes it to the nameplate/aura render seam without waiting
+      // for the next `townArrived` refresh. Solo-only in effect (cohort reads
+      // the friends-poll `party` rows instead — see `currentHeroSocialBadges`),
+      // but re-pushing is harmless either way.
+      unsubscribeSocialBadge = useGameStore.subscribe((next, prev) => {
+        if (next.mySocialBadge !== prev.mySocialBadge) pushHeroSocialBadges();
+      });
+
       lastTime = performance.now();
       lastActiveAt = Date.now();
       rafId = requestAnimationFrame(frame);
@@ -2344,6 +2438,7 @@ export function GameClient() {
       if (autosaveTimer) clearInterval(autosaveTimer);
       unsubscribeReload?.();
       unsubscribeParty?.();
+      unsubscribeSocialBadge?.();
       partySession.teardown();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);

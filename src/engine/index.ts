@@ -57,6 +57,10 @@ export {
   // M7.9b tier-3 quest BOSS objective: the UI surfaces the "challenge the young Sovereign"
   // affordance from `isTier3BossObjectiveActive` (kill objective banked, boss pending).
   isTier3BossObjectiveActive,
+  // M8 "party feel pack": QUEST-boss (evolution exam) detection — drives the party HP
+  // headcount scale in startBossFight (STAGE bosses stay melty; exams don't).
+  isQuestBossFight,
+  isClassChangeBossFight,
 } from "@/engine/systems/quests";
 
 // M8 Wave A — MAIN quest line reads (the UI's chapter tracker derives from these; the
@@ -159,6 +163,15 @@ export {
 // pure reads. The bots run ONLY through `step()` (deterministic, engine-side); the
 // mutator is the `setBotSettings` FrameInput intent, so it stays internal.
 export { defaultBotSettings, normalizeBotSettings } from "@/engine/systems/bots";
+// M8 party (owner 2026-07-08): the bot's restock/sell "want a town trip" predicate,
+// extracted PURE so `GameClient`'s cohort branch can evaluate it against MY
+// virtualized wallet slice (not the raw shared state) to decide whether to leave the
+// cohort and do the trip solo — see `systems/bots.ts`'s `wantsBotTownTrip` doc.
+export {
+  wantsBotTownTrip,
+  type BotRestockConsumables,
+  type BotTripWant,
+} from "@/engine/systems/bots";
 
 // Town NPC anchors (M6 town NPCs phase 2): the ENGINE owns the geometry (CONFIG.townNpcs)
 // so render derives its rigs from `townNpcConfig` and phase-3 UI gates tap-to-talk on the

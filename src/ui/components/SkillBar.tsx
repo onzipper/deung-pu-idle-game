@@ -18,9 +18,10 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import type { HeroClass } from "@/engine";
 import { CONFIG, SKILLS } from "@/engine";
+import { useCastKey } from "@/ui/hooks/useCastKey";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { InfoTip } from "@/ui/components/InfoTip";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
@@ -47,17 +48,6 @@ const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
   // matches `HERO_COLORS.ninja.body` in render/theme.ts (slate/graphite rig tone)
   ninja: { solid: "#6c7a99", soft: "rgba(108, 122, 153, 0.55)" },
 };
-
-/** Detects a fresh cast (cd jumped back up) to restart the CSS sweep. */
-function useCastKey(cd: number): number {
-  const prev = useRef(cd);
-  const [castKey, setCastKey] = useState(0);
-  useEffect(() => {
-    if (cd > prev.current + 0.05) setCastKey((k) => k + 1);
-    prev.current = cd;
-  }, [cd]);
-  return castKey;
-}
 
 /** One learned skill: a cast button + an AUTO-slot toggle badge + a tap-to-open
  * ⓘ detail popover (owner ask, UX-fix wave: "every skill button gets a
@@ -198,67 +188,6 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
   );
 }
 
-/** Smoothly ticks a countdown DOWN in real time between throttled (~10Hz)
- * snapshot updates, instead of visually stair-stepping on each snapshot —
- * resyncs its own baseline every time `remaining` changes (a fresh snapshot
- * value, including a brand-new cast resetting it back up). Purely a display
- * interpolation; the engine's own `atkBuffTimer` stays the source of truth. */
-function useSmoothCountdown(remaining: number): number {
-  const [display, setDisplay] = useState(remaining);
-
-  useEffect(() => {
-    if (remaining <= 0) {
-      // A zero-callback timeout defers the state update into a callback
-      // (same accepted pattern as `usePulseOnIncrease`'s `setTimeout` below)
-      // instead of calling `setState` synchronously in the effect body.
-      const resetId = setTimeout(() => setDisplay(0), 0);
-      return () => clearTimeout(resetId);
-    }
-    const startedAt = performance.now();
-    const startValue = remaining;
-    const resetId = setTimeout(() => setDisplay(remaining), 0);
-    const tickId = setInterval(() => {
-      const elapsedSec = (performance.now() - startedAt) / 1000;
-      setDisplay(Math.max(0, startValue - elapsedSec));
-    }, 100);
-    return () => {
-      clearTimeout(resetId);
-      clearInterval(tickId);
-    };
-  }, [remaining]);
-
-  return display;
-}
-
-/** Owner request: a small status-chip ROW near the HP/mana rows — built to
- * hold multiple future buff chips (each one self-contained), even though
- * War Cry is the only one today. Renders nothing while no buff is active
- * (`hero.atkBuffTimer <= 0`). */
-function BuffChipRow({ hero }: { hero: HeroSummary }) {
-  const tContent = useTranslations("content");
-  const tPanels = useTranslations("panels");
-  const smoothSeconds = useSmoothCountdown(hero.atkBuffTimer);
-
-  if (hero.atkBuffTimer <= 0) return null;
-
-  const warCryName = tContent("skills.sword_warcry.name");
-  const pct = Math.round((hero.atkBuffMult - 1) * 100);
-  const secondsLeft = Math.max(0, Math.ceil(smoothSeconds));
-
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      <span
-        title={tPanels("atkBuffTooltip", { percent: pct })}
-        className="flex min-h-6 items-center gap-1 rounded-full border border-rose-500/60 bg-rose-950/50 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap text-rose-200 tabular-nums"
-      >
-        <span aria-hidden>⚔</span>
-        <span className="line-clamp-1">{warCryName}</span>
-        <span>{secondsLeft}s</span>
-      </span>
-    </div>
-  );
-}
-
 /** Held mana-potion count pinned to the mana bar (M7.7 — potions are the
  * pool's refill loop now; surface the stock where the player watches drain). */
 function ManaPotionBadge() {
@@ -360,7 +289,8 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
         <ManaPotionBadge />
       </div>
 
-      <BuffChipRow hero={hero} />
+      {/* War Cry's ATK-buff chip moved into the consolidated Buff Badge Hub
+          (owner ask — every buff in ONE HUD spot, see BuffBadgeHub.tsx). */}
 
       {/* The learned skill kit */}
       <div className="mt-1 flex flex-wrap items-start justify-center gap-2">

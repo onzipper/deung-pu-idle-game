@@ -4,7 +4,7 @@
  * fresh `id` and (for enemies) the seeded RNG whose stream they own.
  */
 
-import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL } from "@/engine/config";
+import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL, EVADE_TUNING } from "@/engine/config";
 import { emptyEquipped, ITEM_TEMPLATES, refineOf, type EquippedGear } from "@/engine/config/items";
 import { refinedStat } from "@/engine/config/refine";
 import type { Rng } from "@/engine/core/rng";
@@ -146,11 +146,13 @@ export function makeHero(
     config,
     // Combat aim (render-only facing observer) — re-derived each step. Transient.
     aimX: null,
-    // Dash-evade runtime (NINJA FEEL RETUNE) — ready to evade, hp window seeded at full.
-    // Transient; only ever touched for a `dashEvade` class (ninja). See Hero doc.
+    // Dash-evade runtime ("แนวๆ นินจา") — ready to evade, hp window seeded at full. Transient;
+    // only ever touched for a `dashEvade` class (ninja / archer). The window is seeded from this
+    // class's own tuning (0 for a non-evade class — never read, so any value is byte-identical).
+    // See Hero doc.
     evadeCd: 0,
     evadeHpMark: maxHp,
-    evadeMarkCd: CONFIG.ninja.evade.hpWindowSec,
+    evadeMarkCd: EVADE_TUNING[cls]?.hpWindowSec ?? 0,
   };
 }
 
@@ -194,11 +196,18 @@ export function makeEnemy(id: number, kind: EnemyKind, stage: number, rng: Rng):
  * `scaleOverride` (M7.9b tier-3 quest boss): when provided, its hp/atk scales REPLACE the
  * bossVariety row's scales while the boss KEEPS the row's `behaviors` (mechanics + telegraphs
  * unchanged). Used by `systems/boss.startBossFight` to spawn the quest-scaled "young" Glacial
- * Sovereign for a tier-2 hero mid-tier-3-quest; the real s20 boss passes no override. */
+ * Sovereign for a tier-2 hero mid-tier-3-quest; the real s20 boss passes no override.
+ *
+ * `hpHeadcountMult` (M8 "party feel pack"): a QUEST-boss's HP is multiplied by the cohort
+ * headcount scale (`CONFIG.party.questBossHpScale(size)`) so a party can't melt an evolution
+ * exam. Default 1 (solo / STAGE bosses) leaves HP byte-identical. Applied AFTER the row/override
+ * hpScale, so it composes with the young-Sovereign override and the class-change stage boss alike;
+ * atk is NOT headcount-scaled (the exam lasts longer, it doesn't hit harder). */
 export function makeBoss(
   id: number,
   stage: number,
   scaleOverride?: { hpScale: number; atkScale: number },
+  hpHeadcountMult = 1,
 ): Boss {
   // M7.9 boss variety: stamp the per-stage behavior snapshot + init the mechanic
   // timers. `hpScale`/`atkScale` are identity (1) in this first pass, so a boss's
@@ -208,7 +217,7 @@ export function makeBoss(
   const row = CONFIG.bossVariety[stage];
   const hpScale = scaleOverride?.hpScale ?? row?.hpScale ?? 1;
   const atkScale = scaleOverride?.atkScale ?? row?.atkScale ?? 1;
-  const hp = Math.round(CONFIG.bossHp(stage) * hpScale);
+  const hp = Math.round(CONFIG.bossHp(stage) * hpScale * hpHeadcountMult);
   return {
     id,
     x: CONFIG.spawnX,

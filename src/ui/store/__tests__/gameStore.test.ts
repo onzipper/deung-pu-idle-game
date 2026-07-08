@@ -88,6 +88,11 @@ function makeSnapshot(
       },
       stackCap: CONFIG.shop.stackCap,
       ready: { hpPotion: false, manaPotion: false },
+      cds: { hpPotion: 0, manaPotion: 0 },
+      maxCds: {
+        hpPotion: CONFIG.shop.items.hpPotion.cooldown,
+        manaPotion: CONFIG.shop.items.manaPotion.cooldown,
+      },
     },
     bot: defaultBotSettings(),
     autoHunt: true,

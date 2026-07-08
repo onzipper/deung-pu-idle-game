@@ -26,6 +26,7 @@
 
 import { forwardRef, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/ui/components/AnnouncementBanner";
+import { BuffBadgeHub } from "@/ui/components/BuffBadgeHub";
 import { CodexButton } from "@/ui/components/CodexButton";
 import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { DropFeed } from "@/ui/components/DropFeed";
@@ -92,6 +93,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       {/* World boss "เสี่ยจ๋อง": hourly countdown/found-it banner — renders nothing
           outside the pre-announce/active windows, see WorldBossBanner.tsx. */}
       <WorldBossBanner />
+      {/* Buff Badge Hub (owner ask): every active buff (party XP, war cry, future
+          sources) in one consolidated strip — renders nothing with no active
+          buffs, see BuffBadgeHub.tsx. */}
+      <BuffBadgeHub />
       <HudBar />
 
       <div

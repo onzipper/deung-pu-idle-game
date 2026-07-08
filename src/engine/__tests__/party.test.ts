@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { CONFIG, SKILLS, initGameState, step } from "@/engine";
 import type { FrameInput, GameState } from "@/engine";
 import { makeParty, makeStubEnemy, soloSave } from "./helpers";
+import { startBossFight } from "@/engine/systems/boss";
 
 /**
  * M8 party P1b — multi-hero engine determinism + per-hero routing/config isolation,
@@ -204,6 +205,46 @@ describe("M8 party P1b — one hero's death does not stall the others", () => {
   });
 });
 
+describe("M8 cohort — a FULL wipe never treks the shared party to town (owner v1)", () => {
+  it("both heroes down on the FIELD revive IN the zone; no respawn-to-town transit", () => {
+    const s = twoHeroParty(31);
+    s.spawnPaused = true;
+    s.enemies = [];
+    const locBefore = { ...s.location };
+    for (const h of s.heroes) {
+      h.dead = true;
+      h.reviveTimer = 1; // short in-place timer for a fast test
+    }
+    let sawTravel = false;
+    for (let i = 0; i < 60 * 3; i++) {
+      step(s, [{}, {}]);
+      if (s.traveling !== null) sawTravel = true;
+    }
+    expect(sawTravel).toBe(false); // NEVER a town transit (a solo total wipe would walk home)
+    expect(s.heroes.every((h) => !h.dead)).toBe(true); // both revived on their own timers
+    expect(s.phase).toBe("battle");
+    expect(s.location).toEqual(locBefore); // still standing in the same field zone
+  });
+
+  it("a full cohort wipe in a BOSS ROOM retreats the boss (revive in place, no town)", () => {
+    const s = twoHeroParty(37);
+    startBossFight(s);
+    expect(s.phase).toBe("boss");
+    for (const h of s.heroes) {
+      h.dead = true;
+      h.reviveTimer = 100; // stay down THROUGH decayHeroTimers so resolveDeaths sees the wipe
+    }
+    step(s, [{}, {}]);
+    // bossRetreat (the spec's "retreats on player loss"): boss gone, phase back to
+    // battle, whole team revived to full HP in place — and crucially NO town transit.
+    expect(s.boss).toBeNull();
+    expect(s.phase).toBe("battle");
+    expect(s.heroes.every((h) => !h.dead && h.hp === h.maxHp)).toBe(true);
+    expect(s.traveling).toBeNull();
+    expect(s.events.some((e) => e.type === "bossRetreat")).toBe(true);
+  });
+});
+
 describe("M8 cohort exp — the share/buff math (config curves)", () => {
   const P = CONFIG.party;
   it("solo (size 1) is IDENTITY on every cohort curve (byte-identical gate)", () => {
@@ -228,6 +269,18 @@ describe("M8 cohort exp — the share/buff math (config curves)", () => {
   });
   it("goldShareMult stays INERT (gold is personal per owner)", () => {
     expect([P.goldShareMult(1), P.goldShareMult(2), P.goldShareMult(3)]).toEqual([1, 1, 1]);
+  });
+  it("expShareRate is the TRIMMED value (0.20) — compensation removed after respawn scaling", () => {
+    // 0.6 was compensation for kill-starvation; the respawn-rate scale fixed throughput, so the
+    // share was trimmed to 0.20 to pull per-member party xp back toward the 1.3-1.5 target band
+    // (docs/balance-m79.md "Party feel pack — share trim"). Pinned so an accidental drift is caught.
+    expect(P.expShareRate).toBeCloseTo(0.2, 12);
+    // The +10%/extra-member ladder is OWNER-LOCKED and independent of the share trim; it is the
+    // monotonic headcount component (the per-kill pot itself is divided by `alive`, so per-kill-per-
+    // member is NOT monotonic in size at a low share — the xp/hr ladder comes from the buff + the
+    // larger cohort's greater total kill volume/reach, measured in the sim, not from per-kill share).
+    expect(P.expBuffPerMember).toBeCloseTo(0.1, 12);
+    expect(P.expBuff(3)).toBeGreaterThan(P.expBuff(2));
   });
   it("spawnMaxAliveScale grows per extra member (density, not killGoal)", () => {
     expect(P.spawnMaxAliveScale(2)).toBeCloseTo(1 + P.spawnScalePerMember, 12);

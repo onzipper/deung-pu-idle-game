@@ -80,44 +80,84 @@ const enemyHpDamp = (n: number): number =>
 // reward. They are IDENTITY at solo (size 1) so a 1-hero sim is byte-identical, and every
 // derived quantity is a PURE function of the cohort size (heroes present) + the alive
 // count — no RNG, no wall-clock — so all cohort clients compute the same result.
-//   PARTY_EXP_SHARE_RATE (0.6): a kill's xp is credited to the KILLER in full (1.0) and to
-//     every OTHER alive cohort hero at this SHARE (they were present/fighting). The engine
-//     does NOT attribute kills to a hero (no lastHitBy — that needs a structural change,
-//     flagged for game-engine-specialist), so grantKillXp credits the design's §5 EQUAL-to-
-//     all-present form: the mean-field of "killer 1.0 + others share", identical in aggregate
-//     to per-killer crediting when heroes kill at equal rates (the symmetric cohort case).
-//     Sim OVERRULED the 0.5 draft to 0.6 — the net per-member outcome is dominated by an
-//     emergent CO-OP SURVIVAL snowball (fewer deaths per body → deeper reach → xp/kill grows
-//     geometrically), so the share only needs a small lift over the survival floor to seat
-//     the well-behaved classes in-band.
-//   PARTY_EXP_BUFF_PER_MEMBER (0.04): a cohort-wide xp BUFF added per EXTRA member on ALL xp
-//     earned (2p → ×1.04, 3p → ×1.08). Kept SMALL by a hard structural finding: a per-member
-//     buff gives a 3p cohort 2× the boost of a 2p one, and solving "sword-2p ≥ 1.2 AND
-//     archer-3p < 1.6" forces buff×share → 0 — any larger buff pushes the frontier-friction
-//     archer's 3p over the "not-mandatory" ceiling. 0.04 keeps the buff mechanic genuinely
-//     live without breaching the guard for the well-behaved classes.
+//   PARTY_EXP_SHARE_RATE (0.20, TRIMMED from 0.6 — 2026-07-08 "share trim" pass): a kill's xp is
+//     credited to the KILLER in full (1.0) and to every OTHER alive cohort hero at this SHARE (they
+//     were present/fighting). The engine does NOT attribute kills to a hero (no lastHitBy — that
+//     needs a structural change, flagged for game-engine-specialist), so grantKillXp credits the
+//     design's §5 EQUAL-to-all-present form: the mean-field of "killer 1.0 + others share",
+//     identical in aggregate to per-killer crediting when heroes kill at equal rates (the symmetric
+//     cohort case). WHY IT SHRANK: the 0.6 value was COMPENSATION for kill-STARVATION (a cohort's
+//     kills/hero/min sat at 45-68% of solo — the field couldn't refill fast enough). The respawn-
+//     rate scaling (PARTY_RESPAWN_SCALE_PER_MEMBER, 7778f1c) FIXED that (throughput now ~95-100% of
+//     solo), so the 0.6 compensation turned into a SURPLUS: measured per-member party xp had inflated
+//     to ×2.7-3.9 at 3p (well over the 1.3-1.5 target band). Trimming share 0.6→0.20 re-seats it —
+//     2p lands ~1.0-1.5, 3p compresses from ×2.7-3.9 to ×1.7-2.4. NOTE (owner flag): 3p still sits
+//     ABOVE 1.5 at ANY share in the swept 0.20-0.30 range — the residual is a STRUCTURAL co-op
+//     snowball (survival → deeper reach → geometric xp/kill) STACKED on the owner-locked +10%/member
+//     ladder (×1.20 at 3p) + respawn throughput, none of which the share governs; 0.20 is the value
+//     that best approaches the band for BOTH sizes at once (2p archer even dips slightly UNDER). If
+//     the owner wants 3p strictly ≤1.5 the lever is the ladder buff (locked) or a reach cap, NOT the
+//     share. See docs/balance-m79.md "Party feel pack — share trim".
+//   PARTY_EXP_BUFF_PER_MEMBER (0.10): a cohort-wide xp BUFF added per EXTRA member on ALL xp
+//     earned — OWNER SPEC (2026-07-08 "party feel pack"): +10% per ADDITIONAL cohort member,
+//     so 2p → ×1.10, 3p → ×1.20, … 6p → ×1.50 (`partyExpBuff(size)` = 1 + 0.10×(size−1)). This
+//     REPLACES the earlier +0.04 tune (kept small by the buff-vs-ceiling finding below). The
+//     owner chose the larger number knowingly (a clear same-zone incentive); the combined net
+//     multiplier (this buff × share × the new target-spread throughput lift) is REPORTED to him
+//     with a compensating lever (share-rate trim) if it overshoots the old 1.2-1.5 band — the
+//     spec is NOT silently reduced. See docs/balance-m79.md "Party feel pack".
 //   PARTY_SPAWN_SCALE_PER_MEMBER (0.5): the mob-pool `maxAlive` grows per extra member so a
 //     shared field reads FULL for N bodies (2p → ×1.5, 3p → ×2.0). It barely moves throughput
 //     (clustering-bound, below) — its job is target AVAILABILITY + a busy group field, NOT a
 //     starvation fix. Scales DENSITY only — NOT killGoal (zone-unlock quotas stay personal/
 //     unchanged) and NOT the spawn DRAW order (kind→temperament→placement→makeEnemy is
 //     unperturbed; a bigger cap just lets the same seeded sequence fill further).
-// Result (1800s×5 seeds, "Cohort exp pass" in docs/balance-m79.md): per-member xp/hr sword
-// ×1.25/1.26, mage ×1.32/1.34 (2p/3p — in band); archer ×1.57/1.66 (FLAGGED — a denominator
-// artifact of the known solo-archer frontier death-spiral, not an over-tuned reward).
-// OPEN FLAGS: (1) kills/hero/min ~45-65% of solo = auto-hunt TARGET-CLUSTERING (both heroes
-// chase the nearest mob; raising maxAlive barely helps) — below the ~70% "no starvation" goal;
-// real fix = spatial target-spreading in auto-hunt (structural, game-engine-specialist). The
-// reward is carried by SHARED xp, so per-member PROGRESSION is still clearly ahead. (2) s5/s10
-// bosses clear in ~0.1-0.5× solo time at 2-3 bodies (headcount melt) — boss HP-per-headcount
-// scaling is a DESIGN decision for the owner (do NOT silently buff boss HP).
-const PARTY_EXP_SHARE_RATE = 0.6;
-const PARTY_EXP_BUFF_PER_MEMBER = 0.04;
+// M8 "party feel pack" (2026-07-08) closed the three "Cohort exp pass" flags: (1) auto-hunt
+// TARGET-CLUSTERING is fixed by the deterministic target-SPREAD in systems/combat.updateHeroes
+// (each hero prefers the nearest UNCLAIMED farm mob; boss/quest-boss/world-boss = whole party
+// dog-piles, per owner "แต่มีบอส ทุกคนต้องรุม"), lifting kills/hero/min out of the 45-65% starve
+// band; (2) STAGE bosses stay melty (a party reward), but QUEST bosses now scale HP by headcount
+// (PARTY_QUEST_BOSS_HP_PER_MEMBER above); (3) the xp buff is the owner's +10%/extra-member spec
+// (see docs/balance-m79.md "Party feel pack" for the measured post-change per-member xp/hr).
+const PARTY_EXP_SHARE_RATE = 0.2;
+const PARTY_EXP_BUFF_PER_MEMBER = 0.1;
 const PARTY_SPAWN_SCALE_PER_MEMBER = 0.5;
+// M8 "party feel pack" follow-up (2026-07-08, owner-approved) — per-headcount RESPAWN-RATE
+// scaling. PARTY_SPAWN_SCALE_PER_MEMBER above lifts the maxAlive CAP, but a solo hero already
+// SATURATES the respawn cadence (respawnDelay-bound), so a bigger cap alone barely moved
+// kills/hero/min (stayed 45-68% of solo). Owner call: scale spawn THROUGHPUT with cohort size
+// too — the respawnDelay countdown is DIVIDED by (1 + rate×(N−1)) so a 2p field refills ×1.6
+// faster / 3p ×2.2, composing 1:1 with the maxAlive scale (cap and refill grow together, the
+// field reads full for N bodies AND replenishes as N bodies clear it). xp/gold inflation is
+// ACCEPTED (owner: "เงินเฟ้อ เดี๋ยวหากิจมาละลายทีหลัง"). IDENTITY at solo (size 1) → the
+// respawn countdown is byte-identical, and the seeded spawn DRAW order is untouched (a faster
+// countdown just reaches the SAME kind→temperament→placement→makeEnemy sequence sooner; no solo
+// baseline exists for cohorts so a faster stream advance is fine). Sim-swept 0.4-0.7: 0.6 is the
+// sweet spot — kills/hero/min rose from 45-68% of solo (respawn-cap starve) to 75-98% (2p ×1.6
+// field, 3p ×2.2; the ×2.0 maxAlive cap was the bind before). 0.7 gained nothing at 3p (spread-
+// clustering caps kills once the field is full) while inflating xp more; the residual ~75% cases
+// (2p archer / 3p sword) are clustering/death-spiral bound, NOT respawn bound.
+const PARTY_RESPAWN_SCALE_PER_MEMBER = 0.6;
+// M8 "party feel pack" (2026-07-08) — QUEST-boss HP headcount scaling. STAGE bosses stay as-is
+// (owner: melting at headcount is a party REWARD, a feature). QUEST bosses — the tier-1 class-
+// change exam boss + the tier-2 young-Glacial-Sovereign — must NOT melt to a party ("ไม่มีการ
+// จ้างเพื่อนมาสอบผ่าน" / no hiring friends to pass your exam): their HP scales by cohort size so a
+// 2-3p exam takes roughly its SOLO duration. Pure fn of headcount (no RNG/wall-clock → all cohort
+// clients agree); IDENTITY at solo (size 1) so a 1-hero fight is byte-identical. atk is NOT scaled
+// (HP only — the fight lasts longer, it doesn't hit harder). Sim-tuned: 0.8 keeps a 3p quest boss
+// near its solo clear time (×(1+0.8×2)=×2.6 hp vs ~2-3× the DPS).
+const PARTY_QUEST_BOSS_HP_PER_MEMBER = 0.8;
+const partyQuestBossHpScale = (size: number): number =>
+  size <= 1 ? 1 : 1 + PARTY_QUEST_BOSS_HP_PER_MEMBER * (size - 1);
 // Cohort-wide xp buff from group size S (>=1): 1 at solo, +PARTY_EXP_BUFF_PER_MEMBER per
 // extra member. Pure; deterministic (only + - *).
 const partyExpBuff = (size: number): number =>
   size <= 1 ? 1 : 1 + PARTY_EXP_BUFF_PER_MEMBER * (size - 1);
+// Respawn-delay MULTIPLIER for a cohort of size S (>=1): the delay is DIVIDED by
+// (1 + rate×(S−1)) so throughput rises with headcount, composing 1:1 with the maxAlive scale.
+// Solo (size 1) → 1 (byte-identical countdown). Pure; deterministic (only + - * /).
+const partyRespawnDelayScale = (size: number): number =>
+  size <= 1 ? 1 : 1 / (1 + PARTY_RESPAWN_SCALE_PER_MEMBER * (size - 1));
 // Per-hero-per-kill xp multiplier for a cohort: the group buff × the EQUAL share of the
 // per-kill xp pot (killer 1.0 + each other alive hero PARTY_EXP_SHARE_RATE), distributed
 // evenly across the `alive` present heroes. Solo (size 1) → 1 (byte-identical). Only
@@ -499,6 +539,13 @@ export const CONFIG = {
     expBuffPerMember: PARTY_EXP_BUFF_PER_MEMBER,
     /** `maxAlive` growth per extra member so more heroes don't starve one field. */
     spawnScalePerMember: PARTY_SPAWN_SCALE_PER_MEMBER,
+    /** Respawn-RATE growth per extra member (delay ÷(1+rate×(N−1))) so throughput scales too. */
+    respawnScalePerMember: PARTY_RESPAWN_SCALE_PER_MEMBER,
+    /** QUEST-boss (class-change exam + young-Sovereign) HP scale per extra member. */
+    questBossHpPerMember: PARTY_QUEST_BOSS_HP_PER_MEMBER,
+    // QUEST-boss HP × cohort size (class-change exam + tier-3 young Sovereign only; STAGE
+    // bosses untouched). Read by systems/boss.startBossFight. Solo → 1 (byte-identical).
+    questBossHpScale: partyQuestBossHpScale,
     // Cohort xp BUFF from group size (design §answers "exp buff"). Solo → 1.
     expBuff: partyExpBuff,
     // Per-hero-per-kill xp multiplier (buff × equal share of killer-1.0 + others-share).
@@ -516,6 +563,11 @@ export const CONFIG = {
     // personal) nor the seeded draw order.
     spawnMaxAliveScale: (partySize: number): number =>
       partySize <= 1 ? 1 : 1 + PARTY_SPAWN_SCALE_PER_MEMBER * (partySize - 1),
+    // Mob respawn-DELAY scale per cohort size (owner-approved throughput fix): the delay is
+    // DIVIDED by (1+rate×(N−1)) so the field REFILLS faster for more bodies, composing 1:1
+    // with spawnMaxAliveScale (a solo saturates the delay cap, so the cap alone barely moves
+    // kills/hero/min). Solo → 1 (byte-identical); read by systems/hunt.updateSpawns.
+    respawnDelayScale: partyRespawnDelayScale,
   },
   heroBaseAtk: 10,
   heroBaseHp: 150,
@@ -866,29 +918,9 @@ export const CONFIG = {
     dashMaxReach: 300,
     // TWIN FANG (คมเงาคู่) r`radius` splash: neighbours of the primary take this fraction of a hit.
     twinSplashFrac: 0.6,
-    // ---- DASH-EVADE (NINJA FEEL RETUNE 2026-07-08, systems/combat `tryNinjaEvade`) ----
-    // When an AUTO-play ninja is SWARMED under pressure it blinks OUT of the crowd (reusing the
-    // `dashHeroTo` primitive → the heroDashed fx + event come free), then re-engages. The relief
-    // for the friction FLAG 2 ("a range-70 melee stands in the belt trading until dead", ~449
-    // deaths/run). FULLY DETERMINISTIC — no RNG, no wall-clock: the trigger reads only shared
-    // state + per-hero transient counters ticked by fixed dt. The balance pass sweeps these.
-    evade: {
-      // Count ENGAGED enemies within this world-x radius of the hero — the "swarm" measure.
-      radius: 95,
-      // Fire only when at least this many engaged foes are inside `radius` (a real crowd).
-      minEnemies: 3,
-      // Fire when hp fraction drops below this…
-      hpFrac: 0.55,
-      // …OR when the hero LOST at least this fraction of maxHp within `hpWindowSec` (a burst).
-      hpLossFrac: 0.18,
-      // Rolling window (s) over which the hp-loss burst is measured (a periodic snapshot).
-      hpWindowSec: 0.8,
-      // Minimum seconds between evades (own transient counter) — never dash-spams.
-      cooldownSec: 2.2,
-      // The evade hop DISTANCE cap (passed as `dashHeroTo` maxReach) — a decisive slip, clamped
-      // to the walkable field by the dash primitive. Below `dashMaxReach` (300)'s spirit.
-      maxReach: 280,
-    },
+    // NOTE: the DASH-EVADE tunables moved OUT of here into the per-class `EVADE_TUNING` table
+    // (below HERO_TYPES) when the archer opted into the capability — ninja's numbers are carried
+    // there byte-for-byte. `dashLandGap` stays here (it is a dash-PRIMITIVE constant, class-agnostic).
   },
 
   // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
@@ -1545,11 +1577,12 @@ export interface HeroType {
   /** Per-hit fraction of ATK for a `multiHit` basic attack (absent = 1). */
   multiHitMult?: number;
   /**
-   * DASH-EVADE capability (NINJA FEEL RETUNE, 2026-07-08): when true, an AUTO-play hero of
-   * this class uses its dash to SLIP OUT of a mob swarm under pressure (systems/combat
-   * `tryNinjaEvade`, tuned by `CONFIG.ninja.evade`) instead of standing in the belt trading
-   * until dead. Gated as a CAPABILITY (not a class check) so a future dash class can opt in;
-   * absent/false = the class never auto-evades (byte-identical movement — sword/archer/mage).
+   * DASH-EVADE capability ("แนวๆ นินจา", 2026-07-08): when true, an AUTO-play hero of this class
+   * uses its dash to SLIP OUT of a mob swarm under pressure (systems/combat `tryDashEvade`, tuned
+   * per-class by `EVADE_TUNING[cls]`) instead of standing/cornered trading until dead. Gated as a
+   * CAPABILITY (not a class check) so any class can opt in — held by the NINJA (belt-dweller relief)
+   * and the ARCHER (solo death-spiral emergency escape). Absent/false = the class never auto-evades
+   * (byte-identical movement — swordsman / mage).
    */
   dashEvade?: boolean;
 }
@@ -1576,6 +1609,14 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     hpMult: 1.0,
     projSpeed: 660,
     aoe: 0,
+    // NINJA-STYLE DASH-EVADE ("แนวๆ นินจา", owner-approved 2026-07-08) — the ROOT fix for the
+    // archer solo death-spiral. The archer is RANGED and already kites (target-relative servo);
+    // the evade is the EMERGENCY blink when melee actually CLOSES / corners it (a small radius +
+    // hp/burst gate, ARCHER-tuned in `EVADE_TUNING.archer`), NOT a constant hop fighting the kite.
+    // It blinks toward open ground away from the pack, then the kite servo re-engages next step.
+    // (Reuses `dashHeroTo` → the heroDashed event + shadowDash fx fire; the violet streak on an
+    // archer is an ACCEPTED v1 quirk — render polish later.)
+    dashEvade: true,
   },
   mage: {
     offset: -74,
@@ -1600,7 +1641,7 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
   //     more, smaller number-pops for the same power. EFFECTIVE boss DPS stays ~+6% over sword
   //     in BOSSISO (raw ~+22% basic offset by short-range repositioning + a mana-gated kit).
   //   - DASH-EVADE (`dashEvade: true`): under AUTO, a swarmed ninja blinks OUT of the belt
-  //     (systems/combat + `CONFIG.ninja.evade`) — the mobility relief for the friction FLAG 2.
+  //     (systems/combat + `EVADE_TUNING.ninja`) — the mobility relief for the friction FLAG 2.
   //   - `hpMult` 1.35 = squishier than the sword TANK (1.5), tougher than the ranged classes
   //     (archer 1.0 / mage 0.95). OVERRULES the draft 1.15: a 1.15 range-70 melee death-spirals
   //     the aggressive frontier (a squishy MELEE can't kite the belt like the archer does at
@@ -1627,6 +1668,77 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     atkSpeed: 0.36,
     multiHitMult: 0.44,
     dashEvade: true,
+  },
+};
+
+/**
+ * DASH-EVADE tuning per class ("แนวๆ นินจา" auto swarm-escape, systems/combat `tryDashEvade`).
+ * A class opts IN via `HeroType.dashEvade: true`; the numbers below shape WHEN it blinks and HOW
+ * far. Only classes with a `dashEvade` capability appear here — a lookup miss (sword/mage) simply
+ * never evades (the capability guard short-circuits first), so their movement stays byte-identical.
+ *
+ * FULLY DETERMINISTIC — no RNG (the seeded stream is wave-composition only), no wall-clock: the
+ * trigger reads only shared state (hp / enemy positions) + per-hero transient counters ticked by
+ * fixed dt, so it evolves identically on every lockstep client. Sweepable by the balance-sim.
+ */
+export interface EvadeTuning {
+  /** Count ENGAGED enemies within this world-x radius of the hero — the "swarm/crowded" measure. */
+  radius: number;
+  /** Fire only when at least this many engaged foes are inside `radius` (a real crowd). */
+  minEnemies: number;
+  /** Fire when hp fraction drops below this… */
+  hpFrac: number;
+  /** …OR when the hero LOST at least this fraction of maxHp within `hpWindowSec` (a burst). */
+  hpLossFrac: number;
+  /** Rolling window (s) over which the hp-loss burst is measured (a periodic snapshot). */
+  hpWindowSec: number;
+  /** Minimum seconds between evades (own transient counter) — never dash-spams. */
+  cooldownSec: number;
+  /** The evade hop DISTANCE cap (passed as `dashHeroTo` maxReach), clamped to the walkable field. */
+  maxReach: number;
+}
+
+export const EVADE_TUNING: Partial<Record<HeroClass, EvadeTuning>> = {
+  // NINJA — carried BYTE-FOR-BYTE from the retired `CONFIG.ninja.evade` (the ninja sim stays
+  // byte-identical). A range-70 melee that STANDS in the belt; it evades a real 3-mob crowd.
+  ninja: {
+    radius: 95,
+    minEnemies: 3,
+    hpFrac: 0.55,
+    hpLossFrac: 0.18,
+    hpWindowSec: 0.8,
+    cooldownSec: 2.2,
+    maxReach: 280,
+  },
+  // ARCHER ("แนวๆ นินจา" solo death-spiral fix, 2026-07-08) — EMERGENCY escape, NOT a constant hop.
+  // The archer holds at range 350 and kites, so evade must trigger ONLY when melee has genuinely
+  // breached the kite and is cornering the squishy (hpMult 1.0) hero. SIM-TUNED (docs/balance-m79
+  // "Party feel pack"): a first cut (radius 82 / min 2 / hpFrac 0.5 / cd 3.2) OVERDELIVERED into a
+  // near-free class; these conservative values keep the FARM friction meaningful (potions still
+  // ~94/run vs 214 baseline, ~54 farm deaths/5-seeds vs 181 — the spiral hotspots s15/s26-30 are
+  // SMOOTHED, not erased) while breaking the spiral at its root. Emergency gates:
+  //   - radius 78: TIGHT (< ninja 95) — foes must be right on top of it, not merely nearby, so the
+  //     kite servo owns the normal spacing and evade never fights it.
+  //   - minEnemies 3: a REAL crowd has breached the kite (the spiral is a woken survivor-pack, not
+  //     one or two stragglers the kite already handles).
+  //   - hpFrac 0.4 / hpLossFrac 0.16: a real danger floor OR a sharp burst (it cannot trade hits).
+  //   - maxReach 300: a DECISIVE slip that clears the pack AND re-opens a near-full kite gap, so the
+  //     servo immediately re-establishes standoff after the blink (composes with kiting).
+  //   - cooldownSec 4.5: LONG — after one blink the kite carries it; a panic button, not a movement
+  //     mode, so it must not re-fire while the servo is already walking the hero clear.
+  // NOTE (owner flag): the evade also fires vs the s30 field-hazard boss adds, so the RANGED archer
+  // now kites+blinks that (already 0/5, unbeatable) frontier boss indefinitely instead of wiping
+  // ~199×/5-seeds — a positive side effect of the capability, NOT a boss-balance change (boss curves
+  // untouched, still 0/5). A boss-phase suppression was deliberately NOT added (it would perturb the
+  // ninja's byte-identical boss-phase movement). See the report.
+  archer: {
+    radius: 78,
+    minEnemies: 3,
+    hpFrac: 0.4,
+    hpLossFrac: 0.16,
+    hpWindowSec: 0.8,
+    cooldownSec: 4.5,
+    maxReach: 300,
   },
 };
 

@@ -102,7 +102,6 @@
       }
     },
     "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})",
-    "atkBuffTooltip": "+{percent}% ATK",
     "skillInfoAria": "More info about {skillName}",
     "skillStat": {
       "damage": "DMG ×{mult}",
@@ -293,6 +292,10 @@
       "questBoardHint": {
         "title": "The village elder has quests!",
         "body": "Tap the elder in town to open the Quest Board — a story-driven main quest and 3 daily quests to do each day (miss a day, lose nothing)."
+      },
+      "fortifierGained": {
+        "title": "You got a Fortifier!",
+        "body": "You just received a Fortifier item (weapon or armor) — check the inventory (the Fortifier row) to see how many you have, then take it to Uncle Dueng's refine station in town. Tap \"Use Fortifier\" for a guaranteed 100% refine success, once."
       }
     }
   },
@@ -963,6 +966,7 @@
     "botSelling": "💰 Bot is selling at the shop...",
     "botRestocked": "🧪 Bot restocked (HP +{hp} / MP +{mp} / scroll +{scroll})",
     "botReturning": "🏃 Bot is heading back to the farm...",
+    "botLeftCohortForTrip": "🤖 Bot needs to restock — heading to town, will rejoin the party after",
     "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
@@ -976,8 +980,8 @@
     "rewardManaPotion": "+{amount} mana potions",
     "dailyQuestComplete": "🏘 Daily complete! Go claim it at the village elder",
     "warpToFriendStarted": "🌀 Warping to your friend...",
-    "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones",
-    "hofClaimed": "🏅 Hall of Fame reward claimed!",
+    "worldBossClaimed": "🎉 Sia Jong defeated! +{gold} gold +{stones} enhancement stones +1 {item} — check your inventory's Fortifier row, then use \"Use Fortifier\" at Uncle Dueng's refine station",
+    "hofClaimed": "🏅 Hall of Fame reward claimed! Got 1 {item} — check your inventory's Fortifier row, then use \"Use Fortifier\" at Uncle Dueng's refine station",
     "fastTravelBlocked": {
       "locked": "That zone isn't unlocked yet",
       "aggro": "A mob is engaged with you — can't warp",
@@ -1219,6 +1223,18 @@
           "ninjaCadence": "🗡️ Ninja attacks faster with more frequent hits, same total damage",
           "ninjaDash": "💨 Ninja bot now dash-evades out of surrounds on its own — fewer deaths"
         }
+      },
+      "2026-07-09e": {
+        "items": {
+          "buffHub": "🤝 A new buff bar shows every active status in one place — tap a chip for details",
+          "partyFast": "⚡ Joining a party is faster now — no more waiting for the next refresh cycle",
+          "partySpread": "🎯 Party bots now spread out across monsters instead of dog-piling one (bosses still get the full-party pile-on)",
+          "questBossScale": "👹 Quest bosses now scale their HP with your party size",
+          "partyBuff10": "📈 The party EXP buff is now +10% per additional member",
+          "archerDash": "🏹 The archer can now evade! When melee mobs close in, it blinks away to a new firing position — far fewer deaths",
+          "partyShare": "⚖️ Party EXP share rebalanced — partying still levels clearly faster than solo, without leaving solo players far behind (the +10%/member buff is unchanged)",
+          "potionCd": "⏱️ Potion buttons now show their cooldown like skill buttons"
+        }
       }
     }
   },
@@ -1347,6 +1363,16 @@
     "playingWith": "Playing with {names} in this zone",
     "waiting": "Waiting for teammate…",
     "reconnecting": "Reconnecting…"
+  },
+  "buffHub": {
+    "chip": {
+      "partyExp": "+{percent}% EXP ({count} players)",
+      "warCry": "+{percent}% ATK ({seconds}s)"
+    },
+    "detail": {
+      "partyExp": "Party buff: with {count} in your cohort, every kill grants +{percent}% EXP.",
+      "warCry": "War Cry: +{percent}% attack for the whole party, temporarily — {seconds}s left."
+    }
   },
   "worldBoss": {
     "pre": "🌟 Sia Jong is about to invade Map 1! {time} left",

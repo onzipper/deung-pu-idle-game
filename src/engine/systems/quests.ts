@@ -122,6 +122,36 @@ export function tier3QuestBossScale(
 }
 
 /**
+ * Is the CURRENT boss fight serving a tier-1 hero's class-change EXAM (the `killBoss`
+ * objective of an accepted, still-pending class-change quest on ANY cohort hero)? A boss
+ * fight only ever happens in a boss room, so this + the caller's boss phase pins it to a
+ * real fight. Used (with `isTier3QuestBossFight`) to headcount-scale a QUEST boss's HP so a
+ * party can't trivialize an evolution exam ("no hiring friends to pass your exam"). Pure.
+ */
+export function isClassChangeBossFight(state: GameState): boolean {
+  for (const hero of state.heroes) {
+    if (hero.tier !== 1) continue;
+    const q = hero.quest;
+    if (!q || !q.accepted || q.id !== classChangeQuestId(hero.cls)) continue;
+    const def = classChangeQuestFor(hero.cls);
+    const bossIdx = def.objectives.findIndex((o) => o.type === "killBoss");
+    if (bossIdx < 0) continue;
+    if ((q.progress[bossIdx] ?? 0) < def.objectives[bossIdx].count) return true;
+  }
+  return false;
+}
+
+/**
+ * Is the current boss fight a QUEST boss (an evolution exam) rather than a plain STAGE boss?
+ * True for the tier-3 young-Sovereign fight OR any cohort hero's pending class-change exam.
+ * STAGE bosses (owner: melty-at-headcount is a reward) return false. Drives the party HP
+ * headcount scale in `systems/boss.startBossFight`. Pure (no RNG/wall-clock).
+ */
+export function isQuestBossFight(state: GameState): boolean {
+  return isTier3QuestBossFight(state) || isClassChangeBossFight(state);
+}
+
+/**
  * The evolution quest DEF that gates `hero`'s NEXT tier change: the class-change quest
  * at tier 1, the tier-3 quest at tier 2, none at tier 3 (fully evolved). This is the
  * single place the tier -> quest mapping lives (used by the offer/accept/complete

@@ -60,9 +60,10 @@ export function usePatchNotes(): PatchNotesController {
       autoCast,
       autoAllocate,
       autoHunt,
-      // `inTown` doesn't affect `isFreshSave` (the only helper this snapshot
-      // feeds here) — a fixed value keeps this call site simple.
+      // `inTown`/`fortifierCount` don't affect `isFreshSave` (the only helper
+      // this snapshot feeds here) — fixed values keep this call site simple.
       inTown: false,
+      fortifierCount: 0,
       heroes,
     });
     // Same "returning player, but the FTUE flag hasn't been corrected yet"

@@ -13,7 +13,7 @@
  * behaviour is preserved (and made frame-rate independent).
  */
 
-import { CONFIG, HERO_TYPES, ENEMY_TYPES, type HeroType } from "@/engine/config";
+import { CONFIG, HERO_TYPES, ENEMY_TYPES, EVADE_TUNING, type HeroType } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp, sign } from "@/engine/core/math";
 import { dsin, dhypot } from "@/engine/core/dmath";
@@ -30,7 +30,7 @@ import { creditKillGold } from "@/engine/systems/economy";
 import { grantKillXp } from "@/engine/systems/leveling";
 import { advanceQuestObjective } from "@/engine/systems/quests";
 import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
-import { onBossKilled } from "@/engine/systems/boss";
+import { bossRetreat, onBossKilled } from "@/engine/systems/boss";
 import { respawnToTown } from "@/engine/systems/world";
 import {
   aliveHeroes,
@@ -58,6 +58,32 @@ function huntTarget(targets: readonly CombatTarget[], x: number): CombatTarget |
   let best: CombatTarget | null = null;
   let bd = Infinity;
   for (const target of targets) {
+    const d = Math.abs(target.x - x);
+    if (d < bd || (d === bd && best !== null && target.id < best.id)) {
+      bd = d;
+      best = target;
+    }
+  }
+  return best;
+}
+
+/**
+ * TARGET-SPREAD (M8 "party feel pack") — nearest alive target whose id is NOT already
+ * CLAIMED by a lower-index hero this step, tie-broken by lower id (same determinism as
+ * `huntTarget`). Returns null when every target is claimed (the caller then falls back to
+ * plain `huntTarget` = sharing). Lets a cohort fan out over a farm field instead of all
+ * dog-piling the single nearest mob (the "มอนไม่พอแบ่ง" starvation flag). Only ever used in
+ * the multi-hero, non-boss, no-engaged-boss case — solo / boss / world-boss keep `huntTarget`.
+ */
+function nearestUnclaimed(
+  targets: readonly CombatTarget[],
+  x: number,
+  claimed: ReadonlySet<number>,
+): CombatTarget | null {
+  let best: CombatTarget | null = null;
+  let bd = Infinity;
+  for (const target of targets) {
+    if (claimed.has(target.id)) continue;
     const d = Math.abs(target.x - x);
     if (d < bd || (d === bd && best !== null && target.id < best.id)) {
       bd = d;
@@ -111,11 +137,17 @@ function findAliveTargetIn(list: readonly CombatTarget[], id: number): CombatTar
  * cast, so a freshly-regenerated point can fund a cast the same step.
  */
 export function decayHeroTimers(state: GameState): void {
-  // M6: a TOTAL wipe (solo hero down, or a whole party down) revives via the WORLD
-  // respawn (dead hero walks home to town -> revives there; see combat.resolveDeaths
-  // -> world.respawnToTown). Only a PARTIAL party loss (some heroes still up — the
-  // M8 party case) revives IN PLACE here on the per-hero revive timer.
-  const totalWipe = aliveHeroes(state).length === 0;
+  // M6: a SOLO total wipe revives via the WORLD respawn (the dead hero walks home to
+  // town -> revives there; see combat.resolveDeaths -> world.respawnToTown). A PARTIAL
+  // party loss (some heroes still up — the M8 party case) revives IN PLACE here on the
+  // per-hero revive timer.
+  //
+  // COHORT (M8, owner v1 2026-07-08): a cohort (heroes.length > 1) NEVER treks the
+  // shared party to town on death — a full cohort wipe is therefore NOT a "total wipe"
+  // for this purpose, so every dead cohort hero revives IN PLACE on its own timer (a
+  // boss-room cohort wipe instead RETREATS the boss; see resolveDeaths). Only a SOLO
+  // hero (length === 1) can total-wipe to town, keeping the solo path byte-identical.
+  const totalWipe = state.heroes.length === 1 && aliveHeroes(state).length === 0;
   for (const h of state.heroes) {
     if (h.dead && !totalWipe) {
       h.reviveTimer -= FIXED_DT;
@@ -278,10 +310,12 @@ function pickEvadeDir(state: GameState, h: Hero, radius: number): -1 | 1 {
 }
 
 /**
- * DASH-EVADE (NINJA FEEL RETUNE 2026-07-08, `CONFIG.ninja.evade`) — when an AUTO-play hero
- * of a `dashEvade` class is SWARMED under pressure, blink OUT of the crowd toward its clear
- * side, then let the normal auto-hunt re-engage next steps. Returns true if it dashed (the
- * caller then SKIPS this step's approach-walk so the hero doesn't immediately walk back in).
+ * DASH-EVADE ("แนวๆ นินจา" auto swarm-escape, per-class `EVADE_TUNING`) — when an AUTO-play hero
+ * of a `dashEvade` class (ninja / archer) is SWARMED under pressure, blink OUT of the crowd toward
+ * its clear side, then let the normal auto-hunt (and, for the archer, the kite servo) re-engage
+ * next steps. Returns true if it dashed (the caller then SKIPS this step's approach-walk so the
+ * hero doesn't immediately walk back in). The archer reads a tighter/higher-reach block than the
+ * ninja (emergency escape vs belt-dweller relief) — see `EVADE_TUNING`.
  *
  * DETERMINISTIC: no RNG, no wall-clock. The three transient counters (`evadeCd` cooldown +
  * the `evadeHpMark`/`evadeMarkCd` damage-window) are ticked here by fixed dt and are a pure
@@ -289,8 +323,9 @@ function pickEvadeDir(state: GameState, h: Hero, radius: number): -1 | 1 {
  * (see the Hero doc for why they are hash-excluded). Called ONLY for a `dashEvade` class and
  * ONLY when no manual command is active (manual + boss forced-combat keep priority upstream).
  */
-function tryNinjaEvade(state: GameState, h: Hero): boolean {
-  const ev = CONFIG.ninja.evade;
+function tryDashEvade(state: GameState, h: Hero): boolean {
+  const ev = EVADE_TUNING[h.cls];
+  if (!ev) return false; // no tuning for this class → never evades (defensive; dashEvade gate above)
   // Cooldown tick.
   if (h.evadeCd > 0) h.evadeCd = Math.max(0, h.evadeCd - FIXED_DT);
   // Damage-window: measure hp lost since the last snapshot, THEN roll the window if due.
@@ -329,6 +364,24 @@ export function updateHeroes(state: GameState): void {
   const commandTargets = bossPhase ? [] : getTargets(state);
   const minX = hunt.heroMinX;
   const maxX = fieldMaxX(state) - hunt.fieldRightMargin;
+
+  // TARGET-SPREAD + BOSS DOG-PILE (M8 "party feel pack", owner "แต่มีบอส ทุกคนต้องรุม"). Only a
+  // MULTI-HERO cohort spreads — solo keeps plain `huntTarget` (byte-identical). A boss ALWAYS
+  // pulls the WHOLE party: the stage/quest-boss phase (`bossPhase`) clears the enemy list so all
+  // heroes already target the boss, and an ENGAGED world boss (passive-until-hit → hp < maxHp)
+  // is a `forcedBoss` every auto hero converges on, EXEMPT from the claim/spread (claimable by
+  // all). Spread applies ONLY to ordinary farm mobs with no engaged boss present.
+  const multi = state.heroes.length > 1;
+  const wb = state.worldBoss;
+  const forcedBoss: CombatTarget | null =
+    multi && !bossPhase && wb && wb.active && wb.entity && wb.entity.hp < wb.entity.maxHp
+      ? wb.entity
+      : null;
+  // The world-boss id is NEVER claimed even before it engages (a boss is everyone's target).
+  const wbId = wb && wb.active && wb.entity ? wb.entity.id : null;
+  const allowSpread = multi && !bossPhase && !forcedBoss;
+  const claimed: Set<number> | null = allowSpread ? new Set<number>() : null;
+
   for (const h of state.heroes) {
     if (h.dead) continue;
     const t = HERO_TYPES[h.cls];
@@ -382,10 +435,10 @@ export function updateHeroes(state: GameState): void {
     // Only when no manual command is active — manual moveTo/attackTarget and boss forced-combat
     // keep priority (both leave `manualActive` false only in the auto/boss cases, and a real
     // manual command sets it true, suppressing the evade). Byte-identical for non-dashEvade
-    // classes (the `t.dashEvade` guard is false → tryNinjaEvade never runs, counters untouched).
+    // classes (the `t.dashEvade` guard is false → tryDashEvade never runs, counters untouched).
     let evaded = false;
     if (!manualActive && t.dashEvade) {
-      evaded = tryNinjaEvade(state, h);
+      evaded = tryDashEvade(state, h);
     }
 
     if (!manualActive && !evaded) {
@@ -396,7 +449,25 @@ export function updateHeroes(state: GameState): void {
       // mobs coming AT the hero are just targets that arrive early. The multi-actor
       // machinery is retained for M8 — each party member hunts independently here, and
       // the per-class `offset` (formation spacing) is preserved in config for it.
-      const hntTgt = huntTarget(targets, h.x);
+      // Pick the approach target: everyone dog-piles a forced boss; else a cohort fans out
+      // over UNCLAIMED farm mobs (sharing when all are claimed / fewer mobs than heroes); solo
+      // + boss keep plain nearest (`claimed` null → byte-identical). Claiming the chosen mob
+      // reserves it from lower-index... i.e. from HIGHER-index heroes later this step. The world
+      // boss is never claimed (a boss belongs to all heroes at once).
+      // Spread only MELEE approach: melee heroes physically CONVERGE on a mob's position, so
+      // dog-piling one mob is the visible "มอนไม่พอแบ่ง" bunching. RANGED heroes fire from a
+      // standoff and barely move, so forcing them onto a farther unclaimed mob only adds travel
+      // (measured: it dropped archer throughput) for no gain on a spawn-rate-capped field —
+      // they keep plain nearest (byte-identical to pre-spread) and do not claim.
+      let hntTgt: CombatTarget | null;
+      if (forcedBoss) {
+        hntTgt = forcedBoss;
+      } else if (claimed && t.attack === "melee") {
+        hntTgt = nearestUnclaimed(targets, h.x, claimed) ?? huntTarget(targets, h.x);
+        if (hntTgt && hntTgt.id !== wbId) claimed.add(hntTgt.id);
+      } else {
+        hntTgt = huntTarget(targets, h.x);
+      }
       goalX = hntTgt ? approachGoalX(h, t, hntTgt) : h.x;
       // Melee retaliates against the nearest foe within its range on EITHER side
       // (symmetric |Δx| ≤ range) so a monster in melee contact is never a free
@@ -415,10 +486,19 @@ export function updateHeroes(state: GameState): void {
             // balance pacing — is unchanged.
             (nearestTarget(targets, h.x, 0, t.range) ??
             nearestWithin(targets, h.x, t.range));
+      // Forced-boss dog-pile: focus-FIRE the engaged world boss when it's in reach (melee
+      // symmetric, ranged forward), so the party gangs it instead of peeling to farm mobs;
+      // still retaliate to a threat while closing (atkTgt keeps its normal value out of reach).
+      if (forcedBoss) {
+        const d = forcedBoss.x - h.x;
+        const inReach = t.attack === "melee" ? Math.abs(d) <= t.range : d >= 0 && d <= t.range;
+        if (inReach) atkTgt = forcedBoss;
+      }
       // Face the foe being fired at, else the one being approached — so a kiting
       // ranged hero faces (and shoots) its target while retreating. Boss phase
-      // routes here too (the boss is in `targets`), so boss fights are covered.
-      aimTarget = atkTgt ?? hntTgt;
+      // routes here too (the boss is in `targets`), so boss fights are covered. A forced
+      // boss is always FACED (the whole party orients on it even while approaching).
+      aimTarget = forcedBoss ?? atkTgt ?? hntTgt;
     }
 
     // Publish this step's combat aim (render-only facing). Null when not engaging
@@ -660,6 +740,16 @@ export function resolveDeaths(state: GameState): void {
   // (respawnToTown sets `traveling`, and the next steps only tick the walk). Kills
   // banked toward a zone/quest are kept (no progress penalty).
   if (aliveHeroes(state).length === 0 && !state.traveling) {
-    respawnToTown(state);
+    if (state.heroes.length > 1) {
+      // COHORT (M8, owner v1 2026-07-08): a full-party wipe must NEVER drag the shared
+      // party to town. In a BOSS ROOM the boss RETREATS — the whole team revives to
+      // full HP in place and can retry (the spec's "retreats on player loss"), no town
+      // transit. On the FIELD there is no respawn call at all: each dead hero revives
+      // IN the zone on its per-hero timer (decayHeroTimers keeps totalWipe false for a
+      // cohort). Solo (length === 1) still walks home to town — byte-identical.
+      if (state.phase === "boss") bossRetreat(state);
+    } else {
+      respawnToTown(state);
+    }
   }
 }

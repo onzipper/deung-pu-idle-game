@@ -22,6 +22,7 @@ import { grantKillXp } from "@/engine/systems/leveling";
 import {
   advanceQuestObjective,
   isTier3QuestBossFight,
+  isQuestBossFight,
   tier3QuestBossScale,
 } from "@/engine/systems/quests";
 import { advanceDailyProgress } from "@/engine/systems/dailyQuests";
@@ -51,7 +52,18 @@ export function startBossFight(state: GameState): void {
   // with the softer quest-override scales (a "young" version a tier-2 hero can beat) — same
   // CHARGE behavior/telegraphs, just gentler hp/atk. Null for the REAL s20 boss (tier-3 /
   // post-quest), so it spawns at full bossVariety scale. Keys off quest state, not tier alone.
-  state.boss = makeBoss(state.nextId++, state.stage, tier3QuestBossScale(state) ?? undefined);
+  // M8 "party feel pack": a QUEST boss (evolution exam — young Sovereign OR a pending
+  // class-change killBoss) scales HP by cohort headcount so a party can't trivialize the exam.
+  // STAGE bosses pass mult 1 (owner: melty-at-headcount is a reward). Solo → 1 (byte-identical).
+  const questHpMult = isQuestBossFight(state)
+    ? CONFIG.party.questBossHpScale(state.heroes.length)
+    : 1;
+  state.boss = makeBoss(
+    state.nextId++,
+    state.stage,
+    tier3QuestBossScale(state) ?? undefined,
+    questHpMult,
+  );
   state.enemies = [];
   // Drop any in-flight enemy projectiles; keep the team's own shots.
   state.projectiles = state.projectiles.filter((p) => p.team === "hero");

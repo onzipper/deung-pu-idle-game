@@ -108,21 +108,27 @@ function applyPartyTune(): void {
   const share = process.env.PSHARE === undefined ? undefined : Number(process.env.PSHARE);
   const buff = process.env.PBUFF === undefined ? undefined : Number(process.env.PBUFF);
   const scale = process.env.PSCALE === undefined ? undefined : Number(process.env.PSCALE);
-  if (share === undefined && buff === undefined && scale === undefined) return;
+  const resp = process.env.PRESPAWN === undefined ? undefined : Number(process.env.PRESPAWN);
+  if (share === undefined && buff === undefined && scale === undefined && resp === undefined) return;
   const P = CONFIG.party as unknown as {
     expShareRate: number; expBuffPerMember: number; spawnScalePerMember: number;
+    respawnScalePerMember: number;
     expBuff: (n: number) => number;
     expKillMult: (n: number, a: number) => number;
     spawnMaxAliveScale: (n: number) => number;
+    respawnDelayScale: (n: number) => number;
   };
   const r = share ?? P.expShareRate;
   const b = buff ?? P.expBuffPerMember;
   const sc = scale ?? P.spawnScalePerMember;
+  const rs = resp ?? P.respawnScalePerMember;
   P.expShareRate = r; P.expBuffPerMember = b; P.spawnScalePerMember = sc;
+  P.respawnScalePerMember = rs;
   P.expBuff = (n: number) => (n <= 1 ? 1 : 1 + b * (n - 1));
   P.expKillMult = (n: number, a: number) =>
     n <= 1 ? 1 : P.expBuff(n) * ((1 + (Math.max(1, a) - 1) * r) / Math.max(1, a));
   P.spawnMaxAliveScale = (n: number) => (n <= 1 ? 1 : 1 + sc * (n - 1));
+  P.respawnDelayScale = (n: number) => (n <= 1 ? 1 : 1 / (1 + rs * (n - 1)));
 }
 applyPartyTune();
 

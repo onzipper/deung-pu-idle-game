@@ -238,6 +238,25 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09d.items.ninjaDash",
     ],
   },
+  // Buff Badge Hub (owner ask: one HUD spot for every active buff) + party
+  // quick-start (accept/invite/leave already refetch immediately — this wave
+  // makes that explicit + gates the open-panel refresh on staleness) + the
+  // same-day engine "party feel pack": target-spread auto-hunt, quest-boss
+  // headcount HP scaling, and the party XP buff raised to +10%/member.
+  {
+    id: "2026-07-09e",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09e.items.buffHub",
+      "releases.2026-07-09e.items.partyFast",
+      "releases.2026-07-09e.items.partySpread",
+      "releases.2026-07-09e.items.questBossScale",
+      "releases.2026-07-09e.items.partyBuff10",
+      "releases.2026-07-09e.items.archerDash",
+      "releases.2026-07-09e.items.partyShare",
+      "releases.2026-07-09e.items.potionCd",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

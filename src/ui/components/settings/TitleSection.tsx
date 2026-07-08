@@ -14,8 +14,13 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { fetchHofRewards, postHofTitle } from "@/ui/hof/rewardsApi";
-import { resolveTitlePickerState, type TitlePickerState } from "@/ui/hof/rewardsLogic";
+import {
+  nextSocialBadgeAfterTitlePick,
+  resolveTitlePickerState,
+  type TitlePickerState,
+} from "@/ui/hof/rewardsLogic";
 import { titleLabel } from "@/ui/hof/titles";
+import { useGameStore } from "@/ui/store/gameStore";
 
 type FetchState = { kind: "loading" } | TitlePickerState;
 
@@ -23,6 +28,7 @@ export function TitleSection() {
   const t = useTranslations("hof");
   const [state, setState] = useState<FetchState>({ kind: "loading" });
   const [saving, setSaving] = useState(false);
+  const setMySocialBadge = useGameStore((s) => s.setMySocialBadge);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -39,6 +45,11 @@ export function TitleSection() {
     setSaving(false);
     if (res && res.ok) {
       setState({ ...state, displayTitle: res.displayTitle });
+      // Push straight into the store so the in-scene nameplate reflects the
+      // new pick THIS frame — the render seam otherwise only refreshes on
+      // the next `townArrived` fetch (see GameClient.tsx's `refreshHofOnTownArrival`).
+      const label = titleLabel(res.displayTitle, t);
+      setMySocialBadge(nextSocialBadgeAfterTitlePick(useGameStore.getState().mySocialBadge, label));
     }
   }
 

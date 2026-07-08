@@ -269,6 +269,12 @@ export interface ShopSummary {
   stackCap: number;
   /** Quick-use readiness for the two potions (alive, in stock, off cd, not full). */
   ready: { hpPotion: boolean; manaPotion: boolean };
+  /** Remaining per-type use cooldown, seconds (0 = off cooldown) — drives the
+   * SkillBar-style sweep overlay on the potion buttons. */
+  cds: { hpPotion: number; manaPotion: number };
+  /** Each potion's full cooldown, seconds (for the CSS sweep duration) —
+   * `CONFIG.shop.items.<item>.cooldown`, mirrored here for display only. */
+  maxCds: { hpPotion: number; manaPotion: number };
 }
 
 /**
@@ -876,6 +882,11 @@ const emptyShop: ShopSummary = {
   },
   stackCap: CONFIG.shop.stackCap,
   ready: { hpPotion: false, manaPotion: false },
+  cds: { hpPotion: 0, manaPotion: 0 },
+  maxCds: {
+    hpPotion: CONFIG.shop.items.hpPotion.cooldown,
+    manaPotion: CONFIG.shop.items.manaPotion.cooldown,
+  },
 };
 
 /** One drop-feed toast entry (M7 juice, `DropFeed.tsx`) — pushed only for a
