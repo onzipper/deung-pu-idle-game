@@ -942,7 +942,17 @@
     "sellButton": "Sell",
     "sellAllCommonButton": "Sell all common",
     "confirmSell": "Confirm sell?",
-    "refinePlus": "+{level}"
+    "refinePlus": "+{level}",
+    "doll": {
+      "emptyReal": "Empty",
+      "comingSoon": "Coming soon...",
+      "teaserName": {
+        "helmet": "Helmet",
+        "gloves": "Gloves",
+        "boots": "Boots",
+        "amulet": "Amulet"
+      }
+    }
   },
   "dropFeed": {
     "gotItem": "Item obtained: {name}",
@@ -1243,7 +1253,8 @@
       },
       "2026-07-09g": {
         "items": {
-          "buffOverlay": "Buff badges moved to floating icons in the arena corner — no longer push the screen down"
+          "buffOverlay": "Buff badges moved to floating icons in the arena corner — no longer push the screen down",
+          "paperDoll": "New bag view: see what's equipped at a glance + mystery slots..."
         }
       }
     }
