@@ -165,6 +165,12 @@ export interface FriendView {
   title: string | null;
   /** Champion aura (holds rank-1 of level/power/gold this season). */
   champion: boolean;
+  /** True iff this friend already belongs to SOME party (mine or another) —
+   *  drives the "🤝 already in a party" chip. The invite button itself stays
+   *  enabled regardless (owner-approved informed-manual flow, no auto-switch
+   *  dialog): the failure mode is an explicit toast on the ACCEPT side, not a
+   *  disabled invite button. See `respondPartyInvite`'s `already_in_party`. */
+  inParty: boolean;
 }
 
 export interface IncomingRequestView {
@@ -532,6 +538,16 @@ export async function getFriendsPanel(
       : Promise.resolve([] as CharRow[]),
   ]);
 
+  // Which friends already belong to SOME party (mine or another) — feeds the
+  // "🤝 already in a party" chip. One batched IN query, no N+1.
+  const friendPartyRows = friendIds.length
+    ? await prisma.partyMember.findMany({
+        where: { userId: { in: friendIds } },
+        select: { userId: true },
+      })
+    : [];
+  const friendsInPartySet = new Set(friendPartyRows.map((r) => r.userId));
+
   const userMap = new Map(users.map((u) => [u.id, u]));
   const charsByUser = new Map<string, CharRow[]>();
   for (const c of chars as CharRow[]) {
@@ -591,6 +607,7 @@ export async function getFriendsPanel(
       lastSeenAt: lastSeenMs > 0 ? new Date(lastSeenMs).toISOString() : null,
       title: pt.title,
       champion: pt.champion,
+      inParty: friendsInPartySet.has(fid),
     };
   });
 

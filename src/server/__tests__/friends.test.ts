@@ -32,8 +32,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       count: vi.fn(),
       create: vi.fn(),
     },
-    // M8 party — getFriendsPanel folds party state in via loadPartyState().
-    partyMember: { findUnique: vi.fn() },
+    // M8 party — getFriendsPanel folds party state in via loadPartyState(), and
+    // also batches a partyMember.findMany to derive each friend's `inParty` chip.
+    partyMember: { findUnique: vi.fn(), findMany: vi.fn() },
     party: { findUnique: vi.fn() },
     partyInvite: { findMany: vi.fn() },
     // HOF seasonal titles — getFriendsPanel folds title/aura in via titlesForCharacters().
@@ -74,6 +75,7 @@ beforeEach(() => {
   // Default M8 party state = "not in a party, no invites" so the existing
   // getFriendsPanel assertions are unaffected by the party fold-in.
   mockPrisma.partyMember.findUnique.mockResolvedValue(null);
+  mockPrisma.partyMember.findMany.mockResolvedValue([]);
   mockPrisma.partyInvite.findMany.mockResolvedValue([]);
 });
 
@@ -346,6 +348,36 @@ describe("getFriendsPanel", () => {
     expect(f.online).toBe(false);
     // displayName falls back to the most-recent character's name.
     expect(f.displayName).toBe("GoneChar");
+  });
+
+  it("flags a friend already in SOME party (mine or another) via inParty", async () => {
+    registered();
+    const now = new Date("2026-07-07T12:00:00Z");
+    mockPrisma.emojiPing.findMany.mockResolvedValueOnce([]);
+    mockPrisma.emojiPing.deleteMany.mockResolvedValue({ count: 0 });
+    mockPrisma.friendship.findMany.mockResolvedValueOnce([
+      { userAId: ME, userBId: "user_h" },
+      { userAId: ME, userBId: "user_i" },
+    ]);
+    mockPrisma.friendRequest.findMany.mockResolvedValueOnce([]);
+    mockPrisma.user.findMany.mockResolvedValueOnce([
+      { id: "user_h", displayName: "Partied", friendCode: "HHHH2345" },
+      { id: "user_i", displayName: "Solo", friendCode: "IIII2345" },
+    ]);
+    mockPrisma.character.findMany.mockResolvedValueOnce([]);
+    // Only user_h shows up as a member of SOME party.
+    mockPrisma.partyMember.findMany.mockResolvedValueOnce([{ userId: "user_h" }]);
+
+    const res = await getFriendsPanel(ME, now);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const byId = new Map(res.panel.friends.map((f) => [f.userId, f]));
+    expect(byId.get("user_h")?.inParty).toBe(true);
+    expect(byId.get("user_i")?.inParty).toBe(false);
+    expect(mockPrisma.partyMember.findMany).toHaveBeenCalledWith({
+      where: { userId: { in: expect.arrayContaining(["user_h", "user_i"]) } },
+      select: { userId: true },
+    });
   });
 });
 
