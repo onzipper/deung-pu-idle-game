@@ -56,12 +56,14 @@ import { EquipmentDoll } from "@/ui/components/EquipmentDoll";
 import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import {
+  classTintClass,
   GEAR_SLOT_ICONS,
   gearNameClass,
   HERO_ICONS,
   RARITY_COLORS,
   RARITY_GLOW,
   TIER_BORDER_COLORS,
+  weaponGlyph,
 } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -93,6 +95,25 @@ function GridCell({
   // "ตำราตำนาน" legendary (endgame v1.3): a distinct violet border/glow overrides the
   // ordinary tier-6 fallback (its tier, 11, is above every TIER_BORDER_COLORS band).
   const legendary = isLegendaryTemplate(item.templateId);
+  // Owner ask 2026-07-08: weapon glyph reads by REQUIRED CLASS instead of one
+  // universal crossed-blade; armor keeps its generic 🛡 but both get a subtle
+  // per-class glyph tint when class-locked (weapons always are; armor only
+  // when `classReq` isn't null — universal armor stays untinted).
+  const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
+  const tint = classTintClass(template.classReq);
+  // EQUIPPED must be unmistakable (owner ask): bright border, wins over the
+  // tier/legendary border hierarchy — plus an on-tile "ใส่อยู่" label (not a
+  // corner dot). `selected`'s gold ring still layers independently on top.
+  const borderCls = equipped
+    ? "border-emerald-300"
+    : legendary
+      ? "border-fuchsia-400/80"
+      : tierBorder(template.tier);
+  const glowCls = equipped
+    ? "shadow-[0_0_16px_4px_rgba(52,211,153,0.55)]"
+    : legendary
+      ? "shadow-[0_0_16px_4px_rgba(217,70,239,0.45)]"
+      : glow;
 
   return (
     <button
@@ -100,14 +121,20 @@ function GridCell({
       onClick={onSelect}
       aria-pressed={selected}
       aria-label={tContent(`${item.templateId}.name`)}
-      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${
-        legendary ? "border-fuchsia-400/80" : tierBorder(template.tier)
-      } ${legendary ? "shadow-[0_0_16px_4px_rgba(217,70,239,0.45)]" : glow} ${
+      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${borderCls} ${glowCls} ${
         selected ? "ring-2 ring-ddp-gold-bright" : ""
       }`}
     >
-      <span aria-hidden className="text-xl leading-none">
-        {GEAR_SLOT_ICONS[template.slot]}
+      {equipped && (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 top-0 rounded-t-(--ddp-radius-sm) bg-emerald-400 px-0.5 py-0.5 text-center text-[8px] leading-none font-black text-emerald-950"
+        >
+          {t("equippedBadge")}
+        </span>
+      )}
+      <span aria-hidden className={`text-xl leading-none ${equipped ? "mt-2.5" : ""} ${tint}`}>
+        {glyph}
       </span>
       <span className="text-[9px] font-bold text-ddp-ink-muted">
         {t("tierShort", { tier: template.tier })}
@@ -115,7 +142,11 @@ function GridCell({
           <span className="text-emerald-400"> {t("refinePlus", { level: item.refineLevel })}</span>
         )}
       </span>
-      {template.classReq && (
+      {/* Armor's main glyph stays generic 🛡 (owner ask), so a class-locked
+          armor piece still gets this small required-class corner marker —
+          weapons already carry their class in the big glyph above now, so
+          this would just duplicate it there. */}
+      {template.slot === "armor" && template.classReq && (
         <span
           aria-hidden
           className="absolute bottom-0.5 left-0.5 text-[10px] leading-none"
@@ -130,11 +161,6 @@ function GridCell({
           className="absolute bottom-0.5 right-0.5 text-[10px] leading-none"
         >
           {colors.icon}
-        </span>
-      )}
-      {equipped && (
-        <span className="absolute -top-1.5 -left-1.5 rounded-full bg-emerald-400 px-1 text-[9px] font-black text-emerald-950">
-          E
         </span>
       )}
       {isNew && !equipped && (
@@ -235,11 +261,18 @@ function DetailCard({
     sellGuard.trigger(needsConfirm, () => onSell(item));
   }
 
+  const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
+  const tint = classTintClass(template.classReq);
+
   return (
-    <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 p-3">
+    <div
+      className={`flex flex-col gap-2 rounded-(--ddp-radius-md) border p-3 ${
+        equipped ? "border-emerald-400/70 bg-emerald-400/5" : "border-ddp-border-soft bg-black/40"
+      }`}
+    >
       <div className="flex items-center gap-2">
-        <span aria-hidden className="text-2xl">
-          {GEAR_SLOT_ICONS[template.slot]}
+        <span aria-hidden className={`text-2xl ${tint}`}>
+          {glyph}
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className={`truncate text-sm ${prestigeCls || `font-bold ${colors.text}`}`}>
@@ -253,6 +286,11 @@ function DetailCard({
           </span>
           <span className="text-[10px] text-ddp-ink-muted">
             {t("tierLabel", { tier: template.tier })} · {t(`rarity.${template.rarity}`)}
+            {equipped && (
+              <span className="ml-1.5 rounded-full bg-emerald-400/20 px-1.5 py-0.5 font-bold text-emerald-300">
+                {t("equippedBadge")}
+              </span>
+            )}
           </span>
         </div>
       </div>

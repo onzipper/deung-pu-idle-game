@@ -23,11 +23,13 @@ import { lookupTemplate, type GearSlot } from "@/engine";
 import { buildRealDollSlots, TEASER_SLOT_ICONS, type TeaserSlotKey } from "@/ui/gear/dollModel";
 import type { InventoryItem } from "@/ui/gear/types";
 import {
+  classTintClass,
   GEAR_SLOT_ICONS,
   gearNameClass,
   RARITY_COLORS,
   RARITY_GLOW,
   TIER_BORDER_COLORS,
+  weaponGlyph,
 } from "@/ui/labels";
 
 const TEASER_TOAST_MS = 1800;
@@ -58,6 +60,11 @@ function RealSlotButton({
     item && template
       ? gearNameClass(item.templateId, item.refineLevel) || RARITY_COLORS[template.rarity].text
       : "text-ddp-ink-muted/70";
+  // Owner ask 2026-07-08: same per-class weapon glyph + subtle class tint as
+  // the bag grid — every doll real-slot IS the equipped item already (no
+  // separate "equipped" ribbon needed here, unlike the bag's owned pile).
+  const glyph = template ? (slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor) : GEAR_SLOT_ICONS[slot];
+  const tint = template ? classTintClass(template.classReq) : "";
 
   return (
     <button
@@ -67,8 +74,8 @@ function RealSlotButton({
       aria-label={item && template ? tContent(`${item.templateId}.name`) : t(`slot.${slot}`)}
       className={`flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1 transition-transform duration-100 active:scale-95 ${tierCls} ${glow} ${active ? "ring-2 ring-ddp-gold-bright" : ""}`}
     >
-      <span aria-hidden className="text-xl leading-none">
-        {GEAR_SLOT_ICONS[slot]}
+      <span aria-hidden className={`text-xl leading-none ${tint}`}>
+        {glyph}
       </span>
       {item && template ? (
         <span className={`w-full truncate text-center text-[8px] font-bold leading-tight ${nameCls}`}>

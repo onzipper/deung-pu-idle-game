@@ -24,7 +24,7 @@ import { useTranslations } from "next-intl";
 import { ITEM_TEMPLATES } from "@/engine";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import type { InventoryItem } from "@/ui/gear/types";
-import { GEAR_SLOT_ICONS, prestigeNameClass, RARITY_COLORS } from "@/ui/labels";
+import { classTintClass, GEAR_SLOT_ICONS, prestigeNameClass, RARITY_COLORS, weaponGlyph } from "@/ui/labels";
 
 export interface SellRowProps {
   item: InventoryItem;
@@ -58,11 +58,16 @@ export function SellRow({
   const colors = RARITY_COLORS[template.rarity];
   const needsConfirm = template.rarity === "rare" || template.rarity === "epic";
   const prestigeCls = prestigeNameClass(item.refineLevel);
+  // Owner ask 2026-07-08: same per-class weapon glyph + tint as the bag grid
+  // (sell rows never show equipped items — `ShopPanel.tsx` filters those out
+  // before this component ever renders, so no equipped treatment needed here).
+  const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
+  const tint = classTintClass(template.classReq);
 
   const nameBlock = (
     <>
-      <span aria-hidden className="text-lg leading-none">
-        {GEAR_SLOT_ICONS[template.slot]}
+      <span aria-hidden className={`text-lg leading-none ${tint}`}>
+        {glyph}
       </span>
       <div className="flex min-w-0 flex-1 flex-col leading-tight text-left">
         <span className={`truncate text-xs ${prestigeCls || `font-bold ${colors.text}`}`}>
