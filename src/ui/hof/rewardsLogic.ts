@@ -1,13 +1,15 @@
 /**
  * HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) — small
- * pure decision helpers factored out of `ChampionsSection.tsx` /
+ * pure decision helpers factored out of `PodiumStrip.tsx` /
  * `HallOfFamePanel.tsx` / `components/settings/TitleSection.tsx` so they're
  * headlessly testable (no `@testing-library` in this repo — every UI-adjacent
  * test here is pure-logic, same convention as `ui/hof/format.ts`/`query.ts`
  * and `ui/worldBoss/schedule.ts`). No React/DOM/fetch.
  */
 
-import type { HofMyTitle } from "./rewardsTypes";
+import { HOF_REWARD_BOARDS, type HofRewardBoard } from "./titles";
+import type { HofChampionRow, HofMyTitle, HofUnclaimedAward } from "./rewardsTypes";
+import type { HofBoard } from "./types";
 
 export type ClaimState = "idle" | "claiming" | "claimed" | "error";
 
@@ -47,4 +49,129 @@ export function resolveTitlePickerState(
 ): TitlePickerState {
   if (!me || me.titles.length === 0) return { kind: "hidden" };
   return { kind: "ready", titles: me.titles, displayTitle: me.displayTitle };
+}
+
+// ── Podium strip (HOF panel redesign) ───────────────────────────────────────
+// `PodiumStrip.tsx` renders rank-1 (+ an expandable rank 2-3 reveal) for
+// WHICHEVER board is currently selected in `HallOfFamePanel.tsx` — a single
+// nav (the board tabs) drives both the podium AND the live list below it,
+// replacing the old always-on 2x2 "current champions" grid. All these
+// helpers are pure re-keying/lookup logic over the ONE `/api/hof/rewards`
+// response (`useHofRewards.ts`'s fetch) — no extra network calls per tab.
+
+const REWARD_BOARD_SET: ReadonlySet<HofBoard> = new Set(HOF_REWARD_BOARDS);
+
+/** The seasonal rewards program only covers 4 of the 5 leaderboards — boss-
+ * clear-time has no v1 reward (see `titles.ts`'s `HOF_REWARD_BOARDS` comment).
+ * `HofBoard` is a superset of `HofRewardBoard`, so this doubles as the type
+ * guard `resolvePodium` needs to index `champions` safely. */
+export function isRewardBoard(board: HofBoard): board is HofRewardBoard {
+  return REWARD_BOARD_SET.has(board);
+}
+
+export type PodiumResolution =
+  /** Boss board (no v1 reward) — render NO podium strip at all. */
+  | { kind: "none" }
+  /** A reward board, but no season has closed yet (server hasn't crowned a
+   * first champion of ANY category). */
+  | { kind: "noSeason" }
+  /** A reward board with a closed season, but zero champion rows for THIS
+   * board specifically (defensive — the design doc expects rank 1 to always
+   * exist once a season closes, but an empty array should never crash). */
+  | { kind: "empty" }
+  | { kind: "ready"; champion: HofChampionRow; runnersUp: HofChampionRow[] };
+
+/**
+ * Re-keys the ALREADY-fetched `/api/hof/rewards` response by the currently
+ * selected board — `HallOfFamePanel.tsx` calls this on every board switch
+ * (no new fetch); `PodiumStrip.tsx` renders purely off the result.
+ */
+export function resolvePodium(
+  rewards: { season: string | null; champions: Record<HofRewardBoard, HofChampionRow[]> } | null,
+  board: HofBoard,
+): PodiumResolution {
+  if (!isRewardBoard(board)) return { kind: "none" };
+  if (rewards === null) return { kind: "none" };
+  if (rewards.season === null) return { kind: "noSeason" };
+  const rows = rewards.champions[board];
+  if (!rows || rows.length === 0) return { kind: "empty" };
+  const champion = rows.find((r) => r.rank === 1) ?? rows[0];
+  const runnersUp = rows.filter((r) => r !== champion).sort((a, b) => a.rank - b.rank);
+  return { kind: "ready", champion, runnersUp };
+}
+
+/** The rank-2-3 reveal always collapses on a board switch — a player who
+ * expanded level's podium shouldn't land on power's podium pre-expanded. */
+export function nextPodiumExpandedOnBoardChange(): false {
+  return false;
+}
+
+/** My own unclaimed award for THIS specific board, if any — feeds the claim
+ * CTA that lives inside that board's podium strip (item 1 of the redesign:
+ * "the claim CTA... stays reachable... in the podium strip of the relevant
+ * board"). */
+export function resolveMyUnclaimedForBoard(
+  awards: readonly HofUnclaimedAward[] | null | undefined,
+  board: HofBoard,
+): HofUnclaimedAward | null {
+  if (!awards) return null;
+  return awards.find((a) => a.board === board) ?? null;
+}
+
+/** Whether the slim "you have an unclaimed reward" banner (shown above the
+ * board tabs, regardless of which board is selected) should render — a
+ * player who never opens the board holding their award must still see it. */
+export function hasAnyUnclaimedAward(
+  me: { unclaimedAwards: readonly HofUnclaimedAward[] } | null | undefined,
+): boolean {
+  return !!me && me.unclaimedAwards.length > 0;
+}
+
+/** Cross-references a live-list row's `charName` against the SAME board's
+ * champion rows (from the one rewards fetch) so `RankRow` can show a title
+ * under the name when the current top-10 entry happens to also be a crowned
+ * champion — reuses `rewards`, never a new request. `null` for boss (no
+ * titles minted there) or no match. */
+export function titleForCharInBoard(
+  rewards: { champions: Record<HofRewardBoard, HofChampionRow[]> } | null,
+  board: HofBoard,
+  charName: string,
+): string | null {
+  if (!isRewardBoard(board) || rewards === null) return null;
+  const row = rewards.champions[board]?.find((r) => r.charName === charName);
+  return row ? row.titleId : null;
+}
+
+// ── Live-list loading stability (owner: tab switches must never make the
+// panel "ยึดๆ หดๆ" — stretch/shrink) ────────────────────────────────────────
+
+/** Skeleton row count for a board with no cached data yet — matches the
+ * board's own top-10 cap so the fixed-height list container never needs more
+ * placeholder rows than a real response could ever return. */
+export const HOF_SKELETON_ROW_COUNT = 10;
+
+/** Currently a flat constant (every board caps at top-10), factored into its
+ * own function so a future per-board cap doesn't need call-site changes. */
+export function resolveSkeletonRowCount(): number {
+  return HOF_SKELETON_ROW_COUNT;
+}
+
+export type BoardFetchDecision<T> =
+  /** Cache hit — render the cached data INSTANTLY, no skeleton. The caller
+   * still fires a background refetch to swap in fresher data in place. */
+  | { kind: "instant"; data: T }
+  /** Cache miss — nothing to paint yet, show `rowCount` skeleton rows while
+   * the first fetch for this board/filter combo is in flight. */
+  | { kind: "skeleton"; rowCount: number };
+
+/** The board-switch loading decision (`HallOfFamePanel.tsx`'s query-keyed
+ * session cache): a cache hit never shows a loading skeleton, a cache miss
+ * always does. Pure over the cache lookup result so it's testable without a
+ * real `Map`/fetch. */
+export function resolveBoardFetchDecision<T>(
+  cached: T | undefined,
+  skeletonRowCount: number,
+): BoardFetchDecision<T> {
+  if (cached !== undefined) return { kind: "instant", data: cached };
+  return { kind: "skeleton", rowCount: skeletonRowCount };
 }

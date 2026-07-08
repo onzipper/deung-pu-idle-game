@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  HOF_SKELETON_ROW_COUNT,
   claimStateAfterResult,
+  hasAnyUnclaimedAward,
   isMyEntry,
+  isRewardBoard,
+  nextPodiumExpandedOnBoardChange,
+  resolveBoardFetchDecision,
+  resolveMyUnclaimedForBoard,
+  resolvePodium,
+  resolveSkeletonRowCount,
   resolveTitlePickerState,
+  titleForCharInBoard,
 } from "@/ui/hof/rewardsLogic";
-import type { HofMyTitle } from "@/ui/hof/rewardsTypes";
+import type { HofChampionRow, HofMyTitle, HofUnclaimedAward } from "@/ui/hof/rewardsTypes";
+import type { HofRewardBoard } from "@/ui/hof/titles";
 
 describe("claimStateAfterResult (claim CTA state machine)", () => {
   it("transitions to claimed on an ok result", () => {
@@ -61,5 +71,138 @@ describe("resolveTitlePickerState (Settings title picker)", () => {
       titles: oneTitle,
       displayTitle: null,
     });
+  });
+});
+
+// ── Podium strip (HOF panel redesign) ───────────────────────────────────────
+
+function championRow(rank: number, overrides: Partial<HofChampionRow> = {}): HofChampionRow {
+  return { rank, charName: `Champ${rank}`, cls: "swordsman", value: 100, titleId: `level.${rank}`, ...overrides };
+}
+
+const FULL_CHAMPIONS: Record<HofRewardBoard, HofChampionRow[]> = {
+  level: [championRow(1), championRow(2), championRow(3)],
+  power: [],
+  gold: [championRow(1, { charName: "GoldChamp", titleId: "gold.1" })],
+  online: [],
+};
+
+describe("isRewardBoard", () => {
+  it("is true for the 4 seasonal reward boards", () => {
+    expect(isRewardBoard("level")).toBe(true);
+    expect(isRewardBoard("power")).toBe(true);
+    expect(isRewardBoard("gold")).toBe(true);
+    expect(isRewardBoard("online")).toBe(true);
+  });
+
+  it("is false for boss (no v1 reward)", () => {
+    expect(isRewardBoard("boss")).toBe(false);
+  });
+});
+
+describe("resolvePodium (keyed by the currently selected board)", () => {
+  it("renders no podium at all for boss — not even a loading/empty shell", () => {
+    expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "boss")).toEqual({ kind: "none" });
+  });
+
+  it("renders none when rewards data hasn't loaded yet", () => {
+    expect(resolvePodium(null, "level")).toEqual({ kind: "none" });
+  });
+
+  it("renders noSeason when no season has closed yet", () => {
+    expect(resolvePodium({ season: null, champions: FULL_CHAMPIONS }, "level")).toEqual({ kind: "noSeason" });
+  });
+
+  it("renders empty for a reward board with zero champion rows", () => {
+    expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "power")).toEqual({ kind: "empty" });
+  });
+
+  it("re-keys to the selected board's rank-1 champion + sorted runners-up", () => {
+    expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "level")).toEqual({
+      kind: "ready",
+      champion: championRow(1),
+      runnersUp: [championRow(2), championRow(3)],
+    });
+  });
+
+  it("has an empty runners-up list when only rank-1 exists", () => {
+    expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "gold")).toEqual({
+      kind: "ready",
+      champion: championRow(1, { charName: "GoldChamp", titleId: "gold.1" }),
+      runnersUp: [],
+    });
+  });
+});
+
+describe("nextPodiumExpandedOnBoardChange", () => {
+  it("always collapses on a board switch", () => {
+    expect(nextPodiumExpandedOnBoardChange()).toBe(false);
+  });
+});
+
+describe("resolveMyUnclaimedForBoard / hasAnyUnclaimedAward", () => {
+  const awards: HofUnclaimedAward[] = [
+    { awardId: "a1", board: "level", titleId: "level.1" },
+    { awardId: "a2", board: "gold", titleId: "gold.2" },
+  ];
+
+  it("finds the award matching the given board", () => {
+    expect(resolveMyUnclaimedForBoard(awards, "level")).toEqual(awards[0]);
+    expect(resolveMyUnclaimedForBoard(awards, "gold")).toEqual(awards[1]);
+  });
+
+  it("is null when I hold no award on that board", () => {
+    expect(resolveMyUnclaimedForBoard(awards, "power")).toBeNull();
+    expect(resolveMyUnclaimedForBoard(awards, "boss")).toBeNull();
+  });
+
+  it("is null with no awards at all", () => {
+    expect(resolveMyUnclaimedForBoard(null, "level")).toBeNull();
+    expect(resolveMyUnclaimedForBoard(undefined, "level")).toBeNull();
+    expect(resolveMyUnclaimedForBoard([], "level")).toBeNull();
+  });
+
+  it("hasAnyUnclaimedAward is true whenever the list is non-empty (any board)", () => {
+    expect(hasAnyUnclaimedAward({ unclaimedAwards: awards })).toBe(true);
+    expect(hasAnyUnclaimedAward({ unclaimedAwards: [] })).toBe(false);
+    expect(hasAnyUnclaimedAward(null)).toBe(false);
+    expect(hasAnyUnclaimedAward(undefined)).toBe(false);
+  });
+});
+
+describe("titleForCharInBoard", () => {
+  it("finds the title when the live-list name matches a champion on the same reward board", () => {
+    expect(titleForCharInBoard({ champions: FULL_CHAMPIONS }, "level", "Champ2")).toBe("level.2");
+  });
+
+  it("is null on a no-match, an unranked board (boss), or absent rewards data", () => {
+    expect(titleForCharInBoard({ champions: FULL_CHAMPIONS }, "level", "Nobody")).toBeNull();
+    expect(titleForCharInBoard({ champions: FULL_CHAMPIONS }, "boss", "Champ1")).toBeNull();
+    expect(titleForCharInBoard(null, "level", "Champ1")).toBeNull();
+  });
+});
+
+// ── Loading stability (tab-switch skeleton/cache) ───────────────────────────
+
+describe("resolveSkeletonRowCount", () => {
+  it("returns the fixed HOF_SKELETON_ROW_COUNT (top-10-per-board cap)", () => {
+    expect(resolveSkeletonRowCount()).toBe(HOF_SKELETON_ROW_COUNT);
+    expect(resolveSkeletonRowCount()).toBe(10);
+  });
+});
+
+describe("resolveBoardFetchDecision (session cache: cache hit never shows a skeleton)", () => {
+  it("is instant with the cached data on a cache hit — no visible refetch/skeleton", () => {
+    const cached = { top: [], me: null };
+    expect(resolveBoardFetchDecision(cached, 10)).toEqual({ kind: "instant", data: cached });
+  });
+
+  it("is a skeleton with the given row count on a cache miss", () => {
+    expect(resolveBoardFetchDecision(undefined, 10)).toEqual({ kind: "skeleton", rowCount: 10 });
+  });
+
+  it("treats an empty cached array as a real cache hit (falsy-but-defined data still short-circuits)", () => {
+    const cached: unknown[] = [];
+    expect(resolveBoardFetchDecision(cached, 5)).toEqual({ kind: "instant", data: cached });
   });
 });
