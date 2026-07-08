@@ -1277,7 +1277,8 @@
           "asura2": "⚔️ Adventurers who made it back all tell the same story... sometimes an unnaturally powerful monster wanders in there. It glows strangely — but whoever brings it down gets an equally strange reward.",
           "asura3": "📜 ...and there are odd rumors that someone once came back clutching a charred, unreadable scrap of paper. Nobody knows what it is... if you find one, go ask the elders in town.",
           "reconnectFix": "🔌 Fixed a bug where joining a friend's party sometimes failed to connect (a CORS issue blocking the server wake-up) — connections are much smoother now.",
-          "cohortTitleFix": "🏅 Fixed party members' titles/champion auras sometimes showing on the wrong nameplate — everyone's tag is correct now."
+          "cohortTitleFix": "🏅 Fixed party members' titles/champion auras sometimes showing on the wrong nameplate — everyone's tag is correct now.",
+          "ninjaUnlockOpen": "🥷 The ninja class is now open to everyone — no unlock required."
         }
       }
     }

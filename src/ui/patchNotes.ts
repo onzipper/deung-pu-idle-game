@@ -288,6 +288,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09h.items.asura3",
       "releases.2026-07-09h.items.reconnectFix",
       "releases.2026-07-09h.items.cohortTitleFix",
+      "releases.2026-07-09h.items.ninjaUnlockOpen",
     ],
   },
 ];

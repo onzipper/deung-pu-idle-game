@@ -48,7 +48,7 @@ export const NINJA_UNLOCK_TIER = 3;
  * `computeNinjaUnlock().unlocked` then always returns true and `createCharacter`
  * stops rejecting ninja creation. This is the ONLY switch the owner needs to touch.
  */
-export const REQUIRE_NINJA_UNLOCK = true;
+export const REQUIRE_NINJA_UNLOCK = false;
 
 /**
  * Ninja-unlock progress for an account, derived from the `Character.tier` caches
