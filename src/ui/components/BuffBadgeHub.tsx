@@ -1,41 +1,43 @@
 "use client";
 
 /**
- * Buff Badge Hub v2 (owner ask 2026-07-09: "มี badge บอกสถานะบัพด้วย เอาบัพทั้งหมด
- * ไปรวมตรงนั้น ไม่ว่าจะสถานะเพิ่ม stat หรือ พิเศษจากอะไรก็ตาม") — ONE consolidated
- * HUD spot for every ACTIVE buff. The badge SET itself is computed by the pure,
+ * Buff Badge Hub v3 (owner ask, "ห้ามดันจอ": the strip used to sit IN-FLOW
+ * above `HudBar` and pushed the arena/console dock down whenever a buff
+ * appeared — banned outright). The badge SET itself is computed by the pure,
  * headlessly-tested `ui/buffs/activeBuffs.ts` (same logic/view split as
  * `WorldBossBanner.tsx` + `ui/worldBoss/schedule.ts`) — this component is
- * presentational glue only.
+ * presentational glue only, and `activeBuffs.ts` itself is untouched by v3.
  *
- * v2 follow-up (UX audit + owner's second ask: "อยากให้มีบอกด้วยว่าเป็นบัพจากอะไร
- * ไม่ใช่แบบ atk+ ขึ้นมา งงๆ"):
- *  1. SOURCE-LABELED chips — every chip now reads "{icon} {source} · {effect}"
- *     (e.g. "🤝 ตี้ 3 คน · EXP +20%"), resolving `source.<kind>` from the
- *     badge's new `sourceKey` alongside the existing `chip.<kind>` effect
- *     copy. The tap-tooltip keeps the longer `detail.<kind>` explanation.
- *  2. Visual-consistency fix — the row now lives in the SAME bordered-strip
- *     box family as `CohortStatus`/`WorldBossBanner` (border + soft fill),
- *     not a bare flex row floating in the HUD.
- *  3. Jitter fix — the box reserves a FIXED single-line height (`h-8`)
- *     whenever ≥1 buff is active; chips enter/exit via opacity/scale inside
- *     that fixed box (see `useAnimatedChips.ts`) instead of instantly
- *     snapping the DOM, and the row never wraps (see next point) so it can
- *     never reflow the arena below. Renders NOTHING (zero footprint) with no
- *     buffs at all — same idiom as its siblings.
- *  4. Chip cap — `activeBuffs.ts#capBuffBadges` caps the row at N total slots
- *     (2 on narrow/mobile widths, 3 at `sm:` and up) so it always fits one
- *     line; anything past the cap collapses into a single "+N" overflow chip
- *     that opens a small tap-tooltip sheet listing the rest (same lightweight
- *     bubble affordance as a normal chip's detail — not a full `ModalPortal`,
- *     this is glance-level detail).
+ * v3 changes (both approved by the owner):
+ *  1. ZERO layout participation — the hub no longer renders as a sibling of
+ *     `HudBar`/the arena. `GameHud.tsx` now mounts it as an ABSOLUTE overlay
+ *     INSIDE the arena's canvas-slot container (top:8px/left:8px), which is
+ *     already `position:relative` for the decorative frame overlay. The
+ *     outer wrapper is `pointer-events-none` (never blocks the arena's own
+ *     pointerdown/audio-resume listener or hit-testing) with
+ *     `pointer-events-auto` restored per chip so tapping still works.
+ *  2. Icon-first chips — each buff is now a 32px icon square (thin border,
+ *     no text label) with a `conic-gradient` duration-fill ring (CSS mask,
+ *     no canvas/asset) that sweeps clockwise as the buff's remaining time
+ *     shrinks, plus a tiny corner badge (seconds for timed buffs like War
+ *     Cry, the effect percent for buffs with no timer like the party XP
+ *     buff, e.g. `activeBuffs.ts` never carries a "total duration" field so
+ *     the fill fraction for War Cry is derived here from
+ *     `SKILLS.sword_warcry.buffDuration`, the same skill config source the
+ *     seconds themselves come from). Tap toggles the SAME source+detail
+ *     tooltip copy as before (`buffHub.source.*`/`detail.*`); tooltip opens
+ *     LEFT-ALIGNED under the chip (not centered) and stays inside the
+ *     arena's `overflow-hidden` bounds since chips now live in its top-left
+ *     corner instead of a full-width centered strip.
  *
- * Placement unchanged: the top HUD status strip, alongside `CohortStatus`/
- * `WorldBossBanner` (same tier), ABOVE `HudBar`.
+ * Chip cap (`activeBuffs.ts#capBuffBadges`, unchanged) still holds the row at
+ * N total slots (2 mobile / 3 `sm:`+) with a "+N" overflow chip past that —
+ * see `OverflowChip`. Renders nothing (zero DOM) with no active buffs.
  */
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { SKILLS } from "@/engine";
 import {
   buildActiveBuffBadges,
   capBuffBadges,
@@ -43,6 +45,14 @@ import {
 } from "@/ui/buffs/activeBuffs";
 import { useAnimatedChips } from "@/ui/buffs/useAnimatedChips";
 import { useGameStore } from "@/ui/store/gameStore";
+
+/** War Cry is the only timed (depleting) badge kind today; `activeBuffs.ts`
+ * only carries the REMAINING seconds (`params.seconds`), not a total, so the
+ * ring's fill fraction is derived here against the skill's own configured
+ * `buffDuration` — the single source of truth `skills.ts` reads to set the
+ * timer in the first place. Falls back to the raw seconds (ring reads as
+ * "full") if the skill entry is ever missing, rather than dividing by zero. */
+const WAR_CRY_DURATION_SEC = SKILLS.sword_warcry?.buffDuration ?? 6;
 
 /** Total chip SLOTS (real chips + the overflow chip if one is needed) the row
  * is allowed to use per breakpoint — judged against a 360px mobile viewport
@@ -113,26 +123,60 @@ function BuffChip({ badge }: { badge: BuffBadge }) {
 
   useTapOutsideToClose(open, () => setOpen(false), rootRef);
 
+  // Ring fill = fraction of duration REMAINING (1 = just cast, 0 = about to
+  // fall off) — the conic-gradient's dark slice grows clockwise as this
+  // shrinks. Buffs with no timer (party XP: active as long as the cohort
+  // holds) never deplete, so their ring stays fully lit and the corner badge
+  // shows the effect percent instead of a countdown.
+  const isTimed = badge.kind === "warCry";
+  const fraction = isTimed
+    ? WAR_CRY_DURATION_SEC > 0
+      ? Math.max(0, Math.min(1, smoothSeconds / WAR_CRY_DURATION_SEC))
+      : 0
+    : 1;
+  const cornerText = isTimed
+    ? String(Math.max(0, Math.ceil(smoothSeconds)))
+    : `${typeof badge.params.percent === "number" ? badge.params.percent : 0}%`;
+  const darkDeg = (1 - fraction) * 360;
+  const label = `${t(`source.${badge.sourceKey}`, params)} · ${t(`chip.${badge.kind}`, params)}`;
+
   return (
-    <span ref={rootRef} className="relative inline-flex shrink-0">
+    <span ref={rootRef} className="relative inline-flex shrink-0 pointer-events-auto">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex min-h-6 items-center gap-1 rounded-full border border-ddp-gold/50 bg-ddp-gold/10 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap text-ddp-gold-bright tabular-nums transition-transform duration-100 active:scale-95"
+        aria-label={label}
+        className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-md border border-ddp-gold/50 bg-ddp-panel-strong/90 shadow-(--ddp-shadow-panel) transition-transform duration-100 active:scale-95"
       >
-        <span aria-hidden>{badge.icon}</span>
-        <span>{t(`source.${badge.sourceKey}`, params)}</span>
-        <span aria-hidden className="text-ddp-gold/50">
-          ·
+        {/* Duration-fill mask (owner-approved "radial clockwise" ring) —
+            transparent lets the panel bg + icon show through for the
+            REMAINING slice; the dark slice covers elapsed time. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: `conic-gradient(rgba(0,0,0,0.62) 0deg ${darkDeg}deg, transparent ${darkDeg}deg 360deg)`,
+          }}
+        />
+        <span aria-hidden className="relative text-base leading-none">
+          {badge.icon}
         </span>
-        <span>{t(`chip.${badge.kind}`, params)}</span>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -right-1 -bottom-1 rounded-full bg-black/80 px-1 text-[8px] leading-tight font-bold tabular-nums text-ddp-gold-bright"
+        >
+          {cornerText}
+        </span>
       </button>
       {open && (
         <span
           role="tooltip"
-          className="absolute top-full left-1/2 z-20 mt-1.5 w-52 -translate-x-1/2 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-2 text-[11px] leading-snug font-normal text-ddp-ink shadow-(--ddp-shadow-panel)"
+          className="absolute top-full left-0 z-20 mt-1.5 w-52 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-2 text-[11px] leading-snug font-normal text-ddp-ink shadow-(--ddp-shadow-panel)"
         >
+          <span className="mb-1 block font-bold text-ddp-gold-bright">
+            {t(`source.${badge.sourceKey}`, params)}
+          </span>
           {t(`detail.${badge.kind}`, params)}
         </span>
       )}
@@ -151,20 +195,20 @@ function OverflowChip({ badges }: { badges: readonly BuffBadge[] }) {
   useTapOutsideToClose(open, () => setOpen(false), rootRef);
 
   return (
-    <span ref={rootRef} className="relative inline-flex shrink-0">
+    <span ref={rootRef} className="relative inline-flex shrink-0 pointer-events-auto">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={t("overflowChip", { count: badges.length })}
-        className="flex min-h-6 items-center rounded-full border border-ddp-border-soft bg-black/30 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap text-ddp-ink-muted tabular-nums transition-transform duration-100 active:scale-95"
+        className="flex h-8 w-8 items-center justify-center rounded-md border border-ddp-border-soft bg-black/50 text-[10px] font-bold tabular-nums text-ddp-ink-muted transition-transform duration-100 active:scale-95"
       >
         {t("overflowChip", { count: badges.length })}
       </button>
       {open && (
         <span
           role="tooltip"
-          className="absolute top-full right-0 z-20 mt-1.5 w-56 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-2 text-[11px] leading-snug font-normal text-ddp-ink shadow-(--ddp-shadow-panel)"
+          className="absolute top-full left-0 z-20 mt-1.5 w-56 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong p-2 text-[11px] leading-snug font-normal text-ddp-ink shadow-(--ddp-shadow-panel)"
         >
           <span className="mb-1 block font-bold text-ddp-gold-bright">{t("overflowTitle")}</span>
           <ul className="flex flex-col gap-1.5">
@@ -205,7 +249,7 @@ function BuffBadgeRow({
   const chips = useAnimatedChips(slots);
 
   return (
-    <div className={`items-center justify-center gap-1.5 overflow-hidden ${className}`}>
+    <div className={`items-start gap-1.5 ${className}`}>
       {chips.map((c) => (
         <span
           key={c.key}
@@ -232,11 +276,11 @@ export function BuffBadgeHub() {
   const badges = buildActiveBuffBadges({ heroesLength, atkBuffMult, atkBuffTimer });
   if (badges.length === 0) return null;
 
+  // Absolute overlay, top-left of the arena — see the file doc's v3 note.
+  // `pointer-events-none` here so this never blocks the arena's own
+  // pointerdown listener; each chip restores `pointer-events-auto` itself.
   return (
-    <div
-      role="status"
-      className="flex h-8 w-full items-center justify-center rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2"
-    >
+    <div role="status" className="pointer-events-none absolute top-2 left-2 z-10">
       <BuffBadgeRow badges={badges} maxSlots={MOBILE_MAX_SLOTS} className="flex sm:hidden" />
       <BuffBadgeRow badges={badges} maxSlots={DESKTOP_MAX_SLOTS} className="hidden sm:flex" />
     </div>

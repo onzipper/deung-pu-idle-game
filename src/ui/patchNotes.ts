@@ -266,6 +266,15 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
     date: "2026-07-09",
     items: ["releases.2026-07-09f.items.buffHubV2"],
   },
+  // Buff Badge Hub v3 (owner: "ห้ามดันจอ" — the strip was in-flow above HudBar
+  // and pushed the arena/console dock down whenever a buff appeared). Now a
+  // zero-layout absolute overlay pinned to the arena's top-left corner, icon-
+  // first chips with a conic-gradient duration ring instead of text.
+  {
+    id: "2026-07-09g",
+    date: "2026-07-09",
+    items: ["releases.2026-07-09g.items.buffOverlay"],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

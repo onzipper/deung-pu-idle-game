@@ -1240,6 +1240,11 @@
         "items": {
           "buffHubV2": "Buff badges now name their source + a cleaner, reorganized layout"
         }
+      },
+      "2026-07-09g": {
+        "items": {
+          "buffOverlay": "Buff badges moved to floating icons in the arena corner — no longer push the screen down"
+        }
       }
     }
   },

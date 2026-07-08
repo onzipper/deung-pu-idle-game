@@ -93,10 +93,6 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       {/* World boss "เสี่ยจ๋อง": hourly countdown/found-it banner — renders nothing
           outside the pre-announce/active windows, see WorldBossBanner.tsx. */}
       <WorldBossBanner />
-      {/* Buff Badge Hub (owner ask): every active buff (party XP, war cry, future
-          sources) in one consolidated strip — renders nothing with no active
-          buffs, see BuffBadgeHub.tsx. */}
-      <BuffBadgeHub />
       <HudBar />
 
       <div
@@ -115,6 +111,12 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           aria-hidden
           className="pointer-events-none absolute inset-0 z-5 rounded-(--ddp-radius-lg) shadow-[inset_0_0_0_1px_rgba(143,151,201,0.18),inset_0_0_46px_12px_rgba(0,0,0,0.35)]"
         />
+        {/* Buff Badge Hub (owner ask, "ห้ามดันจอ"): every active buff (party XP,
+            war cry, future sources) as a floating icon overlay pinned to the
+            arena's top-left corner — ZERO layout participation, never pushes
+            the arena/console dock down. Renders nothing with no active
+            buffs, see BuffBadgeHub.tsx. */}
+        <BuffBadgeHub />
       </div>
 
       {/* M6 "World & Town": zone/map label + walk arrows (functional; theming
