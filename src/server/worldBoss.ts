@@ -44,6 +44,124 @@ const CLAIM_GRACE_MS = 5 * 60 * 1000;
 export const WORLD_BOSS_REWARD = { gold: 5000, materials: 350 } as const;
 
 /**
+ * SERVER-WIDE shared HP pool knobs (owner-approved: one boss, one pool, every online
+ * player chips the SAME hp). `hp` is the engine's balance-tuned pool (imported so the
+ * lazily-minted `WorldBossWindow` and the client's local render agree on the same total).
+ *
+ * `maxDamagePerPost` is the CLIENT-TRUST v1 plausibility cap: damage numbers are not yet
+ * server-re-derived (that is the M5 anti-cheat wave), so this only rejects an absurd /
+ * overflow forged number. It is deliberately GENEROUS — ~a few minutes of a very strong
+ * hero's theoretical DPS, and still a small fraction of the full pool — so an honest
+ * batched report is never rejected while a single forged post can't wipe the pool. A real
+ * per-hit re-derivation replaces this when M5 lands.
+ */
+export const WORLD_BOSS_DAMAGE = {
+  hp: WORLD_BOSS.hp,
+  maxDamagePerPost: 250_000,
+} as const;
+
+// ── Damage report (shared pool) ──────────────────────────────────────────────
+
+export const worldBossDamageSchema = z
+  .object({
+    windowId: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    damage: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+
+export type WorldBossDamageInput = z.infer<typeof worldBossDamageSchema>;
+
+export type WorldBossDamageResult =
+  | { ok: true; hp: number; defeated: boolean }
+  | { ok: false; reason: "stale_window" | "implausible" };
+
+/**
+ * Report a batch of `damage` a character dealt to the shared world-boss pool for
+ * `windowId`. The SERVER validates: (1) `windowId` is the CURRENT hour against its OWN
+ * wall-clock (a forwarded/forged window → `stale_window` / 410); (2) `damage` is within
+ * the client-trust plausibility cap (→ `implausible`). Then, race-safe:
+ *   - LAZILY mint the `WorldBossWindow` pool at full hp (a concurrent first-report
+ *     collides on the @id → P2002, swallowed — exactly one pool per window);
+ *   - ATOMICALLY decrement `hpRemaining` floored at 0 (`GREATEST(hp - dmg, 0)` raw UPDATE,
+ *     so concurrent chips never go negative / never lose a decrement);
+ *   - stamp `defeatedAt` EXACTLY ONCE the first time the pool reads 0;
+ *   - UPSERT the caller's `WorldBossDamage` participation row (+= capped damage).
+ * Returns the post-decrement `hp` and `defeated` (pool at 0) for the client's
+ * `syncWorldBoss` engine intent.
+ */
+export async function reportWorldBossDamage(
+  characterId: string,
+  windowId: number,
+  damage: number,
+  opts: { now?: Date } = {},
+): Promise<WorldBossDamageResult> {
+  const now = opts.now ?? new Date();
+
+  // Current-hour gate against the SERVER clock (client timestamp never trusted).
+  if (windowId !== worldBossWindowId(now.getTime())) return { ok: false, reason: "stale_window" };
+
+  // Client-trust v1 plausibility cap (see WORLD_BOSS_DAMAGE).
+  if (!Number.isInteger(damage) || damage < 1 || damage > WORLD_BOSS_DAMAGE.maxDamagePerPost) {
+    return { ok: false, reason: "implausible" };
+  }
+
+  // Lazily mint the shared pool (race-safe: a concurrent first-report collides on @id).
+  try {
+    await prisma.worldBossWindow.create({
+      data: { windowId, hpRemaining: WORLD_BOSS_DAMAGE.hp },
+    });
+  } catch (err) {
+    if (!isUniqueViolation(err)) throw err; // P2002 = another report minted it first
+  }
+
+  // Atomic floored decrement (Prisma can't express GREATEST — raw UPDATE). Guarded so a
+  // post against an already-defeated pool is a harmless no-op decrement of a 0 floor.
+  await prisma.$executeRaw`
+    UPDATE \`WorldBossWindow\`
+    SET \`hpRemaining\` = GREATEST(\`hpRemaining\` - ${damage}, 0)
+    WHERE \`windowId\` = ${windowId}`;
+
+  const row = await prisma.worldBossWindow.findUnique({
+    where: { windowId },
+    select: { hpRemaining: true, defeatedAt: true },
+  });
+  const hp = row?.hpRemaining ?? 0;
+  const defeated = hp === 0;
+
+  // Stamp defeatedAt exactly once (the first writer to see 0 wins the guarded UPDATE).
+  if (defeated && row && !row.defeatedAt) {
+    await prisma.$executeRaw`
+      UPDATE \`WorldBossWindow\`
+      SET \`defeatedAt\` = ${now}
+      WHERE \`windowId\` = ${windowId} AND \`hpRemaining\` = 0 AND \`defeatedAt\` IS NULL`;
+  }
+
+  // Participation proof: += this character's (capped) damage for the window.
+  await prisma.worldBossDamage.upsert({
+    where: { characterId_windowId: { characterId, windowId } },
+    create: { characterId, windowId, total: damage },
+    update: { total: { increment: damage } },
+  });
+
+  return { ok: true, hp, defeated };
+}
+
+/**
+ * The shared pool's current hp for `windowId` (zone-entry sync). An untouched window (no
+ * damage reported yet) has no row → the FULL pool, not defeated. Read-only, no identity.
+ */
+export async function getWorldBossPoolState(
+  windowId: number,
+): Promise<{ windowId: number; hp: number; defeated: boolean }> {
+  const row = await prisma.worldBossWindow.findUnique({
+    where: { windowId },
+    select: { hpRemaining: true, defeatedAt: true },
+  });
+  if (!row) return { windowId, hp: WORLD_BOSS_DAMAGE.hp, defeated: false };
+  return { windowId, hp: row.hpRemaining, defeated: row.hpRemaining === 0 };
+}
+
+/**
  * Is a claim for `windowId` valid at server instant `nowMs`? A future window (a boss
  * that has not spawned) is always rejected; the CURRENT window is claimable; a PAST
  * window is claimable only while still within `lifetimeMs + grace` of its spawn
@@ -88,7 +206,10 @@ export function pickFortifier(roll: number): string {
 
 export type WorldBossClaimResult =
   | { ok: true; item: ItemInstanceDTO; goldCredit: number; materialsTotal: number }
-  | { ok: false; reason: "not_owned" | "stale_window" | "already_claimed" };
+  | {
+      ok: false;
+      reason: "not_owned" | "stale_window" | "not_defeated" | "no_participation" | "already_claimed";
+    };
 
 function isUniqueViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
@@ -120,6 +241,23 @@ export async function claimWorldBoss(
 
   // Window validity against the SERVER clock (client timestamp never trusted).
   if (!isClaimableWindow(windowId, now.getTime())) return { ok: false, reason: "stale_window" };
+
+  // SERVER-WIDE shared-pool gate (owner-approved): a reward is claimable ONLY once the
+  // window's shared HP pool is DEFEATED (authoritative `defeatedAt`), and ONLY by a
+  // PARTICIPANT — a character that reported >=1 damage this window (participation proof
+  // v1). Both are checked before the idempotency insert so a non-participant or a
+  // pre-defeat claim never mints.
+  const pool = await prisma.worldBossWindow.findUnique({
+    where: { windowId },
+    select: { defeatedAt: true },
+  });
+  if (!pool || !pool.defeatedAt) return { ok: false, reason: "not_defeated" };
+
+  const participation = await prisma.worldBossDamage.findUnique({
+    where: { characterId_windowId: { characterId, windowId } },
+    select: { total: true },
+  });
+  if (!participation || participation.total <= 0) return { ok: false, reason: "no_participation" };
 
   const templateId = pickFortifier(roll());
 
