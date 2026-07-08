@@ -16,6 +16,7 @@
 
 import { CONFIG } from "@/engine/config";
 import {
+  DROP_GATED_CLASSES,
   ITEM_TEMPLATES,
   bossDropTableForStage,
   dropTableForStage,
@@ -26,8 +27,24 @@ import { clampRefine } from "@/engine/config/refine";
 import { lootFloat, stoneFloat } from "@/engine/core/hash";
 import { clamp } from "@/engine/core/math";
 import { heroMaxHpOf } from "@/engine/systems/stats";
-import type { Hero, Enemy, Boss } from "@/engine/entities";
+import type { Hero, HeroClass, Enemy, Boss } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
+
+/**
+ * The drop-gated class (if any) present in this state's hero roster — the value the
+ * roll sites pass into `dropTableForStage`/`bossDropTableForStage` so gated lines
+ * (ninja daggers) enter the candidate pool. Semantics: ANY roster member of a gated
+ * class admits that class's line into the SHARED table — in a cohort the rotating
+ * drop assignment may then hand one to a non-matching member (sellable, exactly like
+ * the historical cross-class weapon drops). Solo non-gated rosters return undefined
+ * → the table stays byte-identical to the pre-ninja catalog. Deterministic: reads
+ * only `state.heroes` order, which is lockstep state. First match wins (the set has
+ * one member today; revisit if a second gated class ever lands).
+ */
+function gatedLootClass(state: GameState): HeroClass | undefined {
+  for (const h of state.heroes) if (DROP_GATED_CLASSES.has(h.cls)) return h.cls;
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Equip
@@ -154,7 +171,7 @@ export function rollEnemyDrop(state: GameState, e: Enemy): void {
   rollStoneDrop(state, e.x, e.y, e.id, rollId, false);
   const r = lootFloat(state.lootSalt, state.lootCounter);
   state.lootCounter++;
-  const table = dropTableForStage(state.stage);
+  const table = dropTableForStage(state.stage, gatedLootClass(state));
   let acc = 0;
   for (const entry of table) {
     acc += entry.chance;
@@ -183,7 +200,7 @@ export function rollBossDrop(state: GameState, boss: Boss): void {
   rollStoneDrop(state, boss.x, boss.y, boss.id, rollId, true);
   const r = lootFloat(state.lootSalt, state.lootCounter);
   state.lootCounter++;
-  const table = bossDropTableForStage(state.stage);
+  const table = bossDropTableForStage(state.stage, gatedLootClass(state));
   if (table.length === 0) return;
   const total = table.reduce((a, entry) => a + entry.chance, 0);
   const pick = clamp(r, 0, 0.999999) * total;

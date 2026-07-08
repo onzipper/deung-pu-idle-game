@@ -42,7 +42,8 @@ describe("M7.9 gear tiers 7-10", () => {
       expect(inTier.length, `tier ${t} templates`).toBeGreaterThanOrEqual(4);
       const weapons = inTier.filter((x) => x.slot === "weapon");
       const classes = new Set(weapons.map((w) => w.classReq));
-      expect(classes).toEqual(new Set(["swordsman", "archer", "mage"]));
+      // SAVE v18: the ninja dagger line adds a 4th per-class weapon in every tier.
+      expect(classes).toEqual(new Set(["swordsman", "archer", "mage", "ninja"]));
       expect(inTier.some((x) => x.slot === "armor" && x.classReq === null)).toBe(true);
     }
   });

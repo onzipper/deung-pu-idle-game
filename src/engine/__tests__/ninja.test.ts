@@ -373,3 +373,31 @@ describe("world boss lifetime while traveling", () => {
     expect(s.worldBoss?.defeated).toBe(false);
   });
 });
+
+describe("dagger drop gating — end-to-end through step()'s kill path", () => {
+  /** Force `n` one-shot stub kills and collect every itemDrop templateId. */
+  const farmDrops = (cls: "ninja" | "swordsman", n: number): string[] => {
+    const s = initGameState(4242, soloSave(cls, 3));
+    s.spawnPaused = true;
+    const ids: string[] = [];
+    for (let k = 0; k < n; k++) {
+      s.enemies = [makeStubEnemy(5000 + k, s.heroes[0].x + 5, 1)];
+      s.heroes[0].cd = 0;
+      step(s, {});
+      for (const e of s.events) if (e.type === "itemDrop") ids.push(e.templateId);
+    }
+    return ids;
+  };
+
+  it("a solo ninja actually ROLLS daggers via rollEnemyDrop (roll sites pass the roster class)", () => {
+    const ids = farmDrops("ninja", 800);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.some((id) => id.startsWith("w_dagger_"))).toBe(true);
+  });
+
+  it("a solo non-ninja NEVER rolls a dagger through the same path", () => {
+    const ids = farmDrops("swordsman", 800);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.some((id) => id.startsWith("w_dagger_"))).toBe(false);
+  });
+});
