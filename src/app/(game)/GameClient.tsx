@@ -82,6 +82,12 @@ import {
   effectiveUnlockedZones,
   wantsBotTownTrip,
   zoneAt,
+  isAsuraLocation,
+  // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3) — pure snapshot reads.
+  tomePagesFound,
+  hasAllZoneStones,
+  canCraftLegendary,
+  craftBlockReason,
   type GameEvent,
   type GameState,
   type Hero,
@@ -95,6 +101,7 @@ import { GameRenderer } from "@/render/GameRenderer";
 import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
+import { AsuraTomeAssembledModal } from "@/ui/asura/AsuraTomeAssembledModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
 import { selectAutoSellIds } from "@/ui/gear/autoSell";
 import {
@@ -117,6 +124,7 @@ import {
   selectUiConfig,
   writeUiConfig,
   type DailyBoardSummary,
+  type CohortStatusState,
   type DailyQuestSummary,
   type EngineSnapshot,
   type HeroQuestSummary,
@@ -134,6 +142,7 @@ import {
   sameWorldBossStatus,
   shouldQueueWorldBossSpawn,
 } from "@/ui/worldBoss/schedule";
+import { asuraDayKeyForMs } from "@/ui/asura/schedule";
 import { fetchHofRewards } from "@/ui/hof/rewardsApi";
 import { HOF_REWARD_BOARDS, titleLabel } from "@/ui/hof/titles";
 import { resolveCatchUp } from "./catchUp";
@@ -157,6 +166,7 @@ import {
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
+import { buildCohortSocialBadges } from "./cohortBadges";
 import {
   desiredHeroConfig,
   dropAssignedIndex,
@@ -192,9 +202,18 @@ const WORLD_BOSS_REWARD_MATERIALS = 350;
 
 /** Party handshake deadline safety net (partySession.ts D1/D2 fixes). A re-seed exchange
  * that hasn't converged within `HANDSHAKE_DEADLINE_MS` is aborted + retried; a trip backs
- * the next window off to `HANDSHAKE_RETRY_MS` so a genuinely-absent peer doesn't thrash. */
-const HANDSHAKE_DEADLINE_MS = 10_000;
-const HANDSHAKE_RETRY_MS = 15_000;
+ * the next window off to `HANDSHAKE_RETRY_MS` so a genuinely-absent peer doesn't thrash.
+ * Tuned tight (RTT is ~42ms p95, the exchange is ~2 round-trips): a handshake still
+ * unconverged after 3s is genuinely stuck, so this is pure recovery latency for the rare
+ * lost-message case — kept far above the exchange time to never abort a live formation. */
+const HANDSHAKE_DEADLINE_MS = 3_000;
+const HANDSHAKE_RETRY_MS = 6_000;
+
+/** Grace before the "connecting" cohort chip is allowed to show. A same-zone re-form
+ * (leaving for a town trip + walking back) now converges in well under this, so a seamless
+ * re-join never flashes the chip at all; only a genuinely slow/stuck formation surfaces it.
+ * Any terminal chip state (active/solo/waiting/reconnecting) cancels a pending grace. */
+const CONNECTING_CHIP_GRACE_MS = 600;
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
@@ -518,6 +537,19 @@ function buildSnapshot(state: GameState): EngineSnapshot {
         }),
       };
     })(),
+    // ดินแดนอสูร (ASURA) endgame v1 accrual — plain throttled reads, same one-way
+    // "engine carries it, store just reflects it" pattern as `materials`.
+    asuraEssence: state.asuraEssence,
+    asuraZoneKills: { ...state.asuraZoneKills },
+    asuraHotZoneIdx: state.asuraHotZone,
+    // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3) — pure engine reads,
+    // same one-way "engine computes, store just carries it" pattern as `asuraEssence`.
+    tomePagesFound: tomePagesFound(state),
+    tomeUnlocked: state.tomeUnlocked,
+    asuraSigils: state.asuraSigils,
+    hasAllZoneStones: hasAllZoneStones(state),
+    canCraftLegendary: canCraftLegendary(state),
+    craftBlockReason: craftBlockReason(state),
   };
 }
 
@@ -802,6 +834,27 @@ export function GameClient() {
      * after a trip so repeated failures don't thrash. Reset to base on a successful
      * `activateCohort()`/`collapseToSolo()`. */
     let handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS;
+    /** Grace timer for the "connecting" chip (see `CONNECTING_CHIP_GRACE_MS`): a re-form
+     * that resolves within the grace never flashes "connecting". `pushCohortStatus` is the
+     * single funnel for every chip transition — it DEFERS a "connecting" push and cancels
+     * that deferral the instant any terminal state (active/solo/waiting/reconnecting)
+     * arrives, so a seamless re-join goes straight solo/active -> active with no flicker. */
+    let connectingChipTimer: ReturnType<typeof setTimeout> | null = null;
+    function pushCohortStatus(status: CohortStatusState): void {
+      if (status.kind === "connecting") {
+        if (connectingChipTimer) return; // a grace is already pending — don't restart it
+        connectingChipTimer = setTimeout(() => {
+          connectingChipTimer = null;
+          useGameStore.getState().setCohortStatus({ kind: "connecting" });
+        }, CONNECTING_CHIP_GRACE_MS);
+        return;
+      }
+      if (connectingChipTimer) {
+        clearTimeout(connectingChipTimer);
+        connectingChipTimer = null;
+      }
+      useGameStore.getState().setCohortStatus(status);
+    }
     /** ECONOMY-INTEGRITY (cohortWallet.ts): my personal wallet AT THE MOMENT I joined
      * this cohort (my pre-cohort solo wallet, or the settled value from the prior cohort
      * on a re-seed) + the shared pot at that same moment. `virtualWallet(base, sharedBase,
@@ -840,6 +893,10 @@ export function GameClient() {
      * transitions only (see `sameWorldBossStatus`'s doc: comparing `secondsLeft`
      * too gives the countdown its ~1Hz cadence for free). */
     let lastWorldBossStatus: WorldBossStatus = { kind: "idle" };
+    /** ดินแดนอสูร daily hot zone: the last Bangkok day-key QUEUED via
+     * `setAsuraHotZone` — re-queued only when it changes (idempotent, same
+     * shape as `lastWorldBossStatus`'s "only push on transition" idiom). */
+    let lastAsuraDayKeyQueued: number | null = null;
 
     /** Rebuild the `heroId -> displayName` map `GameRenderer.setHeroDisplayNames`
      * wants (keyed by hero id, not slot/index — see its doc). `null` while solo. */
@@ -856,7 +913,7 @@ export function GameClient() {
 
     function refreshCohortStatus(): void {
       if (!cohortActive) return;
-      useGameStore.getState().setCohortStatus({ kind: "active", names: [...cohortMemberNames.values()] });
+      pushCohortStatus({ kind: "active", names: [...cohortMemberNames.values()] });
       renderer.setHeroDisplayNames(currentHeroDisplayNames());
       pushHeroSocialBadges();
     }
@@ -864,44 +921,34 @@ export function GameClient() {
     /** HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) — the
      * `heroId -> {title, champion}` map `GameRenderer.setHeroSocialBadges` wants
      * (nameplate aura + chosen-title seam, mirrors `currentHeroDisplayNames`'
-     * shape/doc). Cohort: resolved straight off the friends-poll `party` rows
-     * (already carry server-VALIDATED `title`/`champion` — see `ui/friends/types.ts`),
-     * matched to a cohort hero id the same way `currentHeroDisplayNames` does
-     * (peer via `cohortMemberIds`'s ticket slot, "me" is the one party member
-     * whose userId is NOT one of the resolved peers). Solo: just my own
-     * `mySocialBadge` (kept fresh by `refreshHofOnTownArrival`) on hero 0. */
+     * shape/doc). Solo: just my own `mySocialBadge` (kept fresh by
+     * `refreshHofOnTownArrival`) on hero 0. Cohort: delegates to the pure,
+     * headlessly-tested `buildCohortSocialBadges` (`cohortBadges.ts`) — MY OWN
+     * badge is always `mySocialBadge` keyed onto `heroes[myCohortIndex]` (never
+     * fished out of the party rows by elimination — see that module's doc for
+     * the live bug this replaced: an elimination heuristic silently
+     * mis-assigned/blanked titles the moment the party held any member outside
+     * the CURRENT same-zone cohort), peers resolved via `cohortMemberIds`'s
+     * ticket slot -> `lastCohortSlots`, the exact same keying
+     * `currentHeroDisplayNames` uses. */
     function currentHeroSocialBadges(): Map<string, { title: string | null; champion: boolean }> {
-      const badges = new Map<string, { title: string | null; champion: boolean }>();
-      if (cohortActive) {
-        const party = useGameStore.getState().party;
-        if (!party) return badges;
-        const peerUserIds = new Set(cohortMemberIds.values());
-        for (const m of party.members) {
-          let heroId: number | undefined;
-          if (!peerUserIds.has(m.userId)) {
-            // The one party member who is NOT a resolved peer is me.
-            heroId = state.heroes[myCohortIndex]?.id;
-          } else {
-            let ticketSlot: number | undefined;
-            for (const [slot, uid] of cohortMemberIds) {
-              if (uid === m.userId) {
-                ticketSlot = slot;
-                break;
-              }
-            }
-            if (ticketSlot === undefined) continue;
-            const idx = lastCohortSlots.indexOf(ticketSlot);
-            heroId = idx >= 0 ? state.heroes[idx]?.id : undefined;
-          }
-          if (heroId === undefined) continue;
-          badges.set(String(heroId), { title: titleLabel(m.title, tHofRef.current), champion: m.champion });
-        }
-      } else {
-        const mine = useGameStore.getState().mySocialBadge;
+      const mine = useGameStore.getState().mySocialBadge;
+      if (!cohortActive) {
+        const badges = new Map<string, { title: string | null; champion: boolean }>();
         const hero = state.heroes[0];
         if (mine && hero) badges.set(String(hero.id), mine);
+        return badges;
       }
-      return badges;
+      const party = useGameStore.getState().party;
+      return buildCohortSocialBadges(
+        state.heroes,
+        myCohortIndex,
+        mine,
+        cohortMemberIds,
+        lastCohortSlots,
+        party?.members ?? [],
+        (titleId) => titleLabel(titleId, tHofRef.current),
+      );
     }
 
     function pushHeroSocialBadges(): void {
@@ -998,7 +1045,7 @@ export function GameClient() {
       cohortMemberNames = new Map();
       renderer.setHeroDisplayNames(null);
       renderer.setPovHeroIndex(0);
-      useGameStore.getState().setCohortStatus({ kind: "solo" });
+      pushCohortStatus({ kind: "solo" });
       pushHeroSocialBadges(); // switch the nameplate/aura seam back to my solo badge
     }
 
@@ -1008,8 +1055,9 @@ export function GameClient() {
       handshake?.abort();
       // The one honest use of the "connecting" chip: a same-zone cohort exists and
       // the re-seed handshake is actually in flight (relay-connected states without
-      // a cohort show nothing — see `onPartyStatusChange`).
-      useGameStore.getState().setCohortStatus({ kind: "connecting" });
+      // a cohort show nothing — see `onPartyStatusChange`). Deferred by
+      // `pushCohortStatus` so a re-form that converges within the grace never flashes it.
+      pushCohortStatus({ kind: "connecting" });
       myTicketSlot = partySession.slot;
       // Pre-handshake, "my own hero" is `heroes[0]` while solo, or `heroes[myCohortIndex]`
       // if this is a re-seed of an ALREADY-active cohort (e.g. a 3rd member joins).
@@ -1084,17 +1132,17 @@ export function GameClient() {
         // event stream — stale shadow flags would wrongly exclude a now-live peer from the
         // next formation, so clear them and let fresh member-shadowed events re-populate.
         shadowedTicketSlots.clear();
-        useGameStore.getState().setCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
+        pushCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
       } else if (status === "connecting" && !cohortActive) {
-        useGameStore.getState().setCohortStatus({ kind: "connecting" });
+        pushCohortStatus({ kind: "connecting" });
       } else if (status === "connected" && !cohortActive) {
         // Connected to the relay but no same-zone cohort (yet) — the chip's "solo"
         // (hidden) state, per its design. Without this branch the "connecting" label
         // from the previous status sticks forever while alone in a zone, reading as
         // a stuck connection when the session is actually live and waiting.
-        useGameStore.getState().setCohortStatus({ kind: "solo" });
+        pushCohortStatus({ kind: "solo" });
       } else if (status === "off" && !cohortActive) {
-        useGameStore.getState().setCohortStatus({ kind: "solo" });
+        pushCohortStatus({ kind: "solo" });
       }
     }
 
@@ -1135,7 +1183,7 @@ export function GameClient() {
         handshake?.abort();
         handshake = null;
         collapseToSolo();
-        useGameStore.getState().setCohortStatus({ kind: "solo" });
+        pushCohortStatus({ kind: "solo" });
         return;
       }
       const changed = !sameSlots(live, lastCohortSlots);
@@ -1472,6 +1520,19 @@ export function GameClient() {
         store.queueSpawnWorldBoss(worldBossPhase.windowId, Math.ceil(worldBossPhase.msRemaining / 1000));
       }
 
+      // ดินแดนอสูร (ASURA) daily hot zone: cheap per-frame day-key check, same
+      // server-clock-aligned `serverNowMs()` the world-boss schedule uses. Only
+      // queued while standing IN asura (the zone the intent actually affects),
+      // and only re-queued when the day-key CHANGES (idempotent — the engine's
+      // `applyAsuraHotZone` is itself a plain set, safe to repeat).
+      if (isAsuraLocation(state.location)) {
+        const asuraDayKey = asuraDayKeyForMs(serverNowMs());
+        if (lastAsuraDayKeyQueued !== asuraDayKey) {
+          lastAsuraDayKeyQueued = asuraDayKey;
+          store.queueSetAsuraHotZone(asuraDayKey);
+        }
+      }
+
       // M7.5 bot-status toasts ("มันเกิดขึ้นไวไป มองไม่ทัน" — owner request):
       // capture pre-step consumable counts so a town restock this frame can be
       // reported with real numbers after the sub-steps run.
@@ -1635,7 +1696,7 @@ export function GameClient() {
         frameEvents = collected;
         // Map the engine's waiting flag onto the HUD chip on TRANSITIONS only.
         if (waiting && !cohortPrevWaiting) {
-          useGameStore.getState().setCohortStatus({ kind: "waiting" });
+          pushCohortStatus({ kind: "waiting" });
         } else if (!waiting && cohortPrevWaiting) {
           refreshCohortStatus(); // resumed — restore "active" (names)
         }
@@ -1801,6 +1862,29 @@ export function GameClient() {
           void attemptWorldBossClaim(ev.windowId, (id) =>
             tContentItemsRef.current(`${id}.name`),
           );
+        } else if (ev.type === "eliteSpawned") {
+          // ดินแดนอสูร elite roaming mob — flavor-only toast (mysterious tone, no
+          // stats/rewards spoiled here; the reward beat is `eliteKilled` below).
+          useGameStore.getState().pushNotice("asuraEliteSpawned");
+        } else if (ev.type === "eliteKilled") {
+          useGameStore.getState().pushNotice("asuraEliteKilled", { essence: ev.essence });
+        } else if (ev.type === "asuraZoneStoneEarned") {
+          useGameStore.getState().pushNotice("asuraZoneStoneEarned");
+        } else if (ev.type === "tomePageFound") {
+          // "ตำราตำนาน" secret-quest breadcrumb (endgame v1.3, owner: discoverable WITHOUT
+          // patch notes) — a dramatic, mysterious toast, no spoilers.
+          useGameStore.getState().pushNotice(`tomePageFound.page${ev.page}`);
+        } else if (ev.type === "tomeAssembled") {
+          // The 3rd page landed — celebratory reveal dialog (mounted at the top level,
+          // see `AsuraTomeAssembledModal.tsx`), NOT a toast.
+          useGameStore.getState().showTomeAssembledCelebration();
+        } else if (ev.type === "asuraSigilClaimed") {
+          useGameStore.getState().pushNotice("asuraSigilClaimed", { count: ev.count });
+        } else if (ev.type === "legendaryCraftBlocked") {
+          // Defensive only — the panel already gates the button on `canCraftLegendary`
+          // (client-side precondition check) before firing the server POST, so this only
+          // fires on a genuine same-frame race (e.g. essence spent by a concurrent claim).
+          useGameStore.getState().pushNotice(`asuraCraftBlocked.${ev.reason}`);
         }
       }
 
@@ -2436,6 +2520,7 @@ export function GameClient() {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
+      if (connectingChipTimer) clearTimeout(connectingChipTimer);
       unsubscribeReload?.();
       unsubscribeParty?.();
       unsubscribeSocialBadge?.();
@@ -2460,6 +2545,9 @@ export function GameClient() {
       {/* UAT "what's new" patch-notes modal — mount only; all decision logic
           lives in `ui/hooks/usePatchNotes.ts` (see that file + `ui/patchNotes.ts`). */}
       <PatchNotesModal />
+      {/* "ตำราตำนาน" secret-quest reveal — mount only; the store's `tomeAssembledCelebration`
+          flag (flipped off the `tomeAssembled` engine event above) drives visibility. */}
+      <AsuraTomeAssembledModal />
     </>
   );
 }

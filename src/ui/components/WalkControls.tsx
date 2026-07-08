@@ -14,6 +14,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { ASURA_MAP_ID } from "@/engine";
 import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
 import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
@@ -41,7 +42,11 @@ export function WalkControls() {
       : world.kind === "town"
         ? t("zoneTown")
         : world.kind === "boss"
-          ? t("zoneBoss")
+          ? // ดินแดนอสูร s40 boss room: an intentional unbeatable wall in v1 —
+            // labeled "???" so players don't waste time trying to grind it (item 6).
+            world.mapId === ASURA_MAP_ID
+            ? t("asuraBossMystery")
+            : t("zoneBoss")
           : t("zoneFarm", { stage: world.stage });
 
   return (
@@ -117,15 +122,18 @@ function WalkArrow({
   const isBossRoom = neighbor?.kind === "boss";
   const enabled = !!neighbor && neighbor.unlocked && !traveling;
 
+  const isAsuraBossRoom = isBossRoom && neighbor?.mapId === ASURA_MAP_ID;
   const label = !neighbor
     ? undefined
     : !neighbor.unlocked
       ? t("lockedTooltip")
-      : isBossRoom
-        ? t("enterBossRoom")
-        : dir === "left"
-          ? t("walkLeftAria")
-          : t("walkRightAria");
+      : isAsuraBossRoom
+        ? t("asuraBossMystery")
+        : isBossRoom
+          ? t("enterBossRoom")
+          : dir === "left"
+            ? t("walkLeftAria")
+            : t("walkRightAria");
 
   return (
     <button

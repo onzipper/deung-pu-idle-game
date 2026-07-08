@@ -147,6 +147,35 @@ export {
   type ZoneNeighbor,
 } from "@/engine/systems/world";
 
+// ดินแดนอสูร (ASURA) hard-map reads (endgame v1). The UI gates the asura warp tab on
+// `isAsuraUnlocked` (persist gate after the s30 boss — the tier3GateCleared precedent), reads the
+// depth band (`asuraRefineBandForStage`) for the "+8/+9/+10" hint, and computes the daily hot zone
+// off `asuraHotZoneFor` (client-side, from the Bangkok day-key) to inject the `setAsuraHotZone`
+// intent. The elite / essence / counter mutations are engine-internal (driven through `step()`),
+// so only the pure reads + the map id are public.
+export {
+  ASURA_MAP_ID,
+  isAsuraStage,
+  isAsuraLocation,
+  isAsuraUnlocked,
+  asuraRefineBandForStage,
+  asuraHotZoneFor,
+  asuraRewardMult,
+  asuraZoneKey,
+  // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3) PURE reads — the UI's tome checklist
+  // + craft affordance derive from these; the mutators (grantAsuraSigil / craftLegendary /
+  // foundTomePage) are engine-internal (driven only through `step()` intents).
+  tomePagesFound,
+  hasAllZoneStones,
+  canCraftLegendary,
+  craftBlockReason,
+  TOME_ALL_PAGES,
+  TOME_PAGE_COUNT,
+  PAGE_ELITE,
+  PAGE_DEPTH_1,
+  PAGE_DEPTH_2,
+} from "@/engine/systems/asura";
+
 // NPC shop / consumables read helpers (M6 "เมืองหลัก"): the UI derives shop prices
 // (stage-scaled) + potion quick-use affordances from these pure reads. The
 // mutators (buy / use / return-scroll) happen ONLY through `step()` intents, so

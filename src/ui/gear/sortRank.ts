@@ -6,17 +6,26 @@
  * React/fetch — headlessly testable.
  */
 
-import { ITEM_TEMPLATES, refinedStat, type ItemRarity, type ItemTemplate } from "@/engine";
+import {
+  ITEM_TEMPLATES,
+  refineStepFor,
+  refinedStat,
+  type ItemRarity,
+  type ItemTemplate,
+} from "@/engine";
 import type { StatBlock } from "@/ui/gear/statDelta";
 import type { InventoryItem } from "@/ui/gear/types";
 
 /** The template's flat stat block, refined to `refineLevel` (M7.6 ตีบวก — a
- * +0 item is byte-identical to its base template). */
+ * +0 item is byte-identical to its base template). A "ตำราตำนาน" legendary uses its
+ * own steeper awakening step (`refineStepFor` → 16%/level) so the inventory compare
+ * shows its true +N ATK; ordinary gear keeps the 8% default. */
 export function refinedStatsOf(template: ItemTemplate, refineLevel: number): StatBlock {
+  const step = refineStepFor(template);
   return {
-    atk: template.stats.atk ? refinedStat(template.stats.atk, refineLevel) : undefined,
-    def: template.stats.def ? refinedStat(template.stats.def, refineLevel) : undefined,
-    hp: template.stats.hp ? refinedStat(template.stats.hp, refineLevel) : undefined,
+    atk: template.stats.atk ? refinedStat(template.stats.atk, refineLevel, step) : undefined,
+    def: template.stats.def ? refinedStat(template.stats.def, refineLevel, step) : undefined,
+    hp: template.stats.hp ? refinedStat(template.stats.hp, refineLevel, step) : undefined,
   };
 }
 
@@ -27,15 +36,18 @@ export function statSumOf(template: ItemTemplate, refineLevel: number): number {
   return (s.atk ?? 0) + (s.def ?? 0) + (s.hp ?? 0);
 }
 
-/** M7.9 "no stacking" default sort — BEST → WORST: tier desc, then refine
- * +level desc, then rarity (epic > rare > common) desc, then flat primary-stat
- * total desc. A missing/retired template sorts to the very bottom. */
+/** M7.9 "no stacking" default sort — BEST → WORST: EQUIPPED first (owner ask
+ * 2026-07-08, "ใส่อยู่" must be unmistakable — the bag's own top slot), then
+ * tier desc, then refine +level desc, then rarity (epic > rare > common)
+ * desc, then flat primary-stat total desc. A missing/retired template sorts
+ * to the very bottom. */
 const RARITY_RANK: Record<ItemRarity, number> = { epic: 2, rare: 1, common: 0 };
 
-function inventorySortRank(item: InventoryItem): [number, number, number, number] {
+function inventorySortRank(item: InventoryItem): [number, number, number, number, number] {
   const template = ITEM_TEMPLATES[item.templateId];
-  if (!template) return [-1, -1, -1, -1];
+  if (!template) return [-1, -1, -1, -1, -1];
   return [
+    item.equippedSlot !== null ? 1 : 0,
     template.tier,
     item.refineLevel,
     RARITY_RANK[template.rarity],

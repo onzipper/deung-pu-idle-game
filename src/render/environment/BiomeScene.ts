@@ -10,6 +10,7 @@
 import { Container } from "pixi.js";
 import type { Zone } from "@/engine";
 import type { GameState } from "@/engine/state";
+import { CONFIG } from "@/engine/config";
 import type { ResolvedBiome } from "@/render/environment/biomes";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { AmbientField } from "@/render/environment/ambientParticles";
@@ -27,6 +28,19 @@ const FAR_CHUNK_W = 180;
 const NEAR_CHUNK_W = 110;
 const GROUND_DEPTH = WORLD_HEIGHT - GROUND_Y + MARGIN;
 
+// ---- ดินแดนอสูร (ASURA) daily HOT-ZONE ambience (endgame v1) — a subtle golden
+// ember drift layered ON TOP of the zone's own (violet-blood) particle field,
+// active ONLY while standing in today's hot farm zone (`state.asuraHotZone`,
+// see `engine/systems/asura.ts::asuraRewardMult` — the SAME comparison this
+// mirrors: `zone.mapId === CONFIG.asura.mapId && zone.kind === "farm" &&
+// zone.zoneIdx === state.asuraHotZone`). Built ONLY for an asura farm-zone
+// `BiomeScene` instance (every other map/zone pays zero cost — the field is
+// simply never constructed, a graceful structural no-op). A DISTINCT warm
+// gold (not the zone's own crimson/violet ember) so "this zone is hot today"
+// reads as its own signal at a glance. ----
+const HOT_ZONE_EMBER_COLOR = 0xffd76a;
+const HOT_ZONE_EMBER_DENSITY = 7;
+
 function chunkCount(chunkWidth: number): number {
   return Math.ceil((WORLD_WIDTH + MARGIN * 2) / chunkWidth) + 2;
 }
@@ -38,6 +52,13 @@ export class BiomeScene {
   private readonly clouds: CloudField;
   private readonly ambient: AmbientField;
   private readonly gateProps: ZoneGateProps;
+  /** ASURA daily hot-zone ember overlay — non-null ONLY when this instance IS
+   * an asura farm zone (see the module-level doc comment above); every other
+   * biome never builds it (zero extra cost). */
+  private readonly hotZoneEmbers: AmbientField | null;
+  /** This scene's own farm-zone index — only meaningful when `hotZoneEmbers`
+   * is non-null (see above). */
+  private readonly hotZoneIdx: number;
 
   constructor(readonly biome: ResolvedBiome, zone: Zone, state: GameState) {
     const sky = buildSkyBands(
@@ -98,6 +119,26 @@ export class BiomeScene {
     );
     this.view.addChild(this.ambient.view);
 
+    // ASURA daily hot-zone ember overlay (see module doc comment) — built only
+    // for an asura FARM zone; every other zone/map leaves this permanently
+    // null (no field, no per-frame cost).
+    const isAsuraFarmZone = zone.kind === "farm" && zone.mapId === CONFIG.asura.mapId;
+    this.hotZoneIdx = zone.zoneIdx;
+    this.hotZoneEmbers = isAsuraFarmZone
+      ? new AmbientField(
+          "ember",
+          HOT_ZONE_EMBER_COLOR,
+          HOT_ZONE_EMBER_DENSITY,
+          WORLD_WIDTH,
+          GROUND_Y - 160,
+          GROUND_Y - 10,
+        )
+      : null;
+    if (this.hotZoneEmbers) {
+      this.hotZoneEmbers.view.visible = false;
+      this.view.addChild(this.hotZoneEmbers.view);
+    }
+
     // Boss-room-only arena framing (M6 task 2): fixed-position gate pillars +
     // lintel + a stepped-alpha vignette, added ON TOP of the biome's own
     // (already darker/more-intense) scenery — "a place, not an effect spam".
@@ -121,6 +162,11 @@ export class BiomeScene {
     this.near.update(dt, this.biome.scrollSpeed.near * speedMul);
     this.clouds.update(dt);
     this.ambient.update(dt);
+    if (this.hotZoneEmbers) {
+      const active = state.asuraHotZone !== null && state.asuraHotZone === this.hotZoneIdx;
+      this.hotZoneEmbers.view.visible = active;
+      if (active) this.hotZoneEmbers.update(dt);
+    }
     this.gateProps.refreshLock(state);
     this.gateProps.update(dt);
   }
@@ -130,6 +176,7 @@ export class BiomeScene {
     this.near.destroy();
     this.clouds.destroy();
     this.ambient.destroy();
+    this.hotZoneEmbers?.destroy();
     this.gateProps.destroy();
     this.view.destroy({ children: true });
   }

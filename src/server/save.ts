@@ -118,6 +118,12 @@ export async function persistSave(
   // Before accepting, re-derive the max achievable gold/stage/upgrades from the
   // previous row + elapsed wall-time at a bounded earn rate, and clamp/reject
   // impossible jumps. Today we only enforce structural sanity above.
+  //
+  // ดินแดนอสูร (endgame v1, SAVE v19): `asuraEssence`/`asuraZoneKills` are the SAME
+  // trust tier as `gold` — client-authoritative v1, passed through by the schema
+  // above with only structural bounds (non-negative ints). Re-deriving a max-
+  // plausible essence/kill-count from elapsed time is deferred to the same M5
+  // anti-cheat wave as gold/stage, not a new gap.
 
   const data: SaveData = { ...parsed.data, lastSeen: now.getTime() };
   const jsonData = data as unknown as Prisma.InputJsonObject;

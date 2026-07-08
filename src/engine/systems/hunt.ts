@@ -24,6 +24,7 @@ import type { Rng } from "@/engine/core/rng";
 import { makeEnemy } from "@/engine/entities";
 import type { EnemyKind } from "@/engine/entities";
 import { zoneAt, type Zone } from "@/engine/systems/world";
+import { promoteElite, shouldSpawnElite } from "@/engine/systems/asura";
 import type { GameState } from "@/engine/state";
 
 /** Resolved per-zone spawn parameters (map defaults + the aggro ramp). */
@@ -113,6 +114,11 @@ function spawnMob(state: GameState, rng: Rng, sp: SpawnParams): void {
   e.aggressive = aggressive;
   e.aggroRadius = aggressive ? sp.aggroRadius : 0;
   e.engaged = false;
+  // ดินแดนอสูร ELITE (endgame v1): a DETERMINISTIC counter cadence (no RNG draw — the seeded
+  // spawn stream is untouched, spawn composition/placement byte-identical) promotes every Nth
+  // asura farm spawn to a beefy, high-value elite. Inert (false) for s1-30 → those runs never
+  // diverge. Promotion happens AFTER makeEnemy's two draws, so the stream cursor is unaffected.
+  if (shouldSpawnElite(state)) promoteElite(state, e);
   state.enemies.push(e);
 }
 

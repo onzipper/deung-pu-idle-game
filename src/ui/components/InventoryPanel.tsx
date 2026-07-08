@@ -39,12 +39,14 @@ import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import {
   FORTIFIER_FOR_SLOT,
-  ITEM_TEMPLATES,
   INVENTORY_CAP,
+  isLegendaryTemplate,
   lookupTemplate,
   type GearSlot,
   type HeroClass,
 } from "@/engine";
+import { executeAwakenLegendary } from "@/ui/asura/awakenFlow";
+import { awakenGate } from "@/ui/asura/awakenView";
 import { fetchInventory, postEquip, postUnequip } from "@/ui/gear/api";
 import { applyEquipChange, applyUnequipChange } from "@/ui/gear/inventoryOps";
 import { executeSell } from "@/ui/gear/sellFlow";
@@ -56,12 +58,14 @@ import { EquipmentDoll } from "@/ui/components/EquipmentDoll";
 import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import {
+  classTintClass,
   GEAR_SLOT_ICONS,
+  gearNameClass,
   HERO_ICONS,
-  prestigeNameClass,
   RARITY_COLORS,
   RARITY_GLOW,
   TIER_BORDER_COLORS,
+  weaponGlyph,
 } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -82,7 +86,7 @@ function GridCell({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const template = ITEM_TEMPLATES[item.templateId];
+  const template = lookupTemplate(item.templateId);
   const tContent = useTranslations("content.items");
   const t = useTranslations("inventory");
   if (!template) return null; // stale/retired template — defensively skip
@@ -90,6 +94,28 @@ function GridCell({
   const colors = RARITY_COLORS[template.rarity];
   const glow = RARITY_GLOW[template.rarity];
   const equipped = item.equippedSlot !== null;
+  // "ตำราตำนาน" legendary (endgame v1.3): a distinct violet border/glow overrides the
+  // ordinary tier-6 fallback (its tier, 11, is above every TIER_BORDER_COLORS band).
+  const legendary = isLegendaryTemplate(item.templateId);
+  // Owner ask 2026-07-08: weapon glyph reads by REQUIRED CLASS instead of one
+  // universal crossed-blade; armor keeps its generic 🛡 but both get a subtle
+  // per-class glyph tint when class-locked (weapons always are; armor only
+  // when `classReq` isn't null — universal armor stays untinted).
+  const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
+  const tint = classTintClass(template.classReq);
+  // EQUIPPED must be unmistakable (owner ask): bright border, wins over the
+  // tier/legendary border hierarchy — plus an on-tile "ใส่อยู่" label (not a
+  // corner dot). `selected`'s gold ring still layers independently on top.
+  const borderCls = equipped
+    ? "border-emerald-300"
+    : legendary
+      ? "border-fuchsia-400/80"
+      : tierBorder(template.tier);
+  const glowCls = equipped
+    ? "shadow-[0_0_16px_4px_rgba(52,211,153,0.55)]"
+    : legendary
+      ? "shadow-[0_0_16px_4px_rgba(217,70,239,0.45)]"
+      : glow;
 
   return (
     <button
@@ -97,12 +123,20 @@ function GridCell({
       onClick={onSelect}
       aria-pressed={selected}
       aria-label={tContent(`${item.templateId}.name`)}
-      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${tierBorder(
-        template.tier,
-      )} ${glow} ${selected ? "ring-2 ring-ddp-gold-bright" : ""}`}
+      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${borderCls} ${glowCls} ${
+        selected ? "ring-2 ring-ddp-gold-bright" : ""
+      }`}
     >
-      <span aria-hidden className="text-xl leading-none">
-        {GEAR_SLOT_ICONS[template.slot]}
+      {equipped && (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 top-0 rounded-t-(--ddp-radius-sm) bg-emerald-400 px-0.5 py-0.5 text-center text-[8px] leading-none font-black text-emerald-950"
+        >
+          {t("equippedBadge")}
+        </span>
+      )}
+      <span aria-hidden className={`text-xl leading-none ${equipped ? "mt-2.5" : ""} ${tint}`}>
+        {glyph}
       </span>
       <span className="text-[9px] font-bold text-ddp-ink-muted">
         {t("tierShort", { tier: template.tier })}
@@ -110,7 +144,11 @@ function GridCell({
           <span className="text-emerald-400"> {t("refinePlus", { level: item.refineLevel })}</span>
         )}
       </span>
-      {template.classReq && (
+      {/* Armor's main glyph stays generic 🛡 (owner ask), so a class-locked
+          armor piece still gets this small required-class corner marker —
+          weapons already carry their class in the big glyph above now, so
+          this would just duplicate it there. */}
+      {template.slot === "armor" && template.classReq && (
         <span
           aria-hidden
           className="absolute bottom-0.5 left-0.5 text-[10px] leading-none"
@@ -125,11 +163,6 @@ function GridCell({
           className="absolute bottom-0.5 right-0.5 text-[10px] leading-none"
         >
           {colors.icon}
-        </span>
-      )}
-      {equipped && (
-        <span className="absolute -top-1.5 -left-1.5 rounded-full bg-emerald-400 px-1 text-[9px] font-black text-emerald-950">
-          E
         </span>
       )}
       {isNew && !equipped && (
@@ -153,9 +186,9 @@ function StatDeltaChips({
   equippedRefineLevel: number;
 }) {
   const t = useTranslations("inventory");
-  const candidate = ITEM_TEMPLATES[candidateTemplateId];
+  const candidate = lookupTemplate(candidateTemplateId);
   if (!candidate) return null;
-  const equipped = equippedTemplateId ? ITEM_TEMPLATES[equippedTemplateId] : null;
+  const equipped = equippedTemplateId ? lookupTemplate(equippedTemplateId) : null;
   // M7.6 ตีบวก: compare REFINED stat blocks (both sides), not raw catalog stats
   // — a +7 sword genuinely out-damages a +0 of the same template.
   const candidateStats = refinedStatsOf(candidate, candidateRefineLevel);
@@ -213,26 +246,55 @@ function DetailCard({
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
-  const template = ITEM_TEMPLATES[item.templateId];
+  const tTome = useTranslations("asura.tome");
+  const template = lookupTemplate(item.templateId);
   const sellGuard = useConfirmGuard();
+  // Awakening ("ปลุกพลัง") reads the same live gold/stone balances as the tome panel.
+  const gold = useGameStore((s) => s.gold);
+  const materials = useGameStore((s) => s.materials);
+  const pushNotice = useGameStore((s) => s.pushNotice);
+  const [awakening, setAwakening] = useState(false);
   if (!template) return null;
 
   const equipped = item.equippedSlot !== null;
   const classBlocked = template.classReq !== null && template.classReq !== heroCls;
   const colors = RARITY_COLORS[template.rarity];
   const needsConfirm = template.rarity === "rare" || template.rarity === "epic";
-  // M7.6+ polish: +8 and up gets prestige-gold name styling (see ui/labels.ts).
-  const prestigeCls = prestigeNameClass(item.refineLevel);
+  // M7.6+ polish: +8 and up gets prestige-gold name styling; a "ตำราตำนาน" legendary
+  // (endgame v1.3, craft-only — never sold) always gets the gold-violet gradient instead.
+  const prestigeCls = gearNameClass(item.templateId, item.refineLevel);
+  const legendary = isLegendaryTemplate(item.templateId);
+  // "ปลุกพลัง" awaken affordance (legendaries only) — the shared pure gate (server order).
+  const awaken = legendary ? awakenGate(item.templateId, item.refineLevel, gold, materials) : null;
 
   function handleSell(): void {
     sellGuard.trigger(needsConfirm, () => onSell(item));
   }
 
+  async function handleAwaken(): Promise<void> {
+    if (awakening) return;
+    setAwakening(true);
+    const res = await executeAwakenLegendary(item.instanceId);
+    setAwakening(false);
+    if (res.ok) {
+      pushNotice("asuraAwakened", { level: res.refineLevel });
+    } else {
+      pushNotice("asuraAwakenFailed", { reason: tTome(`awaken.error.${res.reason}`) });
+    }
+  }
+
+  const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
+  const tint = classTintClass(template.classReq);
+
   return (
-    <div className="flex flex-col gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 p-3">
+    <div
+      className={`flex flex-col gap-2 rounded-(--ddp-radius-md) border p-3 ${
+        equipped ? "border-emerald-400/70 bg-emerald-400/5" : "border-ddp-border-soft bg-black/40"
+      }`}
+    >
       <div className="flex items-center gap-2">
-        <span aria-hidden className="text-2xl">
-          {GEAR_SLOT_ICONS[template.slot]}
+        <span aria-hidden className={`text-2xl ${tint}`}>
+          {glyph}
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className={`truncate text-sm ${prestigeCls || `font-bold ${colors.text}`}`}>
@@ -246,6 +308,11 @@ function DetailCard({
           </span>
           <span className="text-[10px] text-ddp-ink-muted">
             {t("tierLabel", { tier: template.tier })} · {t(`rarity.${template.rarity}`)}
+            {equipped && (
+              <span className="ml-1.5 rounded-full bg-emerald-400/20 px-1.5 py-0.5 font-bold text-emerald-300">
+                {t("equippedBadge")}
+              </span>
+            )}
           </span>
         </div>
       </div>
@@ -287,7 +354,8 @@ function DetailCard({
           </button>
         )}
 
-        {!equipped && (
+        {/* "ตำราตำนาน" legendary (endgame v1.3): bind-on-craft, never sellable — no button. */}
+        {!equipped && !legendary && (
           <button
             type="button"
             disabled={busy || !inTown}
@@ -299,6 +367,44 @@ function DetailCard({
           </button>
         )}
       </div>
+
+      {/* "ปลุกพลัง" AWAKENING (endgame v1.3) — the legendary's guaranteed +0..+5 progression
+          path (the smith's refine station rejects legendaries). 100% success, never breaks. */}
+      {awaken && (
+        <div className="flex flex-col gap-1.5 rounded-(--ddp-radius-md) border border-fuchsia-400/30 bg-fuchsia-400/5 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold text-fuchsia-200">
+              <span aria-hidden>🔮</span>
+              {tTome("awaken.title")}
+            </span>
+            <span className="shrink-0 text-[11px] font-black tabular-nums text-fuchsia-300">
+              {tTome("awaken.levelReadout", { current: awaken.current, max: awaken.max })}
+            </span>
+          </div>
+          {awaken.status === "maxed" ? (
+            <p className="text-center text-[11px] font-bold text-emerald-300">{tTome("awaken.maxed")}</p>
+          ) : (
+            <button
+              type="button"
+              disabled={awakening || awaken.status !== "ready"}
+              onClick={() => void handleAwaken()}
+              className="min-h-10 w-full rounded-(--ddp-radius-md) border border-fuchsia-400 bg-fuchsia-400/15 px-3 text-[12px] font-black text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {awakening
+                ? tTome("awaken.awakeningButton")
+                : awaken.status === "gold"
+                  ? tTome("awaken.needGold")
+                  : awaken.status === "stones"
+                    ? tTome("awaken.needStones")
+                    : tTome("awaken.buttonCost", {
+                        target: awaken.target,
+                        gold: awaken.cost.gold.toLocaleString(),
+                        stones: awaken.cost.stones.toLocaleString(),
+                      })}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -312,6 +418,14 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   const tContent = useTranslations("content.items");
   const inventory = useGameStore((s) => s.inventory);
   const materials = useGameStore((s) => s.materials);
+  // ดินแดนอสูร (endgame v1): accrual-only, mysterious tone — see the module's
+  // asuraEssence doc (never named as a recipe ingredient anywhere in copy).
+  const asuraEssence = useGameStore((s) => s.asuraEssence);
+  // "ตำราตำนาน" secret-quest pages (endgame v1.3) — same mysterious-tone chip
+  // precedent as `asuraEssence` above; hidden again once the tome is unlocked
+  // (the real "⚒️ ตำราตำนาน" main-menu entry takes over from there).
+  const tomePagesFound = useGameStore((s) => s.tomePagesFound);
+  const tomeUnlocked = useGameStore((s) => s.tomeUnlocked);
   const heroCls = useGameStore((s) => s.heroes[0]?.cls);
   const inTown = useGameStore((s) => s.world.kind === "town");
   const sessionKnownTemplateIds = useGameStore((s) => s.sessionKnownTemplateIds);
@@ -334,7 +448,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
       .filter((i) => lookupTemplate(i.templateId)?.kind !== "fortifier")
       .filter((i) => {
         if (!classOnly || !heroCls) return true;
-        const tpl = ITEM_TEMPLATES[i.templateId];
+        const tpl = lookupTemplate(i.templateId);
         return !tpl || tpl.classReq === null || tpl.classReq === heroCls;
       })
       .sort(compareInventoryItems);
@@ -425,7 +539,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         onClick={onClose}
         className="absolute inset-0 bg-black/70"
       />
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) md:max-w-2xl">
+      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-hidden rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) md:max-w-2xl">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
           <button
@@ -440,8 +554,16 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         {/* Paper-doll (approved audit design): pinned LEFT column on desktop,
             pinned horizontal strip above the tabs on mobile — outside the
             bag's own overflow-y-auto container, same tier as the capacity
-            bar/tabs below, so it never scrolls away. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:items-start md:gap-4">
+            bar/tabs below, so it never scrolls away.
+            NOTE: no `items-start` on the md:flex-row axis — that would
+            override the default cross-axis stretch, leaving the bag column
+            sized to its own (unbounded) content instead of the row's actual
+            available height, which is exactly what let the bag grid below
+            grow past the modal's bottom rounded edge on desktop (owner
+            screenshot). Stretch (default) keeps both columns pinned to the
+            row's height so the bag's `min-h-0`/`overflow-y-auto` chain has
+            something bounded to clip against. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:gap-4">
         <EquipmentDoll
           inventory={inventory}
           activeTab={activeTab}
@@ -467,6 +589,29 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             <MaterialIcon className="h-3 w-3" />
             {materials.toLocaleString()}
           </span>
+          {/* ดินแดนอสูร essence (endgame v1) — hidden until the player has ever
+              gotten one (mirrors the fortifier chips below), mysterious tone. */}
+          {asuraEssence > 0 && (
+            <span
+              title={t("asuraEssenceHint")}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-red-800/50 bg-red-950/25 px-2 py-0.5 text-[10px] font-bold tabular-nums text-red-300"
+            >
+              <span aria-hidden>✨</span>
+              {asuraEssence.toLocaleString()}
+            </span>
+          )}
+          {/* "ตำราตำนาน" secret-quest burnt pages (endgame v1.3) — same mysterious-tone,
+              hide-until-owned chip as the essence one above; disappears once the tome is
+              unlocked (the real menu entry takes over). */}
+          {tomePagesFound > 0 && !tomeUnlocked && (
+            <span
+              title={t("tomePagesHint")}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-amber-800/50 bg-amber-950/25 px-2 py-0.5 text-[10px] font-bold tabular-nums text-amber-300"
+            >
+              <span aria-hidden>?</span>
+              {tomePagesFound}/3
+            </span>
+          )}
         </div>
 
         {/* World-boss wave: owned "แกร่ง" fortifier readout (inert — no equip/sell
@@ -532,7 +677,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           </button>
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {items.length === 0 ? (
             <p className="text-[11px] text-ddp-ink-muted/70">{t("emptySlotHint")}</p>
           ) : (

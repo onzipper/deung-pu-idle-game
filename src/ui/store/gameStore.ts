@@ -348,6 +348,35 @@ export interface EngineSnapshot {
    * panel's daily section (the `!` badge on ผู้ใหญ่บ้าน is a render-only read,
    * not this store slice — see `GameRenderer.ts`). */
   dailies: DailyBoardSummary;
+  /** ดินแดนอสูร (ASURA) endgame v1 accrual (SAVE v19) — straight throttled reads off
+   * `state.asuraEssence` (lifetime แก่นอสูร count) + `state.asuraZoneKills` (per-zone
+   * "asura:idx" -> LIFETIME kill count, ศิลาโซน progress toward `CONFIG.asura.zoneStoneGoal`).
+   * Accrual-only display in v1 (no craft menu reads these yet) — mysterious tone, never
+   * spelled out as a recipe ingredient anywhere in the UI. */
+  asuraEssence: number;
+  asuraZoneKills: Record<string, number>;
+  /** ดินแดนอสูร daily HOT ZONE — the throttled read of `state.asuraHotZone` (the resolved
+   * farm-DEPTH index 0..9, or `null` before `GameClient.tsx` has injected today's day-key /
+   * off-map). Drives `AsuraHotZoneBanner.tsx`'s chip while standing in asura. */
+  asuraHotZoneIdx: number | null;
+  /** "ตำราตำนาน" secret-quest tome progress (endgame v1.3) — straight throttled reads off
+   * `tomePagesFound(state)` (0..3) + `state.tomeUnlocked` (latches permanently once all 3
+   * pages are found). Drives ลุงดึ๋ง's lore-dialog breadcrumb (`RefinePanel.tsx`) and the
+   * main-menu tome button's visibility (`AsuraTomeButton.tsx`). */
+  tomePagesFound: number;
+  tomeUnlocked: boolean;
+  /** ตราอสูร sigil count — `state.asuraSigils`, banked by the daily z10 `claimAsuraSigil`
+   * intent. Drives the tome checklist's sigil row. */
+  asuraSigils: number;
+  /** Whether every asura farm zone has reached `CONFIG.asura.zoneStoneGoal` (the PERMANENT
+   * "climb every zone once" craft gate) — straight read of `hasAllZoneStones(state)`. */
+  hasAllZoneStones: boolean;
+  /** Pure craft-affordance read off `canCraftLegendary(state)` — the tome panel's CRAFT
+   * button enable/disable (the t10-weapon requirement is a separate, server-side check). */
+  canCraftLegendary: boolean;
+  /** The first unmet ENGINE-owned craft precondition, or `null` once satisfied — see
+   * `craftBlockReason`'s doc. Drives the tome panel's inline block-reason copy. */
+  craftBlockReason: "locked" | "essence" | "sigils" | "stones" | "gold" | "materials" | null;
 }
 
 /** One-shot player intents, accumulated between drains. Mirrors `FrameInput`. */
@@ -446,6 +475,21 @@ export interface PendingInput {
    * check, never a direct player action — last-wins per frame). The engine's own
    * `trySpawnWorldBoss` is idempotent per windowId, so a repeat is a safe no-op. */
   spawnWorldBoss: { windowId: number; remainingSeconds: number } | null;
+  /** ดินแดนอสูร daily HOT-ZONE day-key (queued by `GameClient.tsx`'s own schedule
+   * check while standing in asura — never a direct player action, last-wins per
+   * frame). The engine resolves the zone deterministically off this — see
+   * `PendingInput.spawnWorldBoss`'s doc for the same idempotent-intent shape. */
+  setAsuraHotZone: { dayKey: number } | null;
+  /** "ตำราตำนาน" daily ตราอสูร claim (endgame v1.3) — queued ONLY after the server
+   * confirms the daily claim (`ui/asura/tomeFlow.ts`), once per frame. The engine's
+   * own `grantAsuraSigil` is a plain add (no per-day guard — the SERVER stamps the
+   * day so a repeat client call is rejected before this is ever queued). */
+  claimAsuraSigil: boolean;
+  /** "ตำราตำนาน" legendary craft request — queued ONLY after `POST /api/asura/craft`
+   * confirms the t10-weapon consumption + mint (`ui/asura/tomeFlow.ts`). The engine
+   * validates + consumes essence/sigils/gold/materials for the solo hero's own class
+   * (`craftLegendary(state)` defaults `cls` to `state.heroes[0].cls`). */
+  craftLegendary: boolean;
 }
 
 function emptyPendingInput(): PendingInput {
@@ -475,6 +519,9 @@ function emptyPendingInput(): PendingInput {
     claimMainReward: null,
     useWarpScroll: null,
     spawnWorldBoss: null,
+    setAsuraHotZone: null,
+    claimAsuraSigil: false,
+    craftLegendary: false,
   };
 }
 
@@ -1016,6 +1063,25 @@ export interface HudState {
   mainChapters: MainChapterSummary[];
   /** M8 quest Wave C daily roster — see `EngineSnapshot.dailies`'s doc. */
   dailies: DailyBoardSummary;
+  /** ดินแดนอสูร accrual (SAVE v19) — see `EngineSnapshot.asuraEssence`'s doc. */
+  asuraEssence: number;
+  asuraZoneKills: Record<string, number>;
+  /** ดินแดนอสูร daily hot zone — see `EngineSnapshot.asuraHotZoneIdx`'s doc. */
+  asuraHotZoneIdx: number | null;
+  /** "ตำราตำนาน" tome progress — see `EngineSnapshot.tomePagesFound`'s doc. */
+  tomePagesFound: number;
+  tomeUnlocked: boolean;
+  asuraSigils: number;
+  hasAllZoneStones: boolean;
+  canCraftLegendary: boolean;
+  craftBlockReason: "locked" | "essence" | "sigils" | "stones" | "gold" | "materials" | null;
+  /** UI-owned one-shot celebration flag (NOT part of the throttled snapshot — flipped
+   * directly off the `tomeAssembled` engine EVENT, same "store action, not a raw `useState`
+   * setter in an effect" shape as `patchNotesVisible`). `AsuraTomeAssembledModal.tsx` shows
+   * the reveal dialog while true; the acknowledge button clears it. Never persisted (a
+   * missed celebration on a fresh tab is a non-issue — the tome button itself stays visible
+   * forever once `tomeUnlocked`). */
+  tomeAssembledCelebration: boolean;
 
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Which NPC's dialog is currently open, or `null` — see `TownPanelId`'s
@@ -1230,6 +1296,11 @@ export interface HudState {
    * carries the visible flag" split as `ftueCompleted`/`setFtueCompleted`). */
   dismissPatchNotes: () => void;
 
+  /** Fired off the `tomeAssembled` engine event: opens the celebratory reveal modal. */
+  showTomeAssembledCelebration: () => void;
+  /** Acknowledge button on the reveal modal. */
+  dismissTomeAssembledCelebration: () => void;
+
   /** Queue a manual cast of `skillId` for the solo hero (deduped by skill id;
    * consumed on next drain — a click casts exactly once at any speed). */
   castSkill: (skillId: string) => void;
@@ -1327,6 +1398,15 @@ export interface HudState {
    * per-member "🌀 วาปไปหา" button) — see `PendingInput.useWarpScroll`'s doc. */
   queueWarpScroll: (target: WorldLocation) => void;
 
+  // ---- "ตำราตำนาน" secret tome + legendary craft (endgame v1.2/v1.3) ----
+  /** Bank the daily z10 ตราอสูร sigil — queued ONLY after `POST /api/asura/sigil`
+   * confirms (`ui/asura/tomeFlow.ts`), see `PendingInput.claimAsuraSigil`'s doc. */
+  queueClaimAsuraSigil: () => void;
+  /** Request the tome craft (the recipe's own class weapon) — queued ONLY after
+   * `POST /api/asura/craft` confirms (`ui/asura/tomeFlow.ts`), see
+   * `PendingInput.craftLegendary`'s doc. */
+  queueCraftLegendary: () => void;
+
   // ---- Town NPCs phase 3 (final): tap-again-to-talk panel gating ----
   /** Open `panel`'s dialog (last-wins — talking to the other NPC or the dock
    * shortcut always wins over whatever was open). */
@@ -1394,6 +1474,12 @@ export interface HudState {
    * boss zone during the "active" phase (last-wins per frame) — see
    * `PendingInput.spawnWorldBoss`'s doc. */
   queueSpawnWorldBoss: (windowId: number, remainingSeconds: number) => void;
+
+  // ---- ดินแดนอสูร (ASURA) endgame v1 ----
+  /** `GameClient.tsx`-only: queue today's Bangkok day-key while standing in
+   * asura (last-wins per frame, re-queued only on change) — see
+   * `PendingInput.setAsuraHotZone`'s doc. */
+  queueSetAsuraHotZone: (dayKey: number) => void;
 
   // ---- M7.9 server-wide high-refine announcement feed ----
   /** Boot-only: record this client's own characterId (see `myCharacterId`'s doc). */
@@ -1470,6 +1556,16 @@ export const useGameStore = create<HudState>((set, get) => ({
   deepestUnlockedFarm: { mapId: "map1", zoneIdx: 1 },
   mainChapters: [],
   dailies: { serverDay: 0, quests: [] },
+  asuraEssence: 0,
+  asuraZoneKills: {},
+  asuraHotZoneIdx: null,
+  tomePagesFound: 0,
+  tomeUnlocked: false,
+  asuraSigils: 0,
+  hasAllZoneStones: false,
+  canCraftLegendary: false,
+  craftBlockReason: null,
+  tomeAssembledCelebration: false,
   activeTownPanel: null,
 
   inventory: [],
@@ -1557,6 +1653,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   showPatchNotes: () => set({ patchNotesVisible: true }),
   dismissPatchNotes: () => set({ patchNotesVisible: false }),
+
+  showTomeAssembledCelebration: () => set({ tomeAssembledCelebration: true }),
+  dismissTomeAssembledCelebration: () => set({ tomeAssembledCelebration: false }),
 
   castSkill: (skillId) =>
     set((s) => ({
@@ -1716,6 +1815,11 @@ export const useGameStore = create<HudState>((set, get) => ({
   queueWarpScroll: (target) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, useWarpScroll: target } })),
 
+  queueClaimAsuraSigil: () =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, claimAsuraSigil: true } })),
+  queueCraftLegendary: () =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, craftLegendary: true } })),
+
   openTownPanel: (panel) => set({ activeTownPanel: panel }),
   closeTownPanel: () => set({ activeTownPanel: null }),
 
@@ -1776,6 +1880,9 @@ export const useGameStore = create<HudState>((set, get) => ({
     set((s) => ({
       pendingInput: { ...s.pendingInput, spawnWorldBoss: { windowId, remainingSeconds } },
     })),
+
+  queueSetAsuraHotZone: (dayKey) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, setAsuraHotZone: { dayKey } } })),
 
   setMyCharacterId: (characterId) => set({ myCharacterId: characterId }),
   ingestAnnouncementFeed: (wire) =>

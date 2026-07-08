@@ -282,6 +282,53 @@ export interface GameState {
    */
   materials: number;
   /**
+   * ดินแดนอสูร (ASURA) แก่นอสูร ESSENCE bank (endgame v1, SAVE v19). A plain per-character
+   * COUNT (like `gold`), incremented directly on an elite kill (systems/asura.onAsuraFarmKill)
+   * WITHOUT touching the loot streams. Accrue-only in v1 (the craft menu that spends it is a
+   * later patch). Persisted.
+   */
+  asuraEssence: number;
+  /**
+   * ดินแดนอสูร ศิลาโซน per-zone LIFETIME kill counters (endgame v1, SAVE v19), keyed
+   * "asura:zoneIdx". Reaching `CONFIG.asura.zoneStoneGoal` earns that zone's ศิลา (a craft
+   * material — banked in v1, spent later). Distinct from the zone-UNLOCK quota (`zoneKills`):
+   * this is the monotonic "climb every zone once" first-clear proof. Persisted.
+   */
+  asuraZoneKills: Record<string, number>;
+  /**
+   * ดินแดนอสูร daily HOT-ZONE index (endgame v1) — the asura farm zone (0..9) running hot today,
+   * or null when unset. Set by the `setAsuraHotZone` intent from the client's day-key (the engine
+   * never reads a clock); read by `asuraRewardMult` to bonus xp/gold/stone IN that zone. TRANSIENT
+   * — never persisted (rebuilt null on load; the client re-injects the day-key each session).
+   */
+  asuraHotZone: number | null;
+  /**
+   * ดินแดนอสูร ELITE spawn TALLY (endgame v1) — a transient per-run counter advanced on each asura
+   * farm spawn; every `CONFIG.asura.elite.cadence`-th spawn is promoted to an elite (deterministic,
+   * NOT an RNG draw). TRANSIENT — never persisted (rebuilt 0 on load; a reload simply re-primes the
+   * cadence). Stays 0 for s1-30, so those runs are byte-identical.
+   */
+  asuraSpawnTally: number;
+  /**
+   * ดินแดนอสูร ตราอสูร SIGIL bank (endgame v1.3, SAVE v20). A plain per-character COUNT (like
+   * `asuraEssence`) fed by the daily z10 `claimAsuraSigil` intent (the server stamps the day —
+   * client-authoritative v1). CONSUMED by a legendary craft (`CONFIG.asura.tome.craft.sigils`).
+   * Persisted.
+   */
+  asuraSigils: number;
+  /**
+   * "ตำราตำนาน" SECRET-QUEST page BITMASK (endgame v1.3, SAVE v20): bit0 = page 1 (first ELITE
+   * kill), bit1 = page 2 (first kill in the z5 farm), bit2 = page 3 (first kill in the z10 farm).
+   * Monotonic (pages are never lost). All 3 bits → `tomeUnlocked` latches. Persisted.
+   */
+  tomePages: number;
+  /**
+   * "ตำราตำนาน" craft-menu UNLOCK latch (endgame v1.3, SAVE v20): true once all 3 secret pages are
+   * assembled (`tomePages` complete). Gates the `craftLegendary` intent. Once true, stays true.
+   * Persisted.
+   */
+  tomeUnlocked: boolean;
+  /**
    * Per-step event buffer for render/audio juice. Cleared at the START of each
    * `step()`, filled during the step, drained by the outside layers after it.
    * Deterministic, one-way (engine never reads it), and NEVER persisted.
@@ -379,6 +426,17 @@ export interface SaveData {
    * spent + gold to refine gear, granted by salvage. Server-authoritative
    * transactions; engine carries the count for display/save. */
   materials: number;
+  /** ดินแดนอสูร แก่นอสูร essence bank (endgame v1, SAVE v19). Accrue-only in v1. */
+  asuraEssence: number;
+  /** ดินแดนอสูร ศิลาโซน per-zone lifetime kill counters keyed "asura:zoneIdx" (endgame v1,
+   * SAVE v19). Accrue-only in v1. */
+  asuraZoneKills: Record<string, number>;
+  /** ดินแดนอสูร ตราอสูร sigil bank (endgame v1.3, SAVE v20). Daily z10 grant; craft consumes. */
+  asuraSigils: number;
+  /** "ตำราตำนาน" secret-quest page bitmask (endgame v1.3, SAVE v20): bit0/1/2 = the 3 pages. */
+  tomePages: number;
+  /** "ตำราตำนาน" craft-menu unlock latch (endgame v1.3, SAVE v20): all 3 pages assembled. */
+  tomeUnlocked: boolean;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -574,6 +632,20 @@ export function initGameState(
     // M7.6 ตีบวก material counter (SAVE v14): restore the saved count (server-
     // authoritative), else 0 for a fresh/pre-v14 start.
     materials: Math.max(0, Math.floor(save?.materials ?? 0)),
+    // ดินแดนอสูร (endgame v1, SAVE v19): restore the แก่นอสูร essence bank + per-zone ศิลาโซน
+    // counters (both accrue-only in v1); a fresh/pre-v19 start begins empty. The hot-zone index
+    // + elite tally are TRANSIENT (rebuilt null/0 — the client re-injects the day-key; the cadence
+    // re-primes).
+    asuraEssence: Math.max(0, Math.floor(save?.asuraEssence ?? 0)),
+    asuraZoneKills: { ...(save?.asuraZoneKills ?? {}) },
+    asuraHotZone: null,
+    asuraSpawnTally: 0,
+    // "ตำราตำนาน" secret tome + ตราอสูร sigils (endgame v1.3, SAVE v20): restore the sigil bank +
+    // page bitmask + unlock latch (all accrue/persist like the essence family); a fresh/pre-v20
+    // start begins empty (no sigils, no pages, locked).
+    asuraSigils: Math.max(0, Math.floor(save?.asuraSigils ?? 0)),
+    tomePages: Math.max(0, Math.floor(save?.tomePages ?? 0)),
+    tomeUnlocked: save?.tomeUnlocked === true,
     events: [],
   };
   initHeroes(state);
@@ -813,6 +885,15 @@ export function toSaveData(state: GameState): SaveData {
     lootSalt: state.lootSalt,
     // M7.6 ตีบวก material counter (SAVE v14).
     materials: state.materials,
+    // ดินแดนอสูร (endgame v1, SAVE v19): the แก่นอสูร essence bank + per-zone ศิลาโซน counters
+    // (accrue-only). The hot-zone index + elite tally are transient — never persisted.
+    asuraEssence: state.asuraEssence,
+    asuraZoneKills: { ...state.asuraZoneKills },
+    // "ตำราตำนาน" secret tome + ตราอสูร sigils (endgame v1.3, SAVE v20): the sigil bank + secret-
+    // quest page bitmask + craft-unlock latch (all accrue-only / monotonic in v1).
+    asuraSigils: state.asuraSigils,
+    tomePages: state.tomePages,
+    tomeUnlocked: state.tomeUnlocked,
     lastSeen: 0,
   };
 }

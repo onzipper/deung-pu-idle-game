@@ -10,7 +10,7 @@
 
 import { useTranslations } from "next-intl";
 import { refineOf, type GearSlot } from "@/engine";
-import { GEAR_SLOT_ICONS, prestigeNameClass } from "@/ui/labels";
+import { GEAR_SLOT_ICONS, gearNameClass } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
 const SLOT_ORDER: readonly GearSlot[] = ["weapon", "armor"];
@@ -36,8 +36,9 @@ export function EquippedLoadout() {
         // M7.6 ตีบวก: the currently-applied refine +level (0 for an empty/
         // unrefined slot — no badge shown then).
         const refineLevel = templateId ? refineOf(equipped, slot) : 0;
-        // M7.6+ polish: +8 and up gets prestige-gold name styling (ui/labels.ts).
-        const prestigeCls = prestigeNameClass(refineLevel);
+        // M7.6+ polish: +8 and up gets prestige-gold name styling; a legendary
+        // (endgame v1.3) always gets the gold-violet gradient instead (ui/labels.ts).
+        const prestigeCls = gearNameClass(templateId, refineLevel);
         return (
           <span
             key={slot}

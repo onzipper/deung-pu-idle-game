@@ -394,6 +394,10 @@
       "boss-map6": {
         "title": "Infernal Sovereign (stage 30) — Field Hazard",
         "body": "The hell city's boss unleashes a telegraphed arena-wide hazard strike that damages you no matter where you stand — heal up and out-DPS it before the strike lands."
+      },
+      "worldAsura": {
+        "title": "The Asura Territories",
+        "body": "A forbidden land past stage 30 — the same monsters you know, but far harsher. The deeper you go, the higher a refine you need. They say something glows strangely in there... and there are odd rumors about a charred scrap of paper someone once found."
       }
     }
   },
@@ -693,6 +697,18 @@
       },
       "w_dagger_t10_apocalypse": {
         "name": "Apocalypse Daggers"
+      },
+      "w_legend_sword_emberfall": {
+        "name": "Asura Emberfall Sword"
+      },
+      "w_legend_bow_starfall": {
+        "name": "Asura Starfall Bow"
+      },
+      "w_legend_staff_runebind": {
+        "name": "Asura Runebind Staff"
+      },
+      "w_legend_dagger_umbra": {
+        "name": "Asura Umbra Dagger"
       }
     },
     "maps": {
@@ -713,6 +729,9 @@
       },
       "map6": {
         "name": "Infernal City"
+      },
+      "asura": {
+        "name": "The Asura Territories"
       }
     }
   },
@@ -865,7 +884,10 @@
     "fastTravelClose": "Close",
     "fastTravelCurrent": "You're here",
     "fastTravelChanneling": "Warping to {map}…",
-    "fastTravelStageRange": "Stage {min}–{max}"
+    "fastTravelStageRange": "Stage {min}–{max}",
+    "asuraBossMystery": "???",
+    "asuraTeaserRow": "The Asura Territories ???",
+    "asuraHotZoneBadge": "Today's hot zone"
   },
   "shop": {
     "title": "Town Shop",
@@ -952,7 +974,9 @@
         "boots": "Boots",
         "amulet": "Amulet"
       }
-    }
+    },
+    "asuraEssenceHint": "Asura essence — hang onto these. Nobody knows what they are for yet...",
+    "tomePagesHint": "A strange scorched page — maybe show it to someone in town..."
   },
   "dropFeed": {
     "gotItem": "Item obtained: {name}",
@@ -1009,6 +1033,25 @@
       "bagFull": "Bag's full — can't buy that back",
       "network": "Network hiccup — try again",
       "unknown": "Something went wrong — try again"
+    },
+    "asuraEliteSpawned": "👹 Something unnaturally powerful appeared in this zone...",
+    "asuraEliteKilled": "✨ You brought it down! +{essence} asura essence",
+    "asuraZoneStoneEarned": "🪨 Zone mastered — its stone is now yours",
+    "tomePageFound": {
+      "page1": "🔥 Something strange fell into your hands... a scorched page. Maybe show it to someone in town?",
+      "page2": "📃 Another scorched page! Looks like it fits with the first one... show it to lungdueng again",
+      "page3": "📜 The last page?! Rush it over to lungdueng"
+    },
+    "asuraSigilClaimed": "🔥 Claimed 1 asura sigil (total {count})",
+    "asuraAwakened": "🔮 Awakening succeeded! Legendary now +{level}",
+    "asuraAwakenFailed": "Couldn't awaken: {reason}",
+    "asuraCraftBlocked": {
+      "locked": "The tome isn't unlocked yet",
+      "essence": "Not enough asura essence",
+      "sigils": "Not enough asura sigils",
+      "stones": "Haven't mastered every zone yet",
+      "gold": "Not enough gold",
+      "materials": "Not enough refine stones"
     }
   },
   "refine": {
@@ -1256,6 +1299,16 @@
           "buffOverlay": "Buff badges moved to floating icons in the arena corner — no longer push the screen down",
           "paperDoll": "New bag view: see what's equipped at a glance + mystery slots..."
         }
+      },
+      "2026-07-09h": {
+        "items": {
+          "asura1": "🌋 New land unlocked: The Asura Territories — a forbidden land past stage 30, deeper and harsher than anything before. 10 zones await heroes brave enough to prove their refine.",
+          "asura2": "⚔️ Adventurers who made it back all tell the same story... sometimes an unnaturally powerful monster wanders in there. It glows strangely — but whoever brings it down gets an equally strange reward.",
+          "asura3": "📜 ...and there are odd rumors that someone once came back clutching a charred, unreadable scrap of paper. Nobody knows what it is... if you find one, go ask the elders in town.",
+          "reconnectFix": "🔌 Fixed a bug where joining a friend's party sometimes failed to connect (a CORS issue blocking the server wake-up) — connections are much smoother now.",
+          "cohortTitleFix": "🏅 Fixed party members' titles/champion auras sometimes showing on the wrong nameplate — everyone's tag is correct now.",
+          "ninjaUnlockOpen": "🥷 The ninja class is now open to everyone — no unlock required."
+        }
       }
     }
   },
@@ -1287,10 +1340,26 @@
       "ninja": "Ninja"
     },
     "titles": {
-      "level": { "1": "Grandmaster of the Realm", "2": "Elite Warrior", "3": "Warrior" },
-      "power": { "1": "Titan of Strength", "2": "Iron Fist", "3": "The Disciplined" },
-      "gold": { "1": "Tycoon", "2": "Wealthy Merchant", "3": "Apprentice Trader" },
-      "online": { "1": "Chief Watchman", "2": "Senior Watchman", "3": "Junior Watchman" }
+      "level": {
+        "1": "Grandmaster of the Realm",
+        "2": "Elite Warrior",
+        "3": "Warrior"
+      },
+      "power": {
+        "1": "Titan of Strength",
+        "2": "Iron Fist",
+        "3": "The Disciplined"
+      },
+      "gold": {
+        "1": "Tycoon",
+        "2": "Wealthy Merchant",
+        "3": "Apprentice Trader"
+      },
+      "online": {
+        "1": "Chief Watchman",
+        "2": "Senior Watchman",
+        "3": "Junior Watchman"
+      }
     },
     "champions": {
       "title": "🏆 Monthly Champions",
@@ -1473,6 +1542,93 @@
       "daily_boss": {
         "title": "Beat a Boss",
         "desc": "Defeat any boss {count} time(s)"
+      }
+    }
+  },
+  "asura": {
+    "bandHint": "This zone favors +{refine} refine and up",
+    "zoneStoneHint": "This zone's stone: {count}/{goal} (lifetime)",
+    "bossMysteryHint": "No one has ever made it through this room...",
+    "hotZoneHere": "Today this zone is HOT! Bonus rewards apply",
+    "hotZoneElsewhere": "Today's hot zone is zone {n}",
+    "tome": {
+      "openButton": "Legend Tome",
+      "title": "Legend Tome",
+      "closeButton": "Close",
+      "checklist": {
+        "essence": "Asura Essence",
+        "stones": "Zone Stones",
+        "sigils": "Asura Sigils",
+        "gold": "Forge Gold",
+        "materials": "Forge Refine Stones",
+        "zoneDot": "Zone {n}"
+      },
+      "claimSigilButton": "Claim today's sigil",
+      "claimingButton": "Claiming...",
+      "claimSigilFailed": "Can't claim right now — try again tomorrow",
+      "weaponPickerLabel": "Pick your class's +10 weapon as the sacrifice",
+      "noWeaponHint": "No +10 class weapon in your bag yet — refine one to +10 first",
+      "equippedTag": "equipped",
+      "blockReason": {
+        "stones": "You must master all 10 zone stones first (climb the asura map fully once)"
+      },
+      "craftButton": "Forge Legendary Weapon",
+      "craftingButton": "Forging...",
+      "craftError": {
+        "locked": "The tome isn't unlocked yet",
+        "essence": "Not enough asura essence",
+        "sigils": "Not enough asura sigils",
+        "stones": "Haven't mastered every zone yet",
+        "gold": "Not enough gold",
+        "materials": "Not enough refine stones",
+        "weapon": "That weapon can't be used (must be your class's +10, not already used)",
+        "network": "Network hiccup — try again",
+        "unknown": "Something went wrong — try again"
+      },
+      "craftSuccess": "Forged! {name} is now yours",
+      "awaken": {
+        "title": "Awaken Power",
+        "levelReadout": "+{current}/{max}",
+        "button": "Awaken to +{target} (100%)",
+        "buttonCost": "Awaken +{target} · {gold}g · {stones} stones",
+        "awakeningButton": "Awakening...",
+        "needGold": "Not enough gold to awaken",
+        "needStones": "Not enough stones to awaken",
+        "maxed": "Fully awakened (+5) — at its peak power",
+        "error": {
+          "not_found": "That legendary isn't in your bag",
+          "not_legendary": "Only a legendary weapon can be awakened",
+          "max": "Already fully awakened (+5)",
+          "insufficient_gold": "Not enough gold",
+          "insufficient_materials": "Not enough stones",
+          "network": "Network hiccup — try again",
+          "unknown": "Something went wrong — try again"
+        }
+      },
+      "assembled": {
+        "title": "The Legend Tome is Complete",
+        "line1": "lungdueng fits the last page against the other two, his hands trembling slightly.",
+        "line2": "\"...so it's true. This really is the asura blacksmith's tome!\"",
+        "line3": "\"I know the recipe now. Want to forge a legendary weapon of your own?\"",
+        "line4": "The \"⚒️ Legend Tome\" menu is unlocked — check it from the main menu!",
+        "ackButton": "Got it"
+      },
+      "lore": {
+        "stage1": {
+          "title": "A Scorched Page",
+          "line1": "lungdueng takes the scorched page from your hand and studies it closely.",
+          "line2": "\"Where'd you find this... it looks like a page from some old tome I've heard of.\"",
+          "line3": "\"They say deep in the asura lands there was once a blacksmith who forged with hellfire...\"",
+          "line4": "\"If you find another page, bring it to me. I want to know how this legend ends.\""
+        },
+        "stage2": {
+          "title": "The Asura Blacksmith's Legend",
+          "line1": "\"Another one already?!\" lungdueng sets down his hammer at once.",
+          "line2": "\"It says... the asura blacksmith could only forge ONE weapon in his life, then vanished into his own flames.\"",
+          "line3": "\"If this legend is true, that weapon can't be ordinary.\"",
+          "line4": "\"Still one page short. Keep looking — I'll be waiting to hear the ending.\""
+        },
+        "continueButton": "Enter the refine station"
       }
     }
   }

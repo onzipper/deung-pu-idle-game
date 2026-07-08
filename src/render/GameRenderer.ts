@@ -19,7 +19,7 @@
  */
 
 import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
-import { isDailyComplete, mainQuestChapters, zoneAt } from "@/engine";
+import { isDailyComplete, mainQuestChapters, tomePagesFound, zoneAt } from "@/engine";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
@@ -462,11 +462,20 @@ export class GameRenderer {
       const questBoardHasNotice =
         mainQuestChapters(state).some((c) => c.claimable) ||
         (state.heroes[0]?.dailies.quests.some((dq) => isDailyComplete(dq) && !dq.claimed) ?? false);
+      // Tome-wave: ลุงดึ๋ง's "!" badge — the player holds "ตำราตำนาน" pages but
+      // hasn't assembled the tome yet, mirroring the elder's precedent above
+      // (same pure `state` read, same per-frame recompute — never cached).
+      const smithHasTomeNotice = tomePagesFound(state) > 0 && !state.tomeUnlocked;
       for (const view of this.npcViews.values()) {
         updateNpcView(view, {
           dt,
           visible: inTown,
-          showIndicator: view.npcId === "npc:elder" ? questBoardHasNotice : false,
+          showIndicator:
+            view.npcId === "npc:elder"
+              ? questBoardHasNotice
+              : view.npcId === "npc:lungdueng"
+                ? smithHasTomeNotice
+                : false,
         });
       }
     }

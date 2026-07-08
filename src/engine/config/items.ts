@@ -21,6 +21,7 @@
  */
 
 import type { HeroClass } from "../entities";
+import { REFINE, clampRefine } from "@/engine/config/refine";
 
 export type GearSlot = "weapon" | "armor";
 
@@ -48,8 +49,17 @@ export interface ItemTemplate {
    * `slot` is reused as the match key (fort_weapon.slot === "weapon"). The server layer
    * enforces the non-equippable/non-sellable rules; `tier: 0` also keeps fortifiers out
    * of every stage-banded drop table for free (tierForStage only ever returns 1..10).
+   *
+   * "legendary" = a "ตำราตำนาน" craft-only weapon (endgame v1.2/v1.3, docs/endgame-design.md).
+   * Minted ONLY by the server on a `legendaryCraftRequested` (the tome craft), NEVER in any
+   * drop table (`LEGENDARY_TIER` = 11 is above MAX_TIER so tierForStage can never band it) and
+   * NEVER NPC-sellable. It IS an equippable weapon (unlike a fortifier) — equipItem admits kind
+   * "legendary" and rejects only "fortifier". Its "awakening" (+0..+5, no-break) rides the
+   * EXISTING per-slot refine field, capped per-kind by `maxRefineForTemplate` (LEGENDARY_MAX_
+   * AWAKEN). Rarity stays "epic" (so the ui glow/sort `Record<ItemRarity>` maps need NO new
+   * member — a deliberate non-breaking choice, exactly like the fortifiers' rarity "epic").
    */
-  kind?: "gear" | "fortifier";
+  kind?: "gear" | "fortifier" | "legendary";
 }
 
 /**
@@ -281,12 +291,144 @@ export const FORTIFIER_FOR_SLOT: Record<GearSlot, string> = {
   armor: "fort_armor",
 };
 
-/** Resolve ANY item-instance template — gear OR fortifier. Use this (not a bare
+// ---------------------------------------------------------------------------
+// "ตำราตำนาน" LEGENDARY weapons (endgame v1.2/v1.3 — craft-only, SEPARATE catalog).
+// ---------------------------------------------------------------------------
+// ONE weapon per class, minted ONLY by the server on the tome craft (never dropped/
+// sold/salvaged). Held in their OWN map (not ITEM_TEMPLATES/CATALOG) so the frozen gear
+// count (56, ui-test-enforced) + every drop table stay byte-identical — the FORTIFIER
+// precedent. `LEGENDARY_TIER` = 11 (> MAX_TIER 10) keeps them off every stage band for
+// free. Power ≈ class-t10 ATK × `LEGENDARY_ATK_MULT` (1.8, owner call 2026-07-08 — see below);
+// "awakening" +0..+5 rides the existing refine field (refinedStat math, capped per-kind — see
+// maxRefineForTemplate). Display name/desc are ui-side i18n (`items.<id>`), never here.
+//
+// OWNER CALL 2026-07-08 (v1.3 power-ceiling raise, "เดือดๆ"): LEGENDARY_ATK_MULT 1.4 → 1.8. Since
+// `refinedStat(base, 10) === round(base * 1.8)`, the legendary's +0 base lands EXACTLY at t10+10
+// parity (126 for the 70-base classes) — craft = instant parity with a maxed ordinary weapon.
+//
+// OWNER RETUNE 2026-07-08 (SUPERSEDES the +40% pass above): a fully-awakened legendary (+5) should
+// sit at +80% over a t10+10, not +40%. Base stays at parity (LEGENDARY_ATK_MULT 1.8 UNCHANGED, +0 =
+// 126 / bow 158). The reach comes from AWAKENING riding its OWN, steeper step — `LEGENDARY_AWAKEN_
+// STEP` = 0.16 (16%/level) instead of the ordinary REFINE 8%. Then `1 + 5 × 0.16 = 1.8`, so a +5
+// legendary's stat = base × 1.8 = (t10×1.8) × 1.8 = t10 × 3.24 ⇒ +5/+0 = ×1.8 = +80% over t10+10.
+// Ordinary gear is UNTOUCHED (still 8%/step, `refinedStat`'s default) — normal-gear stat math +
+// the canonical sim are byte-identical; only a kind === "legendary" item picks the 16% step (via
+// `refineStepFor`). Deliberate earned-fantasy ceiling (legendary+5 trivializes asura's deeper
+// zones) — flagged for the owner, not a bug.
+
+/** The (above-ceiling) tier every legendary carries — keeps them out of tierForStage bands. */
+export const LEGENDARY_TIER = 11;
+/** ATK multiplier vs the class's t10 weapon (sim-sweepable balance lever, docs/endgame). Owner
+ *  call 2026-07-08: 1.4 → 1.8 (base == t10+10 parity; see the block comment above). UNCHANGED by
+ *  the +80% retune — the ceiling raise rides `LEGENDARY_AWAKEN_STEP`, not this base mult. */
+export const LEGENDARY_ATK_MULT = 1.8;
+
+/**
+ * "สายปลุกพลัง" AWAKENING per-level stat step for a legendary (owner retune 2026-07-08). A
+ * legendary's +N stat is `base × (1 + N × LEGENDARY_AWAKEN_STEP)` — 16%/level, DISTINCT from
+ * ordinary gear's `REFINE.statBonusPerRefine` (8%). At the +5 cap this is `base × 1.8`, i.e. +80%
+ * over the (already t10+10-parity) +0 base. `refinedStat` takes this as its `stepPercent` arg only
+ * for kind === "legendary" items (see `refineStepFor`); every ordinary call keeps the 8% default,
+ * so normal gear + the canonical sim stay byte-identical.
+ */
+export const LEGENDARY_AWAKEN_STEP = 0.16;
+
+/**
+ * The per-level refine/awaken stat STEP a template's stats climb by: a legendary uses its own
+ * `LEGENDARY_AWAKEN_STEP` (16%), every other item (gear, fortifier, unknown) the ordinary
+ * `REFINE.statBonusPerRefine` (8%). The SINGLE place item-kind maps to a refine step — every
+ * stat reader (engine `equipStatSum`, the ui compare/stat lines) passes this into `refinedStat`
+ * so a legendary's displayed + combat stats match its steeper awakening curve.
+ */
+export function refineStepFor(template: ItemTemplate | null | undefined): number {
+  return template?.kind === "legendary" ? LEGENDARY_AWAKEN_STEP : REFINE.statBonusPerRefine;
+}
+
+function legendaryWeapon(id: string, cls: HeroClass, t10Atk: number): ItemTemplate {
+  return {
+    id,
+    slot: "weapon",
+    classReq: cls,
+    tier: LEGENDARY_TIER,
+    rarity: "epic",
+    kind: "legendary",
+    stats: { atk: Math.round(t10Atk * LEGENDARY_ATK_MULT) },
+  };
+}
+
+/** Craft-only legendary weapons, keyed by templateId (== DB `ItemInstance.templateId`). t10 ATK
+ *  per class: sword/mage/ninja 70 → 126, archer 88 (its class premium) → 158. FROZEN once shipped
+ *  (the t10Atk INPUT, i.e. 70/88, is frozen — the derived legendary base scales with
+ *  LEGENDARY_ATK_MULT, see the owner-call comment above). */
+export const LEGENDARY_TEMPLATES: Record<string, ItemTemplate> = {
+  w_legend_sword_emberfall: legendaryWeapon("w_legend_sword_emberfall", "swordsman", 70),
+  w_legend_bow_starfall: legendaryWeapon("w_legend_bow_starfall", "archer", 88),
+  w_legend_staff_runebind: legendaryWeapon("w_legend_staff_runebind", "mage", 70),
+  w_legend_dagger_umbra: legendaryWeapon("w_legend_dagger_umbra", "ninja", 70),
+};
+
+/** The legendary weapon templateId crafted for each class (the tome recipe's output — the
+ *  server mints THIS on `legendaryCraftRequested`; the engine emits it in the event). */
+export const LEGENDARY_FOR_CLASS: Record<HeroClass, string> = {
+  swordsman: "w_legend_sword_emberfall",
+  archer: "w_legend_bow_starfall",
+  mage: "w_legend_staff_runebind",
+  ninja: "w_legend_dagger_umbra",
+};
+
+/** Whether `id` is a "ตำราตำนาน" legendary weapon (kind-tagged, so it is byte-distinct from a
+ *  same-rarity epic). Used for the per-kind awakening cap + any legendary-only UI treatment. */
+export function isLegendaryTemplate(id: string | null | undefined): boolean {
+  return !!id && lookupTemplate(id)?.kind === "legendary";
+}
+
+/** The "ตำราตำนาน" AWAKENING ceiling (+0..+5, no-break) — a legendary's refine field is capped
+ *  HERE, distinct from ordinary gear's REFINE.maxRefine (+10). Owner-locked (docs/endgame-design
+ *  v1.2 "สายปลุกพลัง +0..+5"); as of the 2026-07-08 owner retune (LEGENDARY_AWAKEN_STEP 0.16) the
+ *  +5 peak is +80% over a t10+10 (superseded the earlier +40% pass — see the items.ts block). */
+export const LEGENDARY_MAX_AWAKEN = 5;
+
+/** The max refine/awaken level a given template accepts: a legendary caps at LEGENDARY_MAX_AWAKEN
+ *  (+5), all other gear at REFINE.maxRefine (+10). Unknown id → the ordinary ceiling. */
+export function maxRefineForTemplate(id: string | null | undefined): number {
+  return isLegendaryTemplate(id) ? LEGENDARY_MAX_AWAKEN : REFINE.maxRefine;
+}
+
+/** Clamp a server-decided refine/awaken `level` for a specific template: generic [0, maxRefine]
+ *  first, then the template's per-kind ceiling (legendary +5). A null template → the generic clamp. */
+export function clampRefineForTemplate(id: string | null | undefined, level: number | undefined): number {
+  return Math.min(clampRefine(level), maxRefineForTemplate(id));
+}
+
+/**
+ * "สายปลุกพลัง" AWAKENING cost to reach +targetLevel (1..LEGENDARY_MAX_AWAKEN) on a legendary:
+ * escalating gold + เศษศิลา enhancement-stones. Awakening is 100% success and NEVER breaks
+ * (owner design) — a pure, guaranteed materials/gold SINK, so there is no roll/degrade band like
+ * ordinary refine. Server-debited (gold vs the save-blob balance MVP-gap, stones vs the
+ * authoritative `Character.materials` column — the `refineItem` precedent). Exported as a
+ * sweepable balance-knob table indexed by TARGET +level. Essence cost is DEFERRED (v1 gold+stones
+ * only — no engine `awakenLegendary` intent exists yet; a future knob would add an essence count).
+ */
+export const AWAKEN_COST: Record<number, { gold: number; stones: number }> = {
+  1: { gold: 100_000, stones: 250 },
+  2: { gold: 250_000, stones: 500 },
+  3: { gold: 500_000, stones: 1_000 },
+  4: { gold: 900_000, stones: 1_800 },
+  5: { gold: 1_500_000, stones: 3_000 },
+};
+
+/** Awakening cost (gold + stones) to reach `targetLevel` on a legendary, or null if out of the
+ *  +1..+LEGENDARY_MAX_AWAKEN range (already at cap / bad input). Pure lookup — UI + server share it. */
+export function awakenCost(targetLevel: number): { gold: number; stones: number } | null {
+  return AWAKEN_COST[targetLevel] ?? null;
+}
+
+/** Resolve ANY item-instance template — gear OR fortifier OR legendary. Use this (not a bare
  *  `ITEM_TEMPLATES[id]`) wherever a persisted `ItemInstance.templateId` is turned back
- *  into a template, so fortifier instances resolve while the gear-only maps/tables stay
- *  fortifier-free. Returns undefined for a retired/unknown id. */
+ *  into a template, so fortifier/legendary instances resolve while the gear-only maps/tables stay
+ *  fortifier/legendary-free. Returns undefined for a retired/unknown id. */
 export function lookupTemplate(id: string): ItemTemplate | undefined {
-  return ITEM_TEMPLATES[id] ?? FORTIFIER_TEMPLATES[id];
+  return ITEM_TEMPLATES[id] ?? FORTIFIER_TEMPLATES[id] ?? LEGENDARY_TEMPLATES[id];
 }
 
 // ---------------------------------------------------------------------------

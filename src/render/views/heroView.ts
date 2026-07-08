@@ -37,7 +37,13 @@
 
 import { Container, Graphics, Text } from "pixi.js";
 import { CONFIG } from "@/engine/config";
-import { ITEM_TEMPLATES, type ItemRarity } from "@/engine/config/items";
+import {
+  ITEM_TEMPLATES,
+  isLegendaryTemplate,
+  LEGENDARY_TIER,
+  lookupTemplate,
+  type ItemRarity,
+} from "@/engine/config/items";
 import type { Hero, HeroClass } from "@/engine/entities";
 import type { GameEvent } from "@/engine/state";
 import { lerpColor } from "@/render/environment/colorUtils";
@@ -132,6 +138,24 @@ const GEAR_TIER_SCALE: Record<number, number> = {
   9: 2.08,
   10: 2.3,
 };
+
+/** "ตำราตำนาน" LEGENDARY weapon visual growth (endgame v1.2/v1.3, render
+ * wave) — a touch BIGGER than the t7-10 ladder's own ceiling (`GEAR_TIER_SCALE[10]`
+ * = 2.3), reached via `weaponVisualScale()` below rather than a `GEAR_TIER_SCALE[11]`
+ * entry (a legendary's `tier` field is `LEGENDARY_TIER` = 11, deliberately above
+ * `MAX_TIER` so it can never collide with a real drop-table tier). */
+const LEGENDARY_WEAPON_SCALE = 2.5;
+
+/** Resolves the tier -> visual-growth-scale lookup every weapon-geometry call
+ * site needs (`buildGearWeapon`/`swordTipLocal`/`weaponAnchorLocal`) — a
+ * legendary's `LEGENDARY_TIER` routes to its own dedicated scale instead of
+ * silently falling through `GEAR_TIER_SCALE`'s `?? 1` default (which would
+ * render it back down at tier-1 size). Kept as one shared helper so the three
+ * call sites can never drift out of sync with each other. */
+function weaponVisualScale(tier: number): number {
+  if (tier === LEGENDARY_TIER) return LEGENDARY_WEAPON_SCALE;
+  return GEAR_TIER_SCALE[tier] ?? 1;
+}
 
 /** Shared shoulder-to-hand grip point per class — both the (build-once) arm
  * segment in `buildRig` and the (rebuilt-on-equip-change) weapon head in
@@ -937,6 +961,75 @@ function drawApexOrnament(
   }
 }
 
+/** Routes each class branch's "business end" ornament call to either the
+ * ordinary t7-10 `drawApexOrnament` ladder or the dedicated "ตำราตำนาน"
+ * legendary flourish below — kept as a thin dispatcher (instead of folding
+ * `LEGENDARY_TIER` into the t7-10 ladder's own 1..4 step math, which isn't
+ * shaped for a single above-ceiling tier) so every one of the 5 call sites
+ * (sword tip / bow center / ninja main+off dagger tips / mage crystal head)
+ * only needs this one extra `legendary` flag. */
+function drawWeaponFlourish(
+  g: Graphics,
+  tier: number,
+  legendary: boolean,
+  anchor: { x: number; y: number },
+  baseR: number,
+): void {
+  if (legendary) {
+    drawLegendaryOrnament(g, anchor, baseR);
+    return;
+  }
+  drawApexOrnament(g, tier, anchor, baseR);
+}
+
+/**
+ * "ตำราตำนาน" LEGENDARY weapon flourish (endgame v1.2/v1.3, docs/endgame-
+ * design.md) — the rarest look in the game: a two-tone gold-violet edge glow
+ * at the weapon's business end (deliberately its OWN silhouette rather than
+ * an extrapolated `drawApexOrnament` step, so a legendary never reads as
+ * "just a bigger epic drop") plus a small ring of fixed radiant motes.
+ * Build-once path draw, same convention as every other ornament in this
+ * file — the CONTINUOUS idle particle signature (ember arc / starfall / rune
+ * orbit / shadow wisp) and the attack-swing motion trail are
+ * `fx/legendaryFx.ts`'s job, driven every frame off `getWeaponAnchorPos()`
+ * below, never drawn here. Footgun 10: solid fills/strokes on the default
+ * (normal) blend + a darker violet underlayer, never additive. */
+function drawLegendaryOrnament(
+  g: Graphics,
+  anchor: { x: number; y: number },
+  baseR: number,
+): void {
+  const outerR = baseR * 1.15;
+  const innerR = baseR * 0.7;
+  // Dark underlayer first (footgun 10's "darker outline" half) so the two
+  // bright rings above read as glowing edges, not flat strokes on scenery.
+  g.circle(anchor.x, anchor.y, safeRadius(outerR * 1.05)).stroke({
+    width: 1,
+    color: PALETTE.legendaryVioletDark,
+    alpha: 0.4,
+  });
+  g.circle(anchor.x, anchor.y, safeRadius(outerR)).stroke({
+    width: 2,
+    color: PALETTE.legendaryViolet,
+    alpha: 0.5,
+  });
+  g.circle(anchor.x, anchor.y, safeRadius(innerR)).stroke({
+    width: 1.4,
+    color: PALETTE.legendaryGold,
+    alpha: 0.9,
+  });
+  const moteCount = 5;
+  for (let i = 0; i < moteCount; i++) {
+    const a = (Math.PI * 2 * i) / moteCount + Math.PI / 5;
+    const mx = anchor.x + Math.cos(a) * outerR * 1.08;
+    const my = anchor.y + Math.sin(a) * outerR * 1.08 * 0.55;
+    g.circle(mx, my, safeRadius(1.8)).fill({
+      color: PALETTE.legendaryGoldCore,
+      alpha: 0.9,
+    });
+  }
+}
+
 /** Ninja dagger blade (main OR off hand — see `buildGearWeapon`'s ninja
  * branch), same tapered-poly-via-perpendicular-normal technique as the
  * swordsman's blade above, just shorter/flatter (shortest reach in the game)
@@ -952,6 +1045,7 @@ function drawNinjaDaggerBlade(
   tier: number,
   scale: number,
   rarity: ItemRarity,
+  legendary: boolean,
   accent: number,
 ): void {
   const bladeLen = (7 + (tier - 1) * 1.4) * scale * mirror;
@@ -981,6 +1075,24 @@ function drawNinjaDaggerBlade(
   g.moveTo(hand.x - px * guardLen, hand.y - py * guardLen)
     .lineTo(hand.x + px * guardLen, hand.y + py * guardLen)
     .stroke({ width: 1.6, color: PALETTE.ninjaVioletDark, cap: "round" });
+  if (legendary) {
+    // "ตำราตำนาน" gold-violet two-tone edge (dual-wield — both hands get it,
+    // per the render brief): a wider violet pass laid down BEFORE the
+    // rarity-accent stroke below (which resolves to `legendaryGold` for a
+    // legendary — see `buildGearWeapon`) so the gold reads as a bright inner
+    // line rimmed by a softer violet glow, not a single flat outline.
+    g.poly(
+      [
+        hand.x + px * halfW,
+        hand.y + py * halfW,
+        tipX,
+        tipY,
+        hand.x - px * halfW,
+        hand.y - py * halfW,
+      ],
+      true,
+    ).stroke({ width: 1.4, color: PALETTE.legendaryViolet, alpha: 0.55 });
+  }
   if (rarity !== "common") {
     g.poly(
       [
@@ -1010,7 +1122,7 @@ function drawNinjaDaggerBlade(
       true,
     ).fill(PALETTE.ninjaViolet);
   }
-  drawApexOrnament(g, tier, { x: tipX, y: tipY }, Math.abs(bladeLen) * 0.5);
+  drawWeaponFlourish(g, tier, legendary, { x: tipX, y: tipY }, Math.abs(bladeLen) * 0.5);
 }
 
 function buildGearWeapon(
@@ -1019,11 +1131,21 @@ function buildGearWeapon(
   templateId: string | null,
 ): void {
   const colors = HERO_COLORS[cls];
-  const tpl = templateId ? ITEM_TEMPLATES[templateId] : undefined;
+  // `lookupTemplate` (not the plain `ITEM_TEMPLATES` catalog) — a legendary
+  // weapon lives in its OWN `LEGENDARY_TEMPLATES` map (see items.ts), so a
+  // bare `ITEM_TEMPLATES[templateId]` lookup would silently miss it and fall
+  // back to the tier-1/common look.
+  const tpl = templateId ? lookupTemplate(templateId) : undefined;
   const tier = tpl?.tier ?? 1;
   const rarity: ItemRarity = tpl?.rarity ?? "common";
-  const scale = GEAR_TIER_SCALE[tier] ?? 1;
-  const accent = rarityAccentColor(rarity);
+  // "ตำราตำนาน" LEGENDARY weapon (endgame v1.2/v1.3): a distinct, BIGGER
+  // rig treatment (own `weaponVisualScale` ceiling) + a gold-violet accent
+  // override in place of the ordinary rarity-tinted `accent` (legendary's
+  // catalog `rarity` is "epic" for UI-compat reasons — see items.ts — but the
+  // rig must never read as "just another epic drop").
+  const legendary = isLegendaryTemplate(templateId);
+  const scale = weaponVisualScale(tier);
+  const accent = legendary ? PALETTE.legendaryGold : rarityAccentColor(rarity);
   const g = view.gearWeapon;
   g.clear();
   // Ninja-only off-hand dagger (`view.gearOffWeapon`, a child of `offArm` —
@@ -1066,6 +1188,23 @@ function buildGearWeapon(
     g.moveTo(hand.x - px * guardLen, hand.y - py * guardLen)
       .lineTo(hand.x + px * guardLen, hand.y + py * guardLen)
       .stroke({ width: 2.2, color: colors.light, cap: "round" });
+    if (legendary) {
+      // "ตำราตำนาน" gold-violet two-tone edge: a wider violet pass laid down
+      // BEFORE the gold rarity-accent stroke below (`accent` resolves to
+      // `legendaryGold` here) so the gold reads as a bright inner line rimmed
+      // by a softer violet glow.
+      g.poly(
+        [
+          hand.x + px * halfW,
+          hand.y + py * halfW,
+          tipX,
+          tipY,
+          hand.x - px * halfW,
+          hand.y - py * halfW,
+        ],
+        true,
+      ).stroke({ width: 1.8, color: PALETTE.legendaryViolet, alpha: 0.55 });
+    }
     if (rarity !== "common") {
       g.poly(
         [
@@ -1105,7 +1244,7 @@ function buildGearWeapon(
         true,
       ).fill(accent);
     }
-    drawApexOrnament(g, tier, { x: tipX, y: tipY }, bladeLen * 0.5);
+    drawWeaponFlourish(g, tier, legendary, { x: tipX, y: tipY }, bladeLen * 0.5);
   } else if (cls === "archer") {
     const hand = WEAPON_HAND.archer;
     const cx = hand.x + 3;
@@ -1139,6 +1278,16 @@ function buildGearWeapon(
       ],
       true,
     ).fill(PALETTE.steel);
+    if (legendary) {
+      // "ตำราตำนาน" gold-violet two-tone edge (see the swordsman branch's
+      // doc comment) — same `arcFanPoints()` footgun-10/2 workaround as the
+      // gold accent pass below, laid down first/wider.
+      g.poly(arcFanPoints(cx, cy, r, -1.1, 1.1), false).stroke({
+        width: 1.8,
+        color: PALETTE.legendaryViolet,
+        alpha: 0.5,
+      });
+    }
     if (rarity !== "common") {
       // A SECOND `.arc()` call on a Graphics whose pen is already elsewhere
       // (the string/arrow paths just drawn above) blows up `getBounds()` —
@@ -1158,7 +1307,7 @@ function buildGearWeapon(
       g.poly([p1x, p1y, p1x - 3, p1y - 5, p1x + 2, p1y - 3], true).fill(accent);
       g.poly([p2x, p2y, p2x - 3, p2y + 5, p2x + 2, p2y + 3], true).fill(accent);
     }
-    drawApexOrnament(g, tier, { x: cx, y: cy }, r * 0.9);
+    drawWeaponFlourish(g, tier, legendary, { x: cx, y: cy }, r * 0.9);
   } else if (cls === "ninja") {
     // Dual daggers (docs/ninja-design.md §7 "มีดคู่สองมือ"): the main-hand
     // blade grows with the equipped tier exactly like every other class's
@@ -1166,8 +1315,8 @@ function buildGearWeapon(
     // (`view.gearOffWeapon`, child of `offArm`) grows in lockstep off the
     // SAME templateId (one dagger item type, dual-wielded) so both blades
     // always read as matching gear.
-    drawNinjaDaggerBlade(g, WEAPON_HAND.ninja, 1, tier, scale, rarity, accent);
-    drawNinjaDaggerBlade(g2, NINJA_OFF_HAND, -1, tier, scale, rarity, accent);
+    drawNinjaDaggerBlade(g, WEAPON_HAND.ninja, 1, tier, scale, rarity, legendary, accent);
+    drawNinjaDaggerBlade(g2, NINJA_OFF_HAND, -1, tier, scale, rarity, legendary, accent);
   } else {
     const hand = WEAPON_HAND.mage;
     const sx = hand.x;
@@ -1197,6 +1346,16 @@ function buildGearWeapon(
       color: PALETTE.outline,
       alpha: 0.5,
     });
+    if (legendary) {
+      // "ตำราตำนาน" gold-violet two-tone edge (see the swordsman branch's
+      // doc comment) — a slightly wider violet ring UNDER the gold accent
+      // ring below reads as two concentric edge tones around the crystal.
+      g.circle(sx, crystalY, safeRadius(crystalR * 1.78)).stroke({
+        width: 1.6,
+        color: PALETTE.legendaryViolet,
+        alpha: 0.5,
+      });
+    }
     if (rarity !== "common") {
       g.circle(sx, crystalY, safeRadius(crystalR * 1.67)).stroke({
         width: 1,
@@ -1215,7 +1374,7 @@ function buildGearWeapon(
         });
       }
     }
-    drawApexOrnament(g, tier, { x: sx, y: crystalY }, crystalR * 2.2);
+    drawWeaponFlourish(g, tier, legendary, { x: sx, y: crystalY }, crystalR * 2.2);
   }
 
   view.gearWeaponTier = tier;
@@ -1979,7 +2138,7 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
  * (`bladeLen`/`bladeRise`), so a tier-grown blade's trail/aura anchor grows
  * with it instead of lagging behind at the old tier-1 tip. */
 function swordTipLocal(tier: number): { x: number; y: number } {
-  const scale = GEAR_TIER_SCALE[tier] ?? 1;
+  const scale = weaponVisualScale(tier);
   const hand = WEAPON_HAND.swordsman;
   const bladeLen = (12 + (tier - 1) * 2.4) * scale;
   const bladeRise = 20 * scale;
@@ -2011,7 +2170,7 @@ export function getSwordTipPos(view: HeroView, out: { x: number; y: number }): b
  * flame aura, not a precision trail) but scales with tier so it stays
  * roughly on the weapon as it grows. */
 function weaponAnchorLocal(cls: HeroClass, tier: number): { x: number; y: number } {
-  const scale = GEAR_TIER_SCALE[tier] ?? 1;
+  const scale = weaponVisualScale(tier);
   if (cls === "swordsman") {
     const hand = WEAPON_HAND.swordsman;
     const bladeLen = (12 + (tier - 1) * 2.4) * scale;
@@ -2095,6 +2254,17 @@ export function getChampionAnchorPos(
 export function isSwordSwinging(view: HeroView): boolean {
   const kind = view.anim.attack?.kind;
   return view.cls === "swordsman" && (kind === "swing" || kind === "spin");
+}
+
+/** Generalized across EVERY class (unlike `isSwordSwinging` above) — true
+ * while ANY attack animation is actively playing EXCEPT the mage's
+ * stationary `castHold` channel (docs/endgame-design.md's legendary motion
+ * trail should ride an actual swing/shot/thrust, not a held pose). Used by
+ * `fx/legendaryFx.ts`'s cross-class attack-swing trail — `isSwordSwinging`
+ * stays swordsman-only for `fx/weaponTrail.ts`'s own dedicated ribbon. */
+export function isHeroAttackSwinging(view: HeroView): boolean {
+  const kind = view.anim.attack?.kind;
+  return kind != null && kind !== "castHold";
 }
 
 // ---------------------------------------------------------------------------

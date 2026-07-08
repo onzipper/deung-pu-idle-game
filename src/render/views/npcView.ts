@@ -26,10 +26,12 @@
  *   ├── sparks (ลุงดึ๋ง ONLY: a tiny fixed pool of pooled Graphics dots, one
  *   │   flash per hammer strike — real-dt, capped, never allocated per-strike)
  *   ├── nameLabel (Text, floating name plate above the head)
- *   ├── indicator (M8 quest Wave C, ผู้ใหญ่บ้าน ONLY: a small bobbing "!" badge
- *   │   above the name plate — toggled by `NpcUpdateCtx.showIndicator`, driven
- *   │   by the throttled snapshot's "any daily claimable / main chapter
- *   │   unclaimed" read, never built for the other two NPCs)
+ *   ├── indicator (M8 quest Wave C ผู้ใหญ่บ้าน + tome-wave ลุงดึ๋ง: a small
+ *   │   bobbing "!" badge above the name plate — toggled by
+ *   │   `NpcUpdateCtx.showIndicator`, driven by an engine-state read
+ *   │   (elder: any daily claimable / main chapter unclaimed; smith: holds
+ *   │   "ตำราตำนาน" pages but hasn't assembled the tome yet) computed by the
+ *   │   caller (`GameRenderer.ts`); never built for ป้าปุ๊)
  *   └── affordanceRing (Graphics: soft pulsing "แตะได้" ring at the feet —
  *       NOT a quest marker arrow, just a gentle glint)
  *
@@ -101,8 +103,8 @@ export interface NpcView extends Container {
   /** ลุงดึ๋ง only — `null` for the other two. */
   hammerArm: Graphics | null;
   sparks: SparkSlot[];
-  /** ผู้ใหญ่บ้าน only (M8 quest Wave C) — `null` for the other two. Visibility
-   * toggled per-frame by `NpcUpdateCtx.showIndicator`. */
+  /** ผู้ใหญ่บ้าน (M8 quest Wave C) + ลุงดึ๋ง (tome-wave) — `null` for ป้าปุ๊.
+   * Visibility toggled per-frame by `NpcUpdateCtx.showIndicator`. */
   indicator: { root: Container; bg: Graphics; text: Text } | null;
   /** World-space point (view-local, since `view.position.x` is the anchor's
    * fixed world-x and `y` is always 0) a UI-triggered speech bubble should
@@ -118,9 +120,10 @@ export interface NpcUpdateCtx {
   /** Only true while standing in the town zone — gates both visibility and
    * the (otherwise free-running) idle animation work. */
   visible: boolean;
-  /** ผู้ใหญ่บ้าน only (M8 quest Wave C): show the bobbing "!" badge — any daily
-   * claimable or the current main-chapter reward unclaimed (engine-derived by
-   * the caller). Ignored for the other two NPCs (no `indicator` to toggle). */
+  /** ผู้ใหญ่บ้าน (M8 quest Wave C) + ลุงดึ๋ง (tome-wave): show the bobbing "!"
+   * badge — engine-derived by the caller (elder: any daily claimable or the
+   * current main-chapter reward unclaimed; smith: holds tome pages but the
+   * tome isn't unlocked yet). Ignored for ป้าปุ๊ (no `indicator` to toggle). */
   showIndicator?: boolean;
 }
 
@@ -400,10 +403,11 @@ export function createNpcView(npcId: TownNpcId): NpcView {
   nameLabel.position.set(0, HEAD_Y - HEAD_R - 12);
   view.addChild(nameLabel);
 
-  // ผู้ใหญ่บ้าน only (M8 quest Wave C): the bobbing "!" claimable-notice badge,
-  // built once and hidden by default (toggled in `updateNpcView`).
+  // ผู้ใหญ่บ้าน (M8 quest Wave C) + ลุงดึ๋ง (tome-wave): the bobbing "!"
+  // claimable-notice badge, built once and hidden by default (toggled in
+  // `updateNpcView`).
   let indicator: { root: Container; bg: Graphics; text: Text } | null = null;
-  if (isElder) {
+  if (isElder || isSmith) {
     indicator = buildIndicatorBadge();
     indicator.root.position.set(0, HEAD_Y - HEAD_R - 28);
     view.addChild(indicator.root);
@@ -450,8 +454,8 @@ export function updateNpcView(view: NpcView, ctx: NpcUpdateCtx): void {
   const ringScale = 0.92 + 0.12 * pulse;
   view.affordanceRing.scale.set(ringScale, ringScale);
 
-  // ผู้ใหญ่บ้าน only (M8 quest Wave C): show/bob the "!" badge. Reuses
-  // `breathPhase` (already ticking every frame regardless of NPC) at a
+  // ผู้ใหญ่บ้าน (M8 quest Wave C) + ลุงดึ๋ง (tome-wave): show/bob the "!" badge.
+  // Reuses `breathPhase` (already ticking every frame regardless of NPC) at a
   // different multiplier/amplitude rather than adding a dedicated phase.
   if (view.indicator) {
     const show = ctx.showIndicator === true;

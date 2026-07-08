@@ -102,12 +102,24 @@ describe("npcView rig transform math (regression guard)", () => {
     view.destroy({ children: true });
   });
 
-  it("ป้าปุ๊/ลุงดึ๋ง: never build an indicator badge (elder-only feature)", () => {
-    for (const id of ["npc:pahpu", "npc:lungdueng"] as const) {
-      const view = createNpcView(id);
-      expect(view.indicator).toBeNull();
-      updateNpcView(view, { dt: 0.1, visible: true, showIndicator: true }); // ignored, must not throw
-      view.destroy({ children: true });
-    }
+  it("ป้าปุ๊: never builds an indicator badge (no claimable affordance)", () => {
+    const view = createNpcView("npc:pahpu");
+    expect(view.indicator).toBeNull();
+    updateNpcView(view, { dt: 0.1, visible: true, showIndicator: true }); // ignored, must not throw
+    view.destroy({ children: true });
+  });
+
+  // Tome-wave: ลุงดึ๋ง's "!" badge mirrors the elder's precedent above, driven
+  // by GameRenderer's tome-pages-held-but-not-unlocked read.
+  it("ลุงดึ๋ง: indicator badge is null-safe and hidden by default, shown only via showIndicator", () => {
+    const view = createNpcView("npc:lungdueng");
+    expect(view.indicator).not.toBeNull();
+    updateNpcView(view, { dt: 0, visible: true });
+    expect(view.indicator?.root.visible).toBe(false);
+    updateNpcView(view, { dt: 0.1, visible: true, showIndicator: true });
+    expect(view.indicator?.root.visible).toBe(true);
+    updateNpcView(view, { dt: 0.1, visible: true, showIndicator: false });
+    expect(view.indicator?.root.visible).toBe(false);
+    view.destroy({ children: true });
   });
 });

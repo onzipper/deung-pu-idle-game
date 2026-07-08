@@ -7,7 +7,7 @@
  * `src/ui/README.md`'s "Content i18n pattern" section.
  */
 
-import { REFINE, type GearSlot, type HeroClass, type ItemRarity } from "@/engine";
+import { isLegendaryTemplate, REFINE, type GearSlot, type HeroClass, type ItemRarity } from "@/engine";
 
 export const HERO_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F5E1}️", // 🗡️
@@ -57,6 +57,52 @@ export const GEAR_SLOT_ICONS: Record<GearSlot, string> = {
   weapon: "\u{2694}", // ⚔
   armor: "\u{1F6E1}", // 🛡
 };
+
+/**
+ * Owner ask 2026-07-08 ("icon ไม่สื่อความหมาย ดูยากว่าอาวุธอาชีพไหน") — a
+ * WEAPON tile's glyph differentiates by REQUIRED CLASS instead of one
+ * universal crossed-blade (`GEAR_SLOT_ICONS.weapon`). Every real weapon
+ * template has a `classReq` (see `weapon()` in `engine/config/items.ts`) —
+ * only the inert `fort_weapon` fortifier is `classReq: null`, and every
+ * equip/sell grid already filters `kind === "fortifier"` out. All pre-2020,
+ * Win10-safe (footgun #4).
+ */
+export const WEAPON_CLASS_ICONS: Record<HeroClass, string> = {
+  swordsman: "\u{1F5E1}️", // 🗡️ sword
+  archer: "\u{1F3F9}", // 🏹 bow
+  mage: "\u{1F52E}", // 🔮 crystal ball (staff stand-in)
+  ninja: "\u{1F52A}", // 🔪 dagger
+};
+
+/** Weapon tile glyph for a template's `classReq` — the per-class icon when
+ * one applies, else the generic slot glyph (defensive fallback for the
+ * classReq:null fortifier, which no equip/sell/sort UI ever actually shows). */
+export function weaponGlyph(classReq: HeroClass | null): string {
+  return classReq ? WEAPON_CLASS_ICONS[classReq] : GEAR_SLOT_ICONS.weapon;
+}
+
+/**
+ * Subtle per-class glyph TINT so a bag full of tiles scans "which class" at
+ * a glance — applied to the glyph's text color only (never the tile's outer
+ * border, which stays owned by the existing tier/rarity/legendary/equipped
+ * hierarchy — layering another bordered accent risks fighting that ladder).
+ * Armor gets the same tint when class-locked (`classReq` set) — universal
+ * armor (`classReq: null`) gets no tint, matching its 🛡 glyph staying
+ * generic. Class colors are picked to stay visually distinct from every
+ * existing rarity/tier accent (sky/emerald/fuchsia/rose vs. gold/violet/slate).
+ */
+export const CLASS_TINT: Record<HeroClass, string> = {
+  swordsman: "text-sky-300",
+  archer: "text-emerald-300",
+  mage: "text-purple-300",
+  ninja: "text-rose-300",
+};
+
+/** Glyph tint class for a gear template's `classReq` — "" (inherit) for
+ * universal (`null`) gear. */
+export function classTintClass(classReq: HeroClass | null): string {
+  return classReq ? CLASS_TINT[classReq] : "";
+}
 
 /** Per-rarity Tailwind text/border color classes for gear cards + the drop-feed
  * toast (M7). Epic gets the "stronger beat" the drop-feed juice task asks for
@@ -115,4 +161,23 @@ export const PRESTIGE_REFINE_LEVEL = REFINE.failBands.degradeMax + 1; // 8
  */
 export function prestigeNameClass(refineLevel: number): string {
   return refineLevel >= PRESTIGE_REFINE_LEVEL ? "text-ddp-gold-bright font-black" : "";
+}
+
+/**
+ * "ตำราตำนาน" legendary craft-only weapons (endgame v1.3) get a distinct
+ * gold-violet gradient name accent — ALWAYS, regardless of awakening level (a
+ * fresh +0 legendary still reads as special, unlike ordinary gear's
+ * `prestigeNameClass` which only kicks in past +8). A non-legendary
+ * `templateId` falls through to the ordinary refine-prestige ladder.
+ */
+export const LEGENDARY_NAME_CLASS =
+  "bg-gradient-to-r from-ddp-gold-bright via-fuchsia-300 to-violet-400 bg-clip-text text-transparent font-black";
+
+/** Picks the name-span class for a gear item: legendary gradient first, else
+ * the ordinary `prestigeNameClass(refineLevel)` ladder. Callers that already
+ * resolve a template should pass its `templateId`; a `null`/`undefined` id
+ * (empty slot) safely falls through to the refine ladder ("" at +0). */
+export function gearNameClass(templateId: string | null | undefined, refineLevel: number): string {
+  if (templateId && isLegendaryTemplate(templateId)) return LEGENDARY_NAME_CLASS;
+  return prestigeNameClass(refineLevel);
 }

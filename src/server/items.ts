@@ -259,9 +259,9 @@ export interface ItemInstanceDTO {
   acquiredAt: string;
   /** M7.6 RO-style refine +level (+0..+REFINE.maxRefine). */
   refineLevel: number;
-  /** Item category — "gear" (equippable) or "fortifier" (the "แกร่ง" consumable). The
-   *  UI wave uses this to render/route fortifiers apart from gear. */
-  kind: "gear" | "fortifier";
+  /** Item category — "gear" (equippable), "fortifier" (the "แกร่ง" consumable), or "legendary"
+   *  (a "ตำราตำนาน" craft-only weapon — endgame v1.3). The UI wave routes each apart. */
+  kind: "gear" | "fortifier" | "legendary";
 }
 
 interface InstanceRow {
@@ -815,8 +815,10 @@ export async function sellItems(
           continue;
         }
         // Fortifiers are never NPC-sellable (they'd destroy a valuable consumable for
-        // 0 gold — tier 0). Server-authoritative refusal.
-        if (lookupTemplate(item.templateId)?.kind === "fortifier") {
+        // 0 gold — tier 0), and a "ตำราตำนาน" legendary is bind-on-craft (vendorPrice 0
+        // and one-per-class — never let one be sold for nothing). Server-authoritative refusal.
+        const sellKind = lookupTemplate(item.templateId)?.kind;
+        if (sellKind === "fortifier" || sellKind === "legendary") {
           results.push({ itemId, status: "rejected", reason: "not_sellable" });
           continue;
         }
@@ -1049,7 +1051,8 @@ export type RefineResult =
         | "max"
         | "insufficient_materials"
         | "insufficient_gold"
-        | "no_fortifier";
+        | "no_fortifier"
+        | "legendary";
     };
 
 /** Crypto-backed uniform roll in [0, 1). Injectable for deterministic tests. This
@@ -1104,6 +1107,10 @@ export async function refineItem(
       if (!template) throw new RefineOpError("unknown_template");
       // A fortifier can't itself be a refine TARGET (only gear is refined).
       if (template.kind === "fortifier") throw new RefineOpError("not_found");
+      // A "ตำราตำนาน" legendary is NEVER server-refined: its "awakening" (+0..+5, no-break)
+      // is ENGINE-side stat math (refinedStat), not a server refine roll — reject here so a
+      // client can't push a legendary through the +10/break rolling path (endgame v1.3).
+      if (template.kind === "legendary") throw new RefineOpError("legendary");
 
       const current = clampRefine(item.refineLevel);
       if (current >= REFINE.maxRefine) throw new RefineOpError("max");
@@ -1429,7 +1436,8 @@ class RefineOpError extends Error {
       | "max"
       | "insufficient_materials"
       | "insufficient_gold"
-      | "no_fortifier",
+      | "no_fortifier"
+      | "legendary",
   ) {
     super(reason);
   }

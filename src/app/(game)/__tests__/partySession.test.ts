@@ -415,6 +415,199 @@ describe("PartySession re-announces its zone to late joiners", () => {
   });
 });
 
+// ── setZone: beat BEFORE onCohortChanged (leave-and-return re-form regression) ─────
+//
+// Real seam: on returning to a friend's zone after a solo town trip, `setZone` used to
+// recompute the cohort (firing onCohortChanged — the caller's reseed-offer hook) BEFORE
+// broadcasting my arrival beat, so on the wire my offer preceded my beat. A peer that had
+// dropped me still listed only itself, discarded the early offer as foreign, and the
+// re-form stalled until the multi-second handshake deadline ("reconnecting every trip").
+// The fix: broadcast the beat FIRST so the peer re-derives the cohort before the offer.
+
+describe("PartySession.setZone broadcasts the beat before firing onCohortChanged", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  type LogEntry = { type: "beat"; zoneIdx: number } | { type: "cohort"; slots: number[] };
+
+  async function connectedRig(): Promise<{
+    session: PartySession;
+    socket: () => { sent: string[]; emit: (frame: object) => void; onopen: (() => void) | null };
+    log: LogEntry[];
+  }> {
+    const sockets: FakeWs[] = [];
+    const log: LogEntry[] = [];
+    class FakeWs {
+      static OPEN = 1;
+      readyState = 1;
+      url: string;
+      sent: string[] = [];
+      onopen: (() => void) | null = null;
+      onmessage: ((e: { data: string }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+      }
+      send(data: string): void {
+        this.sent.push(data);
+        const f = JSON.parse(data) as { t: string; payload?: { kind?: string; zoneIdx?: number } };
+        if (f.t === "g" && f.payload?.kind === "zone") log.push({ type: "beat", zoneIdx: f.payload.zoneIdx! });
+      }
+      close(): void {}
+      emit(frame: object): void {
+        this.onmessage?.({ data: JSON.stringify(frame) });
+      }
+    }
+    vi.stubGlobal("WebSocket", FakeWs);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/party/ticket")) {
+          return {
+            ok: true,
+            json: async () => ({
+              relayUrl: "ws://relay.test",
+              ticket: "t",
+              slot: 0,
+              partyId: "p1",
+              exp: Date.now() + 60_000,
+            }),
+          } as Response;
+        }
+        return { ok: false, type: "opaque" } as unknown as Response;
+      }),
+    );
+    const session = new PartySession({
+      onCohortChanged: (slots) => log.push({ type: "cohort", slots: [...slots] }),
+      onGameMessage: () => {},
+      onStatusChange: () => {},
+      onMemberShadowChanged: () => {},
+    });
+    session.setZone("map1", 2);
+    session.setParty({ partyId: "p1" });
+    await vi.advanceTimersByTimeAsync(10);
+    const ws = sockets[sockets.length - 1];
+    ws.onopen?.();
+    // welcome.seq is the seq the NEXT message carries — subsequent frames MUST be
+    // consecutive from there or the SeqTracker fires a (fatal) gap and tears down.
+    ws.emit({ t: "welcome", seq: 5, slots: [{ slot: 0, userId: "me" }] });
+    ws.emit({ t: "member-joined", seq: 5, slot: 1, userId: "friend" });
+    ws.emit({ t: "g", seq: 6, slot: 1, payload: { kind: "zone", mapId: "map1", zoneIdx: 2 } });
+    return { session, socket: () => sockets[sockets.length - 1], log };
+  }
+
+  it("on returning to the peer's zone, the arrival beat precedes the cohort-change hook", async () => {
+    const rig = await connectedRig();
+    // Roam away solo (peer drops out of my cohort), then walk back into the shared zone.
+    rig.session.setZone("map1", 3);
+    rig.log.length = 0; // isolate the RETURN transition
+    rig.session.setZone("map1", 2);
+
+    const beatIdx = rig.log.findIndex((e) => e.type === "beat" && e.zoneIdx === 2);
+    const cohortWithPeerIdx = rig.log.findIndex((e) => e.type === "cohort" && e.slots.length > 1);
+    expect(beatIdx).toBeGreaterThanOrEqual(0);
+    expect(cohortWithPeerIdx).toBeGreaterThanOrEqual(0);
+    // The beat (peer learns I'm back) MUST be on the wire before the cohort-change hook
+    // (where the caller sends its reseed-offer) — otherwise the offer arrives foreign.
+    expect(beatIdx).toBeLessThan(cohortWithPeerIdx);
+    rig.session.setParty(null);
+  });
+});
+
+// ── prewake is skipped on the first connect, run only on a reconnect ────────────────
+//
+// The relay is kept awake externally (UptimeRobot); a cold start is only plausible AFTER
+// a socket failure. Firing the serial /health round-trip on every connect only added
+// latency to the join. So the first attempt goes straight to the websocket; a reconnect
+// (after a ws close bumps `reconnectAttempt`) prewakes.
+
+describe("PartySession prewake timing", () => {
+  const noopHandlers = {
+    onCohortChanged: () => {},
+    onGameMessage: () => {},
+    onStatusChange: () => {},
+    onMemberShadowChanged: () => {},
+  };
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function rig(): { healthHits: () => number; wsCount: () => number; closeLast: () => void } {
+    let healthHits = 0;
+    const sockets: FakeWs[] = [];
+    class FakeWs {
+      static OPEN = 1;
+      readyState = 1;
+      url: string;
+      onopen: (() => void) | null = null;
+      onmessage: ((e: { data: string }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+      }
+      send(): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", FakeWs);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/party/ticket")) {
+          return {
+            ok: true,
+            json: async () => ({
+              relayUrl: "ws://relay.test",
+              ticket: "t",
+              slot: 0,
+              partyId: "p1",
+              exp: Date.now() + 60_000,
+            }),
+          } as Response;
+        }
+        healthHits++; // the /health prewake
+        return { ok: false, type: "opaque" } as unknown as Response;
+      }),
+    );
+    return {
+      healthHits: () => healthHits,
+      wsCount: () => sockets.length,
+      closeLast: () => sockets[sockets.length - 1]?.onclose?.(),
+    };
+  }
+
+  it("does NOT prewake on the first connect, but DOES on a reconnect", async () => {
+    const r = rig();
+    const session = new PartySession(noopHandlers);
+    session.setParty({ partyId: "p1" });
+    await vi.advanceTimersByTimeAsync(10);
+    // First attempt: ticket -> straight to the websocket, no /health round-trip.
+    expect(r.wsCount()).toBe(1);
+    expect(r.healthHits()).toBe(0);
+
+    // A ws failure schedules a reconnect (backoff); that attempt DOES prewake.
+    r.closeLast();
+    await vi.advanceTimersByTimeAsync(2_000); // past the first backoff step
+    await vi.advanceTimersByTimeAsync(10);
+    expect(r.wsCount()).toBe(2);
+    expect(r.healthHits()).toBeGreaterThanOrEqual(1);
+    session.setParty(null);
+  });
+});
+
 // ── resolveMemberDisplayName (never leak a cuid to the HUD) ─────────────────────────
 
 describe("resolveMemberDisplayName", () => {

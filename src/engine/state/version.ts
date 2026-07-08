@@ -169,7 +169,30 @@ import type {
 // `asClass` no longer coerces it to swordsman). The ninja's skills/dash/quests are all DERIVED
 // from cls+tier+level (not persisted), so there is no migrate() data branch — only the
 // KNOWN_CLASSES widening + this stamp. Old saves load unchanged.
-export const SAVE_VERSION = 18;
+// v18 -> v19 (ดินแดนอสูร / ASURA hard-map — endgame v1, docs/endgame-design.md): the save gains
+// two ADDITIVE accrual counters for the hard map — `asuraEssence` (a plain แก่นอสูร essence COUNT,
+// like gold, banked on elite kills) and `asuraZoneKills` (per-asura-zone ศิลาโซน lifetime kill
+// counters keyed "asura:zoneIdx"). Both accrue-only in v1 (the craft menu + secret quest that
+// SPEND them are a later patch). A pre-v19 save had neither, so migration backfills essence -> 0
+// and the counters -> {} (nobody is owed retroactive materials — mirrors v16 goldEarned=0 / v17
+// mainClaimed no-backpay). The asura map's zone-UNLOCK progress rides the EXISTING `unlockedZones`
+// (asura is just the 7th map, gated behind the s30 boss via `onBossRoomCleared`), so NO new unlock
+// field is needed. The hot-zone index + elite spawn tally are TRANSIENT (never persisted). A v19
+// save's own values are preserved (essence floored non-negative; counters normalised — idempotent
+// for the server's migrate-on-every-save). Old saves load byte-identically (both default empty).
+// v19 -> v20 ("ตำราตำนาน" secret tome + legendary craft — endgame v1.2/v1.3, docs/endgame-design.md):
+// three ADDITIVE fields for the endgame craft loop — `asuraSigils` (a plain ตราอสูร COUNT like
+// `asuraEssence`, banked by the daily z10 `claimAsuraSigil` intent, consumed by a craft),
+// `tomePages` (the SECRET 3-page quest BITMASK: bit0 = first ELITE kill, bit1/bit2 = first kill in
+// the z5/z10 farm — the depth-anchored adaptation of the doc's "boss z5/z10", which don't exist as
+// beatable rooms), and `tomeUnlocked` (the craft-menu latch, true once all 3 pages assemble). The
+// LEGENDARY weapon itself needs NO new field — it rides the EXISTING `equipped.weapon` + per-slot
+// `refine` (its "awakening" +0..+5 is the refine level, capped per-kind by `maxRefineForTemplate`).
+// A pre-v20 save had none, so migration backfills sigils -> 0, pages -> 0 (bitmask empty), unlocked
+// -> false (nobody is owed a retroactive tome — mirrors v16 goldEarned=0 / v19 essence=0 no-backpay).
+// A v20 save's own values are preserved (sigils/pages floored non-negative, unlocked coerced to a
+// boolean — idempotent for the server's migrate-on-every-save). Old saves load byte-identically.
+export const SAVE_VERSION = 20;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -257,6 +280,15 @@ export interface UnknownSave {
   lootSalt?: unknown;
   // v14 material counter (M7.6). Optional; pre-v14 backfills to 0.
   materials?: unknown;
+  // v19 ดินแดนอสูร accrual (endgame v1). Optional; pre-v19 backfills essence -> 0,
+  // asuraZoneKills -> {}. Malformed entries drop.
+  asuraEssence?: unknown;
+  asuraZoneKills?: Record<string, unknown>;
+  // v20 "ตำราตำนาน" tome + ตราอสูร sigils (endgame v1.3). Optional; pre-v20 backfills sigils -> 0,
+  // tomePages -> 0, tomeUnlocked -> false.
+  asuraSigils?: unknown;
+  tomePages?: unknown;
+  tomeUnlocked?: unknown;
   // v16 Hall of Fame observers (M7.95). All optional; a pre-v16 save backfills
   // goldEarned -> 0, bossBest -> {}, levelCapAt -> null. Malformed entries drop.
   goldEarned?: unknown;
@@ -649,6 +681,17 @@ export function migrate(save: UnknownSave): SaveData {
     // M7.6 ตีบวก material counter (v14): preserve a v14 save's count (floored non-
     // negative); a pre-v14 save (no `materials`) backfills to 0.
     materials: asStat(numOrUndef(save.materials), 0),
+    // ดินแดนอสูร accrual (v19): preserve a v19 save's essence bank + per-zone ศิลาโซน counters;
+    // a pre-v19 save backfills essence -> 0 and the counters -> {} (no retroactive materials).
+    // `normalizeZoneKills` keeps only "map:idx" keys with non-negative integer counts.
+    asuraEssence: asStat(numOrUndef(save.asuraEssence), 0),
+    asuraZoneKills: normalizeZoneKills(save.asuraZoneKills),
+    // "ตำราตำนาน" secret tome + ตราอสูร sigils (v20): preserve a v20 save's sigil bank + page
+    // bitmask + unlock latch; a pre-v20 save backfills sigils -> 0, pages -> 0, unlocked -> false
+    // (no retroactive tome — no-backpay discipline).
+    asuraSigils: asStat(numOrUndef(save.asuraSigils), 0),
+    tomePages: asStat(numOrUndef(save.tomePages), 0),
+    tomeUnlocked: save.tomeUnlocked === true,
     lastSeen: save.lastSeen ?? 0,
   };
 }

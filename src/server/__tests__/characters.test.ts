@@ -238,8 +238,8 @@ const ALL_TIER3 = tierRows([
 ]);
 
 describe("computeNinjaUnlock — gate math over tier caches", () => {
-  it("locks when the flag is on (default) — sanity for the test suite", () => {
-    expect(REQUIRE_NINJA_UNLOCK).toBe(true);
+  it("the gate flag is off (owner lifted it) — sanity for the test suite", () => {
+    expect(REQUIRE_NINJA_UNLOCK).toBe(false);
   });
 
   it("unlocks when all three base lines are at tier 3", () => {
@@ -251,7 +251,7 @@ describe("computeNinjaUnlock — gate math over tier caches", () => {
     expect(u.baseTier3).toEqual({ swordsman: true, archer: true, mage: true });
   });
 
-  it("stays locked when a base line is below tier 3 (progress 2/3)", () => {
+  it("computes partial progress (2/3) but stays UNLOCKED because the flag is off", () => {
     const u = computeNinjaUnlock(
       tierRows([
         ["swordsman", 3],
@@ -259,19 +259,19 @@ describe("computeNinjaUnlock — gate math over tier caches", () => {
         ["mage", 2],
       ]),
     );
-    expect(u.unlocked).toBe(false);
+    expect(u.unlocked).toBe(true);
     expect(u.cleared).toBe(2);
     expect(u.baseTier3.mage).toBe(false);
   });
 
-  it("stays locked when a base line is missing entirely", () => {
+  it("computes a missing base line but stays UNLOCKED because the flag is off", () => {
     const u = computeNinjaUnlock(
       tierRows([
         ["swordsman", 3],
         ["archer", 3],
       ]),
     );
-    expect(u.unlocked).toBe(false);
+    expect(u.unlocked).toBe(true);
     expect(u.cleared).toBe(2);
     expect(u.maxTier.mage).toBe(0);
   });
@@ -302,7 +302,7 @@ describe("computeNinjaUnlock — gate math over tier caches", () => {
     expect(u.cleared).toBe(3);
   });
 
-  it("treats a stale default-1 tier cache as tier 1 (may undercount, accepted)", () => {
+  it("treats a stale default-1 tier cache as tier 1 (may undercount, accepted) but stays UNLOCKED", () => {
     const u = computeNinjaUnlock(
       tierRows([
         ["swordsman", 3],
@@ -310,7 +310,7 @@ describe("computeNinjaUnlock — gate math over tier caches", () => {
         ["mage", 1], // never re-saved since deploy
       ]),
     );
-    expect(u.unlocked).toBe(false);
+    expect(u.unlocked).toBe(true);
     expect(u.cleared).toBe(2);
   });
 });
@@ -341,7 +341,7 @@ describe("createCharacter — ninja unlock gate", () => {
     expect(mockPrisma.character.create).toHaveBeenCalledOnce();
   });
 
-  it("rejects a ninja when the account has not cleared 3× tier 3 (ninja_locked)", async () => {
+  it("allows a ninja even when the account has not cleared 3× tier 3 — flag is off", async () => {
     mockPrisma.character.count.mockResolvedValue(3);
     mockPrisma.character.findMany.mockResolvedValue(
       tierRows([
@@ -350,13 +350,14 @@ describe("createCharacter — ninja unlock gate", () => {
         ["mage", 2],
       ]),
     );
+    mockPrisma.character.findFirst.mockResolvedValue(null); // name free
+    mockPrisma.character.create.mockResolvedValue({ ...ROW, baseClass: "ninja", name: "Kage" });
     const r = await createCharacter(USER, { name: "Kage", baseClass: "ninja" });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.code).toBe("ninja_locked");
-    expect(mockPrisma.character.create).not.toHaveBeenCalled();
+    expect(r.ok).toBe(true);
+    expect(mockPrisma.character.create).toHaveBeenCalledOnce();
   });
 
-  it("rejects a ninja on a mixed account missing a base line (ninja_locked)", async () => {
+  it("allows a ninja on a mixed account missing a base line entirely — flag is off", async () => {
     mockPrisma.character.count.mockResolvedValue(2);
     mockPrisma.character.findMany.mockResolvedValue(
       tierRows([
@@ -364,9 +365,11 @@ describe("createCharacter — ninja unlock gate", () => {
         ["archer", 3],
       ]),
     );
+    mockPrisma.character.findFirst.mockResolvedValue(null); // name free
+    mockPrisma.character.create.mockResolvedValue({ ...ROW, baseClass: "ninja", name: "Kage" });
     const r = await createCharacter(USER, { name: "Kage", baseClass: "ninja" });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.code).toBe("ninja_locked");
+    expect(r.ok).toBe(true);
+    expect(mockPrisma.character.create).toHaveBeenCalledOnce();
   });
 });
 

@@ -279,6 +279,33 @@ export const PALETTE = {
   /** Engraved gold-leaf trim/text tone — soft, not jewel-bright (still
    * scenery, distinct from `championGold`'s vivid entity-layer aura). */
   honorPlateGold: 0xc9a24a,
+
+  // ---- ดินแดนอสูร (ASURA endgame v1, render wave) ELITE roaming-mob accents —
+  // deliberately its OWN dark-red/violet family, distinct from every existing
+  // boss/enrage/skill accent, so an elite reads as "a rare dangerous find" at a
+  // glance. Footgun 10: flat/solid on NORMAL blend + a darker underlayer, never
+  // additive (rings/bursts here use the same layered-alpha convention as every
+  // other pooled fx). ----
+  /** Pulsing aura ring base + spawn-telegraph/kill-burst ring tone. */
+  eliteAura: 0x9c1c3e,
+  /** Bright core accent for the kill-burst + spawn-telegraph flourish. */
+  eliteAuraCore: 0xff5d8f,
+  /** Dark underlayer for the aura ring's inner fill. */
+  eliteAuraDark: 0x2a0a14,
+
+  // ---- "ตำราตำนาน" LEGENDARY weapons (endgame v1.2/v1.3, render wave) -----
+  // The rarest look in the game (one craft-only weapon per class) needs its
+  // OWN two-tone identity distinct from every existing gold family already in
+  // play (plain `gold` evolution accent, `gearEpic`'s orange-gold epic-rarity
+  // trim, `worldBossGold`'s lemon flash tycoon motif, `refinePrestige`'s
+  // near-white glow, `championGold`'s HOF amber) — a warmer/purer gold paired
+  // with a deep magisterial violet edge, so a legendary reads as "beyond
+  // rarity itself" rather than "a fancier epic drop". Footgun 10: flat/solid
+  // on NORMAL blend + a darker underlayer, never additive.
+  legendaryGold: 0xf7d048,
+  legendaryGoldCore: 0xfff3c4,
+  legendaryViolet: 0x9b3fe8,
+  legendaryVioletDark: 0x2e0f4a,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe
@@ -320,7 +347,7 @@ export const ENEMY_COLORS: Record<EnemyKind, number> = {
  * see `ENEMY_SPECIES_ACCENT` below for the glow accents that carry the rest of
  * that legibility work on map6 specifically. */
 export const ENEMY_SPECIES_COLORS: Record<
-  "map4" | "map5" | "map6",
+  "map4" | "map5" | "map6" | "asura",
   Record<EnemyKind, number>
 > = {
   // map4 ice tundra: frost-wolf / ice golem / frozen shambler / frost wisp.
@@ -332,15 +359,22 @@ export const ENEMY_SPECIES_COLORS: Record<
   // deliberately lighter-value than the near-black hell-city grounds so the
   // silhouette itself pops without relying on the glow accent alone.
   map6: { fast: 0x8a2a2a, tank: 0x554842, normal: 0x6b625a, ranged: 0x4a1f3a },
+  // ดินแดนอสูร (endgame v1, s31-40): reuses map6's exact silhouettes
+  // (`enemySpecies.ts`'s `MAP6_BUILDERS` — imp/charcoal brute/ash ghoul/cinder
+  // warlock) recolored into a corrupted violet-black palette so a glance reads
+  // "the same demons, corrupted further" rather than a brand-new (and costlier)
+  // shape set.
+  asura: { fast: 0x5a1a52, tank: 0x33163c, normal: 0x421a48, ranged: 0x2a0f3a },
 };
 
 /** map4/5/6's "glowing eyes / cold-crystal / ember-crack" accent — a single
  * dedicated hue per map (mirrors `BOSS_COLORS`' body/crown/eye split), layered
  * as flat alpha fills/strokes on the species body, never a gradient. */
-export const ENEMY_SPECIES_ACCENT: Record<"map4" | "map5" | "map6", number> = {
+export const ENEMY_SPECIES_ACCENT: Record<"map4" | "map5" | "map6" | "asura", number> = {
   map4: 0x2ec8ff, // cold cyan glow (frost eyes / crystalline edges)
   map5: 0xffd88a, // warm gold glow (mummy/colossus/scorpion eyes)
   map6: 0xff6a2e, // ember orange-red glow (eyes / crack-lines)
+  asura: 0xd0263e, // corrupted blood-red glow, distinct from map6's orange ember
 };
 /** map5's sand-wraith caster gets its own mystical violet eye glow instead of
  * the shared warm-gold accent above (a caster-specific "different magic"

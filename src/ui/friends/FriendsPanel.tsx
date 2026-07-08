@@ -25,6 +25,7 @@ import type {
   PartyWire,
 } from "@/ui/friends/types";
 import { parseFriendZone, relativeTimeFrom } from "@/ui/friends/format";
+import { sortFriendsByPresence } from "@/ui/friends/sortFriends";
 import type { UseFriendsPoll } from "@/ui/friends/useFriendsPoll";
 import { requestOpenAccountSettings } from "@/ui/openSettingsSignal";
 import { isZoneUnlockedUi } from "@/ui/world/zones";
@@ -239,7 +240,7 @@ export function FriendsPanel({ onClose, poll }: FriendsPanelProps) {
                   </p>
                 ) : (
                   <div className="flex flex-col gap-1.5">
-                    {panel.friends.map((f) => (
+                    {sortFriendsByPresence(panel.friends).map((f) => (
                       <FriendRow
                         key={f.userId}
                         friend={f}
