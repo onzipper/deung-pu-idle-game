@@ -183,3 +183,40 @@ export function heroConfigDiff(desired: HeroConfig, current: HeroConfig | undefi
     desired.autoManaThreshold !== current.autoManaThreshold;
   return changed ? desired : null;
 }
+
+/**
+ * The bot MASTER SWITCH's HUD-facing value: MY OWN hero's `config.autoHunt` — NOT the
+ * shared, lane-0-owned legacy `state.autoHunt` field (owner live bug: "leader's toggle
+ * flips everyone, member can't toggle self").
+ *
+ * ── Root cause ──────────────────────────────────────────────────────────────────────
+ * `buildSnapshot` used to read `autoHunt: state.autoHunt` — a SINGLE shared `GameState`
+ * scalar every cohort client sees identically (it's part of `SharedCohortSave`, seeded
+ * from the authority). That value fed `store.autoHunt`, which in turn fed BOTH the
+ * toggle button's own on/off DISPLAY and (via `desiredHeroConfig`) every member's
+ * REPLICATED `setHeroConfig` diff every single frame. So: the party leader's toggle
+ * wrote the shared field (`step()`'s `primary.setAutoHunt` — lane 0 only), which every
+ * OTHER client's next `buildSnapshot` echoed back as "MY" `store.autoHunt`, which their
+ * own `desiredHeroConfig` then dutifully replicated onto THEIR hero — silently
+ * overwriting a member's real preference with the leader's ("leader's toggle flips
+ * everyone"). Symmetrically, a non-lead member's own toggle correctly flipped THEIR
+ * hero's config via the engine's `i>=1` `setAutoHunt` branch, but their button's
+ * DISPLAY (and the next frame's `desiredHeroConfig` input) was still driven by the
+ * untouched shared field, which immediately replicated the STALE value right back onto
+ * their own hero the very next turn ("member can't toggle self" — a self-reverting
+ * toggle).
+ *
+ * ── The fix ─────────────────────────────────────────────────────────────────────────
+ * `heroes[0]` is "my hero" by the convention `buildSnapshot`'s caller already
+ * establishes everywhere else in a cohort (the snapshot state's `heroes` array is
+ * reordered so index 0 is always mine — see `GameClient.tsx`'s per-frame UI-sync doc).
+ * Reading `heroes[0].config.autoHunt` instead makes the toggle, its display, and the
+ * `desiredHeroConfig` replication input all agree on MY OWN hero's real automation
+ * state, independent of every other member's. In SOLO this is byte-identical to the old
+ * read (`syncPrimaryHeroConfig` keeps `heroes[0].config.autoHunt === state.autoHunt` in
+ * lockstep every step). Falls back to `state.autoHunt` only for a defensively-shaped
+ * input with no heroes at all (never a real `GameState`).
+ */
+export function myAutoHuntDisplay(state: Pick<GameState, "heroes" | "autoHunt">): boolean {
+  return state.heroes[0]?.config.autoHunt ?? state.autoHunt;
+}

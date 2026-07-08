@@ -81,3 +81,50 @@ export function shouldQueueWorldBossSpawn(
     live !== null && live.windowId === phase.windowId && (live.active || live.defeated);
   return phase.phase === "active" && status.kind === "activeHere" && !blocked;
 }
+
+// ── SHARED-HP client driver (M8.6) — pure decision helpers ──────────────────────────
+//
+// `worldBossDamageDealt(state)` is the SHARED sim's cumulative total: in a cohort every
+// member's client reads the IDENTICAL number (lockstep), so if every member posted their
+// own watermark delta the server pool would take N× damage for one shared kill. Only the
+// AUTHORITY (lowest cohort slot — solo is trivially its own authority) runs the PERIODIC
+// full-delta report (`authorityReportDelta`); every OTHER member sends exactly ONE tiny
+// participation ping the first time the shared total turns positive for a window
+// (`shouldSendParticipationPing`) so a `WorldBossDamage` row exists for THEIR character
+// too (the claim's participation gate), without duplicating the decrement. Non-authority
+// members instead poll the read-only state endpoint on the same cadence to keep their
+// local render's hp current (`shouldPollHp`) — they have no post response of their own to
+// ride. GameClient owns the actual watermark/timer bookkeeping (closures, like
+// `lastWorldBossStatus`); these are pure predicates over already-computed inputs.
+
+/** The AUTHORITY's periodic report delta: positive damage above `watermark` iff the
+ * cadence has elapsed since the last post. Returns 0 when there's nothing to post
+ * (caller should skip the POST entirely on 0). */
+export function authorityReportDelta(
+  totalDamage: number,
+  watermark: number,
+  msSinceLastPost: number,
+  cadenceMs: number,
+): number {
+  const delta = totalDamage - watermark;
+  if (delta <= 0) return 0;
+  return msSinceLastPost >= cadenceMs ? delta : 0;
+}
+
+/** A non-authority member's ONE-SHOT participation ping: true exactly once per window —
+ * the first frame the shared total turns positive. `pingedWindowId` is the caller's own
+ * "already pinged this window" latch (set BEFORE the request resolves, so a slow
+ * response — or a retry after a failure — can't double-fire within the same window). */
+export function shouldSendParticipationPing(
+  totalDamage: number,
+  windowId: number,
+  pingedWindowId: number | null,
+): boolean {
+  return totalDamage > 0 && pingedWindowId !== windowId;
+}
+
+/** A non-authority member's own hp-poll cadence (keeps their local render in sync since
+ * they never see a post response). Same shape as `authorityReportDelta`'s cadence gate. */
+export function shouldPollHp(msSinceLastPoll: number, cadenceMs: number): boolean {
+  return msSinceLastPoll >= cadenceMs;
+}

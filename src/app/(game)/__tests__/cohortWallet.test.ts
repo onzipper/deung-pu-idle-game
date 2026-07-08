@@ -3,11 +3,12 @@ import {
   desiredHeroConfig,
   dropAssignedIndex,
   heroConfigDiff,
+  myAutoHuntDisplay,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
 } from "../cohortWallet";
-import { initGameState, type GameState, type HeroConfig } from "@/engine";
+import { initGameState, makeHero, step, type GameState, type HeroConfig } from "@/engine";
 
 function wallet(
   gold: number,
@@ -229,5 +230,127 @@ describe("desiredHeroConfig + heroConfigDiff", () => {
   it("heroConfigDiff returns the desired config when current is undefined", () => {
     const desired = cfg();
     expect(heroConfigDiff(desired, undefined)).toBe(desired);
+  });
+});
+
+describe("myAutoHuntDisplay (bot-toggle live bug fix)", () => {
+  it("solo: reads heroes[0].config.autoHunt (kept byte-identical to state.autoHunt by syncPrimaryHeroConfig)", () => {
+    const s = initGameState(1);
+    step(s, { setAutoHunt: false });
+    // `syncPrimaryHeroConfig` mirrors the global onto heroes[0].config BEFORE this same
+    // step's `setAutoHunt` intent updates `state.autoHunt` (step.ts ordering) — one extra
+    // idle step lets the mirror catch up, same as the real per-frame loop would.
+    step(s, {});
+    expect(s.heroes[0].config.autoHunt).toBe(false);
+    expect(s.autoHunt).toBe(false);
+    expect(myAutoHuntDisplay(s)).toBe(false);
+  });
+
+  it("cohort: my OWN hero's config, NOT the shared state.autoHunt global", () => {
+    // Two-hero cohort: lane 1 flips ITS OWN hero off via setHeroConfig; the shared
+    // `state.autoHunt` global is never touched by that lane (only lane 0's legacy
+    // `setAutoHunt` writes it — see step.ts).
+    const s = initGameState(1);
+    s.heroes.push(makeHero(2, "swordsman"));
+    step(s, [{}, { setHeroConfig: { autoHunt: false } }]);
+    expect(s.heroes[1].config.autoHunt).toBe(false);
+    expect(s.heroes[0].config.autoHunt).toBe(true);
+    expect(s.autoHunt).toBe(true); // shared global untouched
+
+    // "heroes[0] = mine" convention: a snapshot for hero-1's owner reorders heroes so
+    // THEIR hero is index 0 (GameClient's per-frame UI-sync) — myAutoHuntDisplay must
+    // then report false, independent of the OTHER member's (still-true) hero.
+    const snapForHero1Owner = { ...s, heroes: [s.heroes[1], s.heroes[0]] };
+    expect(myAutoHuntDisplay(snapForHero1Owner)).toBe(false);
+    expect(myAutoHuntDisplay(s)).toBe(true); // hero-0 owner's own view: unaffected
+  });
+
+  it("falls back to state.autoHunt when heroes is empty (defensive only)", () => {
+    expect(myAutoHuntDisplay({ heroes: [], autoHunt: true })).toBe(true);
+    expect(myAutoHuntDisplay({ heroes: [], autoHunt: false })).toBe(false);
+  });
+});
+
+describe("2-client cohort bot-toggle scenario (regression for the live bug)", () => {
+  // Simulates the exact failure mode the owner reported: BEFORE the fix, both clients'
+  // "desired" config was derived from the SAME shared `state.autoHunt` (fed by the old
+  // `buildSnapshot`), so client A's toggle got replicated onto client B's hero too, and
+  // client B's own toggle self-reverted the very next tick. AFTER the fix (this test),
+  // each client's desired config is derived from `myAutoHuntDisplay` of ITS OWN
+  // reordered snapshot view — independent, and stable (no oscillation) once converged.
+  const cfg = (autoHunt: boolean): HeroConfig => ({
+    autoCast: false,
+    autoAllocate: false,
+    autoHunt,
+    autoHpPotion: false,
+    autoManaPotion: false,
+    autoHpThreshold: 0.5,
+    autoManaThreshold: 0.3,
+  });
+
+  it("client A toggling OFF never touches client B's hero, and never oscillates", () => {
+    const s = initGameState(1);
+    s.heroes.push(makeHero(2, "swordsman"));
+    // Both start ON.
+    step(s, [{ setHeroConfig: cfg(true) }, { setHeroConfig: cfg(true) }]);
+    expect(s.heroes[0].config.autoHunt).toBe(true);
+    expect(s.heroes[1].config.autoHunt).toBe(true);
+
+    // Client A (hero 0 owner) sees ITS OWN view (heroes[0] = mine, unreordered) and
+    // decides to turn its bot off; client B's independent view is untouched (still true),
+    // so client B's own desired config stays `true` — the replication is a stable no-op.
+    const aView = s; // hero 0 owner: heroes[0] already mine
+    const bView = { ...s, heroes: [s.heroes[1], s.heroes[0]] }; // hero 1 owner: reordered
+
+    const aDesired = desiredHeroConfig({
+      autoHunt: !myAutoHuntDisplay(aView), // A clicks the toggle -> OFF
+      autoCast: false,
+      autoAllocate: false,
+      autoHpPotion: false,
+      autoManaPotion: false,
+      autoHpThreshold: 0.5,
+      autoManaThreshold: 0.3,
+    });
+    const bDesired = desiredHeroConfig({
+      autoHunt: myAutoHuntDisplay(bView), // B does nothing -> unchanged (still true)
+      autoCast: false,
+      autoAllocate: false,
+      autoHpPotion: false,
+      autoManaPotion: false,
+      autoHpThreshold: 0.5,
+      autoManaThreshold: 0.3,
+    });
+    const aDiff = heroConfigDiff(aDesired, s.heroes[0].config);
+    const bDiff = heroConfigDiff(bDesired, s.heroes[1].config);
+    expect(aDiff).toEqual(cfg(false));
+    expect(bDiff).toBeNull(); // B's own hero is already what B wants — no replication noise
+
+    step(s, [{ setHeroConfig: aDiff! }, {}]);
+    expect(s.heroes[0].config.autoHunt).toBe(false);
+    expect(s.heroes[1].config.autoHunt).toBe(true); // UNCHANGED by A's toggle
+
+    // Re-derive both clients' desired config against the now-converged state: neither
+    // produces a diff (the old bug re-sent a stale shared-derived config forever).
+    const aDesired2 = desiredHeroConfig({
+      autoHunt: myAutoHuntDisplay(s),
+      autoCast: false,
+      autoAllocate: false,
+      autoHpPotion: false,
+      autoManaPotion: false,
+      autoHpThreshold: 0.5,
+      autoManaThreshold: 0.3,
+    });
+    const bView2 = { ...s, heroes: [s.heroes[1], s.heroes[0]] };
+    const bDesired2 = desiredHeroConfig({
+      autoHunt: myAutoHuntDisplay(bView2),
+      autoCast: false,
+      autoAllocate: false,
+      autoHpPotion: false,
+      autoManaPotion: false,
+      autoHpThreshold: 0.5,
+      autoManaThreshold: 0.3,
+    });
+    expect(heroConfigDiff(aDesired2, s.heroes[0].config)).toBeNull();
+    expect(heroConfigDiff(bDesired2, s.heroes[1].config)).toBeNull();
   });
 });

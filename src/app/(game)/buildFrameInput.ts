@@ -64,6 +64,12 @@ export function buildFrameInput(
     // direct player action) while standing in the window's boss zone — plain
     // passthrough, no hero-index remap needed (it's location-based, not per-hero).
     spawnWorldBoss: pending.spawnWorldBoss ?? undefined,
+    // World boss "เสี่ยจ๋อง" SHARED-HP sync (M8.6): same "GameClient's own schedule/network
+    // check queues this" shape as `spawnWorldBoss` above — plain passthrough. The engine
+    // reads it from LANE 0 only (`step()`'s `primary.syncWorldBoss`), so only the cohort
+    // AUTHORITY's client actually lands one (see `ui/worldBoss/schedule.ts`'s dedup doc);
+    // a non-authority member never queues this field in the first place.
+    syncWorldBoss: pending.syncWorldBoss ?? undefined,
     // ดินแดนอสูร daily hot zone: same "GameClient's own schedule check queues this"
     // shape as `spawnWorldBoss` above — plain passthrough, location-based not per-hero.
     setAsuraHotZone: pending.setAsuraHotZone ?? undefined,

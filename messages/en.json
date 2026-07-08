@@ -1309,6 +1309,15 @@
           "cohortTitleFix": "🏅 Fixed party members' titles/champion auras sometimes showing on the wrong nameplate — everyone's tag is correct now.",
           "ninjaUnlockOpen": "🥷 The ninja class is now open to everyone — no unlock required."
         }
+      },
+      "2026-07-09i": {
+        "items": {
+          "worldBossSharedHp": "🩸 World boss เสี่ยจ๋อง now shares ONE health bar across the whole server — every player who joins the fight chips in against the same pool.",
+          "worldBossBotEngage": "🤖 Your bot now piles onto เสี่ยจ๋อง if it's already engaged nearby (it still won't pick the first fight — never farms newcomers).",
+          "partyInviteToasts": "🔔 Party invites now give clear feedback (accept/decline/expired) and friends who are already in a party show a chip on their row.",
+          "cohortLeakFix": "🗺️ Fixed a party bug where playing alongside a far-progressed friend could leak their zone unlocks into your own save.",
+          "botToggleFix": "🔁 Fixed the bot on/off switch in a party — each member's toggle now only affects their OWN hero."
+        }
       }
     }
   },
