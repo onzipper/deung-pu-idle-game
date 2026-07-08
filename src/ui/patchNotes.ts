@@ -227,6 +227,17 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
     date: "2026-07-09",
     items: ["releases.2026-07-09c.items.hofRedesign"],
   },
+  // Podium stage redesign (owner: rank-1 row "ไม่ค่อยพิเศษเลย") + the same-day
+  // ninja engine wave (attack cadence + bot dash-evade — see engine zone).
+  {
+    id: "2026-07-09d",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09d.items.podium",
+      "releases.2026-07-09d.items.ninjaCadence",
+      "releases.2026-07-09d.items.ninjaDash",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

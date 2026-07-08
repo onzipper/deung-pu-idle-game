@@ -5,7 +5,7 @@ import {
   hasAnyUnclaimedAward,
   isMyEntry,
   isRewardBoard,
-  nextPodiumExpandedOnBoardChange,
+  rankFromTitleId,
   resolveBoardFetchDecision,
   resolveMyUnclaimedForBoard,
   resolvePodium,
@@ -84,7 +84,7 @@ const FULL_CHAMPIONS: Record<HofRewardBoard, HofChampionRow[]> = {
   level: [championRow(1), championRow(2), championRow(3)],
   power: [],
   gold: [championRow(1, { charName: "GoldChamp", titleId: "gold.1" })],
-  online: [],
+  online: [championRow(1, { charName: "OnlineChamp", titleId: "online.1" }), championRow(3, { charName: "OnlineThird", titleId: "online.3" })],
 };
 
 describe("isRewardBoard", () => {
@@ -117,26 +117,45 @@ describe("resolvePodium (keyed by the currently selected board)", () => {
     expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "power")).toEqual({ kind: "empty" });
   });
 
-  it("re-keys to the selected board's rank-1 champion + sorted runners-up", () => {
+  it("re-keys to the selected board's 3 fixed slots (podium stage)", () => {
     expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "level")).toEqual({
       kind: "ready",
-      champion: championRow(1),
-      runnersUp: [championRow(2), championRow(3)],
+      rank1: championRow(1),
+      rank2: championRow(2),
+      rank3: championRow(3),
     });
   });
 
-  it("has an empty runners-up list when only rank-1 exists", () => {
+  it("nulls the missing slots when only rank-1 exists (short board)", () => {
     expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "gold")).toEqual({
       kind: "ready",
-      champion: championRow(1, { charName: "GoldChamp", titleId: "gold.1" }),
-      runnersUp: [],
+      rank1: championRow(1, { charName: "GoldChamp", titleId: "gold.1" }),
+      rank2: null,
+      rank3: null,
+    });
+  });
+
+  it("slots rows by EXACT rank number, not by list position — a pathological rank1+rank3 (no rank2) board leaves rank2 null instead of misplacing rank3 into that seat", () => {
+    expect(resolvePodium({ season: "2026-07", champions: FULL_CHAMPIONS }, "online")).toEqual({
+      kind: "ready",
+      rank1: championRow(1, { charName: "OnlineChamp", titleId: "online.1" }),
+      rank2: null,
+      rank3: championRow(3, { charName: "OnlineThird", titleId: "online.3" }),
     });
   });
 });
 
-describe("nextPodiumExpandedOnBoardChange", () => {
-  it("always collapses on a board switch", () => {
-    expect(nextPodiumExpandedOnBoardChange()).toBe(false);
+describe("rankFromTitleId (podium claim-CTA slot placement)", () => {
+  it("parses the trailing rank number off a structural title id", () => {
+    expect(rankFromTitleId("level.1")).toBe(1);
+    expect(rankFromTitleId("gold.2")).toBe(2);
+    expect(rankFromTitleId("online.3")).toBe(3);
+  });
+
+  it("is null for an unparseable id", () => {
+    expect(rankFromTitleId("level")).toBeNull();
+    expect(rankFromTitleId("level.abc")).toBeNull();
+    expect(rankFromTitleId("")).toBeNull();
   });
 });
 
