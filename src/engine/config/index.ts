@@ -320,13 +320,19 @@ export const CONFIG = {
   //   manaPotion   — restore `restoreFrac` of MAX MANA (caster sustain)
   //   returnScroll — teleport to town from anywhere (consumed; instant)
   //
-  // PRICING is STAGE-SCALED: `priceAt(item, stage) = round(basePrice *
-  // priceStageBase^(stage-1))`. Gold income per kill itself grows (~1.05^n plus a
-  // linear term), so a flat price would trivialise late-game; scaling at 1.12/stage
-  // keeps a potion worth a meaningful slice (~4-6 kills) of the CURRENT zone's gold
-  // at every depth — a real sink that bites hardest exactly at the frontier wall
-  // (where the hero dies + drinks most). Non-tradable + fungible => plain COUNTS in
-  // the save (SAVE v9), NOT M7 item-instances (see entities `ShopItemId`).
+  // PRICING is FLAT (owner call 2026-07-08 "ราคาตายตัว... ไม่อยากให้มันยากไป"):
+  // `priceAt(item, stage) = basePrice` — `priceStageBase` is 1.0, killing the old
+  // 1.12^(stage-1) depth-scaling that made a frontier hp potion cost 1,605g at s30
+  // (players reported being unable to afford potions at all). Base prices are the
+  // original early-game-tuned values, so a fresh character's burden is UNCHANGED;
+  // everyone deeper simply pays less. KNOWN TRADE-OFF, owner-accepted: late-game
+  // gold now accumulates faster (the potion sink no longer tracks income growth) —
+  // the owner plans future events/sinks to drain it ("เดี๋ยวเราคอยหา event มาทำให้
+  // เงินไม่เฟ้ออีกที"); revisit before the central-marketplace milestone. The
+  // scaling machinery (`shopPriceAt`/`shopStageOf`) is kept intact so a future
+  // knob-turn can restore depth pricing without a code change. Non-tradable +
+  // fungible => plain COUNTS in the save (SAVE v9), NOT M7 item-instances (see
+  // entities `ShopItemId`).
   //
   // AUTO-USE (the idle feature): settings-style toggles + thresholds (UI-owned like
   // autoCast, mirrored onto state each frame). `autoDefaults` seeds the initial
@@ -338,8 +344,9 @@ export const CONFIG = {
   shop: {
     /** Max held per item (a hand-edited save can't stockpile absurd counts). */
     stackCap: 99,
-    /** Per-stage price multiplier (compounds on `basePrice`). */
-    priceStageBase: 1.12,
+    /** Per-stage price multiplier (compounds on `basePrice`). 1.0 = FLAT pricing
+     *  everywhere (owner call 2026-07-08); was 1.12 — see the PRICING note above. */
+    priceStageBase: 1.0,
     /** Initial (UI-owned) auto-use toggle + threshold values. */
     autoDefaults: {
       hpPotion: true,
@@ -355,8 +362,8 @@ export const CONFIG = {
       manaPotion: { basePrice: 45, restoreFrac: 0.45, cooldown: 10 },
       returnScroll: { basePrice: 150, restoreFrac: 0, cooldown: 0 },
       // "วาปหาเพื่อน" warp scroll (M8, SAVE v17): a party "warp to a friend" hop. Priced
-      // ABOVE the return scroll (150) on the SAME stage-scaling rule (priceStageBase) —
-      // warping to an arbitrary unlocked zone is worth more than a one-way trip home.
+      // ABOVE the return scroll (150) — warping to an arbitrary unlocked zone is worth
+      // more than a one-way trip home. (Flat like everything else since 2026-07-08.)
       warpScroll: { basePrice: 200, restoreFrac: 0, cooldown: 0 },
     },
   },

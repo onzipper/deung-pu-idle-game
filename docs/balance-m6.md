@@ -461,3 +461,7 @@ byte-identical replay = no RNG), min-spacing (no stacked mobs across seeds; dete
 assertion made robust to landing mid death-cycle (bounded revive + fresh kill events) —
 the RNG-stream shift from min-spacing moves which frame the hero is dead on; progress
 (gold banked, kills resumed) is what's asserted.
+
+## Flat shop pricing (2026-07-08, owner call — supersedes the stage-scaled pricing above)
+
+Owner: "ราคาตายตัว... ไม่อยากให้มันยากไป" (players at depth could not afford potions; s30 hp potion had reached 1,605g). `priceStageBase` 1.12 → **1.0**: everything ป้าปุ๊ sells is now its base price forever — hp 60 / mana 45 / return 150 / warp 200. Early game unchanged (base prices were the s1-tuned values); every deeper player pays less. Canonical sim (5400s GEAR+REFINE, 5 seeds, all 4 classes): every gate holds (class-change s5, tier-3 s16, quest boss 5/5, s30 soft-wall unchanged); ninja deaths improved 562 → 449/run (sustain now affordable). KNOWN DEBT (owner-accepted): the potion sink no longer tracks income growth, so late-game gold accumulates faster — owner plans future events/sinks; revisit before the central-marketplace milestone. The scaling machinery stays in code behind the knob.
