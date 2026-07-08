@@ -249,6 +249,12 @@ const NAMEPLATE_ALPHA = 0.85;
  * shadowed, non-primary ally). */
 const NAMEPLATE_Y = GROUND_Y - 72;
 const SHADOW_TAG_Y = GROUND_Y - 84;
+/** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
+ * the per-season title tag lane — stacked ABOVE the shadow tag (shown for
+ * ANY slot, incl. the primary hero, which has neither a nameplate nor a
+ * shadow tag competing for room there), so a single fixed Y works for every
+ * hero regardless of which of the other two lanes are also active. */
+const TITLE_TAG_Y = GROUND_Y - 96;
 
 type AttackKindAnim =
   "swing" | "spin" | "release" | "triple" | "staffPulse" | "castHold" | "dualSlash";
@@ -393,6 +399,12 @@ export interface HeroView extends Container {
    * (read directly every frame), stacked above `nameplate` so both can show
    * at once. Top-level sibling, same convention as `nameplate`. */
   shadowTag: Text;
+  /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
+   * the current season's title tag (e.g. "จ้าวยุทธภพ"), shown above ANY hero
+   * (incl. the primary/slot-0 hero — "solo players see their own title, that's
+   * the flex", per spec) whenever `HeroFrameContext.socialBadge.title` is set.
+   * Top-level sibling (like `nameplate`/`shadowTag`), same upright convention. */
+  socialTitle: Text;
   anim: HeroAnimState;
 }
 
@@ -420,6 +432,19 @@ export interface HeroFrameContext {
    * call site (solo hero, `slot: 0`) keeps compiling unchanged.
    */
   displayName?: string | null;
+  /**
+   * HOF seasonal rewards (docs/hof-rewards-design.md §3, render wave): this
+   * hero's current-season social flex, or `null`/omitted for none. `title` is
+   * an already-localized Thai string (e.g. "จ้าวยุทธภพ") shown for ANY slot
+   * (unlike `displayName`'s non-primary-only nameplate — a solo player sees
+   * their own title too). `champion` gates the rank-1 gold aura
+   * (`fx/championAura.ts`, driven by `GameRenderer`/`FxController` off the
+   * SAME badge map — see `GameRenderer.setHeroSocialBadges()`), read here only
+   * to decide the title-tag TEXT, never the aura itself (that's a continuous
+   * fx-layer read, not this view's job). Supplied via
+   * `GameRenderer.setHeroSocialBadges()`, mirroring `displayName`'s seam.
+   */
+  socialBadge?: { title: string | null; champion: boolean } | null;
 }
 
 export function createHeroView(): HeroView {
@@ -542,7 +567,32 @@ export function createHeroView(): HeroView {
   shadowTag.position.set(0, SHADOW_TAG_Y);
   shadowTag.visible = false;
 
-  view.addChild(bodyRoot, auraRing, hpBar, reviveRing, reviveLabel, nameplate, shadowTag);
+  // HOF seasonal rewards (render wave): title tag, shown for ANY hero slot —
+  // see `HeroView.socialTitle`'s doc comment. Gold text (flat fill, no
+  // gradient), hidden until `updateHeroView` has a title to show.
+  const socialTitle = new Text({
+    text: "",
+    style: {
+      fontSize: 10,
+      fontWeight: "700",
+      fill: PALETTE.gold,
+      fontFamily: "sans-serif",
+    },
+  });
+  socialTitle.anchor.set(0.5);
+  socialTitle.position.set(0, TITLE_TAG_Y);
+  socialTitle.visible = false;
+
+  view.addChild(
+    bodyRoot,
+    auraRing,
+    hpBar,
+    reviveRing,
+    reviveLabel,
+    nameplate,
+    shadowTag,
+    socialTitle,
+  );
 
   view.bodyRoot = bodyRoot;
   view.legBack = legBack;
@@ -565,6 +615,7 @@ export function createHeroView(): HeroView {
   view.reviveLabel = reviveLabel;
   view.nameplate = nameplate;
   view.shadowTag = shadowTag;
+  view.socialTitle = socialTitle;
   view.anim = {
     initialized: false,
     lastX: 0,
@@ -1862,6 +1913,11 @@ export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext
   if (showNameplate) view.nameplate.text = ctx.displayName as string;
   view.shadowTag.visible = hero.shadowed;
 
+  // ---- HOF seasonal title tag (ANY slot, incl. solo/primary) --------------
+  const titleText = ctx.socialBadge?.title ?? null;
+  view.socialTitle.visible = !!titleText;
+  if (titleText) view.socialTitle.text = titleText;
+
   if (anim.joinFlashT >= 0) {
     anim.joinFlashT += dt;
     if (anim.joinFlashT >= JOIN_FLASH_DURATION) {
@@ -2011,6 +2067,25 @@ export function getArmorAnchorPos(
 ): boolean {
   if (!view.parent) return false;
   view.parent.toLocal(ARMOR_ANCHOR_LOCAL, view.upperBody, out);
+  return true;
+}
+
+/** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
+ * fixed LOCAL mid-torso point (within `upperBody`'s own frame, same
+ * convention as `ARMOR_ANCHOR_LOCAL` above) the champion gold aura
+ * (`fx/championAura.ts`) centers its tall double-ring halo on — a touch lower
+ * than the armor sparkle anchor so the halo's own geometry (see that module's
+ * `RING_RY`) sits comfortably below the HP bar/nameplate lanes above the head. */
+const CHAMPION_ANCHOR_LOCAL = { x: 0, y: HIP_Y + 2 };
+
+/** World-space position of this hero's champion-aura anchor THIS frame — same
+ * `false`-while-unattached contract as `getWeaponAnchorPos`/`getArmorAnchorPos`. */
+export function getChampionAnchorPos(
+  view: HeroView,
+  out: { x: number; y: number },
+): boolean {
+  if (!view.parent) return false;
+  view.parent.toLocal(CHAMPION_ANCHOR_LOCAL, view.upperBody, out);
   return true;
 }
 

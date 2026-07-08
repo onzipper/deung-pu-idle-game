@@ -13,6 +13,7 @@ import { Pool } from "@/render/Pool";
 import { GROUND_Y } from "@/render/layout";
 import {
   createHeroView,
+  getChampionAnchorPos,
   updateHeroView,
   type HeroFrameContext,
 } from "@/render/views/heroView";
@@ -94,6 +95,7 @@ describe("M8 party P6 — multiple hero views pool/build correctly", () => {
 
     expect(view.nameplate.visible).toBe(false);
     expect(view.shadowTag.visible).toBe(false);
+    expect(view.socialTitle.visible).toBe(false); // HOF seam never called -> no title tag
     expect(view.bodyRoot.alpha).toBe(1);
     expect(view.torso.tint).toBe(0xffffff);
     view.destroy({ children: true });
@@ -192,6 +194,131 @@ describe("M8 party P6 — shadow-body visuals", () => {
     hero.dead = true;
     for (let i = 0; i < 60; i++) updateHeroView(view, hero, ctx()); // play out the death fall
     expect(view.bodyRoot.alpha).toBeCloseTo(0.5, 1); // GHOST_ALPHA, no shadow dim applied
+    view.destroy({ children: true });
+  });
+});
+
+describe("HOF seasonal rewards — title tag (docs/hof-rewards-design.md §3)", () => {
+  it("shows for ANY slot (incl. primary/solo), unlike the nameplate", () => {
+    const primary = createHeroView();
+    updateHeroView(
+      primary,
+      makeHero(1, "swordsman", 0),
+      ctx({ slot: 0, socialBadge: { title: "จ้าวยุทธภพ", champion: true } }),
+    );
+    expect(primary.socialTitle.visible).toBe(true);
+    expect(primary.socialTitle.text).toBe("จ้าวยุทธภพ");
+    // The nameplate stays governed by its own (non-primary + displayName) rule
+    // — the title tag is a wholly separate lane/gate.
+    expect(primary.nameplate.visible).toBe(false);
+
+    const ally = createHeroView();
+    updateHeroView(
+      ally,
+      makeHero(2, "archer", 0),
+      ctx({ slot: 1, socialBadge: { title: "ยอดยุทธ์", champion: false } }),
+    );
+    expect(ally.socialTitle.visible).toBe(true);
+    expect(ally.socialTitle.text).toBe("ยอดยุทธ์");
+
+    primary.destroy({ children: true });
+    ally.destroy({ children: true });
+  });
+
+  it("hides when the badge (or its title) is null/omitted", () => {
+    const view = createHeroView();
+    updateHeroView(view, makeHero(1, "mage", 0), ctx({ slot: 0, socialBadge: null }));
+    expect(view.socialTitle.visible).toBe(false);
+
+    updateHeroView(
+      view,
+      makeHero(1, "mage", 0),
+      ctx({ slot: 0, socialBadge: { title: null, champion: true } }),
+    );
+    expect(view.socialTitle.visible).toBe(false); // champion aura is a separate concern (fx layer)
+
+    view.destroy({ children: true });
+  });
+
+  it("clears again once the badge is dropped (no stale text/visibility)", () => {
+    const view = createHeroView();
+    updateHeroView(
+      view,
+      makeHero(1, "swordsman", 0),
+      ctx({ slot: 0, socialBadge: { title: "เสี่ยใหญ่", champion: false } }),
+    );
+    expect(view.socialTitle.visible).toBe(true);
+
+    updateHeroView(view, makeHero(1, "swordsman", 0), ctx({ slot: 0, socialBadge: null }));
+    expect(view.socialTitle.visible).toBe(false);
+
+    view.destroy({ children: true });
+  });
+
+  it("survives a Pool mark-and-sweep rebuild (same convention as the nameplate)", () => {
+    const layer = new Container();
+    const pool = new Pool(layer, createHeroView);
+    const heroes = [makeHero(1, "swordsman", 0), makeHero(2, "archer", 100)];
+
+    pool.beginFrame();
+    updateHeroView(
+      pool.get(heroes[0].id),
+      heroes[0],
+      ctx({ slot: 0, socialBadge: { title: "จ้าวยุทธภพ", champion: true } }),
+    );
+    updateHeroView(pool.get(heroes[1].id), heroes[1], ctx({ slot: 1 }));
+    pool.endFrame();
+
+    expect(pool.peek(1)?.socialTitle.visible).toBe(true);
+
+    // Hero 2 drops, hero 1 stays — its view (and title) must survive the sweep.
+    pool.beginFrame();
+    updateHeroView(
+      pool.get(heroes[0].id),
+      heroes[0],
+      ctx({ slot: 0, socialBadge: { title: "จ้าวยุทธภพ", champion: true } }),
+    );
+    pool.endFrame();
+
+    expect(pool.peek(1)?.socialTitle.visible).toBe(true);
+    expect(pool.peek(1)?.socialTitle.text).toBe("จ้าวยุทธภพ");
+    expect(pool.peek(2)).toBeUndefined();
+
+    pool.clear();
+  });
+});
+
+describe("HOF seasonal rewards — champion aura anchor composes cleanly with the tier-2 aura", () => {
+  it("getChampionAnchorPos resolves a finite point once attached, independent of the tier-2 idle aura's own visibility", () => {
+    const layer = new Container();
+    const view = createHeroView();
+    layer.addChild(view);
+    const hero = makeHero(1, "mage", 50);
+    hero.tier = 2; // evolution tier -> `view.auraRing` (a SEPARATE, ground-anchored ellipse) activates
+
+    updateHeroView(view, hero, ctx({ slot: 0, socialBadge: { title: "จอมยุทธ์", champion: true } }));
+
+    // Tier-2 idle aura is unaffected by (and drawn independently of) the
+    // champion badge — the two auras never share Graphics/state.
+    expect(view.auraRing.visible).toBe(true);
+
+    const out = { x: 0, y: 0 };
+    const ok = getChampionAnchorPos(view, out);
+    expect(ok).toBe(true);
+    expect(Number.isFinite(out.x)).toBe(true);
+    expect(Number.isFinite(out.y)).toBe(true);
+    // The champion halo anchors well above the ground and clear of the HP bar
+    // lane (GROUND_Y-58) — see `championAura.ts`'s module doc comment.
+    expect(out.y).toBeLessThan(GROUND_Y);
+    expect(out.y).toBeGreaterThan(GROUND_Y - 58);
+
+    view.destroy({ children: true });
+  });
+
+  it("returns false for a view not yet attached under a parent Container", () => {
+    const view = createHeroView();
+    const out = { x: 0, y: 0 };
+    expect(getChampionAnchorPos(view, out)).toBe(false);
     view.destroy({ children: true });
   });
 });

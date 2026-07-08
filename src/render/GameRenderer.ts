@@ -58,6 +58,10 @@ import {
 import { NpcSpeechBubble } from "@/render/fx/npcSpeechBubble";
 import { TOWN_NPCS, type TownNpcId } from "@/render/townNpcs";
 import { createTownLlamaActor, type TownLlamaActor } from "@/render/environment/townLlama";
+import {
+  TownHonorBoard,
+  type TownChampionEntry,
+} from "@/render/environment/townHonorBoard";
 
 /**
  * Manual play (M7.8) tap outcome: a live enemy id (monsters WIN over ground
@@ -135,6 +139,16 @@ export class GameRenderer {
    * until the load succeeds. Lives in `background` (behind every entity),
    * NOT alongside `npcViews`. */
   private llama: TownLlamaActor | null = null;
+  /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 3): the town
+   * honor plaque. Built once, added to `background` (same layer/lifecycle
+   * convention as `llama` above). Stays invisible until `setTownChampions()`
+   * is ever called — see `TownHonorBoard`'s own "never called = pixel-
+   * identical" doc comment. */
+  private honorBoard: TownHonorBoard | null = null;
+  /** Defensive-read storage (mirrors `heroDisplayNames`/`povHeroIndex`'s own
+   * convention) so `setTownChampions()` is safe to call before `create()`
+   * resolves — re-applied to a freshly-built `honorBoard` in `create()`. */
+  private townChampions: readonly TownChampionEntry[] | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private startTime = 0;
   /** Real elapsed ms at the previous draw() call — used to derive a real-time
@@ -161,6 +175,19 @@ export class GameRenderer {
    * See `setHeroDisplayNames()`.
    */
   private heroDisplayNames: ReadonlyMap<number, string> | null = null;
+  /**
+   * HOF seasonal rewards (docs/hof-rewards-design.md §3, render wave): per-
+   * hero-id season badge (title tag text + champion gold-aura flag) — same
+   * "no identity field on `Hero`" reasoning / defensive-read convention as
+   * `heroDisplayNames` above. Forwarded to `FxController.setHeroSocialBadges()`
+   * for the continuous champion-aura read, and threaded into each hero's
+   * `HeroFrameContext.socialBadge` for the title-tag text (see
+   * `setHeroSocialBadges()`).
+   */
+  private heroSocialBadges: ReadonlyMap<
+    string,
+    { title: string | null; champion: boolean }
+  > | null = null;
   /**
    * M8 party P6 hook: index into `state.heroes` of the LOCAL point-of-view
    * hero — forwarded to `FxController.setPovHeroIndex()` so a co-op friend's
@@ -245,6 +272,13 @@ export class GameRenderer {
     this.llama = createTownLlamaActor();
     background.addChild(this.llama.view);
 
+    // HOF seasonal rewards: same background-layer, built-once, zone-gated
+    // lifecycle as `llama` above. Re-applies any `setTownChampions()` call
+    // that arrived before `create()` resolved.
+    this.honorBoard = new TownHonorBoard();
+    background.addChild(this.honorBoard.view);
+    if (this.townChampions) this.honorBoard.setEntries(this.townChampions);
+
     this.heroPool = new Pool(entities, createHeroView);
     this.enemyPool = new Pool(entities, createEnemyView);
     this.projectilePool = new Pool(projectiles, createProjectileView);
@@ -304,6 +338,7 @@ export class GameRenderer {
     // `setHeroDisplayNames()` gives, applied here instead of a defensive read
     // in `draw()` since the fx controller owns the gating state itself.
     this.fx.setPovHeroIndex(this.povHeroIndex);
+    this.fx.setHeroSocialBadges(this.heroSocialBadges);
 
     // Pixi's built-in `resizeTo` only reacts to `window` resize events; a
     // ResizeObserver on the actual mount element is what makes layout-driven
@@ -351,6 +386,7 @@ export class GameRenderer {
         events: frameEvents,
         marching,
         displayName: this.heroDisplayNames?.get(h.id) ?? null,
+        socialBadge: this.heroSocialBadges?.get(String(h.id)) ?? null,
       });
     });
     heroPool.endFrame();
@@ -431,6 +467,7 @@ export class GameRenderer {
     }
     this.npcSpeech?.update(dt);
     this.llama?.update(dt, inTown);
+    this.honorBoard?.update(dt, inTown);
 
     this.projectilePool.beginFrame();
     for (const p of state.projectiles) {
@@ -472,6 +509,9 @@ export class GameRenderer {
     this.llama?.destroy();
     this.llama = null;
 
+    this.honorBoard?.destroy();
+    this.honorBoard = null;
+
     this.environment?.destroy();
     this.environment = null;
 
@@ -487,6 +527,8 @@ export class GameRenderer {
     this.currentWorldBossId = null;
     this.lastAnchorX = null;
     this.heroDisplayNames = null;
+    this.heroSocialBadges = null;
+    this.townChampions = null;
     this.bossHpBar = null;
     this.bossLabel = null;
     this.worldBossHpBar = null;
@@ -646,6 +688,41 @@ export class GameRenderer {
    */
   setHeroDisplayNames(names: ReadonlyMap<number, string> | null): void {
     this.heroDisplayNames = names;
+  }
+
+  /**
+   * HOF seasonal rewards (docs/hof-rewards-design.md §3, render wave): registers
+   * per-hero-id current-season social badges (title tag text + rank-1 champion
+   * gold-aura flag), keyed the same way as `setHeroDisplayNames()` above.
+   * `title: null` shows no tag for that hero even if `champion` is true (e.g. an
+   * online-time #1, which the design intentionally never gets a title-less
+   * aura for either — see `docs/hof-rewards-design.md` §2's "ออนไลน์นานสุด" row).
+   * `null`/unset (every existing call site) means no hero ever shows a title
+   * tag or champion aura — solo/sim output is unaffected by this seam existing.
+   * Safe to call any time (before `create()` resolves, mid-session, or after
+   * `destroy()`); forwarded to `FxController.setHeroSocialBadges()` for the
+   * continuous aura read, re-applied to a freshly-built `FxController`
+   * regardless of call order (same convention as `setPovHeroIndex()`).
+   */
+  setHeroSocialBadges(
+    badges: ReadonlyMap<string, { title: string | null; champion: boolean }> | null,
+  ): void {
+    this.heroSocialBadges = badges;
+    this.fx?.setHeroSocialBadges(badges);
+  }
+
+  /**
+   * HOF seasonal rewards (docs/hof-rewards-design.md §3 item 3, render wave):
+   * registers the current season's town honor-plaque entries (see
+   * `TownHonorBoard.setEntries()`'s "never called = pixel-identical" doc
+   * comment — the plaque itself stays invisible until this is called at least
+   * once, even with `[]`). Safe to call any time (before `create()` resolves,
+   * mid-session, or after `destroy()`); re-applied to a freshly-built
+   * `honorBoard` in `create()` regardless of call order.
+   */
+  setTownChampions(entries: readonly TownChampionEntry[]): void {
+    this.townChampions = entries;
+    this.honorBoard?.setEntries(entries);
   }
 
   /**
