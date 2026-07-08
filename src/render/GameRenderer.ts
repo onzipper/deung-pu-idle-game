@@ -432,7 +432,12 @@ export class GameRenderer {
     if (wb && wb.active && wb.entity) {
       if (!this.worldBossView) {
         this.worldBossView = createWorldBossView();
-        this.layers.entities.addChild(this.worldBossView);
+        // BEHIND every hero/enemy/boss view (Pixi draws in child order, and the
+        // world boss spawns AFTER the pools exist, so a plain addChild painted the
+        // ~2.5x tycoon OVER the heroes standing in front of him — owner report
+        // 2026-07-08 "hero โดนเสี่ยจ๋องบัง"). Index 0 = backmost of the entities
+        // layer; his nameplate/HP bar live on the overlay layer and are unaffected.
+        this.layers.entities.addChildAt(this.worldBossView, 0);
       }
       updateWorldBossView(this.worldBossView, wb.entity, { elapsedMs, dt, events: frameEvents });
       this.currentWorldBossId = wb.entity.id;
