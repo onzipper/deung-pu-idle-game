@@ -809,6 +809,181 @@ const MAP6_BOSS: BiomeDef = {
   scrollSpeed: { far: 9, near: 24 },
 };
 
+// ---- ดินแดนอสูร (ASURA, endgame v1, docs/endgame-design.md, s31-40) — the 7th
+// map: 10 farm zones (no town — `CONFIG.asura.mapId !== CONFIG.world.townMapId`)
+// deepening a corrupted dark-red/violet demonic re-tint, escalating toward a
+// capstone throne. Reuses the SAME environment machinery (sky/far/ground/
+// particle/weatherTint layering, `AmbientKind`/`PropStyle`/`SilhouetteShape`
+// vocabularies — no new enum members) every other map theme does; only the
+// palette/shape CHOICES are new. Deliberately a DIFFERENT hue family from
+// map2's "แดนอสูร" (fiery orange-red) — a deep BLOOD-VIOLET corruption so the
+// two never read as the same place, even though both are "demon" themed.
+// `enemySpecies.ts`'s asura mob species (reused map6 silhouettes, recolored)
+// carry the rest of the "corrupted, familiar" read on top of this backdrop. ----
+
+const ASURA_FARM: readonly BiomeDef[] = [
+  {
+    id: "asura-zone1",
+    nameTh: "ประตูมิติร้าว",
+    sky: { top: 0x1a0a1c, bottom: 0x28122c, horizon: 0xb5486a },
+    far: { color: 0x230e28, alpha: 0.6, shape: "jagged-rock", amplitude: 40, density: 0.85 },
+    ground: { base: 0x28102a, band: 0x341636, speckle: 0x481f4a, accent: 0xa8355a, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xd6547a, density: 9 },
+    scrollSpeed: { far: 7, near: 20 },
+  },
+  {
+    id: "asura-zone2",
+    nameTh: "ทุ่งเถ้ากระดูก",
+    sky: { top: 0x160916, bottom: 0x230f22, horizon: 0xaa3e64 },
+    far: { color: 0x1e0c1e, alpha: 0.64, shape: "jagged-rock", amplitude: 44, density: 0.95 },
+    ground: { base: 0x230d20, band: 0x2e122a, speckle: 0x42193a, accent: 0x9c2f52, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xcc4a6e, density: 10 },
+    weatherTint: { color: 0x2c0e26, alpha: 0.09 },
+    scrollSpeed: { far: 7, near: 20 },
+  },
+  {
+    id: "asura-zone3",
+    nameTh: "หนองเลือดดำ",
+    sky: { top: 0x120711, bottom: 0x1d0c1c, horizon: 0x9c3660 },
+    far: { color: 0x190a1a, alpha: 0.68, shape: "infernal-skyline", amplitude: 48, density: 1.0 },
+    ground: { base: 0x1e0b1c, band: 0x281024, speckle: 0x3a1632, accent: 0x8f2a4e, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xbf3f66, density: 11 },
+    weatherTint: { color: 0x2a0c22, alpha: 0.11 },
+    scrollSpeed: { far: 8, near: 21 },
+  },
+  {
+    id: "asura-zone4",
+    nameTh: "ป่าจิตวิญญาณอสูร",
+    sky: { top: 0x0f0610, bottom: 0x190a19, horizon: 0x8a2f5c },
+    far: { color: 0x150819, alpha: 0.71, shape: "infernal-skyline", amplitude: 52, density: 1.05 },
+    ground: { base: 0x190a1c, band: 0x230e26, speckle: 0x341334, accent: 0x82295a, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xb03a68, density: 12 },
+    weatherTint: { color: 0x2c0c28, alpha: 0.13 },
+    scrollSpeed: { far: 8, near: 21 },
+  },
+  {
+    id: "asura-zone5",
+    nameTh: "ซากปรักปีศาจ",
+    sky: { top: 0x0c050f, bottom: 0x160816, horizon: 0x7c2a5c },
+    far: {
+      color: 0x130717,
+      alpha: 0.74,
+      shape: "jagged-rock",
+      amplitude: 56,
+      density: 1.12,
+      glowRim: 0xc03a70,
+    },
+    ground: { base: 0x160918, band: 0x200c22, speckle: 0x301230, accent: 0xc03a70, propStyle: "ember" },
+    particle: { kind: "ember", color: 0xc03a70, density: 12 },
+    weatherTint: { color: 0x300e2c, alpha: 0.15 },
+    scrollSpeed: { far: 8, near: 22 },
+  },
+  {
+    id: "asura-zone6",
+    nameTh: "แดนคำสาป",
+    sky: { top: 0x0a0410, bottom: 0x130715, horizon: 0x6e2560 },
+    far: {
+      color: 0x100616,
+      alpha: 0.76,
+      shape: "infernal-skyline",
+      amplitude: 60,
+      density: 1.18,
+      glowRim: 0xc03a78,
+    },
+    ground: { base: 0x130818, band: 0x1c0c22, speckle: 0x2c1230, accent: 0xc03a78, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xc23a7a, density: 13 },
+    weatherTint: { color: 0x330e2e, alpha: 0.17 },
+    scrollSpeed: { far: 9, near: 22 },
+  },
+  {
+    id: "asura-zone7",
+    nameTh: "หุบเหวมนตร์ดำ",
+    sky: { top: 0x080310, bottom: 0x100616, horizon: 0x651f66 },
+    far: {
+      color: 0x0d0518,
+      alpha: 0.78,
+      shape: "jagged-rock",
+      amplitude: 62,
+      density: 1.22,
+      glowRim: 0xc73a88,
+    },
+    ground: { base: 0x100618, band: 0x190a24, speckle: 0x281032, accent: 0xc73a88, propStyle: "ember" },
+    particle: { kind: "ember", color: 0xc73a88, density: 14 },
+    weatherTint: { color: 0x360f34, alpha: 0.19 },
+    scrollSpeed: { far: 9, near: 23 },
+  },
+  {
+    id: "asura-zone8",
+    nameTh: "มหาสมุทรเถ้าอสูร",
+    sky: { top: 0x060212, bottom: 0x0d0518, horizon: 0x5c1a6c },
+    far: {
+      color: 0x0a0418,
+      alpha: 0.8,
+      shape: "infernal-skyline",
+      amplitude: 65,
+      density: 1.26,
+      glowRim: 0xcf3d98,
+    },
+    ground: { base: 0x0d0518, band: 0x160828, speckle: 0x241038, accent: 0xcf3d98, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xcf3d98, density: 14 },
+    weatherTint: { color: 0x3a103a, alpha: 0.2 },
+    scrollSpeed: { far: 9, near: 23 },
+  },
+  {
+    id: "asura-zone9",
+    nameTh: "แท่นพิพากษาบาป",
+    sky: { top: 0x050113, bottom: 0x0b041a, horizon: 0x531572 },
+    far: {
+      color: 0x08031a,
+      alpha: 0.83,
+      shape: "jagged-rock",
+      amplitude: 68,
+      density: 1.3,
+      glowRim: 0xd63fa8,
+    },
+    ground: { base: 0x0b041a, band: 0x14072c, speckle: 0x220f3e, accent: 0xd63fa8, propStyle: "ember" },
+    particle: { kind: "ember", color: 0xd63fa8, density: 15 },
+    weatherTint: { color: 0x3e1140, alpha: 0.21 },
+    scrollSpeed: { far: 9, near: 24 },
+  },
+  {
+    id: "asura-zone10",
+    nameTh: "ธรณีประตูอวสาน",
+    sky: { top: 0x04010f, bottom: 0x09031a, horizon: 0x4a107a },
+    far: {
+      color: 0x06021c,
+      alpha: 0.85,
+      shape: "infernal-skyline",
+      amplitude: 70,
+      density: 1.34,
+      glowRim: 0xde42b8,
+    },
+    ground: { base: 0x08031c, band: 0x11062e, speckle: 0x1e0e42, accent: 0xde42b8, propStyle: "cracks" },
+    particle: { kind: "ember", color: 0xde42b8, density: 15 },
+    weatherTint: { color: 0x421248, alpha: 0.23 },
+    scrollSpeed: { far: 9, near: 24 },
+  },
+];
+
+const ASURA_BOSS: BiomeDef = {
+  id: "asura-boss",
+  nameTh: "แท่นบัลลังก์จอมอสูรวิปริต",
+  special: "bossRoom",
+  sky: { top: 0x030010, bottom: 0x07021a, horizon: 0x420d80 },
+  far: {
+    color: 0x05011c,
+    alpha: 0.88,
+    shape: "infernal-skyline",
+    amplitude: 74,
+    density: 1.4,
+    glowRim: 0xe84ac8,
+  },
+  ground: { base: 0x06021e, band: 0x0f0530, speckle: 0x1c0d46, accent: 0xe84ac8, propStyle: "cracks" },
+  particle: { kind: "ember", color: 0xe84ac8, density: 17 },
+  weatherTint: { color: 0x4a1350, alpha: 0.26 },
+  scrollSpeed: { far: 9, near: 24 },
+};
+
 interface MapTheme {
   town?: BiomeDef;
   farm: readonly BiomeDef[];
@@ -822,6 +997,7 @@ const MAP_THEMES: Record<string, MapTheme> = {
   map4: { farm: MAP4_FARM, boss: MAP4_BOSS },
   map5: { farm: MAP5_FARM, boss: MAP5_BOSS },
   map6: { farm: MAP6_FARM, boss: MAP6_BOSS },
+  [CONFIG.asura.mapId]: { farm: ASURA_FARM, boss: ASURA_BOSS },
 };
 
 /** Darken a resolved biome a touch further for a same-map hue-loop repeat

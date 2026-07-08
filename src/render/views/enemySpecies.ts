@@ -41,7 +41,7 @@ import {
   type BossMapId,
 } from "@/render/theme";
 
-type EnemyMapId = BossMapId;
+type EnemyMapId = BossMapId | "asura";
 
 /** Draws a kind's full body silhouette (fills + shading/eyes/plates) onto
  * `g`, in absolute GROUND_Y-relative coordinates. `s` is the already-clamped
@@ -366,6 +366,13 @@ const SPECIES: Record<EnemyMapId, MapEnemyTheme> = {
   map4: { colors: ENEMY_SPECIES_COLORS.map4, builders: MAP4_BUILDERS },
   map5: { colors: ENEMY_SPECIES_COLORS.map5, builders: MAP5_BUILDERS },
   map6: { colors: ENEMY_SPECIES_COLORS.map6, builders: MAP6_BUILDERS },
+  // ดินแดนอสูร (ASURA endgame v1, docs/endgame-design.md) — deliberately reuses
+  // MAP6_BUILDERS verbatim (the exact same imp/charcoal-brute/ash-ghoul/cinder-
+  // warlock silhouettes the player already fought in map6) with `asura`'s own
+  // corrupted violet-black colors (`ENEMY_SPECIES_COLORS.asura`) — "the same
+  // demons, corrupted further" rather than a brand-new, costlier shape set.
+  // s1-30 (map1-6) are untouched — this only adds a NEW key.
+  asura: { colors: ENEMY_SPECIES_COLORS.asura, builders: MAP6_BUILDERS },
 };
 
 /** Resolve a kind's body color + shape-builder for the given map. Falls back

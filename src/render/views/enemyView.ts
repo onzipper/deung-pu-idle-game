@@ -39,6 +39,33 @@ import type { GameEvent } from "@/engine/state";
 import { GROUND_Y } from "@/render/layout";
 import { drawHpBar } from "@/render/views/hpBar";
 import { enemySpeciesFor } from "@/render/views/enemySpecies";
+import { PALETTE, safeRadius } from "@/render/theme";
+
+// ---------------------------------------------------------------------------
+// ดินแดนอสูร (ASURA endgame v1) ELITE treatment — an unmistakable "rare/
+// dangerous" read on top of the zone's normal species rig: scaled up + a
+// pulsing dark-red/violet aura ring. `elite` is fixed for an entity's whole
+// life (set once at `promoteElite` time, before it ever enters `state.enemies`
+// — see `systems/asura.ts`), same guarantee `kind`/`size` already rely on, so
+// baking the scale into `buildRig`'s one-time `size` param (not a per-frame
+// `view.scale` multiply, which is already spoken for by the facing flip/pose
+// squash) is safe. The aura ring itself is built ONCE (elite-only) and only
+// TRANSFORMED (alpha/scale pulse) per frame after that — continuous/persistent
+// juice belongs in the view, not `fx/` (see render/README.md).
+// ---------------------------------------------------------------------------
+const ELITE_SIZE_SCALE = 1.35;
+const ELITE_AURA_RADIUS = 24;
+const ELITE_AURA_PULSE_SPEED = 3.2; // radians/sec
+const ELITE_AURA_ALPHA_BASE = 0.3;
+const ELITE_AURA_ALPHA_SWING = 0.22;
+const ELITE_AURA_SCALE_SWING = 0.1;
+
+/** The render-only effective size an elite draws at (scaled up) vs the
+ * engine's own `enemy.size` (untouched — this never feeds back into
+ * `GameState`). Every other kind reads its plain `enemy.size` unchanged. */
+function effectiveSize(enemy: Enemy): number {
+  return enemy.elite ? enemy.size * ELITE_SIZE_SCALE : enemy.size;
+}
 
 // ---------------------------------------------------------------------------
 // Per-kind tunables — the single table personality differences read from.
@@ -152,6 +179,10 @@ interface EnemyAnimState {
    * to aim — rather than re-derived every frame off a near-zero velocity.
    */
   facing: 1 | -1;
+  /** ASURA ELITE aura pulse clock (real seconds, randomized start phase so
+   * several concurrent elites don't pulse in lockstep) — unused/inert for a
+   * non-elite enemy. */
+  eliteT: number;
 }
 
 export interface EnemyFrameContext {
@@ -174,6 +205,10 @@ export interface EnemyView extends Container {
   legs: Graphics;
   limbArm: Graphics;
   hpBar: Graphics;
+  /** ASURA ELITE pulsing aura ring (built once, elite-only — see the module
+   * doc comment above). Stays an empty, invisible `Graphics` for every
+   * ordinary enemy (zero extra draw calls beyond an idle child). */
+  eliteRing: Graphics;
   kind: EnemyKind | null;
   anim: EnemyAnimState;
 }
@@ -184,12 +219,14 @@ export function createEnemyView(): EnemyView {
   view.legs = new Graphics();
   view.limbArm = new Graphics();
   view.hpBar = new Graphics();
+  view.eliteRing = new Graphics();
+  view.eliteRing.visible = false;
   view.kind = null;
 
   view.body.pivot.set(0, GROUND_Y);
   view.body.position.set(0, GROUND_Y);
 
-  view.addChild(view.body, view.legs, view.limbArm, view.hpBar);
+  view.addChild(view.body, view.legs, view.limbArm, view.eliteRing, view.hpBar);
   view.anim = {
     initialized: false,
     lastX: 0,
@@ -199,6 +236,7 @@ export function createEnemyView(): EnemyView {
     spawnT: 0,
     attack: null,
     facing: 1,
+    eliteT: Math.random() * Math.PI * 2,
   };
   return view;
 }
@@ -227,14 +265,37 @@ function frontPoint(kind: EnemyKind, size: number): { x: number; y: number } {
  * switch here — map1/2/3 resolve to the exact original builders (byte-
  * identical, see that module's doc comment), map4/5/6 get their own species.
  * Everything else below (legs/limbArm, the rest of the rig contract) is
- * unchanged by this task. */
-function buildRig(view: EnemyView, kind: EnemyKind, size: number, mapId: string | undefined): void {
+ * unchanged by this task.
+ *
+ * `size` is already the ELITE-scaled effective size (see `effectiveSize()`)
+ * when `elite` is true — the silhouette itself just draws bigger, no separate
+ * code path. `elite` additionally populates `view.eliteRing` once (two flat-
+ * alpha circles — a dark-red/violet aura ring, `updateEnemyView` only pulses
+ * its alpha/scale per frame after this). */
+function buildRig(
+  view: EnemyView,
+  kind: EnemyKind,
+  size: number,
+  mapId: string | undefined,
+  elite: boolean,
+): void {
   const s = Math.max(0.1, size);
   const { color, build } = enemySpeciesFor(mapId, kind);
 
   const g = view.body;
   g.clear();
   build(g, s, color);
+
+  view.eliteRing.clear();
+  if (elite) {
+    const cy = GROUND_Y - 16 * s;
+    const r = safeRadius(ELITE_AURA_RADIUS * s);
+    view.eliteRing.circle(0, cy, r).fill({ color: PALETTE.eliteAuraDark, alpha: 0.28 });
+    view.eliteRing.circle(0, cy, r).stroke({ width: 2, color: PALETTE.eliteAura, alpha: 0.85 });
+    view.eliteRing.visible = true;
+  } else {
+    view.eliteRing.visible = false;
+  }
 
   view.legs.clear();
   view.legs
@@ -343,9 +404,10 @@ function recoilCurve(progress: number): number {
 }
 
 export function updateEnemyView(view: EnemyView, enemy: Enemy, ctx: EnemyFrameContext): void {
+  const size = effectiveSize(enemy);
   if (view.kind !== enemy.kind) {
     view.kind = enemy.kind;
-    buildRig(view, enemy.kind, enemy.size, ctx.mapId);
+    buildRig(view, enemy.kind, size, ctx.mapId, !!enemy.elite);
   }
 
   const anim = view.anim;
@@ -447,19 +509,32 @@ export function updateEnemyView(view: EnemyView, enemy: Enemy, ctx: EnemyFrameCo
   view.legs.position.set(dirOffX * 0.6 + shuffleX * facing, pose.offY * 0.5 + spawnHop);
   view.legs.scale.x = facing;
 
-  const front = frontPoint(enemy.kind, Math.max(0.1, enemy.size));
+  const front = frontPoint(enemy.kind, Math.max(0.1, size));
   view.limbArm.scale.x = facing;
   view.limbArm.rotation = anim.armAngle + attackArmDelta;
   view.limbArm.position.set(front.x * facing + dirOffX, front.y + pose.offY + spawnHop);
 
   view.position.set(enemy.x, 0);
 
+  // ---- ASURA ELITE aura pulse (continuous, elite-only) ---------------------
+  // Ring geometry is built ONCE in `buildRig`; every frame here only pulses
+  // alpha/scale (a "build once, transform per frame" continuous visual, same
+  // convention as `bossView.ts`'s enrage tint) — no `.clear()`/redraw cost.
+  if (enemy.elite) {
+    anim.eliteT += dt * ELITE_AURA_PULSE_SPEED;
+    const pulse = Math.sin(anim.eliteT);
+    view.eliteRing.alpha = clamp01(ELITE_AURA_ALPHA_BASE + ELITE_AURA_ALPHA_SWING * pulse);
+    const auraScale = 1 + ELITE_AURA_SCALE_SWING * pulse;
+    view.eliteRing.position.set(dirOffX, spawnHop);
+    view.eliteRing.scale.set(auraScale);
+  }
+
   drawHpBar(
     view.hpBar,
     0,
-    GROUND_Y - 42 - 8 * enemy.size,
+    GROUND_Y - 42 - 8 * size,
     enemy.hp,
     enemy.maxHp,
-    30 * enemy.size,
+    30 * size,
   );
 }

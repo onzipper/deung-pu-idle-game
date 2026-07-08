@@ -721,6 +721,31 @@ const WORLD_BOSS_DEFEAT_FLASH_ALPHA = 0.3;
 const WORLD_BOSS_DEFEAT_SHOWER_COUNT = 40; // a real coin FOUNTAIN, not a shower
 const WORLD_BOSS_DEFEAT_SHOWER_WIDTH = 260;
 
+// ---------------------------------------------------------------------------
+// ดินแดนอสูร (ASURA endgame v1, docs/endgame-design.md) ELITE roaming-mob beats
+// — the PERSISTENT pulsing aura ring lives in `enemyView.ts` (continuous,
+// reads `enemy.elite` directly every frame, same "continuous belongs in the
+// view" convention as boss enrage tint); these two are the EDGE-TRIGGERED
+// beats off `eliteSpawned`/`eliteKilled` (a spawn telegraph + a bigger-than-
+// normal kill flourish banking the essence). Both reuse existing pools
+// (rings/particles/eventText) — no new pool class needed for a rare beat.
+// ---------------------------------------------------------------------------
+const ELITE_SPAWN_RING_R0 = 6;
+const ELITE_SPAWN_RING_R1 = 70;
+const ELITE_SPAWN_RING_DURATION = 0.55;
+const ELITE_SPAWN_PARTICLE_COUNT = 12;
+const ELITE_SPAWN_FLASH_ALPHA = 0.14; // subtle — a rare-find sting, not a boss-enrage-sized flash
+
+const ELITE_KILL_SHAKE = 6;
+const ELITE_KILL_RING_R1 = 100;
+const ELITE_KILL_RING_DURATION = 0.5;
+const ELITE_KILL_PARTICLE_COUNT = 20;
+/** Ground-anchored (the event carries no `kind`, unlike `kill` — see
+ * `engine/state/events.ts`'s `eliteKilled` shape), same "entities are
+ * effectively 1D on x" convention as `ITEM_DROP_POP_Y`/`STONE_DROP_POP_Y`,
+ * pitched a touch taller since an elite is the scaled-up silhouette. */
+const ELITE_KILL_POP_Y = GROUND_Y - 30;
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -1179,6 +1204,12 @@ export class FxController {
         case "kill":
           this.onKill(ev, state);
           break;
+        case "eliteSpawned":
+          this.onEliteSpawned(ev);
+          break;
+        case "eliteKilled":
+          this.onEliteKilled(ev);
+          break;
         case "heroDown":
           this.shake.trigger(3); // mild
           this.impactFilters.triggerRgbSplit();
@@ -1349,10 +1380,13 @@ export class FxController {
           this.onTargetLocked(ev.id, state);
           break;
         default:
-          // stageCleared / upgradeBought / townArrived / commandCancelled: no
-          // fx-layer reaction — `commandCancelled` is covered structurally by
-          // `updateTargetLock()`'s continuous read (the reticle eases itself
-          // out the instant `hero.command` goes null, see its doc comment).
+          // stageCleared / upgradeBought / townArrived / commandCancelled /
+          // asuraZoneStoneEarned: no fx-layer reaction — `commandCancelled` is
+          // covered structurally by `updateTargetLock()`'s continuous read
+          // (the reticle eases itself out the instant `hero.command` goes
+          // null, see its doc comment); `asuraZoneStoneEarned` is a save-only
+          // milestone banked by `systems/asura.ts` with no dedicated beat in
+          // this v1 render wave (elite/hot-zone/biome were the ask).
           break;
       }
     }
@@ -1796,6 +1830,88 @@ export class FxController {
         });
       }
     }
+  }
+
+  /** ASURA ELITE spawn telegraph (`eliteSpawned`) — a "something dangerous
+   * just appeared" beat layered ON TOP of the ordinary spawn portal every new
+   * enemy id already gets from `updateEnemySpawns()`'s mark-and-sweep: a
+   * bigger warn-colored ring + a matching violet inner ring, a burst, a rising
+   * "ELITE!" callout (reusing `eventText`, same pool the kill-gold/aggro "!"
+   * text share), and a subtle full-arena flash (kept well within the README's
+   * "~0.2-0.3 peak alpha, never strobing" rule — this is a rare-find sting,
+   * not a boss-enrage-sized punch). The PERSISTENT pulsing aura ring itself is
+   * `enemyView.ts`'s job (continuous, reads `enemy.elite` every frame). */
+  private onEliteSpawned(ev: Extract<GameEvent, { type: "eliteSpawned" }>): void {
+    const size = ENEMY_TYPES[ev.kind]?.size ?? 1;
+    const y = GROUND_Y - 20 - 8 * size;
+    this.rings.spawn({
+      x: ev.x,
+      y,
+      r0: ELITE_SPAWN_RING_R0,
+      r1: ELITE_SPAWN_RING_R1,
+      duration: ELITE_SPAWN_RING_DURATION,
+      width: 3,
+      color: PALETTE.eliteAura,
+    });
+    this.rings.spawn({
+      x: ev.x,
+      y,
+      r0: ELITE_SPAWN_RING_R0 * 0.5,
+      r1: ELITE_SPAWN_RING_R1 * 0.6,
+      duration: ELITE_SPAWN_RING_DURATION * 1.25,
+      width: 2,
+      color: PALETTE.eliteAuraCore,
+    });
+    burst(this.particles, ev.x, y, ELITE_SPAWN_PARTICLE_COUNT, PALETTE.eliteAuraCore, {
+      speed: 95,
+      life: 0.5,
+      radius: 3,
+    });
+    this.eventText.spawn({
+      x: ev.x,
+      y: y - 22,
+      label: "ELITE!",
+      color: PALETTE.eliteAuraCore,
+      fontSize: 16,
+      duration: 0.65,
+      rise: 22,
+    });
+    this.flash.trigger(PALETTE.eliteAura, ELITE_SPAWN_FLASH_ALPHA);
+  }
+
+  /** ASURA ELITE kill flourish (`eliteKilled`) — a bigger-than-normal-kill
+   * burst (the elite's own `onKill` fires too, from the same underlying
+   * `kill` event; this layers the "you just banked essence" beat on top) + a
+   * mild shake + a rising "+N" essence label (a bare number, like `onKill`'s
+   * gold label — render has no i18n hookup, see README's zone-name note, so
+   * no Thai/English unit text is hardcoded here). Ground-anchored (see
+   * `ELITE_KILL_POP_Y`'s doc comment — the event carries no `kind`/size). */
+  private onEliteKilled(ev: Extract<GameEvent, { type: "eliteKilled" }>): void {
+    const y = ELITE_KILL_POP_Y;
+    this.shake.trigger(ELITE_KILL_SHAKE);
+    this.rings.spawn({
+      x: ev.x,
+      y,
+      r0: 12,
+      r1: ELITE_KILL_RING_R1,
+      duration: ELITE_KILL_RING_DURATION,
+      width: 4,
+      color: PALETTE.eliteAura,
+    });
+    burst(this.particles, ev.x, y, ELITE_KILL_PARTICLE_COUNT, PALETTE.eliteAuraCore, {
+      speed: 170,
+      life: 0.55,
+      radius: 4,
+    });
+    this.eventText.spawn({
+      x: ev.x,
+      y,
+      label: `+${ev.essence}`,
+      color: PALETTE.eliteAuraCore,
+      fontSize: 15,
+      duration: 0.8,
+      rise: 38,
+    });
   }
 
   /** Hero death v2 (item 3): a class-colored soul wisp + a dim ring that
