@@ -292,6 +292,20 @@ export const PALETTE = {
   eliteAuraCore: 0xff5d8f,
   /** Dark underlayer for the aura ring's inner fill. */
   eliteAuraDark: 0x2a0a14,
+
+  // ---- "ตำราตำนาน" LEGENDARY weapons (endgame v1.2/v1.3, render wave) -----
+  // The rarest look in the game (one craft-only weapon per class) needs its
+  // OWN two-tone identity distinct from every existing gold family already in
+  // play (plain `gold` evolution accent, `gearEpic`'s orange-gold epic-rarity
+  // trim, `worldBossGold`'s lemon flash tycoon motif, `refinePrestige`'s
+  // near-white glow, `championGold`'s HOF amber) — a warmer/purer gold paired
+  // with a deep magisterial violet edge, so a legendary reads as "beyond
+  // rarity itself" rather than "a fancier epic drop". Footgun 10: flat/solid
+  // on NORMAL blend + a darker underlayer, never additive.
+  legendaryGold: 0xf7d048,
+  legendaryGoldCore: 0xfff3c4,
+  legendaryViolet: 0x9b3fe8,
+  legendaryVioletDark: 0x2e0f4a,
 } as const;
 
 /** Hero class -> {body, light (armor/weapon highlight), shade (hood/robe

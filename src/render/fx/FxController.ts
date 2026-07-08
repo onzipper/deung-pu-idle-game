@@ -18,7 +18,7 @@ import { Container as PixiContainer } from "pixi.js";
 import type { Container } from "pixi.js";
 import { zoneAt } from "@/engine";
 import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
-import { ITEM_TEMPLATES, refineOf, type ItemRarity } from "@/engine/config/items";
+import { ITEM_TEMPLATES, isLegendaryTemplate, refineOf, type ItemRarity } from "@/engine/config/items";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
@@ -49,6 +49,7 @@ import { GroundCrackPool } from "@/render/fx/groundCrack";
 import { HazardBandOverlay } from "@/render/fx/hazardBand";
 import { HitFlashController } from "@/render/fx/hitFlash";
 import { ImpactFilterController } from "@/render/fx/impactFilters";
+import { LegendaryFxController } from "@/render/fx/legendaryFx";
 import { LevelUpBurstPool } from "@/render/fx/levelUp";
 import { LightPillarPool } from "@/render/fx/lightPillar";
 import { MeteorSkyFlash, ScorchPool } from "@/render/fx/meteorScene";
@@ -81,6 +82,7 @@ import {
   getSwordTipPos,
   getWeaponAnchorPos,
   isCastHolding,
+  isHeroAttackSwinging,
   isSwordSwinging,
   peekSwordSwing,
   type HeroView,
@@ -746,6 +748,49 @@ const ELITE_KILL_PARTICLE_COUNT = 20;
  * pitched a touch taller since an elite is the scaled-up silhouette. */
 const ELITE_KILL_POP_Y = GROUND_Y - 30;
 
+// ---------------------------------------------------------------------------
+// "ตำราตำนาน" LEGENDARY tome/craft beats (endgame v1.2/v1.3, docs/endgame-
+// design.md render wave) — `tomePageFound`/`tomeAssembled`/
+// `legendaryCraftRequested` carry no world position of their own (a secret-
+// quest/menu-unlock/craft-request, not a combat impact), so every beat below
+// anchors at the solo hero's own position (`state.heroes[0]`, or the
+// craft-matching class if one exists — see `onLegendaryCraftRequested`'s own
+// doc). Escalating weight, same convention as `onLevelUp`/`onEvolve`: page
+// find is the smallest ("something fluttered down"), tome assembly is the
+// biggest reveal (menu permanently unlocked), craft request sits in between
+// (a forge flourish, not a new permanent state flip).
+const TOME_PAGE_RING_R0 = 4;
+const TOME_PAGE_RING_R1 = 26;
+const TOME_PAGE_RING_DURATION = 0.32;
+const TOME_PAGE_PARTICLE_COUNT = 7;
+const TOME_PAGE_PARTICLE_SPEED = 40;
+const TOME_PAGE_PARTICLE_LIFE = 0.4;
+const TOME_PAGE_TEXT_DURATION = 0.85;
+const TOME_PAGE_TEXT_RISE = 30;
+
+const TOME_ASSEMBLED_PILLAR_HEAD_MARGIN = 30;
+const TOME_ASSEMBLED_PILLAR_WIDTH = 20;
+const TOME_ASSEMBLED_PILLAR_DURATION = 0.55;
+const TOME_ASSEMBLED_BURST_DURATION = 0.7;
+const TOME_ASSEMBLED_RING_R0 = 16;
+const TOME_ASSEMBLED_RING_R1 = 72;
+const TOME_ASSEMBLED_RING_DURATION = 0.6;
+const TOME_ASSEMBLED_PARTICLE_COUNT_GOLD = 16;
+const TOME_ASSEMBLED_PARTICLE_COUNT_VIOLET = 10;
+const TOME_ASSEMBLED_PARTICLE_SPEED = 100;
+const TOME_ASSEMBLED_PARTICLE_LIFE = 0.6;
+const TOME_ASSEMBLED_FLASH_ALPHA = 0.26;
+
+const LEGENDARY_CRAFT_RING_R0 = 18;
+const LEGENDARY_CRAFT_RING_R1 = 90;
+const LEGENDARY_CRAFT_RING_DURATION = 0.5;
+const LEGENDARY_CRAFT_RING2_R1 = 60;
+const LEGENDARY_CRAFT_RING2_DURATION = 0.62;
+const LEGENDARY_CRAFT_PARTICLE_COUNT = 18;
+const LEGENDARY_CRAFT_PARTICLE_SPEED = 95;
+const LEGENDARY_CRAFT_PARTICLE_LIFE = 0.5;
+const LEGENDARY_CRAFT_FLASH_ALPHA = 0.28;
+
 interface KnockbackEntry {
   view: Container;
   t: number;
@@ -878,6 +923,13 @@ export class FxController {
    * `this.rings` (constructed below), adds zero new pooled Graphics of its
    * own. See `updateGearFx()`. */
   private readonly refinePrestige: RefinePrestigeFx;
+
+  /** "ตำราตำนาน" LEGENDARY weapon fx (endgame v1.2/v1.3): the per-class idle
+   * ambient signature + cross-class attack-swing trail — continuous, same
+   * convention as `gearAura`/`gearSparkle` above (see `updateLegendaryFx()`).
+   * A legendary weapon does NOT also get `gearAura`'s flame (see that
+   * method's `!isLegendaryTemplate` gate) — this replaces it. */
+  private readonly legendaryFx: LegendaryFxController;
 
   /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
    * the rank-1 champion gold aura — same continuous-per-frame convention as
@@ -1100,6 +1152,7 @@ export class FxController {
     this.castAura = new CastAuraController(this.heroFxLayer);
     this.gearAura = new GearAuraController(this.heroFxLayer);
     this.gearSparkle = new GearSparklePool(this.heroFxLayer);
+    this.legendaryFx = new LegendaryFxController(this.heroFxLayer);
     this.warCryAura = new WarCryAuraController(this.heroFxLayer);
     this.championAura = new ChampionAuraController(this.heroFxLayer);
     this.arrowSwarm = new ArrowSwarmPool(this.heroFxLayer);
@@ -1379,14 +1432,25 @@ export class FxController {
         case "targetLocked":
           this.onTargetLocked(ev.id, state);
           break;
+        case "tomePageFound":
+          this.onTomePageFound(ev, state);
+          break;
+        case "tomeAssembled":
+          this.onTomeAssembled(state);
+          break;
+        case "legendaryCraftRequested":
+          this.onLegendaryCraftRequested(ev, state);
+          break;
         default:
           // stageCleared / upgradeBought / townArrived / commandCancelled /
-          // asuraZoneStoneEarned: no fx-layer reaction — `commandCancelled` is
-          // covered structurally by `updateTargetLock()`'s continuous read
-          // (the reticle eases itself out the instant `hero.command` goes
-          // null, see its doc comment); `asuraZoneStoneEarned` is a save-only
-          // milestone banked by `systems/asura.ts` with no dedicated beat in
-          // this v1 render wave (elite/hot-zone/biome were the ask).
+          // asuraZoneStoneEarned / asuraSigilClaimed / legendaryCraftBlocked:
+          // no fx-layer reaction — `commandCancelled` is covered structurally
+          // by `updateTargetLock()`'s continuous read (the reticle eases
+          // itself out the instant `hero.command` goes null, see its doc
+          // comment); `asuraZoneStoneEarned`/`asuraSigilClaimed` are save-only
+          // milestones with no dedicated beat in this v1 render wave
+          // (elite/hot-zone/biome/legendary were the asks); a BLOCKED craft
+          // request is a UI-toast concern, not a juice beat.
           break;
       }
     }
@@ -1468,6 +1532,7 @@ export class FxController {
     this.castAura.destroy();
     this.gearAura.destroy();
     this.gearSparkle.destroy();
+    this.legendaryFx.destroy();
     this.championAura.destroy();
     this.warCryAura.destroy();
     this.arrowSwarm.destroy();
@@ -1519,8 +1584,15 @@ export class FxController {
       const weaponRefine = refineOf(h.equipped, "weapon");
       const armorRefine = refineOf(h.equipped, "armor");
 
+      // "ตำราตำนาน" legendary weapons get their OWN dedicated fx
+      // (`legendaryFx` — idle signature + attack-swing trail, see
+      // `updateLegendaryFx()`) instead of stacking the ordinary tier-6/epic
+      // flame aura on top (a legendary's catalog `rarity` is "epic" for
+      // UI-compat reasons — see items.ts — so without this gate it would
+      // otherwise trigger `auraOn` below like any other epic drop).
       const auraOn =
         !!view &&
+        !isLegendaryTemplate(h.equipped.weapon) &&
         (weaponRarity === "epic" || weaponRefine >= REFINE_AURA_THRESHOLD) &&
         getWeaponAnchorPos(view, this.weaponAnchorScratch);
       // Class-flavored aura (owner request 2026-07-07): the same flame rig
@@ -1573,6 +1645,33 @@ export class FxController {
     });
     this.gearAura.update(dt);
     this.gearSparkle.update(dt);
+    this.updateLegendaryFx(dt, state);
+  }
+
+  /** "ตำราตำนาน" LEGENDARY weapon fx (endgame v1.2/v1.3, render wave):
+   * continuous, not event-driven — same convention as `updateGearFx()`,
+   * called from within it (right after the ordinary aura/sparkle pass) since
+   * it reuses the SAME `getWeaponAnchorPos()` per-hero read. Per hero slot,
+   * activates the per-class idle ambient signature + (while an attack swing
+   * is actively playing) samples the attack-swing trail, when that hero has a
+   * legendary weapon equipped, else eases the slot's ambient signature back
+   * to invisible and stops sampling the trail (existing trail points still
+   * finish decaying on their own real-time clock). */
+  private updateLegendaryFx(dt: number, state: GameState): void {
+    state.heroes.forEach((h, slot) => {
+      const view = h.dead ? null : this.lookupHeroView(h.id);
+      const legendary = !!view && isLegendaryTemplate(h.equipped.weapon);
+      const active = legendary && getWeaponAnchorPos(view!, this.weaponAnchorScratch);
+      this.legendaryFx.setSlot(
+        slot,
+        active,
+        active ? h.cls : null,
+        this.weaponAnchorScratch.x,
+        this.weaponAnchorScratch.y,
+        active && isHeroAttackSwinging(view!),
+      );
+    });
+    this.legendaryFx.update(dt);
   }
 
   /** HOF seasonal rewards (docs/hof-rewards-design.md §3 item 2, render wave):
@@ -2114,6 +2213,148 @@ export class FxController {
       fontSize: 16,
       duration: EVOLVE_TEXT_DURATION,
       rise: EVOLVE_TEXT_RISE,
+    });
+  }
+
+  /** "ตำราตำนาน" secret-quest page find (`tomePageFound`) — a small mystical
+   * page-flutter at the solo hero's own position: a gentle downward-drifting
+   * particle burst (positive gravity, unlike every other "rising energy" beat
+   * in this file — reads as a fluttering paper fragment settling, not power
+   * surging up) + a soft violet ring pulse + a "page/total" readout. Deliberately
+   * the SMALLEST of the three tome beats (see the knobs block's doc comment). */
+  private onTomePageFound(
+    ev: Extract<GameEvent, { type: "tomePageFound" }>,
+    state: GameState,
+  ): void {
+    const hero = state.heroes[0];
+    if (!hero) return;
+    const x = hero.x;
+    const y = HERO_TOP_Y;
+    this.rings.spawn({
+      x,
+      y,
+      r0: TOME_PAGE_RING_R0,
+      r1: TOME_PAGE_RING_R1,
+      duration: TOME_PAGE_RING_DURATION,
+      width: 2,
+      color: PALETTE.legendaryViolet,
+    });
+    burst(this.particles, x, y, TOME_PAGE_PARTICLE_COUNT, PALETTE.legendaryGold, {
+      speed: TOME_PAGE_PARTICLE_SPEED,
+      life: TOME_PAGE_PARTICLE_LIFE,
+      radius: 2,
+      gravity: 45, // a fluttering page settling down, not rising energy
+      drag: 0.5,
+    });
+    this.eventText.spawn({
+      x,
+      y: y - 12,
+      label: `${ev.page}/${ev.pagesTotal}`,
+      color: PALETTE.legendaryGold,
+      fontSize: 13,
+      duration: TOME_PAGE_TEXT_DURATION,
+      rise: TOME_PAGE_TEXT_RISE,
+    });
+  }
+
+  /** "ตำราตำนาน" the 3rd page landing (`tomeAssembled`) — the craft menu
+   * unlocks PERMANENTLY, so this is the biggest of the three tome beats
+   * (mirrors `onEvolve()`'s "big goal-ladder moment" structure: a light
+   * pillar + a starburst + a two-tone gold/violet ring + a two-tone particle
+   * spread + a brief arena flash), at the solo hero's own position. No text
+   * label (canvas `Text` here stays numeric/ASCII per the module's existing
+   * convention — see `onLevelUp()`'s doc comment on locale-invariant labels;
+   * skipping one entirely is simplest and the reveal is already plenty loud). */
+  private onTomeAssembled(state: GameState): void {
+    const hero = state.heroes[0];
+    if (!hero) return;
+    const x = hero.x;
+    const y = HERO_TOP_Y;
+    const topY = y - TOME_ASSEMBLED_PILLAR_HEAD_MARGIN;
+    this.lightPillars.spawn({
+      x,
+      topY,
+      height: GROUND_Y - topY,
+      color: PALETTE.legendaryViolet,
+      duration: TOME_ASSEMBLED_PILLAR_DURATION,
+      width: TOME_ASSEMBLED_PILLAR_WIDTH,
+    });
+    this.levelUpBursts.spawn({
+      x,
+      y,
+      color: PALETTE.legendaryGold,
+      duration: TOME_ASSEMBLED_BURST_DURATION,
+    });
+    this.rings.spawn({
+      x,
+      y,
+      r0: TOME_ASSEMBLED_RING_R0,
+      r1: TOME_ASSEMBLED_RING_R1,
+      duration: TOME_ASSEMBLED_RING_DURATION,
+      width: 4,
+      color: PALETTE.legendaryViolet,
+    });
+    burst(this.particles, x, y, TOME_ASSEMBLED_PARTICLE_COUNT_GOLD, PALETTE.legendaryGold, {
+      speed: TOME_ASSEMBLED_PARTICLE_SPEED,
+      life: TOME_ASSEMBLED_PARTICLE_LIFE,
+      radius: 3,
+      gravity: -30, // rising arcane energy — same read as evolve's own burst
+      drag: 0.3,
+    });
+    burst(this.particles, x, y, TOME_ASSEMBLED_PARTICLE_COUNT_VIOLET, PALETTE.legendaryViolet, {
+      speed: TOME_ASSEMBLED_PARTICLE_SPEED * 0.8,
+      life: TOME_ASSEMBLED_PARTICLE_LIFE,
+      radius: 2.5,
+      gravity: -30,
+      drag: 0.3,
+    });
+    // Brief, subtle full-arena flash — README's "~0.2-0.3 peak alpha, never
+    // strobing" rule holds even for this bigger moment.
+    this.flash.trigger(PALETTE.legendaryViolet, TOME_ASSEMBLED_FLASH_ALPHA);
+  }
+
+  /** "ตำราตำนาน" craft request (`legendaryCraftRequested`) — a forge-flash
+   * flourish at the crafting class's own hero (falls back to the solo hero if
+   * that class isn't in the current roster — e.g. a cohort where only a
+   * teammate plays the crafted class). The actual mint lands via the SERVER
+   * (this event only means "the engine validated + consumed the recipe"), so
+   * this stays a punchy but not permanent-state-flip-sized beat: a bright
+   * gold ring + a softer violet echo ring + an upward gold-core shower + a
+   * brief flash, sitting between `onTomePageFound`'s small flutter and
+   * `onTomeAssembled`'s full reveal. */
+  private onLegendaryCraftRequested(
+    ev: Extract<GameEvent, { type: "legendaryCraftRequested" }>,
+    state: GameState,
+  ): void {
+    const hero = state.heroes.find((h) => h.cls === ev.cls) ?? state.heroes[0];
+    if (!hero) return;
+    const x = hero.x;
+    const y = HERO_TOP_Y;
+    this.flash.trigger(PALETTE.legendaryGold, LEGENDARY_CRAFT_FLASH_ALPHA);
+    this.rings.spawn({
+      x,
+      y,
+      r0: LEGENDARY_CRAFT_RING_R0,
+      r1: LEGENDARY_CRAFT_RING_R1,
+      duration: LEGENDARY_CRAFT_RING_DURATION,
+      width: 5,
+      color: PALETTE.legendaryGold,
+    });
+    this.rings.spawn({
+      x,
+      y,
+      r0: LEGENDARY_CRAFT_RING_R0 * 0.6,
+      r1: LEGENDARY_CRAFT_RING2_R1,
+      duration: LEGENDARY_CRAFT_RING2_DURATION,
+      width: 3,
+      color: PALETTE.legendaryViolet,
+    });
+    burst(this.particles, x, y, LEGENDARY_CRAFT_PARTICLE_COUNT, PALETTE.legendaryGoldCore, {
+      speed: LEGENDARY_CRAFT_PARTICLE_SPEED,
+      life: LEGENDARY_CRAFT_PARTICLE_LIFE,
+      radius: 3,
+      gravity: -20,
+      drag: 0.25,
     });
   }
 
