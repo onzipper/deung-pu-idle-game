@@ -334,6 +334,92 @@ describe("CohortTurnEngine perSlotLag() (Wave 3 network HUD)", () => {
   });
 });
 
+// ── (12) FIX 5: hidden-tab lane-keepalive (issueOnly) + resume backlog burst ─────────
+
+describe("CohortTurnEngine hidden-tab keepalive + resume burst (FIX 5)", () => {
+  it("issueOnly emits my lanes and advances issueTurn WITHOUT moving the execute cursor", () => {
+    const rec = makeRecorder(idle);
+    const eng = new CohortTurnEngine(2, 0, 0);
+    eng.issueOnly(350, rec.io); // 3 issue boundaries (300ms) + 50ms remainder
+    expect(rec.sent.length).toBe(3); // issued my lane 3x
+    expect(rec.subSteps.length).toBe(0); // NEVER executes a sub-step
+    expect(eng.turn).toBe(0); // execute cursor stays frozen
+    // Strictly increasing executeTurns (issue cursor advanced), scheduled INPUT_DELAY ahead.
+    expect(rec.sent[0].executeTurn).toBe(INPUT_DELAY_TURNS);
+    for (let i = 1; i < rec.sent.length; i++) {
+      expect(rec.sent[i].executeTurn).toBe(rec.sent[i - 1].executeTurn + 1);
+    }
+    expect(rec.sent.every((m) => m.slot === 0)).toBe(true);
+  });
+
+  it("a hidden client (issue-only) then bursts to LANE-PARITY with a never-hidden peer", () => {
+    // engA "hides" partway: it stops ticking (no execute) and only issue-onlys from wall
+    // clock, while engB keeps ticking normally and consuming engA's issued lanes. On resume
+    // engA burst-executes the buffered backlog. Both must have run the IDENTICAL assembled
+    // lane sequence (the determinism "hash") and engA must catch up substantially.
+    const scriptA = (n: number): FrameInput => ({ moveTo: { x: 100 + n } });
+    const scriptB = (n: number): FrameInput => ({ moveTo: { x: 900 + n } });
+    const recA = makeRecorder(scriptA, (m) => engB.deliver(m));
+    const recB = makeRecorder(scriptB, (m) => engA.deliver(m));
+    const engA = new CohortTurnEngine(2, 0, 0);
+    const engB = new CohortTurnEngine(2, 1, 0);
+
+    let now = 0;
+    // Phase 1: both tick normally for ~500ms.
+    for (let t = 0; t < 30; t++) {
+      now += SUB_STEP_MS;
+      engA.tick(SUB_STEP_MS, now, recA.io);
+      engB.tick(SUB_STEP_MS, now, recB.io);
+    }
+    const pausedTurn = engA.turn;
+    expect(pausedTurn).toBeGreaterThan(0);
+
+    // Phase 2: engA HIDDEN for ~5s of wall clock — issue-only (no execute); engB ticks on
+    // and consumes engA's issued idle lanes (so engB NEVER stalls waiting on the hidden peer).
+    for (let t = 0; t < 300; t++) {
+      now += SUB_STEP_MS;
+      engA.issueOnly(SUB_STEP_MS, recA.io);
+      engB.tick(SUB_STEP_MS, now, recB.io);
+    }
+    expect(engA.turn).toBe(pausedTurn); // execute cursor never moved while hidden
+    expect(engB.turn).toBeGreaterThan(pausedTurn + 20); // engB kept running the whole time
+
+    // Phase 3: engA RESUMES — budgeted burst until caught up (no wall-clock budget in the
+    // test; just loop batches until convergence).
+    let guard = 0;
+    for (;;) {
+      const r = engA.burstExecute(recA.io, 256, now);
+      if (r.caughtUp) break;
+      if (++guard > 10_000) throw new Error("burst did not converge");
+    }
+
+    // engA drained its backlog and caught up substantially past where it paused.
+    expect(engA.turn).toBeGreaterThan(pausedTurn + 20);
+    // THE POINT: byte-identical assembled lanes in identical order on BOTH clients — the
+    // hidden client's local execute lag is invisible to determinism.
+    const n = Math.min(recA.subSteps.length, recB.subSteps.length);
+    expect(n).toBeGreaterThan(0);
+    expect(recA.subSteps.slice(0, n)).toEqual(recB.subSteps.slice(0, n));
+  });
+
+  it("burstExecute stops (caughtUp) at a genuinely-missing peer lane instead of idle-filling", () => {
+    const rec = makeRecorder(idle);
+    const eng = new CohortTurnEngine(2, 0, 0); // slot 1 never delivers
+    // Issue a big backlog of MY lanes while "hidden" (execute cursor stays at 0).
+    eng.issueOnly(3_000, rec.io);
+    expect(eng.turn).toBe(0);
+    // Burst: the pre-seeded idle turns (0..INPUT_DELAY-1) are complete, but turn
+    // INPUT_DELAY's slot-1 lane never arrived -> the burst stops (caughtUp) at or before
+    // that turn and NEVER crosses it (never fabricates slot 1's real input).
+    const r = eng.burstExecute(rec.io, 1_000, 0);
+    expect(r.caughtUp).toBe(true);
+    expect(eng.turn).toBeLessThanOrEqual(INPUT_DELAY_TURNS); // never crossed the missing lane
+    // Every executed sub-step ran a length-2 vector (no lane starvation crash) and slot 1's
+    // real input was never fabricated (the burst halted before any turn needed it).
+    expect(rec.subSteps.length % SUB_STEPS_PER_TURN).toBe(0);
+  });
+});
+
 describe("CohortTurnEngine shadowed-slot auto-fill (fix A.1)", () => {
   it("a never-sending index stalls both peers until shadowed, then both advance with {} auto-fill", () => {
     // Distinct scripts per live slot so any lane mixing would show; slot 2 has NO engine

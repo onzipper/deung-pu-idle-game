@@ -72,7 +72,14 @@ const MAX_SLOTS = 6; // owner raised the party cap 3 -> 6 (2026-07-08)
 // Tunables (env-overridable; createRelay() options win for tests).
 const DEFAULTS = {
   graceMs: intEnv("PARTY_RELAY_GRACE_MS", 5000), // dead socket -> shadow after this
-  heartbeatMs: intEnv("PARTY_RELAY_HEARTBEAT_MS", 15000), // ws ping cadence
+  // ws ping cadence. Lowered 15000 -> 5000 (FIX 5, 2026-07-09): the SILENT-DEATH path (a
+  // mobile fold / OS freeze that suspends the page before a clean close frame flushes)
+  // leaves a slot "live" until the heartbeat misses a pong. Detection is worst-case
+  // ~2x heartbeat (one interval to send the ping, the next to notice no pong) + graceMs,
+  // so 15000 gave a ~35s whole-cohort freeze; 5000 bounds it to ~10-12s+grace. The clean
+  // close-1000 path (visibilitychange/pagehide teardown) still shadows instantly and is
+  // unaffected. Env-overridable; createRelay() options still win for tests.
+  heartbeatMs: intEnv("PARTY_RELAY_HEARTBEAT_MS", 5000),
   maxRooms: intEnv("PARTY_RELAY_MAX_ROOMS", 500),
   maxMsgBytes: intEnv("PARTY_RELAY_MAX_MSG_BYTES", 8192), // ~8KB per frame
   maxMsgPerSec: intEnv("PARTY_RELAY_MAX_MSG_PER_SEC", 40), // per-socket flood kill
