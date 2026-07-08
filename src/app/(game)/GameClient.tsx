@@ -158,6 +158,7 @@ import {
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
+import { buildCohortSocialBadges } from "./cohortBadges";
 import {
   desiredHeroConfig,
   dropAssignedIndex,
@@ -895,44 +896,34 @@ export function GameClient() {
     /** HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) — the
      * `heroId -> {title, champion}` map `GameRenderer.setHeroSocialBadges` wants
      * (nameplate aura + chosen-title seam, mirrors `currentHeroDisplayNames`'
-     * shape/doc). Cohort: resolved straight off the friends-poll `party` rows
-     * (already carry server-VALIDATED `title`/`champion` — see `ui/friends/types.ts`),
-     * matched to a cohort hero id the same way `currentHeroDisplayNames` does
-     * (peer via `cohortMemberIds`'s ticket slot, "me" is the one party member
-     * whose userId is NOT one of the resolved peers). Solo: just my own
-     * `mySocialBadge` (kept fresh by `refreshHofOnTownArrival`) on hero 0. */
+     * shape/doc). Solo: just my own `mySocialBadge` (kept fresh by
+     * `refreshHofOnTownArrival`) on hero 0. Cohort: delegates to the pure,
+     * headlessly-tested `buildCohortSocialBadges` (`cohortBadges.ts`) — MY OWN
+     * badge is always `mySocialBadge` keyed onto `heroes[myCohortIndex]` (never
+     * fished out of the party rows by elimination — see that module's doc for
+     * the live bug this replaced: an elimination heuristic silently
+     * mis-assigned/blanked titles the moment the party held any member outside
+     * the CURRENT same-zone cohort), peers resolved via `cohortMemberIds`'s
+     * ticket slot -> `lastCohortSlots`, the exact same keying
+     * `currentHeroDisplayNames` uses. */
     function currentHeroSocialBadges(): Map<string, { title: string | null; champion: boolean }> {
-      const badges = new Map<string, { title: string | null; champion: boolean }>();
-      if (cohortActive) {
-        const party = useGameStore.getState().party;
-        if (!party) return badges;
-        const peerUserIds = new Set(cohortMemberIds.values());
-        for (const m of party.members) {
-          let heroId: number | undefined;
-          if (!peerUserIds.has(m.userId)) {
-            // The one party member who is NOT a resolved peer is me.
-            heroId = state.heroes[myCohortIndex]?.id;
-          } else {
-            let ticketSlot: number | undefined;
-            for (const [slot, uid] of cohortMemberIds) {
-              if (uid === m.userId) {
-                ticketSlot = slot;
-                break;
-              }
-            }
-            if (ticketSlot === undefined) continue;
-            const idx = lastCohortSlots.indexOf(ticketSlot);
-            heroId = idx >= 0 ? state.heroes[idx]?.id : undefined;
-          }
-          if (heroId === undefined) continue;
-          badges.set(String(heroId), { title: titleLabel(m.title, tHofRef.current), champion: m.champion });
-        }
-      } else {
-        const mine = useGameStore.getState().mySocialBadge;
+      const mine = useGameStore.getState().mySocialBadge;
+      if (!cohortActive) {
+        const badges = new Map<string, { title: string | null; champion: boolean }>();
         const hero = state.heroes[0];
         if (mine && hero) badges.set(String(hero.id), mine);
+        return badges;
       }
-      return badges;
+      const party = useGameStore.getState().party;
+      return buildCohortSocialBadges(
+        state.heroes,
+        myCohortIndex,
+        mine,
+        cohortMemberIds,
+        lastCohortSlots,
+        party?.members ?? [],
+        (titleId) => titleLabel(titleId, tHofRef.current),
+      );
     }
 
     function pushHeroSocialBadges(): void {
