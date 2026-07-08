@@ -36,6 +36,9 @@ const { mockPrisma } = vi.hoisted(() => ({
     partyMember: { findUnique: vi.fn() },
     party: { findUnique: vi.fn() },
     partyInvite: { findMany: vi.fn() },
+    // HOF seasonal titles — getFriendsPanel folds title/aura in via titlesForCharacters().
+    hofSeason: { findFirst: vi.fn() },
+    hofAward: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));

@@ -24,6 +24,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { loadPartyState } from "@/server/party";
+import { titlesForCharacters, type CharTitleInfo } from "@/server/hofSeason";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,16 @@ export interface CurrentCharacter {
   level: number;
 }
 
+/** HOF seasonal title/aura for the shown character — rides THIS poll (no new poll) so
+ *  the game client can render OTHER players' chosen title + champion aura. `title` is
+ *  the player's chosen display title id, but ONLY when they actually hold it this
+ *  season (server-validated); `champion` = holds a gold-aura title (rank-1 of
+ *  level/power/gold). See src/server/hofSeason.ts `titlesForCharacters`. */
+export interface PresenceTitle {
+  title: string | null;
+  champion: boolean;
+}
+
 export interface FriendView {
   userId: string;
   displayName: string | null;
@@ -150,6 +161,10 @@ export interface FriendView {
   currentCharacter: CurrentCharacter | null;
   lastZone: string | null;
   lastSeenAt: string | null;
+  /** Chosen display title id (validated: held this season), or null. */
+  title: string | null;
+  /** Champion aura (holds rank-1 of level/power/gold this season). */
+  champion: boolean;
 }
 
 export interface IncomingRequestView {
@@ -175,6 +190,10 @@ export interface PartyMemberView {
   online: boolean;
   currentCharacter: CurrentCharacter | null;
   lastZone: string | null;
+  /** Chosen display title id (validated: held this season), or null. */
+  title: string | null;
+  /** Champion aura (holds rank-1 of level/power/gold this season). */
+  champion: boolean;
 }
 
 export interface PartyView {
@@ -225,12 +244,23 @@ export async function areFriends(a: string, b: string): Promise<boolean> {
 // ── Character presence helper ────────────────────────────────────────────────
 
 interface CharRow {
+  id?: string;
   userId: string;
   name: string;
   baseClass: string;
   level: number;
   lastZone: string | null;
+  uiConfig?: unknown;
   save: { lastSeen: Date } | null;
+}
+
+/** Read a character's chosen-display-title from its uiConfig JSON (raw). */
+function chosenTitleOf(uiConfig: unknown): string | null {
+  if (uiConfig && typeof uiConfig === "object" && !Array.isArray(uiConfig)) {
+    const v = (uiConfig as Record<string, unknown>).displayTitle;
+    if (typeof v === "string") return v;
+  }
+  return null;
 }
 
 /** The most-recently-saved character in a group (the one being played), or null. */
@@ -489,11 +519,13 @@ export async function getFriendsPanel(
       ? prisma.character.findMany({
           where: { userId: { in: otherIds }, deletedAt: null },
           select: {
+            id: true,
             userId: true,
             name: true,
             baseClass: true,
             level: true,
             lastZone: true,
+            uiConfig: true,
             save: { select: { lastSeen: true } },
           },
         })
@@ -516,12 +548,37 @@ export async function getFriendsPanel(
     return mr?.char.name ?? null;
   };
 
+  // HOF seasonal titles for the SHOWN character of each other user — folded into THIS
+  // poll (no new poll) so the client can render other players' title + champion aura.
+  // Best-effort: a HOF lookup failure must never break the friends/party poll.
+  const shownCharIds = otherIds
+    .map((uid) => mostRecent(charsByUser.get(uid) ?? [])?.char.id)
+    .filter((id): id is string => typeof id === "string");
+  let titleMap = new Map<string, CharTitleInfo>();
+  try {
+    titleMap = await titlesForCharacters(shownCharIds);
+  } catch (err) {
+    console.warn("[friends] HOF title lookup failed (non-fatal):", err);
+  }
+  /** The chosen (validated) title + aura for a user's most-recent character. */
+  const presenceTitleFor = (uid: string): { title: string | null; champion: boolean } => {
+    const mr = mostRecent(charsByUser.get(uid) ?? []);
+    const cid = mr?.char.id;
+    const info = cid ? titleMap.get(cid) : undefined;
+    if (!info) return { title: null, champion: false };
+    // Chosen display title only shows when the character actually holds it.
+    const chosen = chosenTitleOf(mr?.char.uiConfig);
+    const title = chosen && info.titleIds.includes(chosen) ? chosen : null;
+    return { title, champion: info.champion };
+  };
+
   const nowMs = now.getTime();
   const friends: FriendView[] = friendIds.map((fid) => {
     const u = userMap.get(fid);
     const mr = mostRecent(charsByUser.get(fid) ?? []);
     const lastSeenMs = mr?.lastSeenMs ?? 0;
     const online = lastSeenMs > 0 && nowMs - lastSeenMs < ONLINE_WINDOW_MS;
+    const pt = presenceTitleFor(fid);
     return {
       userId: fid,
       displayName: displayNameFor(fid),
@@ -532,6 +589,8 @@ export async function getFriendsPanel(
         : null,
       lastZone: mr?.char.lastZone ?? null,
       lastSeenAt: lastSeenMs > 0 ? new Date(lastSeenMs).toISOString() : null,
+      title: pt.title,
+      champion: pt.champion,
     };
   });
 
@@ -554,6 +613,7 @@ export async function getFriendsPanel(
   const memberView = (uid: string): PartyMemberView => {
     const mr = mostRecent(charsByUser.get(uid) ?? []);
     const lastSeenMs = mr?.lastSeenMs ?? 0;
+    const pt = presenceTitleFor(uid);
     return {
       userId: uid,
       displayName: displayNameFor(uid),
@@ -562,6 +622,8 @@ export async function getFriendsPanel(
         ? { name: mr.char.name, class: mr.char.baseClass, level: mr.char.level }
         : null,
       lastZone: mr?.char.lastZone ?? null,
+      title: pt.title,
+      champion: pt.champion,
     };
   };
 

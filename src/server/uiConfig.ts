@@ -57,6 +57,12 @@ export const uiConfigSchema = z
     autoSellEpic: autoSellAction,
     autoSellKeepBetterStat: z.boolean(),
     autoEquip: z.boolean(),
+    // HOF seasonal rewards: the ONE chosen display title id (`${board}.${rank}`, e.g.
+    // "level.1") the player shows on nameplates/HOF/party. Structurally validated here
+    // (a short string or null to clear); the AUTHORITATIVE "you actually hold this
+    // title" check lives in `setDisplayTitle` (src/server/hofSeason.ts), and every
+    // OTHER-player read derives titles from HofAward, never from this cosmetic field.
+    displayTitle: z.string().min(1).max(16).nullable(),
   })
   .partial()
   .strict();
