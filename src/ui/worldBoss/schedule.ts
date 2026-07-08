@@ -28,16 +28,31 @@ export function formatCountdown(seconds: number): string {
  * matches `location`. `secondsLeft` is a whole-second ceiling (never 0 while the
  * phase is genuinely pre/active), which also gives the store push its ~1Hz cadence
  * for free (see `sameWorldBossStatus`'s doc).
+ *
+ * `defeated`/`myUnclaimed` (FIX 2, 2026-07-09 live round): while `phase` is
+ * `"active"`, the SHARED server pool may already be dead even though the window's
+ * 15-minute clock is still running (`GameClient.tsx` latches `defeated` from either
+ * the local `state.worldBoss.defeated` witness OR an all-clients poll — see its
+ * doc). A defeated window with nothing left for ME to collect (`!myUnclaimed`) has
+ * nothing worth telling the player — the banner goes back to `"idle"` rather than
+ * lingering on a stale countdown. A defeated window I still have an unclaimed
+ * reward for shows the celebratory `"defeated"` state instead of `"active"`/
+ * `"activeHere"` (this overrides "found it!" — the fight is already over).
  */
 export function deriveWorldBossStatus(
   phase: WorldBossPhase,
   location: { mapId: string; zoneIdx: number },
+  defeated: boolean,
+  myUnclaimed: boolean,
 ): WorldBossStatus {
   if (phase.phase === "idle") return { kind: "idle" };
   if (phase.phase === "pre") {
     return { kind: "pre", secondsLeft: Math.ceil(phase.msToSpawn / 1000) };
   }
   const secondsLeft = Math.ceil(phase.msRemaining / 1000);
+  if (defeated) {
+    return myUnclaimed ? { kind: "defeated", secondsLeft } : { kind: "idle" };
+  }
   const loc = worldBossLocationFor(phase.windowId);
   const here = loc !== null && loc.mapId === location.mapId && loc.zoneIdx === location.zoneIdx;
   return here ? { kind: "activeHere", secondsLeft } : { kind: "active", secondsLeft };
@@ -53,8 +68,9 @@ export function deriveWorldBossStatus(
 export function sameWorldBossStatus(a: WorldBossStatus, b: WorldBossStatus): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "idle") return true;
-  // `b` shares `a.kind` here (both are one of the three non-idle variants, which
-  // all carry `secondsLeft`), so this cast is safe.
+  // `b` shares `a.kind` here (both are one of the four non-idle variants — pre/
+  // active/activeHere/defeated — which all carry `secondsLeft`), so this cast is
+  // safe.
   return a.secondsLeft === (b as { secondsLeft: number }).secondsLeft;
 }
 

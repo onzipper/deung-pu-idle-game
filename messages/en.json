@@ -1540,7 +1540,8 @@
   "worldBoss": {
     "pre": "🌟 Sia Jong is about to invade Map 1! {time} left",
     "active": "🌟 Sia Jong has appeared somewhere in Map 1 — hunt him down! ({time})",
-    "activeHere": "🌟 Sia Jong is in THIS zone!!"
+    "activeHere": "🌟 Sia Jong is in THIS zone!!",
+    "defeated": "🌟 Sia Jong is down! Collecting your reward…"
   },
   "questBoard": {
     "title": "Quest Board",

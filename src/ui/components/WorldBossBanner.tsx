@@ -27,12 +27,16 @@ export function WorldBossBanner() {
       ? t("pre", { time })
       : status.kind === "activeHere"
         ? t("activeHere")
-        : t("active", { time });
+        : status.kind === "defeated"
+          ? t("defeated")
+          : t("active", { time });
 
   const tone =
     status.kind === "activeHere"
       ? "border-rose-400/50 bg-rose-400/15 text-rose-200 animate-buy-pulse"
-      : "border-ddp-gold/40 bg-ddp-gold/10 text-ddp-gold-bright";
+      : status.kind === "defeated"
+        ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-200"
+        : "border-ddp-gold/40 bg-ddp-gold/10 text-ddp-gold-bright";
 
   return (
     <div

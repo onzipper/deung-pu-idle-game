@@ -1087,12 +1087,18 @@ export interface CohortNetState {
  * ceil-second granularity naturally gates the store push without a separate
  * throttle timer). `"activeHere"` = the boss's chosen farm zone for this window IS
  * my current location ("found it!") — a distinct accent tone from plain `"active"`.
+ * `"defeated"` (FIX 2, 2026-07-09 live round) = the SHARED server hp pool for this
+ * window is already dead AND I still have an unclaimed reward for it — takes
+ * priority over `"active"`/`"activeHere"` (see `deriveWorldBossStatus`'s doc);
+ * once claimed (or if I never participated) the window quietly falls back to
+ * `"idle"` rather than lingering on a stale countdown.
  */
 export type WorldBossStatus =
   | { kind: "idle" }
   | { kind: "pre"; secondsLeft: number }
   | { kind: "active"; secondsLeft: number }
-  | { kind: "activeHere"; secondsLeft: number };
+  | { kind: "activeHere"; secondsLeft: number }
+  | { kind: "defeated"; secondsLeft: number };
 
 /** M7.9 server-wide high-refine announcement feed — session-memory (in-
  * process, NOT localStorage) dedup set. Module-level like `dropFeedSeq`
