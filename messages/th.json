@@ -942,7 +942,17 @@
     "sellButton": "ขาย",
     "sellAllCommonButton": "ขาย common ทั้งหมด",
     "confirmSell": "ยืนยันขาย?",
-    "refinePlus": "+{level}"
+    "refinePlus": "+{level}",
+    "doll": {
+      "emptyReal": "ว่าง",
+      "comingSoon": "เร็ว ๆ นี้...",
+      "teaserName": {
+        "helmet": "หมวก",
+        "gloves": "ถุงมือ",
+        "boots": "รองเท้า",
+        "amulet": "สร้อยคอ"
+      }
+    }
   },
   "dropFeed": {
     "gotItem": "ได้ไอเทม: {name}",
@@ -1239,6 +1249,12 @@
       "2026-07-09f": {
         "items": {
           "buffHubV2": "ป้ายบัฟบอกที่มาชัดเจน + จัดระเบียบใหม่"
+        }
+      },
+      "2026-07-09g": {
+        "items": {
+          "buffOverlay": "ป้ายบัฟย้ายเป็นไอคอนลอยมุมสนาม ไม่ดันจออีกต่อไป",
+          "paperDoll": "กระเป๋าใหม่: เห็นของที่สวมใส่ชัด ๆ + ช่องปริศนา..."
         }
       }
     }

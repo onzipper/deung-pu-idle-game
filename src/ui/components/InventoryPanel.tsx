@@ -52,6 +52,7 @@ import { compareInventoryItems, refinedStatsOf, sellAllCommonIds } from "@/ui/ge
 import { computeStatDelta } from "@/ui/gear/statDelta";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import { toInventoryItem, type InventoryItem } from "@/ui/gear/types";
+import { EquipmentDoll } from "@/ui/components/EquipmentDoll";
 import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import {
@@ -401,6 +402,13 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     setBusy(false);
   }
 
+  // Paper-doll real-slot tap: same destination as tapping the item's own
+  // grid tile (activeTab + selectedInstanceId) — no new state shape.
+  function handleSelectRealSlot(slot: GearSlot, instanceId: string | null): void {
+    setActiveTab(slot);
+    setSelectedInstanceId(instanceId);
+  }
+
   if (!heroCls) return null;
 
   return (
@@ -417,7 +425,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         onClick={onClose}
         className="absolute inset-0 bg-black/70"
       />
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
+      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) md:max-w-2xl">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
           <button
@@ -428,6 +436,19 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             ✕ {t("closeButton")}
           </button>
         </div>
+
+        {/* Paper-doll (approved audit design): pinned LEFT column on desktop,
+            pinned horizontal strip above the tabs on mobile — outside the
+            bag's own overflow-y-auto container, same tier as the capacity
+            bar/tabs below, so it never scrolls away. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:items-start md:gap-4">
+        <EquipmentDoll
+          inventory={inventory}
+          activeTab={activeTab}
+          onSelectReal={handleSelectRealSlot}
+          className="md:w-45"
+        />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
 
         {/* Capacity bar + materials readout (M7.6 ตีบวก) */}
         <div className="flex items-center gap-2">
@@ -543,6 +564,8 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
               onSell={handleSell}
             />
           )}
+        </div>
+        </div>
         </div>
       </div>
     </div>
