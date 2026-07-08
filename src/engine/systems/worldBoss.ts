@@ -235,6 +235,29 @@ export function updateWorldBossAI(state: GameState): void {
 }
 
 /**
+ * Tick ONLY the world boss's lifetime countdown — NO movement / mechanics / aggro. Called
+ * from `step()`'s TRAVEL early-return (the transit branch skips `updateWorldBossAI`, which is
+ * battle-only). The hourly boss's 15-min window is a WALL-CLOCK lifetime, so it must keep
+ * counting down while the local player walks between zones: otherwise a solo hero's death →
+ * auto-return round-trip (map1 hosts the town, so the return is a same-map transit) would
+ * FREEZE the despawn clock and keep the boss alive indefinitely, well past its hour window.
+ * Combat AI stays PAUSED here (the hero is off the field mid-transit) — only the clock ticks,
+ * and the boss despawns at 0 exactly like `updateWorldBossAI`.
+ *
+ * The zone-LEAVE despawn is deliberately NOT applied here: `state.location` still holds the
+ * DEPARTURE zone until `arriveAtZone` (a transit updates it only on arrival), so a same-window
+ * transit keeps the boss; the genuine zone-change despawn fires on the first post-arrival
+ * BATTLE step, when `updateWorldBossAI` sees the new location. Dormant (no boss) → a no-op, so
+ * the solo canonical sim stays byte-identical.
+ */
+export function tickWorldBossLifetime(state: GameState): void {
+  const wb = state.worldBoss;
+  if (!wb || !wb.active || !wb.entity) return;
+  wb.countdown -= FIXED_DT;
+  if (wb.countdown <= 0) retireWorldBoss(state, wb, false);
+}
+
+/**
  * Resolve a world-boss death (call AFTER hero damage has landed this step). On hp ≤ 0
  * it emits `worldBossDefeated` and retires the entity — NO xp/gold, NO kill-quota /
  * quest credit (rewards are SERVER-claimed off the event). A no-op otherwise.

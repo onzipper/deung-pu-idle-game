@@ -227,7 +227,7 @@ describe("M8 daily quests — claim + roster replace", () => {
 describe("M8 SAVE v17 migration", () => {
   it("bumps to 17, backfills warpScroll=0 + empty dailies for a pre-v17 save", () => {
     const m = migrate({ version: 16, stage: 3, gold: 100, hero: { cls: "mage", level: 20, tier: 1 } });
-    expect(m.version).toBe(17);
+    expect(m.version).toBe(SAVE_VERSION);
     expect(m.consumables.warpScroll).toBe(0);
     expect(m.hero.dailies).toEqual({ serverDay: 0, quests: [] });
   });

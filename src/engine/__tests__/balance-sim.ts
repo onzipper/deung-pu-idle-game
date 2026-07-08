@@ -1328,11 +1328,18 @@ const ISO_STATS: Record<HeroClass, { str: number; dex: number; int: number; vit:
   swordsman: { str: 188, dex: 4, int: 48, vit: 51 },
   archer: { str: 4, dex: 224, int: 57, vit: 5 },
   mage: { str: 3, dex: 4, int: 210, vit: 72 },
+  // Ninja (SAVE v18): 3 DEX : 1 VIT draft ratio on ~270 points, on top of the ninja base.
+  ninja: { str: 5, dex: 210, int: 3, vit: 72 },
 };
+// NINJA gear (SAVE v18): PLACEHOLDER — reuses the swordsman melee templates so the sim
+// typechecks/runs; the real ninja DAGGER templates (classReq "ninja") land in the GEAR wave
+// (2) and the ninja SIM wave (5) swaps them in. Ninja is NOT in the default CLASSES, so the
+// canonical sim never reads these entries → default runs stay byte-identical.
 const ISO_GEAR: Record<HeroClass, { weapon: string; armor: string }> = {
   swordsman: { weapon: "w_sword_t10_apocalypse", armor: "a_infernal_t10_aegis" },
   archer: { weapon: "w_bow_t10_apocalypse", armor: "a_infernal_t10_aegis" },
   mage: { weapon: "w_staff_t10_apocalypse", armor: "a_infernal_t10_aegis" },
+  ninja: { weapon: "w_sword_t10_apocalypse", armor: "a_infernal_t10_aegis" },
 };
 // Each frontier boss map: last-farm zoneIdx (just left of the boss room) + full-unlock counts.
 const ISO_BOSSES = [
@@ -1463,15 +1470,19 @@ const WB_LIFETIME_S = WORLD_BOSS.lifetimeMs / 1000;
 const WB_LEVEL = Math.round(Number(process.env.WB_LEVEL ?? 60));
 const WB_REFINE = Math.round(Number(process.env.WB_REFINE ?? 6));
 
+// Ninja gear entries are PLACEHOLDERS (sword templates) — see ISO_GEAR's note; the real
+// ninja daggers land in the GEAR wave (2) and the ninja SIM wave (5) swaps them in.
 const T8_WEAPON: Record<HeroClass, string> = {
   swordsman: "w_sword_t8_dune",
   archer: "w_bow_t8_dune",
   mage: "w_staff_t8_dune",
+  ninja: "w_sword_t8_dune",
 };
 const T8_ARMOR: Record<HeroClass, string> = {
   swordsman: "a_sword_t8_bulwark",
   archer: "a_archer_t8_stalker",
   mage: "a_mage_t8_seer",
+  ninja: "a_sword_t8_bulwark",
 };
 
 /** Class auto-allocate ratio (auto-alloc v2, docs/balance-m7): sword 4STR:1VIT,
@@ -1484,6 +1495,11 @@ function allocStats(cls: HeroClass, level: number): Stats {
     return { str: b.str + (pts - v), dex: b.dex, int: b.int, vit: b.vit + v };
   }
   if (cls === "archer") return { str: b.str, dex: b.dex + pts, int: b.int, vit: b.vit };
+  if (cls === "ninja") {
+    // Ninja DRAFT ratio (SAVE v18): 3 DEX : 1 VIT (docs/ninja-design.md §2).
+    const v = Math.round(pts / 4);
+    return { str: b.str, dex: b.dex + (pts - v), int: b.int, vit: b.vit + v };
+  }
   const v = Math.round(pts / 4);
   return { str: b.str, dex: b.dex, int: b.int + (pts - v), vit: b.vit + v };
 }
@@ -1499,10 +1515,11 @@ interface WbSpec {
 }
 
 const TIER_WEAPON: Record<number, Record<HeroClass, string>> = {
-  7: { swordsman: "w_sword_t7_frost", archer: "w_bow_t7_frost", mage: "w_staff_t7_frost" },
+  // Ninja entries are PLACEHOLDERS (sword templates) — see ISO_GEAR's note.
+  7: { swordsman: "w_sword_t7_frost", archer: "w_bow_t7_frost", mage: "w_staff_t7_frost", ninja: "w_sword_t7_frost" },
   8: T8_WEAPON,
-  9: { swordsman: "w_sword_t9_obsidian", archer: "w_bow_t9_obsidian", mage: "w_staff_t9_obsidian" },
-  10: { swordsman: "w_sword_t10_apocalypse", archer: "w_bow_t10_apocalypse", mage: "w_staff_t10_apocalypse" },
+  9: { swordsman: "w_sword_t9_obsidian", archer: "w_bow_t9_obsidian", mage: "w_staff_t9_obsidian", ninja: "w_sword_t9_obsidian" },
+  10: { swordsman: "w_sword_t10_apocalypse", archer: "w_bow_t10_apocalypse", mage: "w_staff_t10_apocalypse", ninja: "w_sword_t10_apocalypse" },
 };
 const TIER_ARMOR: Record<number, Record<HeroClass, string> | string> = {
   7: "a_frost_t7_mail",

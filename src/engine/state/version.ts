@@ -160,7 +160,16 @@ import type {
 //      quest roster + progress. A pre-v17 save backfills an EMPTY roster (serverDay 0, no
 //      quests — safe: nothing done today; the server feeds a fresh roster on boot). A v17
 //      save's roster is preserved (unknown catalog ids dropped, counters clamped).
-export const SAVE_VERSION = 17;
+// v17 -> v18 (NINJA — อาชีพพิเศษที่ 4, docs/ninja-design.md): the `hero.cls` DOMAIN WIDENS from
+// {swordsman,archer,mage} to add "ninja" (tier chain นินจา → จอมนินจา → ราชันเงา). This is a
+// PURE domain widening — NO brand-new save FIELD — exactly like the v14→v15 tier-3 widening,
+// so migrating a v17 save is byte-identical: a v17 save has cls ∈ the old 3, so `asClass`
+// preserves it and every derived shape (stats base, skills, quests, autoSlots) normalises
+// unchanged. A genuine v18 ninja save round-trips its cls (KNOWN_CLASSES now includes it, so
+// `asClass` no longer coerces it to swordsman). The ninja's skills/dash/quests are all DERIVED
+// from cls+tier+level (not persisted), so there is no migrate() data branch — only the
+// KNOWN_CLASSES widening + this stamp. Old saves load unchanged.
+export const SAVE_VERSION = 18;
 
 /** A per-hero progress entry from an unknown/older save (pre-v4 team shape). */
 type UnknownHeroProgress = { level?: number; xp?: number; tier?: number };
@@ -272,7 +281,7 @@ export interface UnknownSave {
   upgrades?: { atk?: number; speed?: number; hp?: number };
 }
 
-const KNOWN_CLASSES: readonly HeroClass[] = ["swordsman", "archer", "mage"];
+const KNOWN_CLASSES: readonly HeroClass[] = ["swordsman", "archer", "mage", "ninja"];
 
 function asClass(cls: string | undefined): HeroClass {
   return KNOWN_CLASSES.includes(cls as HeroClass) ? (cls as HeroClass) : "swordsman";
@@ -455,7 +464,7 @@ function numOrUndef(v: unknown): number | undefined {
  */
 function deriveSalt(save: UnknownSave): number {
   const cls = asClass(save.hero?.cls);
-  const clsHash = cls === "swordsman" ? 1 : cls === "archer" ? 2 : 3;
+  const clsHash = cls === "swordsman" ? 1 : cls === "archer" ? 2 : cls === "mage" ? 3 : 4;
   const mix =
     ((save.stage ?? 1) >>> 0) ^
     Math.imul((save.gold ?? 0) >>> 0, 0x9e3779b9) ^

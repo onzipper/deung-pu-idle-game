@@ -8,8 +8,15 @@
 
 import type { EquippedGear } from "@/engine/config/items";
 
-/** Player hero classes (POC: sword / archer / mage). */
-export type HeroClass = "swordsman" | "archer" | "mage";
+/**
+ * Player hero classes (POC: sword / archer / mage). The NINJA (นินจา, SAVE v18) is the
+ * 4th line — a short-range dual-dagger melee bruiser (DEX-primary) with a `dash` reposition
+ * primitive. Its tier chain: ninja → จอมนินจา (tier 2) → ราชันเงา (tier 3). Adding it is a
+ * pure DOMAIN WIDENING of the union (no new save field), like the v15 tier-3 widening —
+ * every `Record<HeroClass, …>` in the engine gains a ninja entry; existing classes are
+ * byte-identical (they never read the ninja key). See docs/ninja-design.md.
+ */
+export type HeroClass = "swordsman" | "archer" | "mage" | "ninja";
 
 /**
  * Base-stat axes (M5 "Base stats", 86d3jv7m3 — RO-flavoured but lean):

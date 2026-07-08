@@ -349,7 +349,17 @@ export function updateHeroes(state: GameState): void {
         h.cd = heroAtkSpeedOf(h);
         const dmg = heroAtkOf(h);
         if (t.attack === "melee") {
-          applyDamage(state, tgt, dmg, "attack");
+          // NINJA dagger DOUBLE-HIT (SAVE v18): `multiHit` swings per attack, each
+          // `multiHitMult` of the rolled atk. Absent/1 for the swordsman → the single
+          // full-damage strike (byte-identical to pre-v18). Each hit routes through
+          // applyDamage so a survivor retaliates + render sees a hit per swing. No RNG.
+          const hits = t.multiHit ?? 1;
+          if (hits > 1) {
+            const per = Math.round(dmg * (t.multiHitMult ?? 1));
+            for (let i = 0; i < hits; i++) applyDamage(state, tgt, per, "attack");
+          } else {
+            applyDamage(state, tgt, dmg, "attack");
+          }
         } else if (t.attack === "arrow") {
           // Basic-attack VOLLEY (86d3k2rgf): fire `archerVolleyCount` small arrows
           // at the SAME target. Damage is split as a float — per-arrow = dmg /

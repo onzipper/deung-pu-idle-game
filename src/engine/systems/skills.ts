@@ -27,7 +27,8 @@ import {
   CLASS_SKILLS,
   type SkillType,
 } from "@/engine/config";
-import { applyAoeDamage } from "@/engine/systems/damage";
+import { applyAoeDamage, applyDamage } from "@/engine/systems/damage";
+import { dashHeroTo } from "@/engine/systems/dash";
 import { heroAtkOf } from "@/engine/systems/stats";
 import {
   aliveHeroes,
@@ -282,6 +283,73 @@ function applySkillEffect(
         x: cx,
         y: CONFIG.skills.meteorSpawnY,
       });
+      return;
+    }
+    // ---- NINJA kinds (SAVE v18) — the `dash` reposition primitive + melee strikes ----
+    case "dash": {
+      // เงาพริบ: blink THROUGH the nearest in-range target (short hop, capped by
+      // `ninja.dashMaxReach`) and strike it once ×mult. The guard already ensured a target
+      // within `def.range`; nothing here draws from the RNG stream (dashHeroTo is pure).
+      const tgt = nearestWithin(targets, hero.x, def.range);
+      if (!tgt) return;
+      dashHeroTo(state, hero, tgt.x, CONFIG.ninja.dashMaxReach);
+      applyDamage(state, tgt, Math.round(heroAtkOf(hero) * def.mult), "skill");
+      return;
+    }
+    case "multistrike": {
+      // คมเงาคู่: a stationary flurry — `def.targets` rapid hits ×mult on the nearest in-range
+      // foe, then an r`def.radius` splash at `ninja.twinSplashFrac` to its NEIGHBOURS (the
+      // primary already ate the full combo). Each hit routes through applyDamage, so a tough
+      // survivor of the flurry/splash retaliates (M7.7 survivor-retaliation). Deterministic.
+      const tgt = nearestWithin(targets, hero.x, def.range);
+      if (!tgt) return;
+      const dmg = Math.round(heroAtkOf(hero) * def.mult);
+      for (let i = 0; i < def.targets; i++) applyDamage(state, tgt, dmg, "skill");
+      const splash = Math.round(dmg * CONFIG.ninja.twinSplashFrac);
+      for (const e of targets) {
+        if (e === tgt) continue;
+        if (Math.abs(e.x - tgt.x) < def.radius) applyDamage(state, e, splash, "skill");
+      }
+      return;
+    }
+    case "chaindash": {
+      // เงาสังหาร (tier-2 ultimate): a CHAIN of up to `def.targets` blinks. Each hop picks the
+      // nearest LIVE, not-yet-hit foe within `def.range` of the ninja's CURRENT x (id tie-break
+      // for determinism), blinks to it (UNBOUNDED reach — the field-wide chain) and strikes it
+      // ×mult. Stops when the chain length is reached or no reachable foe remains. NO RNG.
+      const dmg = Math.round(heroAtkOf(hero) * def.mult);
+      const hit = new Set<number>();
+      for (let n = 0; n < def.targets; n++) {
+        let next: CombatTarget | null = null;
+        let bd = Infinity;
+        for (const e of targets) {
+          if (e.hp <= 0 || hit.has(e.id)) continue;
+          const d = Math.abs(e.x - hero.x);
+          if (d > def.range) continue;
+          if (d < bd || (d === bd && next !== null && e.id < next.id)) {
+            bd = d;
+            next = e;
+          }
+        }
+        if (!next) break;
+        dashHeroTo(state, hero, next.x);
+        applyDamage(state, next, dmg, "skill");
+        hit.add(next.id);
+      }
+      return;
+    }
+    case "shadowstorm": {
+      // พันเงานิรันดร์ (tier-3 skill-4): the real body blinks to the enemy centroid, then shadow
+      // clones strike EVERY target on the field ×mult (field-wide — iterates ALL targets, not a
+      // radius). The จอสลัว + time-freeze spectacle rides the `skillCast` event in render (reuses
+      // skyDarken etc.) — the engine adds NO new event. Guard ensured ≥1 target in range. NO RNG.
+      const inRange = targets.filter((e) => Math.abs(e.x - hero.x) < def.range);
+      const cx = inRange.length
+        ? inRange.reduce((sum, e) => sum + e.x, 0) / inRange.length
+        : hero.x;
+      dashHeroTo(state, hero, cx);
+      const dmg = Math.round(heroAtkOf(hero) * def.mult);
+      for (const e of targets) applyDamage(state, e, dmg, "skill");
       return;
     }
   }

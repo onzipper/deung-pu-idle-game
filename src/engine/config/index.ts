@@ -845,6 +845,22 @@ export const CONFIG = {
     arrowRainRange: 760,
   },
 
+  // ---- ninja dash primitive + skill tunables (SAVE v18, docs/ninja-design.md §1/§3) ----
+  // The `dash` reposition (systems/dash.ts) is fully DETERMINISTIC — fixed offsets, NO RNG
+  // (the seeded stream stays wave-composition only) and NO wall-clock. Every ninja skill that
+  // repositions (เงาพริบ / เงาสังหาร / พันเงานิรันดร์) reads these knobs so the sim can sweep them.
+  ninja: {
+    // A dash lands this far past the target on the FAR side (blink "through" it), inside the
+    // dagger's short reach (70) so the follow-up strike connects. Sized under `range` 70.
+    dashLandGap: 18,
+    // Max hop distance for the single SHADOW-BLINK (เงาพริบ) — a short teleport, NOT a
+    // field-wide leap. The chain (เงาสังหาร) + ult (พันเงานิรันดร์) pass Infinity (unbounded)
+    // so they genuinely blink across the whole field; skill cast `range` gates reachability.
+    dashMaxReach: 300,
+    // TWIN FANG (คมเงาคู่) r80 splash: neighbours of the primary take this fraction of a hit.
+    twinSplashFrac: 0.5,
+  },
+
   // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
   // With the upgrade lines REMOVED (M5 Character Pivot), per-hero LEVEL is the
   // PRIMARY interim power axis (base-stat allocation is a later task). The solo
@@ -935,6 +951,9 @@ export const CONFIG = {
       swordsman: { str: 8, dex: 4, int: 3, vit: 6 },
       archer: { str: 4, dex: 8, int: 3, vit: 5 },
       mage: { str: 3, dex: 4, int: 8, vit: 4 },
+      // Ninja (SAVE v18, docs/ninja-design.md §2): DEX-highest (its damage + speed stat),
+      // low VIT (thin body). Total 20 — the same budget band as archer (20) / mage (19).
+      ninja: { str: 5, dex: 8, int: 3, vit: 4 },
     } satisfies Record<HeroClass, HeroStats>,
     // ---- auto-allocate v2 ratios (M7.7 "Auto-allocate v2") ----
     // Auto-allocate no longer DUMPS every point into the class primary (which left
@@ -979,6 +998,10 @@ export const CONFIG = {
       swordsman: { str: 4, vit: 1, int: 1 },
       archer: { dex: 4, int: 1 },
       mage: { int: 3, vit: 1 },
+      // Ninja DRAFT ratio (SAVE v18, docs/ninja-design.md §2): 3 DEX : 1 VIT — DEX is the
+      // damage + tempo primary, a VIT trickle floors the thin body's survivability. The
+      // ninja SIM wave (5) confirms/overrules this (auto-alloc v2 lesson: sim decides).
+      ninja: { dex: 3, vit: 1 },
     } as Record<HeroClass, Partial<Record<StatKey, number>>>,
   },
 
@@ -1478,6 +1501,15 @@ export interface HeroType {
   projSpeed: number;
   /** AoE radius for `aoe` attackers (0 otherwise). */
   aoe: number;
+  /**
+   * NINJA dagger DOUBLE-HIT (SAVE v18): a melee BASIC attack lands this many hits per
+   * swing (default/absent = 1, so the sword/existing melee path is byte-identical). Each
+   * hit deals `multiHitMult` × the rolled atk (`~0.55`), so the dagger trades the shortest
+   * reach in the game for a rapid two-strike combo. Deterministic (no RNG).
+   */
+  multiHit?: number;
+  /** Per-hit fraction of ATK for a `multiHit` basic attack (absent = 1). */
+  multiHitMult?: number;
 }
 
 export const HERO_TYPES: Record<HeroClass, HeroType> = {
@@ -1515,6 +1547,26 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     projSpeed: 360,
     aoe: 46,
   },
+  // NINJA (นินจา, SAVE v18) — DEX-primary short-range melee bruiser. FIRST-PASS draft
+  // numbers (docs/ninja-design.md §1/§8); the ninja SIM wave (5) finalizes them. Identity:
+  //   - `range` 70 = the SHORTEST reach in the game (sword 96) — trades reach for tempo.
+  //   - `atkSpeed` 0.45 = the FASTEST base cadence (sword 0.5 / archer 0.72 / mage 1.15).
+  //   - `multiHit` 2 × `multiHitMult` 0.55 = the dagger DOUBLE-HIT (2 swings ≈ 1.1× atk/attack)
+  //     → basic DPS a touch above the sword's, paying for its short reach + thinner body.
+  //   - `hpMult` 1.15 = squishier than the sword TANK (1.5), tougher than the mage (0.95).
+  // DEX drives both its ATK (PRIMARY_STAT) and the universal atk-speed factor (stats.ts).
+  ninja: {
+    offset: 30,
+    attack: "melee",
+    range: 70,
+    atkSpeed: 0.45,
+    dmgMult: 1.0,
+    hpMult: 1.15,
+    projSpeed: 0,
+    aoe: 0,
+    multiHit: 2,
+    multiHitMult: 0.55,
+  },
 };
 
 /**
@@ -1523,7 +1575,7 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
  * removed). Retained as the authoritative ordered class list — the server's
  * known-classes enum and the evolution cost index both key off it.
  */
-export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage"];
+export const SLOT_ORDER: readonly HeroClass[] = ["swordsman", "archer", "mage", "ninja"];
 
 /**
  * Each class's PRIMARY (damage-scaling) base stat, and the auto-allocate target
@@ -1534,6 +1586,9 @@ export const PRIMARY_STAT: Record<HeroClass, StatKey> = {
   swordsman: "str",
   archer: "dex",
   mage: "int",
+  // Ninja is a DEX melee class (SAVE v18): DEX drives its dagger ATK (like the archer) AND
+  // the universal atk-speed factor, so allocation funnels DEX for both damage + tempo.
+  ninja: "dex",
 };
 
 export interface EnemyType {
@@ -1604,7 +1659,29 @@ export const ENEMY_TYPES: Record<EnemyKind, EnemyType> = {
  *  - `bolt`   : a single high-damage HOMING arrow at the nearest target (nuke).
  *  - `buff`   : a self ATK buff for a duration (no damage; war-cry).
  */
-export type SkillKind = "nova" | "strike" | "meteor" | "rain" | "bolt" | "buff";
+// NINJA (SAVE v18) kinds reuse EXISTING combat mechanics + the `dash` reposition
+// primitive (systems/dash.ts) — NO new ProjectileKind (the dash is a hero move, not a
+// projectile; the render-crash footgun #6 only bites new ProjectileKind/render-mapped
+// unions, and render does NOT map over SkillKind). Deterministic (fixed offsets, no RNG):
+//  - `dash`        : blink THROUGH the nearest in-range target + one strike (เงาพริบ).
+//  - `multistrike` : stationary `targets` rapid hits on the nearest foe + an r`radius`
+//                    splash at `CONFIG.ninja.twinSplashFrac` (คมเงาคู่).
+//  - `chaindash`   : chain-dash up to `targets` distinct foes across the field, one strike
+//                    each (เงาสังหาร — the tier-2 signature ultimate).
+//  - `shadowstorm` : blink to the enemy centroid, then strike EVERY field target (พันเงา-
+//                    นิรันดร์ — the tier-3 skill-4; time-freeze spectacle is render/timeDirector's
+//                    job, keyed off the `skillCast` event, so the engine emits no new event).
+export type SkillKind =
+  | "nova"
+  | "strike"
+  | "meteor"
+  | "rain"
+  | "bolt"
+  | "buff"
+  | "dash"
+  | "multistrike"
+  | "chaindash"
+  | "shadowstorm";
 
 export interface SkillType {
   /** Unique, class-namespaced id (the key into `SKILLS`). */
@@ -1780,6 +1857,49 @@ const SKILL_LIST = [
     cost: 120, cd: 16, radius: 150, mult: 8.0, targets: 8, projSpeed: 360, range: 520,
     buffMult: 1, buffDuration: 0,
   },
+
+  // ---- ninja (นินจา, SAVE v18 — blink assassin) ----
+  // FIRST-PASS draft numbers (docs/ninja-design.md §3); the ninja SIM wave (5) tunes them
+  // under the shape the owner approved. Mana sits MID-SPECTRUM (pricier than the sword's flat
+  // pool, cheaper than the mage's) — the ninja should "feel" its mana per the pacing-governor
+  // rule. All DETERMINISTIC (fixed offsets, `dash` primitive; NO RNG, NO new ProjectileKind).
+  //
+  // Signature: SHADOW BLINK (เงาพริบ) — a `dash` THROUGH the nearest in-range target + one
+  // strike. cost/cd = 5.0/s ≤ baseRegen 7 so the flat pool sustains it (the M5 no-hard-stall
+  // signature guarantee), like the sword whirl / archer rain / mage meteor.
+  {
+    id: "ninja_dashstrike", cls: "ninja", tier: 1, unlockLevel: 1, kind: "dash",
+    cost: 20, cd: 4, radius: 0, mult: 1.8, targets: 0, projSpeed: 0, range: 260,
+    buffMult: 1, buffDuration: 0,
+  },
+  // TWIN FANG (คมเงาคู่, Lv6) — a stationary `targets`-hit flurry on the nearest foe + an
+  // r80 splash at `ninja.twinSplashFrac` (0.5) to its neighbours: single-target burst with
+  // a little cleave. Utility (kept distinct in role, NOT nuke-ified — like powershot/frost).
+  {
+    id: "ninja_twinfang", cls: "ninja", tier: 1, unlockLevel: 6, kind: "multistrike",
+    cost: 35, cd: 8, radius: 80, mult: 0.6, targets: 5, projSpeed: 0, range: 110,
+    buffMult: 1, buffDuration: 0,
+  },
+  // SHADOW MASSACRE (เงาสังหาร, tier-2 ULTIMATE) — the class SIGNATURE: a CHAIN of `targets`
+  // (8) dashes that blink the ninja to each nearest un-hit foe across the whole field, one
+  // strike each. cost 90 gates it (a flat-pool class), moderate cd (owner: ultimates aren't
+  // long-cd). `range` is the per-hop chain reach. Reuses the `dash` primitive — no projectile.
+  {
+    id: "ninja_massacre", cls: "ninja", tier: 2, unlockLevel: 15, kind: "chaindash",
+    cost: 90, cd: 20, radius: 0, mult: 1.4, targets: 8, projSpeed: 0, range: 320,
+    buffMult: 1, buffDuration: 0,
+  },
+  // ETERNAL SHADOWS (พันเงานิรันดร์, tier-3 skill-4) — the real body blinks to the enemy
+  // centroid, then shadow clones strike EVERY target on the field ×mult. Field-wide (ignores
+  // radius gating — iterates all targets). The จอสลัว + time-freeze spectacle is render/
+  // timeDirector's job, keyed off the `skillCast` event (reuses skyDarken etc.) — the engine
+  // emits NO new spectacle event. cost 170 (deep, tier-3-pool-fed) gates it; cd 45s. Learned
+  // at tier 3 + level 40 (auto-slot 4, tier-gated) → s1-15 has no ninja skill-4.
+  {
+    id: "ninja_eternal", cls: "ninja", tier: 3, unlockLevel: 40, kind: "shadowstorm",
+    cost: 170, cd: 45, radius: 500, mult: 2.2, targets: 0, projSpeed: 0, range: 900,
+    buffMult: 1, buffDuration: 0,
+  },
 ] as const satisfies readonly SkillType[];
 
 /** The skill catalog, keyed by id (the single source of truth for skill tuning). */
@@ -1792,6 +1912,7 @@ export const CLASS_SKILLS: Record<HeroClass, string[]> = {
   swordsman: SKILL_LIST.filter((s) => s.cls === "swordsman").map((s) => s.id),
   archer: SKILL_LIST.filter((s) => s.cls === "archer").map((s) => s.id),
   mage: SKILL_LIST.filter((s) => s.cls === "mage").map((s) => s.id),
+  ninja: SKILL_LIST.filter((s) => s.cls === "ninja").map((s) => s.id),
 };
 
 /** Each class's SIGNATURE skill id (slot-0 default; the HOF/combat-power skill). */
@@ -1799,6 +1920,7 @@ export const SIGNATURE_SKILL: Record<HeroClass, string> = {
   swordsman: "sword_whirl",
   archer: "archer_rain",
   mage: "mage_meteor",
+  ninja: "ninja_dashstrike",
 };
 
 /**
@@ -1810,4 +1932,5 @@ export const SKILL_TYPES: Record<HeroClass, SkillType> = {
   swordsman: SKILLS[SIGNATURE_SKILL.swordsman],
   archer: SKILLS[SIGNATURE_SKILL.archer],
   mage: SKILLS[SIGNATURE_SKILL.mage],
+  ninja: SKILLS[SIGNATURE_SKILL.ninja],
 };

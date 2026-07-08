@@ -54,6 +54,13 @@ export type GameEvent =
   | { type: "evolve"; id: number; cls: HeroClass; tier: number }
   | { type: "statAllocated"; id: number; stat: StatKey; amount: number }
   | { type: "skillCast"; heroClass: HeroClass; slot: number; skillId: string }
+  // NINJA `dash` reposition (SAVE v18, docs/ninja-design.md §1). Fires each time a ninja
+  // skill blinks the hero (เงาพริบ once, เงาสังหาร per chain hop, พันเงานิรันดร์ to the centroid):
+  // render draws the shadow-trail / afterimage from `fromX` to `toX`. `heroId` is the hero
+  // ENTITY id (render views key by entity id). One-way, deterministic (no RNG), NOT persisted.
+  // NB (footgun #6): this new event kind needs a render/audio entry in the ninja RENDER wave;
+  // unhandled it falls to the FxController/audio DEFAULT (a safe no-op), no crash.
+  | { type: "heroDashed"; heroId: number; fromX: number; toX: number }
   | { type: "projectileSpawn"; kind: ProjectileKind; x: number; y: number }
   | { type: "bossSlamTelegraph"; x: number; y: number }
   | { type: "bossSlamLand"; x: number; y: number }

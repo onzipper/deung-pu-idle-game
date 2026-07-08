@@ -42,6 +42,7 @@ import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import {
   applyWorldBossSpawnIntents,
   updateWorldBossAI,
+  tickWorldBossLifetime,
   resolveWorldBossDeath,
 } from "@/engine/systems/worldBoss";
 import { evolveHero } from "@/engine/systems/evolution";
@@ -482,6 +483,10 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     const arrived = updateTransit(state);
     if (arrived?.kind === "boss") startBossFight(state);
     if (arrived?.kind === "town" && state.botPending) onBotTownArrival(state);
+    // WORLD BOSS "เสี่ยจ๋อง": its 15-min lifetime is a wall-clock window, so the despawn clock
+    // keeps ticking WHILE the local player travels (combat AI stays paused) — a death/return
+    // round-trip must not freeze it alive past its hour. Dormant (no boss) → no-op.
+    tickWorldBossLifetime(state);
     state.time += FIXED_DT;
     state.rngState = rng.state();
     return state;
