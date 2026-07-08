@@ -163,6 +163,7 @@ function createScene(stage: LabStage, _frames: FrameSet): LabScene {
     rigsLayer.addChild(fxLayer);
     const fx = createPixelWeaponFx(fxLayer);
     fx.setPixelSize(FX_PIXEL_SIZE);
+    fx.setGroundY(GROUND_Y); // enables the "special-feel" wave's ambient ground-spark pops
 
     const label = new Text({ text: "", style: { fill: 0xffe28a, fontSize: 12 } });
     label.anchor.set(0.5, 0);

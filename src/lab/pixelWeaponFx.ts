@@ -54,6 +54,11 @@ export interface PixelWeaponFx {
   /** Density burst for a handful of sim ticks — call on every swing so
    * attacks read juicier than idle hold. */
   notifySwing(): void;
+  /** World-space ground line for the recipe `ambient` feature's ground-spark
+   * pops (experiment ⑧'s "special-feel" wave). Not gated/compared — just
+   * assigned (see `setGroundY` below); default is `null` (ground sparks off)
+   * so hosts that never call this (experiment ⑦) are unaffected. */
+  setGroundY(y: number): void;
   update(dt: number): void;
   destroy(): void;
 }
@@ -102,7 +107,7 @@ const SPAWN_SPREAD = 24;
  * share this fixed span (same default the legacy element path itself uses). */
 const RECIPE_EVENT_SPREAD = SPAWN_SPREAD;
 
-const POOL_SIZE = 280;
+const POOL_SIZE = 340;
 
 type Kind =
   | "fire"
@@ -116,8 +121,16 @@ type Kind =
   | "recipeFlame"
   | "recipeSparkle"
   | "recipeCrackle"
-  | "recipeBeatColumn"
-  | "recipeBeatFlare";
+  // ---- "special-feel" wave (molten/afterimage/charge-burst-beat/ambient) —
+  // replaces the old static recipeBeatColumn/recipeBeatFlare pair.
+  | "recipeMolten"
+  | "recipeDrip"
+  | "recipeTrail"
+  | "recipeCharge"
+  | "recipeFlashBar"
+  | "recipeBurst"
+  | "recipeAmbient"
+  | "recipeGroundSpark";
 
 function isRecipeKind(kind: Kind): boolean {
   return kind.startsWith("recipe");
@@ -129,11 +142,22 @@ interface Slot {
   kind: Kind;
   x: number;
   y: number;
+  /** Velocity for every particle-ish kind — EXCEPT `recipeMolten`, which
+   * repurposes this pair as `(tFrac, perpOffset)` instead of a velocity (see
+   * `tickRecipeMolten`): `vx` = 0..1 fraction back along the blade from the
+   * tip, `vy` = world-px perpendicular offset off the blade centerline. A
+   * molten slot's position is RE-PROJECTED from the current tip+dir every
+   * tick using these two numbers, never integrated — reusing the existing
+   * fields instead of growing `Slot` for one kind. */
   vx: number;
   vy: number;
   sizeTexels: number;
   life: number; // seconds remaining
   maxLife: number;
+  /** Generic per-particle random seed — positional wobble phase for most
+   * kinds, but repurposed as the color-SHIMMER phase for `recipeMolten`
+   * (`tickRecipeMolten` walks its palette by `sin(tickCount + wobbleSeed)`
+   * instead of by life progress, since molten pixels don't age out). */
   wobbleSeed: number;
   color: number;
   // sparkle blink cycle
@@ -208,7 +232,29 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
   let recipeLayerRuntimes: { cfg: RefineFxLayer; spawnAccum: number }[] = [];
   let lastRecipeSig: string | null = null;
   let crackleTimer = 0;
-  let beatTimer = 0;
+
+  // ---- "special-feel" wave state — additive, mirrors the crackle/beat
+  // state above (all reset together in `setRecipe`, never on a redundant
+  // same-signature call).
+  let groundY: number | null = null;
+  // molten: the currently-"clinging" slots (for drip-pick/top-up bookkeeping
+  // only — the actual per-tick ride-the-blade reprojection runs generically
+  // in the pool dispatch loop below, keyed off `kind === "recipeMolten"`).
+  let moltenSlots: Slot[] = [];
+  let dripAccum = 0;
+  // swing afterimage: fixed-size ring buffer of recent tip positions, pushed
+  // once per sim tick, zero allocation per tick (pre-filled below).
+  const TIP_RING_SIZE = 10;
+  const tipRing: { x: number; y: number }[] = Array.from({ length: TIP_RING_SIZE }, () => ({ x: 0, y: 0 }));
+  let tipRingHead = 0;
+  // charge→burst beat: within-cycle phase timer + one-shot flags per cycle.
+  let beatCycleTimer = 0;
+  let beatFlashDone = false;
+  let beatBurstDone = false;
+  let chargeSpawnAccum = 0;
+  // ambient: separate accumulators for the two ambient sub-emitters.
+  let emberAccum = 0;
+  let groundSparkAccum = 0;
 
   function findFreeSlot(): Slot | null {
     for (const s of pool) if (!s.active) return s;
@@ -222,8 +268,9 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
   function releaseSlot(s: Slot): void {
     s.active = false;
     s.g.visible = false;
-    // recipeBeatFlare scales its Graphics up mid-life — a slot released from
-    // any path (recipe swap, element swap) must hand the next spawner a 1×
+    // recipeFlashBar's oversized tip-flare (`phase: "in"`) scales its
+    // Graphics up mid-life — a slot released from any path (recipe swap,
+    // element swap) must hand the next spawner a 1×
     // node or the reused particle draws oversized.
     s.g.scale.set(1);
   }
@@ -522,71 +569,287 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
     }
   }
 
-  // ---- recipe: beat (+10 normal / +5 legendary) — rising column + tip flare
-  function spawnBeatPulse(cfg: NonNullable<RefineFxRecipe["beat"]>): void {
-    const flare = findFreeSlot();
-    if (flare) {
-      flare.active = true;
-      flare.kind = "recipeBeatFlare";
-      flare.x = tipX;
-      flare.y = tipY;
-      flare.color = cfg.columnPalette[0] ?? 0xffffff;
-      flare.maxLife = 3 / clampPositive(stepFps, 1);
-      flare.life = flare.maxLife;
-      flare.g.visible = true;
+  // ---- recipe: molten (+8 normal / +3 legendary) — pixels CLING to the
+  // blade, re-projected from the CURRENT tip+dir every tick (make-or-break
+  // behavior — see the `Slot.vx`/`vy`/`wobbleSeed` repurpose docs above).
+  function spawnMoltenSlot(cfg: NonNullable<RefineFxRecipe["molten"]>): Slot | null {
+    const s = findFreeSlot();
+    if (!s) return null;
+    s.active = true;
+    s.kind = "recipeMolten";
+    s.palette = cfg.palette;
+    s.sizeTexels = 1 + Math.floor(Math.random() * 2); // 1-2 texels, small clinging pixels
+    s.vx = Math.random(); // tFrac — repurposed, NOT velocity (see Slot doc)
+    s.vy = (Math.random() - 0.5) * 6; // perpOffset — repurposed, NOT velocity
+    s.wobbleSeed = Math.random() * 1000; // shimmer phase seed — repurposed
+    s.g.visible = true;
+    return s;
+  }
+
+  function refillMoltenSlots(cfg: NonNullable<RefineFxRecipe["molten"]>): void {
+    const need = cfg.countTexels - moltenSlots.length;
+    for (let i = 0; i < need; i++) {
+      const s = spawnMoltenSlot(cfg);
+      if (!s) break;
+      moltenSlots.push(s);
     }
-    const columnCount = 5;
-    for (let i = 0; i < columnCount; i++) {
+  }
+
+  const MOLTEN_SPREAD = RECIPE_EVENT_SPREAD;
+  const MOLTEN_SHIMMER_SPEED = 0.35;
+
+  /** Re-projects position from the CURRENT tip+dir every call (this IS the
+   * "ride the blade through a swing" behavior) instead of integrating a
+   * velocity — molten slots never age out on their own, only via a drip
+   * conversion (see the drip bookkeeping in `simTick`). Color walks the
+   * palette by a slow shimmer (phase = `wobbleSeed`), not by life progress —
+   * molten pixels don't have a life progress. */
+  function tickRecipeMolten(s: Slot): void {
+    const perpX = -dirY;
+    const perpY = dirX;
+    s.x = tipX - dirX * s.vx * MOLTEN_SPREAD + perpX * s.vy;
+    s.y = tipY - dirY * s.vx * MOLTEN_SPREAD + perpY * s.vy;
+    const shimmer = (Math.sin((tickCount + s.wobbleSeed) * MOLTEN_SHIMMER_SPEED) + 1) / 2;
+    drawSquare(s.g, s.sizeTexels, paletteStepColor(s.palette, shimmer), ALPHA_STEPS[0]);
+    s.g.position.set(snap(s.x), snap(s.y));
+  }
+
+  const DRIP_GRAVITY = 220;
+
+  /** A molten slot plucked mid-flight (see the drip bookkeeping in
+   * `simTick`) falls with gravity and fades out by palette-step before/at
+   * `groundY` (or its own life running out, whichever comes first). */
+  function tickRecipeDrip(s: Slot, tickDt: number): void {
+    s.life -= tickDt;
+    s.vy += DRIP_GRAVITY * tickDt;
+    s.x += s.vx * tickDt;
+    s.y += s.vy * tickDt;
+    const hitGround = groundY !== null && s.y >= groundY;
+    if (s.life <= 0 || hitGround) {
+      releaseSlot(s);
+      return;
+    }
+    const progress = 1 - s.life / s.maxLife;
+    const color = paletteStepColor(s.palette, progress);
+    const shrink = clampPositive(s.sizeTexels * (1 - progress * 0.5), 0.5);
+    const alphaIdx =
+      progress > 0.7 ? Math.min(ALPHA_STEPS.length - 1, Math.floor((progress - 0.7) * 4 * ALPHA_STEPS.length)) : 0;
+    drawSquare(s.g, shrink, color, ALPHA_STEPS[alphaIdx]);
+    s.g.position.set(snap(s.x), snap(s.y));
+  }
+
+  // ---- recipe: swing afterimage (+9 normal / +4 legendary) — stationary
+  // ghost squares sampled from the tip ring-buffer; also reused (below) for
+  // ambient ground-spark pops, which are the same "stationary, stepped-alpha
+  // fade, short life" shape with a different spawn site.
+  function pushTipRing(): void {
+    const slot = tipRing[tipRingHead]!;
+    slot.x = tipX;
+    slot.y = tipY;
+    tipRingHead = (tipRingHead + 1) % TIP_RING_SIZE;
+  }
+
+  const TRAIL_LAG_TICKS = 3;
+
+  function spawnRecipeTrail(cfg: NonNullable<RefineFxRecipe["swingTrail"]>): void {
+    const s = findFreeSlot();
+    if (!s) return;
+    const lagIdx = (tipRingHead - TRAIL_LAG_TICKS - 1 + TIP_RING_SIZE * 2) % TIP_RING_SIZE;
+    const p = tipRing[lagIdx]!;
+    s.active = true;
+    s.kind = "recipeTrail";
+    s.palette = cfg.palette;
+    s.sizeTexels = 1.4;
+    s.x = p.x;
+    s.y = p.y;
+    const tickInterval = 1 / clampPositive(stepFps, 1);
+    s.maxLife = tickInterval * (1 + Math.floor(Math.random() * 2)); // 1-2 ticks
+    s.life = s.maxLife;
+    s.g.visible = true;
+  }
+
+  function spawnRecipeGroundSpark(cfg: NonNullable<RefineFxRecipe["ambient"]>): void {
+    if (groundY === null) return;
+    const s = findFreeSlot();
+    if (!s) return;
+    s.active = true;
+    s.kind = "recipeGroundSpark";
+    s.palette = cfg.palette;
+    s.sizeTexels = 1;
+    s.x = tipX + (Math.random() - 0.5) * 50;
+    s.y = groundY;
+    const tickInterval = 1 / clampPositive(stepFps, 1);
+    s.maxLife = tickInterval * (2 + Math.floor(Math.random() * 2)); // 2-3 ticks
+    s.life = s.maxLife;
+    s.g.visible = true;
+  }
+
+  /** Stationary square, stepped-alpha fade over life — shared by
+   * `recipeTrail` (swing afterimage) and `recipeGroundSpark` (ambient pop). */
+  function tickRecipeStationaryFade(s: Slot, tickDt: number): void {
+    s.life -= tickDt;
+    if (s.life <= 0) {
+      releaseSlot(s);
+      return;
+    }
+    const progress = 1 - s.life / s.maxLife;
+    const color = paletteStepColor(s.palette, progress);
+    const alphaIdx = Math.min(ALPHA_STEPS.length - 1, Math.floor(progress * ALPHA_STEPS.length));
+    drawSquare(s.g, s.sizeTexels, color, ALPHA_STEPS[alphaIdx]);
+    s.g.position.set(snap(s.x), snap(s.y));
+  }
+
+  // ---- recipe: charge→burst beat (+10 normal / +5 legendary) — REWORK of
+  // the old static ember-column + tip-flare pulse into a 3-phase
+  // anticipation→payoff cycle: INHALE (ring homes to the CURRENT tip every
+  // tick) → FLASH (oversized plus + bright blade-line squares) → BURST
+  // (radial pixels + a swing-style density kick).
+  const CHARGE_INHALE_DURATION = 0.9;
+  const CHARGE_SPAWN_RATE = 10; // particles/sec during the inhale window
+  const CHARGE_RING_RADIUS = 50;
+  const CHARGE_SPEED = 90;
+
+  function spawnRecipeCharge(cfg: NonNullable<RefineFxRecipe["beat"]>): void {
+    const s = findFreeSlot();
+    if (!s) return;
+    const a = Math.random() * Math.PI * 2;
+    const r = CHARGE_RING_RADIUS + Math.random() * 20;
+    s.active = true;
+    s.kind = "recipeCharge";
+    s.palette = cfg.palette;
+    s.sizeTexels = 1;
+    s.x = tipX + Math.cos(a) * r;
+    s.y = tipY + Math.sin(a) * r * 0.6;
+    s.maxLife = CHARGE_INHALE_DURATION + 0.2; // safety cap if it never reaches the tip
+    s.life = s.maxLife;
+    s.g.visible = true;
+  }
+
+  /** Re-aims toward the CURRENT tip every tick (not a fixed target captured
+   * at spawn) at a constant speed — so charge particles track a swinging
+   * blade during the inhale window instead of drifting to a stale point. */
+  function tickRecipeCharge(s: Slot, tickDt: number): void {
+    s.life -= tickDt;
+    const dx = tipX - s.x;
+    const dy = tipY - s.y;
+    const dist = Math.hypot(dx, dy);
+    if (s.life <= 0 || dist < 4) {
+      releaseSlot(s);
+      return;
+    }
+    s.x += (dx / dist) * CHARGE_SPEED * tickDt;
+    s.y += (dy / dist) * CHARGE_SPEED * tickDt;
+    const progress = 1 - s.life / s.maxLife;
+    drawSquare(s.g, s.sizeTexels, paletteStepColor(s.palette, progress), ALPHA_STEPS[0]);
+    s.g.position.set(snap(s.x), snap(s.y));
+  }
+
+  function spawnFlashBar(cfg: NonNullable<RefineFxRecipe["beat"]>): void {
+    const tickInterval = 1 / clampPositive(stepFps, 1);
+    // oversized white-plus tip flare — `phase: "in"` marks the scale-
+    // animated core (vs. `"hold"` for the plain blade-line squares below).
+    const core = findFreeSlot();
+    if (core) {
+      core.active = true;
+      core.kind = "recipeFlashBar";
+      core.phase = "in";
+      core.x = tipX;
+      core.y = tipY;
+      core.color = 0xffffff;
+      core.maxLife = tickInterval * 2;
+      core.life = core.maxLife;
+      core.g.visible = true;
+    }
+    const barCount = 3 + Math.floor(Math.random() * 2); // 3-4
+    const perpX = -dirY;
+    const perpY = dirX;
+    for (let i = 0; i < barCount; i++) {
       const s = findFreeSlot();
       if (!s) break;
-      const perpX = -dirY;
-      const perpY = dirX;
+      const t = barCount > 1 ? i / (barCount - 1) : 0;
       const jitter = (Math.random() - 0.5) * 4;
       s.active = true;
-      s.kind = "recipeBeatColumn";
-      s.color = cfg.columnPalette[i % cfg.columnPalette.length]!;
-      s.x = tipX + perpX * jitter;
-      s.y = tipY + perpY * jitter - i * pixelSize * 1.5; // stagger the column upward
-      s.vx = (Math.random() - 0.5) * 6;
-      s.vy = -(40 + Math.random() * 20);
+      s.kind = "recipeFlashBar";
+      s.phase = "hold";
+      s.x = tipX - dirX * t * RECIPE_EVENT_SPREAD + perpX * jitter;
+      s.y = tipY - dirY * t * RECIPE_EVENT_SPREAD + perpY * jitter;
+      s.color = cfg.palette[i % cfg.palette.length] ?? 0xffffff;
       s.sizeTexels = 1 + (i % 2);
-      s.maxLife = 0.55 + Math.random() * 0.25;
+      s.maxLife = tickInterval * 2;
       s.life = s.maxLife;
       s.g.visible = true;
     }
   }
 
-  function tickRecipeBeatColumn(s: Slot, tickDt: number): void {
+  /** `phase === "in"` is the oversized plus-shape flare (scale-animated,
+   * same "scale the pooled node, shrink back to 1×" technique the old
+   * `recipeBeatFlare` used); `phase === "hold"` is a plain bright blade-line
+   * square. `releaseSlot` resets scale on release either way. */
+  function tickRecipeFlashBar(s: Slot, tickDt: number): void {
     s.life -= tickDt;
     if (s.life <= 0) {
       releaseSlot(s);
-      return;
-    }
-    s.x += s.vx * tickDt;
-    s.y += s.vy * tickDt;
-    const progress = 1 - s.life / s.maxLife;
-    const alphaIdx =
-      progress > 0.6 ? Math.min(ALPHA_STEPS.length - 1, Math.floor((progress - 0.6) * 4 * ALPHA_STEPS.length)) : 0;
-    drawSquare(s.g, s.sizeTexels, s.color, ALPHA_STEPS[alphaIdx]);
-    s.g.position.set(snap(s.x), snap(s.y));
-  }
-
-  /** Bigger plus-shape flash (the "tip-flare pulse" half of the beat) —
-   * `drawPlus` itself has no size param (fixed at `pixelSize`), so the
-   * "bigger" read comes from scaling the pooled Graphics node directly,
-   * shrinking back to 1× over its short life. */
-  function tickRecipeBeatFlare(s: Slot, tickDt: number): void {
-    s.life -= tickDt;
-    if (s.life <= 0) {
-      releaseSlot(s);
-      s.g.scale.set(1);
       return;
     }
     const progress = 1 - s.life / s.maxLife;
     const alphaIdx = Math.min(ALPHA_STEPS.length - 1, Math.floor(progress * ALPHA_STEPS.length));
-    drawPlus(s.g, s.color, ALPHA_STEPS[alphaIdx]);
-    s.g.scale.set(clampPositive(1.6 - progress * 0.6, 0.6));
+    if (s.phase === "in") {
+      drawPlus(s.g, s.color, ALPHA_STEPS[alphaIdx]);
+      s.g.scale.set(clampPositive(1.8 - progress * 0.8, 0.6));
+    } else {
+      drawSquare(s.g, s.sizeTexels, s.color, ALPHA_STEPS[alphaIdx]);
+    }
     s.g.position.set(snap(s.x), snap(s.y));
+  }
+
+  const BURST_COUNT_MIN = 10;
+  const BURST_DENSITY_KICK_TICKS = 3;
+
+  /** Radial burst — "treat as an internal `notifySwing`-style density spike"
+   * (the plan's words): reuses `burstTicksLeft`, the SAME knob a real swing
+   * uses, so the burst beat also gives every other active recipe feature
+   * (swing afterimage window, layer burst multiplier) a brief kick. */
+  function spawnBurst(cfg: NonNullable<RefineFxRecipe["beat"]>): void {
+    const count = BURST_COUNT_MIN + Math.floor(Math.random() * 3); // 10-12
+    for (let i = 0; i < count; i++) {
+      const s = findFreeSlot();
+      if (!s) break;
+      const a = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+      const speed = 60 + Math.random() * 40;
+      s.active = true;
+      s.kind = "recipeBurst";
+      s.palette = cfg.palette;
+      s.x = tipX;
+      s.y = tipY;
+      s.vx = Math.cos(a) * speed;
+      s.vy = Math.sin(a) * speed * 0.6;
+      s.sizeTexels = 1 + Math.floor(Math.random() * 2);
+      s.maxLife = 0.35 + Math.random() * 0.2;
+      s.life = s.maxLife;
+      s.wobbleSeed = Math.random() * 1000;
+      s.g.visible = true;
+    }
+    burstTicksLeft = Math.max(burstTicksLeft, BURST_DENSITY_KICK_TICKS);
+  }
+
+  // ---- recipe: world ambient (+10 normal / +5 legendary) — slow wide-radius
+  // embers around the whole character, reusing `tickRecipeMotes`'s drift/
+  // fade (kind-agnostic — it only reads generic Slot fields).
+  function spawnRecipeAmbient(cfg: NonNullable<RefineFxRecipe["ambient"]>): void {
+    const s = findFreeSlot();
+    if (!s) return;
+    s.x = tipX + (Math.random() - 0.5) * 60; // ±30px around the anchor
+    s.y = tipY + (Math.random() - 0.5) * 60;
+    s.active = true;
+    s.kind = "recipeAmbient";
+    s.palette = cfg.palette;
+    s.sizeTexels = 1;
+    s.maxLife = 1.8 + Math.random() * 1.2; // slow, wide-radius rise
+    s.life = s.maxLife;
+    s.vx = (Math.random() - 0.5) * 6;
+    s.vy = -(4 + Math.random() * 5);
+    s.wobbleSeed = Math.random() * 1000;
+    s.g.visible = true;
   }
 
   // ---- sim tick -----------------------------------------------------------
@@ -594,6 +857,10 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
     tickCount++;
     if (burstTicksLeft > 0) burstTicksLeft--;
     const burstMult = burstTicksLeft > 0 ? 1.8 : 1;
+    // Pushed unconditionally, once per tick, zero allocation (fixed-size
+    // pre-filled ring) — even when nothing currently reads it, so the swing-
+    // afterimage buffer is never stale the instant a recipe turns it on.
+    pushTipRing();
 
     if (element === "fire") {
       // rate-based (particles/second), NOT particles/tick, so concurrent
@@ -640,11 +907,88 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
           spawnCrackleBurst(recipe.crackle);
         }
       }
+
+      // ---- molten: top-up the clinging population + roll drips. The
+      // per-tick ride-the-blade reprojection itself runs generically in the
+      // pool dispatch loop below (keyed off `kind === "recipeMolten"`).
+      if (recipe.molten) {
+        refillMoltenSlots(recipe.molten);
+        if (recipe.molten.dripRate > 0) {
+          dripAccum += recipe.molten.dripRate * tickDt;
+          while (dripAccum >= 1 && moltenSlots.length > 0) {
+            dripAccum -= 1;
+            const idx = Math.floor(Math.random() * moltenSlots.length);
+            const dripSlot = moltenSlots[idx]!;
+            moltenSlots.splice(idx, 1);
+            // Convert the plucked slot IN PLACE into a falling drip — reuses
+            // its pooled Graphics, no extra `findFreeSlot` needed.
+            dripSlot.kind = "recipeDrip";
+            dripSlot.vx = (Math.random() - 0.5) * 14;
+            dripSlot.vy = 6 + Math.random() * 8;
+            dripSlot.maxLife = 0.6 + Math.random() * 0.5;
+            dripSlot.life = dripSlot.maxLife;
+            refillMoltenSlots(recipe.molten); // top back up to countTexels
+          }
+        }
+      } else if (moltenSlots.length > 0) {
+        // Defensive only — `molten` going non-null→null always rides a
+        // recipe signature change, which `setRecipe` already releases+clears
+        // for. Kept so this branch can never silently leak active slots if
+        // that invariant is ever broken.
+        for (const s of moltenSlots) releaseSlot(s);
+        moltenSlots = [];
+      }
+
+      // ---- swing afterimage: only while a swing burst is active — "no
+      // buffer reads while idle" (the plan's words).
+      if (recipe.swingTrail && burstTicksLeft > 0) {
+        spawnRecipeTrail(recipe.swingTrail);
+      }
+
+      // ---- charge→burst beat: INHALE (0..period-worth of ring-homing
+      // particles) → FLASH (2 ticks) → BURST, then quiet until the cycle
+      // wraps. Phase computed from a within-cycle timer (not tick counts)
+      // so it stays correct across `setStepFps` changes.
       if (recipe.beat) {
-        beatTimer += tickDt;
-        if (beatTimer >= recipe.beat.flarePeriod) {
-          beatTimer -= recipe.beat.flarePeriod;
-          spawnBeatPulse(recipe.beat);
+        beatCycleTimer += tickDt;
+        const flashEnd = CHARGE_INHALE_DURATION + tickDt * 2;
+        if (beatCycleTimer < CHARGE_INHALE_DURATION) {
+          chargeSpawnAccum += CHARGE_SPAWN_RATE * tickDt;
+          while (chargeSpawnAccum >= 1) {
+            spawnRecipeCharge(recipe.beat);
+            chargeSpawnAccum -= 1;
+          }
+        } else if (beatCycleTimer < flashEnd) {
+          if (!beatFlashDone) {
+            spawnFlashBar(recipe.beat);
+            beatFlashDone = true;
+          }
+        } else if (!beatBurstDone) {
+          spawnBurst(recipe.beat);
+          beatBurstDone = true;
+        }
+        if (beatCycleTimer >= recipe.beat.period) {
+          beatCycleTimer -= recipe.beat.period;
+          beatFlashDone = false;
+          beatBurstDone = false;
+          chargeSpawnAccum = 0;
+        }
+      }
+
+      // ---- world ambient: slow embers around the whole character + ground
+      // sparks (only once a host calls `setGroundY`).
+      if (recipe.ambient) {
+        emberAccum += recipe.ambient.emberRate * density * tickDt;
+        while (emberAccum >= 1) {
+          spawnRecipeAmbient(recipe.ambient);
+          emberAccum -= 1;
+        }
+        if (groundY !== null) {
+          groundSparkAccum += recipe.ambient.groundSparkRate * density * tickDt;
+          while (groundSparkAccum >= 1) {
+            spawnRecipeGroundSpark(recipe.ambient);
+            groundSparkAccum -= 1;
+          }
         }
       }
     }
@@ -659,8 +1003,13 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
       else if (s.kind === "recipeFlame") tickRecipeFlame(s, tickDt);
       else if (s.kind === "recipeSparkle") tickSparkle(s); // phase logic is kind-agnostic
       else if (s.kind === "recipeCrackle") tickElectricFlash(s, tickDt); // life-countdown-only, also kind-agnostic
-      else if (s.kind === "recipeBeatColumn") tickRecipeBeatColumn(s, tickDt);
-      else if (s.kind === "recipeBeatFlare") tickRecipeBeatFlare(s, tickDt);
+      else if (s.kind === "recipeMolten") tickRecipeMolten(s);
+      else if (s.kind === "recipeDrip") tickRecipeDrip(s, tickDt);
+      else if (s.kind === "recipeTrail" || s.kind === "recipeGroundSpark") tickRecipeStationaryFade(s, tickDt);
+      else if (s.kind === "recipeCharge") tickRecipeCharge(s, tickDt);
+      else if (s.kind === "recipeFlashBar") tickRecipeFlashBar(s, tickDt);
+      else if (s.kind === "recipeBurst") tickRecipeFlame(s, tickDt); // radial fade/move is kind-agnostic
+      else if (s.kind === "recipeAmbient") tickRecipeMotes(s, tickDt); // drift/fade is kind-agnostic
     }
   }
 
@@ -676,7 +1025,7 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
       // VALUE-compared (not reference), so a host that recomputes a fresh
       // recipe object every frame (rather than only on an actual refine/
       // rarity change) is still a safe no-op — never resets a running
-      // spawnAccum/crackleTimer/beatTimer on a redundant call. `resolveRefine
+      // spawnAccum/crackleTimer/beatCycleTimer on a redundant call. `resolveRefine
       // FxRecipe` returns small plain-object trees, so JSON.stringify is a
       // cheap-enough dev-tool signature (called at most once per slider tick,
       // never in a hot per-particle loop).
@@ -694,7 +1043,24 @@ export function createPixelWeaponFx(parent: Container): PixelWeaponFx {
       recipe = next;
       recipeLayerRuntimes = (next?.layers ?? []).map((cfg) => ({ cfg, spawnAccum: 0 }));
       crackleTimer = 0;
-      beatTimer = 0;
+
+      // "special-feel" wave state — every accumulator/one-shot flag resets
+      // together with the recipe swap above (the blanket release loop just
+      // above already deactivated any in-flight molten/drip/trail/charge/
+      // flashBar/burst/ambient/groundSpark slots; `moltenSlots` only needs
+      // its stale references dropped).
+      moltenSlots = [];
+      dripAccum = 0;
+      beatCycleTimer = 0;
+      beatFlashDone = false;
+      beatBurstDone = false;
+      chargeSpawnAccum = 0;
+      emberAccum = 0;
+      groundSparkAccum = 0;
+      if (next?.molten) refillMoltenSlots(next.molten);
+    },
+    setGroundY(y: number): void {
+      groundY = y;
     },
     setAnchor(tx: number, ty: number, dx = 1, dy = 0): void {
       tipX = tx;

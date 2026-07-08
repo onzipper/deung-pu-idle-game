@@ -76,9 +76,67 @@ describe("resolveRefineFxRecipe — crackle at +9, beat at +10 (normal gear)", (
     expect(resolveRefineFxRecipe("epic", 10, false).crackle).not.toBeNull();
   });
 
-  it("beat is null below +10 and present exactly at +10", () => {
+  it("beat is null below +10 and present exactly at +10, kind chargeBurst (post-rework)", () => {
     expect(resolveRefineFxRecipe("common", 9, false).beat).toBeNull();
-    expect(resolveRefineFxRecipe("common", 10, false).beat).not.toBeNull();
+    const beat = resolveRefineFxRecipe("common", 10, false).beat;
+    expect(beat).not.toBeNull();
+    expect(beat!.kind).toBe("chargeBurst");
+    expect(beat!.period).toBeGreaterThan(0);
+  });
+});
+
+describe("resolveRefineFxRecipe — 'special-feel' wave (normal gear)", () => {
+  it("molten is null below +8 and present from +8 onward, with drips ONLY at +10", () => {
+    expect(resolveRefineFxRecipe("rare", 7, false).molten).toBeNull();
+    const at8 = resolveRefineFxRecipe("rare", 8, false).molten;
+    const at9 = resolveRefineFxRecipe("rare", 9, false).molten;
+    const at10 = resolveRefineFxRecipe("rare", 10, false).molten;
+    expect(at8).not.toBeNull();
+    expect(at8!.dripRate).toBe(0);
+    expect(at9!.dripRate).toBe(0);
+    expect(at10!.dripRate).toBeGreaterThan(0);
+  });
+
+  it("swingTrail is null below +9 and present from +9 onward", () => {
+    expect(resolveRefineFxRecipe("epic", 8, false).swingTrail).toBeNull();
+    expect(resolveRefineFxRecipe("epic", 9, false).swingTrail).not.toBeNull();
+    expect(resolveRefineFxRecipe("epic", 10, false).swingTrail).not.toBeNull();
+  });
+
+  it("ambient is null below +10 and present exactly at +10", () => {
+    expect(resolveRefineFxRecipe("common", 9, false).ambient).toBeNull();
+    const ambient = resolveRefineFxRecipe("common", 10, false).ambient;
+    expect(ambient).not.toBeNull();
+    expect(ambient!.emberRate).toBeGreaterThan(0);
+    expect(ambient!.groundSparkRate).toBeGreaterThan(0);
+  });
+});
+
+describe("resolveRefineFxRecipe — 'special-feel' wave (legendary ladder)", () => {
+  it("molten ≥+3, drips only from +5", () => {
+    expect(resolveRefineFxRecipe("epic", 2, true).molten).toBeNull();
+    const at3 = resolveRefineFxRecipe("epic", 3, true).molten;
+    const at4 = resolveRefineFxRecipe("epic", 4, true).molten;
+    const at5 = resolveRefineFxRecipe("epic", 5, true).molten;
+    expect(at3).not.toBeNull();
+    expect(at3!.dripRate).toBe(0);
+    expect(at4!.dripRate).toBe(0);
+    expect(at5!.dripRate).toBeGreaterThan(0);
+  });
+
+  it("swingTrail ≥+4", () => {
+    expect(resolveRefineFxRecipe("epic", 3, true).swingTrail).toBeNull();
+    expect(resolveRefineFxRecipe("epic", 4, true).swingTrail).not.toBeNull();
+  });
+
+  it("chargeBurst beat + ambient both land exactly at +5", () => {
+    expect(resolveRefineFxRecipe("epic", 4, true).beat).toBeNull();
+    expect(resolveRefineFxRecipe("epic", 4, true).ambient).toBeNull();
+    const beat = resolveRefineFxRecipe("epic", 5, true).beat;
+    const ambient = resolveRefineFxRecipe("epic", 5, true).ambient;
+    expect(beat).not.toBeNull();
+    expect(beat!.kind).toBe("chargeBurst");
+    expect(ambient).not.toBeNull();
   });
 });
 

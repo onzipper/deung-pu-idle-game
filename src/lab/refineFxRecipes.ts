@@ -36,6 +36,25 @@
  *     +3     wider (spread +30%)
  *     +4     + crackle
  *     +5     + beat (gold-tinted)
+ *
+ *   "special-feel" wave (owner reviewed in-browser: "มาถูกทางแล้ว" but
+ *   high-refine didn't feel SPECIAL yet — picked ALL FOUR proposed upgrades):
+ *     molten blade      pixels CLING to the blade line itself (re-projected
+ *                        from the CURRENT tip+dir every tick — see
+ *                        `pixelWeaponFx.ts`'s `tickRecipeMolten`), slow
+ *                        palette shimmer while attached; `dripRate>0` lets
+ *                        pixels occasionally detach and fall with gravity.
+ *                        normal +8 (drips +10) · legendary +3 (drips +5)
+ *     swing afterimage   stepped ghost squares sampled from a per-instance
+ *                        tip ring-buffer, only while a swing burst is active.
+ *                        normal +9 · legendary +4
+ *     charge→burst beat  3-phase cycle (inhale ring homes to the CURRENT tip
+ *                        each tick → flash → radial burst) replacing the old
+ *                        static ember-column + tip-flare pulse.
+ *                        normal +10 · legendary +5
+ *     world ambient      slow wide-radius embers around the whole character
+ *                        + ground-level sparks (needs `setGroundY`).
+ *                        normal +10 · legendary +5
  */
 
 import type { ItemRarity } from "@/engine/config/items";
@@ -59,15 +78,50 @@ export interface RefineFxCrackle {
   palette: readonly number[];
 }
 
+/** +8..+10 (normal) / +3..+5 (legendary) — pixels CLINGING to the blade line
+ * itself, re-projected from the CURRENT tip+dir every sim tick (see
+ * `pixelWeaponFx.ts`'s `tickRecipeMolten`). `dripRate` is 0 until the drip
+ * threshold (+10 normal / +5 legendary) — 0 means "clinging only, no drips". */
+export interface RefineFxMolten {
+  palette: readonly number[];
+  countTexels: number;
+  dripRate: number;
+}
+
+/** +9 (normal) / +4 (legendary) — stepped ghost squares sampled from the fx
+ * module's per-instance tip ring-buffer, spawned only while a swing burst
+ * window is active (`pixelWeaponFx.ts`'s `notifySwing`/`burstTicksLeft`). */
+export interface RefineFxSwingTrail {
+  palette: readonly number[];
+}
+
+/** +10 (normal) / +5 (legendary) — REWORK replacing the old static ember-
+ * column + tip-flare pulse with a 3-phase anticipation→payoff beat: INHALE
+ * (ring of particles homing toward the CURRENT tip) → FLASH (oversized plus
+ * + bright blade-line squares) → BURST (radial pixels + a swing-style density
+ * kick). `period` is the full inhale→flash→burst→quiet cycle length. */
 export interface RefineFxBeat {
-  columnPalette: readonly number[];
-  flarePeriod: number;
+  kind: "chargeBurst";
+  palette: readonly number[];
+  period: number;
+}
+
+/** +10 (normal) / +5 (legendary) — "world-notice" presence: slow wide-radius
+ * embers rising around the WHOLE character, plus ground-level spark pops
+ * (the latter only fires once the host calls `setGroundY`; defaults off). */
+export interface RefineFxAmbient {
+  palette: readonly number[];
+  emberRate: number;
+  groundSparkRate: number;
 }
 
 export interface RefineFxRecipe {
   layers: RefineFxLayer[];
   crackle: RefineFxCrackle | null;
+  molten: RefineFxMolten | null;
+  swingTrail: RefineFxSwingTrail | null;
   beat: RefineFxBeat | null;
+  ambient: RefineFxAmbient | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,9 +167,25 @@ const CRACKLE_REFINE = 9;
 const CRACKLE_INTERVAL = 1.6;
 const CRACKLE_PALETTE: readonly number[] = [0xfffbe0, 0xffffff];
 
-const BEAT_REFINE = 10;
-const BEAT_FLARE_PERIOD = 1.9;
-const BEAT_COLUMN_PALETTE: readonly number[] = [0xffe9a8, 0xfffbe0];
+// ---- "special-feel" wave additions (owner: ALL FOUR picked) --------------
+
+const MOLTEN_REFINE = 8;
+const MOLTEN_DRIP_REFINE = 10;
+const MOLTEN_COUNT_TEXELS = 8; // "~6-10 concurrent" per the plan
+const MOLTEN_DRIP_RATE = 0.8; // detach events/sec once dripping turns on
+
+const SWING_TRAIL_REFINE = 9;
+
+const CHARGE_BURST_REFINE = 10;
+const CHARGE_BURST_PERIOD = 2.4;
+// Warm white/gold, same family as the old signature-beat palette — a
+// deliberately NOT-rarity-tinted flourish (it's the ladder's own signature
+// beat, not the element itself).
+const CHARGE_BURST_PALETTE: readonly number[] = [0xffe9a8, 0xfffbe0, 0xffffff];
+
+const AMBIENT_REFINE = 10;
+const AMBIENT_EMBER_RATE = 0.6; // very low — "the world notices you", not a firework
+const AMBIENT_GROUND_SPARK_RATE = 1.0;
 
 export const NORMAL_MAX_REFINE = 10;
 
@@ -176,7 +246,27 @@ function resolveNormalRecipe(rarity: ItemRarity, refineRaw: number): RefineFxRec
   return {
     layers,
     crackle: refine >= CRACKLE_REFINE ? { interval: CRACKLE_INTERVAL, palette: CRACKLE_PALETTE } : null,
-    beat: refine >= BEAT_REFINE ? { columnPalette: BEAT_COLUMN_PALETTE, flarePeriod: BEAT_FLARE_PERIOD } : null,
+    molten:
+      refine >= MOLTEN_REFINE
+        ? {
+            palette: RARITY_ACCENT[rarity],
+            countTexels: MOLTEN_COUNT_TEXELS,
+            dripRate: refine >= MOLTEN_DRIP_REFINE ? MOLTEN_DRIP_RATE : 0,
+          }
+        : null,
+    swingTrail: refine >= SWING_TRAIL_REFINE ? { palette: RARITY_ACCENT[rarity] } : null,
+    beat:
+      refine >= CHARGE_BURST_REFINE
+        ? { kind: "chargeBurst", palette: CHARGE_BURST_PALETTE, period: CHARGE_BURST_PERIOD }
+        : null,
+    ambient:
+      refine >= AMBIENT_REFINE
+        ? {
+            palette: RARITY_ACCENT[rarity],
+            emberRate: AMBIENT_EMBER_RATE * intensity,
+            groundSparkRate: AMBIENT_GROUND_SPARK_RATE * intensity,
+          }
+        : null,
   };
 }
 
@@ -187,7 +277,17 @@ function resolveNormalRecipe(rarity: ItemRarity, refineRaw: number): RefineFxRec
 
 export const LEGENDARY_MAX_REFINE = 5;
 const LEGEND_CRACKLE_REFINE = 4;
-const LEGEND_BEAT_REFINE = 5;
+
+// ---- "special-feel" wave, legendary mapping (owner call, see plan) -------
+// molten ≥3 (drips at 5) · swingTrail ≥4 · chargeBurst+ambient =5 · gold/
+// violet palettes split across the new features the same way the two base
+// layers already split them (molten=gold "molten metal", trail=violet,
+// chargeBurst=gold, ambient=violet).
+const LEGEND_MOLTEN_REFINE = 3;
+const LEGEND_MOLTEN_DRIP_REFINE = 5;
+const LEGEND_SWING_TRAIL_REFINE = 4;
+const LEGEND_CHARGE_BURST_REFINE = 5;
+const LEGEND_AMBIENT_REFINE = 5;
 
 /** Rate multiplier per awaken level 0..5 — ramps +1/+2, flat +3 (spread-only
  * change that level), flat +4/+5 (crackle/beat additions carry those levels
@@ -219,7 +319,27 @@ function resolveLegendaryRecipe(refineRaw: number): RefineFxRecipe {
   return {
     layers,
     crackle: refine >= LEGEND_CRACKLE_REFINE ? { interval: CRACKLE_INTERVAL, palette: CRACKLE_PALETTE } : null,
-    beat: refine >= LEGEND_BEAT_REFINE ? { columnPalette: LEGEND_GOLD_PALETTE, flarePeriod: BEAT_FLARE_PERIOD } : null,
+    molten:
+      refine >= LEGEND_MOLTEN_REFINE
+        ? {
+            palette: LEGEND_GOLD_PALETTE,
+            countTexels: MOLTEN_COUNT_TEXELS,
+            dripRate: refine >= LEGEND_MOLTEN_DRIP_REFINE ? MOLTEN_DRIP_RATE : 0,
+          }
+        : null,
+    swingTrail: refine >= LEGEND_SWING_TRAIL_REFINE ? { palette: LEGEND_VIOLET_PALETTE } : null,
+    beat:
+      refine >= LEGEND_CHARGE_BURST_REFINE
+        ? { kind: "chargeBurst", palette: LEGEND_GOLD_PALETTE, period: CHARGE_BURST_PERIOD }
+        : null,
+    ambient:
+      refine >= LEGEND_AMBIENT_REFINE
+        ? {
+            palette: LEGEND_VIOLET_PALETTE,
+            emberRate: AMBIENT_EMBER_RATE * LEGENDARY_INTENSITY,
+            groundSparkRate: AMBIENT_GROUND_SPARK_RATE * LEGENDARY_INTENSITY,
+          }
+        : null,
   };
 }
 
