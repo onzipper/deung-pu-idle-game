@@ -229,10 +229,14 @@ export type GameEvent =
   // every event — the engine NEVER reads these back (the command state lives on the
   // hero); render adds consumers (a ground click-marker at `moveOrdered.x`, a lock
   // ring on `targetLocked.id`, a fade on `commandCancelled`). `moveOrdered.x` is the
-  // CLAMPED walkable x actually commanded.
-  | { type: "moveOrdered"; x: number }
-  | { type: "targetLocked"; id: number }
-  | { type: "commandCancelled" }
+  // CLAMPED walkable x actually commanded. `heroIdx` (owner bug batch A #3, "tap-ring
+  // pov-only") is the cohort lane/hero index the command was applied to — mirrors
+  // `heroShadowed.heroIdx` below; render gates the ring-ping fx on it (`=== the local
+  // client's `povHeroIndex`) so a PEER's tap-to-move/tap-a-monster never rings on my
+  // screen. Solo is always lane 0 === default `povHeroIndex` 0 — pixel-identical.
+  | { type: "moveOrdered"; x: number; heroIdx: number }
+  | { type: "targetLocked"; id: number; heroIdx: number }
+  | { type: "commandCancelled"; heroIdx: number }
   // Shadow-body transition (M8 party P2 — "ร่างเงา", design §9). Fires on the STEP a
   // cohort hero's shadow flag flips (owner dropped past grace → `value:true`; reconnected
   // → `value:false`), so render (P6) can dim + tag the offline body / restore it. One-way

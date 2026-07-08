@@ -1123,7 +1123,8 @@ export function GameClient() {
       myTicketSlot = partySession.slot;
       // Pre-handshake, "my own hero" is `heroes[0]` while solo, or `heroes[myCohortIndex]`
       // if this is a re-seed of an ALREADY-active cohort (e.g. a 3rd member joins).
-      const myProgression = progressionFromHero(cohortActive ? state.heroes[myCohortIndex] : state.heroes[0]);
+      const myHero = cohortActive ? state.heroes[myCohortIndex] : state.heroes[0];
+      const myProgression = progressionFromHero(myHero);
       handshake = new PartyHandshake({
         mySlot: myTicketSlot,
         cohortSlots,
@@ -1131,6 +1132,12 @@ export function GameClient() {
         myProgression,
         mySharedSave: sharedSaveFromState(state),
         mintSeed: () => Date.now() >>> 0,
+        // Owner bug batch A #2 ("position reset on cohort re-form"): attach my CURRENT
+        // x ONLY when this re-seed continues a cohort I was ALREADY active in — e.g.
+        // someone else joins/leaves my zone and everyone's handshake restarts. A fresh
+        // solo->cohort join has no meaningful position in this cohort yet, so it's
+        // omitted and the joiner spawns at the formation anchor, same as before.
+        myX: cohortActive ? myHero.x : undefined,
       });
       handshakeStartedAt = performance.now();
       handshake.start();
