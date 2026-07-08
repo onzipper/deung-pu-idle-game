@@ -984,6 +984,11 @@ describe("cohort — the bot never initiates a shared-party town trip", () => {
       mpPotionTarget: 15,
       scrollReserve: 3,
     };
+    // Bot settings are PER HERO now (2026-07-09): in a real cohort each hero's config carries
+    // its own bot settings (via handshake progression / setHeroConfig), and the bot systems read
+    // heroes[0].config — NOT the shared state.bot. A 2-hero cohort never runs syncPrimaryHeroConfig,
+    // so seed the configs here to reproduce a live "bot ON" party (state.bot alone would be inert).
+    for (const h of s.heroes) h.config = { ...h.config, ...s.bot };
     s.consumables.hpPotion = 0;
     s.consumables.manaPotion = 0;
     s.spawnPaused = true; // isolate the bot decision from combat noise

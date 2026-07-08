@@ -152,6 +152,11 @@ function hashHero(h: number, hero: Hero): number {
   h = bool(h, c.autoManaPotion);
   h = num(h, c.autoHpThreshold);
   h = num(h, c.autoManaThreshold);
+  // config.{enabled,sellTripEnabled,hpPotionTarget,mpPotionTarget,scrollReserve,goldReserve}
+  // (the per-hero idle-bot settings, 2026-07-09) are EXCLUDED — same as the legacy shared
+  // `state.bot` always was (automation scaffolding, not battlefield state). The bot's OBSERVABLE
+  // effects (town trips, gold/consumable spends) all land on already-hashed fields, so divergence
+  // is still caught; excluding these keeps the canonical / determinism hashes byte-identical.
   // Shadow-body flag (M8 P2) — sim-relevant LANE POLICY (a shadowed hero's manual/lead
   // intents are dropped in `step()`), replicated shared state, so it MUST fold in.
   h = bool(h, hero.shadowed);

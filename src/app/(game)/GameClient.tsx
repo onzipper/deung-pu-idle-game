@@ -95,6 +95,7 @@ import {
   type HeroClass,
   type SaveData,
   type TownNpcId,
+  type BotSettings,
 } from "@/engine";
 import { type TurnMessage } from "@/engine/lockstep";
 import { AudioController } from "@/render/audio";
@@ -174,11 +175,13 @@ import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFram
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
 import {
+  botSettingsFrom,
   desiredHeroConfig,
   dropAssignedIndex,
   heroConfigDiff,
   myAutoHuntDisplay,
   nextAutoHuntWish,
+  nextBotSettingsWish,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
@@ -520,8 +523,10 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     shop,
     // Idle-bot config (M7.5, read-only display source — see `HudState.bot`'s
     // doc) + per-map unlocked-zone counts (M6 SAVE v8 field, surfaced for the
-    // fast-travel picker's lock read).
-    bot: { ...state.bot },
+    // fast-travel picker's lock read). PER-HERO now (2026-07-09): read MY OWN hero's
+    // config (heroes[0] is my-hero-first in a cohort) so the BotSettings panel shows my
+    // own settings, not the shared lane-0 `state.bot`. Byte-identical in solo (config ≡ state.bot).
+    bot: botSettingsFrom(state.heroes[0]?.config, state.bot),
     // Bot MASTER switch display (M8 party live bug fix — see `myAutoHuntDisplay`'s doc):
     // MY OWN hero's config, never the shared `state.autoHunt` legacy field.
     autoHunt: myAutoHuntDisplay(state),
@@ -921,6 +926,10 @@ export function GameClient() {
      * `nextAutoHuntWish`). Holds a pressed `autoHunt` value until my hero's replicated
      * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
     let cohortAutoHuntWish: boolean | null = null;
+    /** 2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน": my CLIENT-LOCAL bot-SETTINGS wish latch (see
+     * `nextBotSettingsWish`). Holds each pressed BotSettings field until my hero's replicated
+     * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
+    let cohortBotSettingsWish: Partial<BotSettings> | null = null;
     /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
      * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
     let cohortEngine: CohortTurnEngine | null = null;
@@ -1137,7 +1146,15 @@ export function GameClient() {
       // slice — kills I made inside the cohort accrue to my own `zoneKills`, so leaving the
       // party keeps them (and the accumulated count unlocks the zone once I'm solo).
       const settledProg = settledProgress();
+      // Bot settings are PER HERO now (2026-07-09): capture MY hero's own bot config BEFORE
+      // the extract (which rebuilds `state.bot` from the SHARED slice) so the post-collapse
+      // solo state keeps MY settings, not the authority's shared `state.bot`.
+      const myBot = botSettingsFrom(state.heroes[myCohortIndex]?.config, state.bot);
       state = extractSoloState(state, myCohortIndex, seed);
+      // Overwrite the rebuilt solo `state.bot` with my own — the next step's
+      // `syncPrimaryHeroConfig` then mirrors it onto heroes[0].config (so the solo bot behaves
+      // exactly as my in-cohort settings dictated).
+      state.bot = myBot;
       if (settled) {
         state.gold = settled.gold;
         state.goldEarned = settled.goldEarned;
@@ -1158,6 +1175,7 @@ export function GameClient() {
       cohortProgressBase = null;
       cohortZoneKillsBase = null;
       cohortAutoHuntWish = null;
+      cohortBotSettingsWish = null;
       cohortActive = false;
       handshake?.abort();
       handshake = null;
@@ -1239,6 +1257,7 @@ export function GameClient() {
       // shared kill-delta against) + clear the bot-toggle wish latch for the fresh cohort.
       cohortZoneKillsBase = liveZoneKills(built);
       cohortAutoHuntWish = null;
+      cohortBotSettingsWish = null;
       handshake = null;
       handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS; // converged — reset the backoff
       cohortActive = true;
@@ -1922,16 +1941,11 @@ export function GameClient() {
           zoneAt(state.location).kind === "farm"
         ) {
           const want = wantsBotTownTrip(
-            // A2: gate BOTH bot chores on MY hero's master switch (`config.autoHunt`) — the
-            // shared `state.bot.enabled`/`sellTripEnabled` flags are lane-0-owned, so without
-            // this a member whose master is OFF would still be dragged on a leader-driven trip
-            // (and a member with it ON couldn't trip if the leader's was off). AND-ing per
-            // hero makes the leave-decision honour MY own toggle.
-            {
-              ...state.bot,
-              enabled: state.bot.enabled && myHero.config.autoHunt,
-              sellTripEnabled: state.bot.sellTripEnabled && myHero.config.autoHunt,
-            },
+            // Bot settings are PER HERO now (2026-07-09): read MY hero's own config directly
+            // (structurally a BotSettings) — it holds MY enabled/sellTripEnabled/targets, set via
+            // the replicated `setHeroConfig`. No more ANDing the shared lane-0 `state.bot` with my
+            // master switch; the config IS my own, so the leave-decision honours my own settings.
+            myHero.config,
             { hpPotion: myWallet.consumables.hpPotion ?? 0, manaPotion: myWallet.consumables.manaPotion ?? 0 },
             myWallet.gold,
             shopStageOf(state),
@@ -1975,6 +1989,15 @@ export function GameClient() {
               input.setAutoHunt,
               state.heroes[myCohortIndex]?.config.autoHunt ?? store.autoHunt,
             );
+            // 2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน": LATCH this frame's `setBotSettings` patch
+            // (every BotSettingsSection switch) BEFORE stripping it — same reason as autoHunt:
+            // `store.bot` mirrors MY replicated config, so it can't drive its own change; the
+            // wish holds each pressed field until my hero's config confirms it, then releases.
+            cohortBotSettingsWish = nextBotSettingsWish(
+              cohortBotSettingsWish,
+              input.setBotSettings,
+              state.heroes[myCohortIndex]?.config,
+            );
             // Strip the LEGACY `setAutoHunt` intent: `step()` applies it lane-0-only
             // (`primary.setAutoHunt`), so the leader's copy would mutate the SHARED
             // `state.autoHunt` for everyone (and bleed into `SharedCohortSave`), and a
@@ -1990,6 +2013,9 @@ export function GameClient() {
             // latched wish), diff it against my hero's current config, and replicate any
             // change on my lane — the engine applies it lane-index -> hero, so it lands
             // (deterministically, on every client) within one turn. Re-sent until observed.
+            // Idle-bot settings (2026-07-09): store.bot mirrors MY hero's config; overlay the
+            // wish latch so a freshly-pressed field feeds a real diff until config confirms it.
+            const bot = { ...store.bot, ...(cohortBotSettingsWish ?? {}) };
             const diff = heroConfigDiff(
               desiredHeroConfig({
                 autoHunt: cohortAutoHuntWish ?? store.autoHunt,
@@ -1999,6 +2025,12 @@ export function GameClient() {
                 autoManaPotion: store.autoManaPotion,
                 autoHpThreshold: store.autoHpThreshold,
                 autoManaThreshold: store.autoManaThreshold,
+                enabled: bot.enabled,
+                sellTripEnabled: bot.sellTripEnabled,
+                hpPotionTarget: bot.hpPotionTarget,
+                mpPotionTarget: bot.mpPotionTarget,
+                scrollReserve: bot.scrollReserve,
+                goldReserve: bot.goldReserve,
               }),
               state.heroes[myCohortIndex]?.config,
             );
@@ -2370,7 +2402,10 @@ export function GameClient() {
         // MY row (materials is server-authoritative on persist, but included for a coherent
         // blob). `myVirtualWallet` reads the live pot, never mutating it.
         const w = myVirtualWallet();
-        const base = { ...state, heroes: [mine] };
+        // Bot settings are PER HERO now (2026-07-09): persist MY OWN hero's bot config (not the
+        // shared lane-0 `state.bot`) so autosave/the hide beacon carry the settings I actually
+        // set in the cohort — `toSaveData` reads `state.bot`, so overlay it on the throwaway base.
+        const base = { ...state, heroes: [mine], bot: botSettingsFrom(mine.config, state.bot) };
         // PROGRESSION-INTEGRITY (cohortProgress.ts): same shape as the wallet override —
         // `base` is a THROWAWAY shallow clone (never the live `state`, so mutating its
         // scalar fields here can't desync the lockstep sim), overwritten with MY SETTLED

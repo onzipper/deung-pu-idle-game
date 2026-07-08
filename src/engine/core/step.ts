@@ -453,7 +453,21 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   if (primary.refined) advanceDailyProgress(state, "refineOnce", 1);
   // Idle-bot settings update (M7.5) — merged + clamped onto the persisted state.bot.
   // Bot is the LEAD/local player's automation (lane 0).
-  if (primary.setBotSettings) setBotSettings(state, primary.setBotSettings);
+  if (primary.setBotSettings) {
+    setBotSettings(state, primary.setBotSettings);
+    // Bot settings are now PER HERO (2026-07-09): re-mirror the clamped `state.bot` onto
+    // heroes[0].config THIS frame (solo only — no-op for a cohort) so `updateBots` below sees
+    // the change immediately, matching the pre-per-hero behaviour where it read `state.bot` raw.
+    syncPrimaryHeroConfig(state);
+  }
+  // Cohort members (i≥1) set their OWN hero's bot config (mirrors the setAutoHunt split below);
+  // a member's copy is dead without this. Lane 0 stays `state.bot` (verbatim above) — the client
+  // reroutes a cohort member's bot edit through `setHeroConfig` (applied above), so this per-lane
+  // `setBotSettings` path is a legacy/defence channel. Deterministic: every client applies identically.
+  for (let i = 1; i < state.heroes.length; i++) {
+    const b = laneFor(i).setBotSettings;
+    if (b) applyHeroConfig(state.heroes[i], b);
+  }
   // Auto-hunt toggle (M6.6): lane 0 sets the persisted global (mirrored onto
   // heroes[0].config above); a cohort member (i≥1) sets its OWN hero's config.
   if (primary.setAutoHunt !== undefined) state.autoHunt = primary.setAutoHunt;

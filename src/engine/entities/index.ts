@@ -304,6 +304,28 @@ export interface HeroConfig {
   autoHpThreshold: number;
   /** Auto mana-potion fires below this fraction of MAX MANA (0..1). */
   autoManaThreshold: number;
+  // ── Idle-BOT settings, per hero (2026-07-09 "ตั้งค่าบอทเป็นของใครของมัน") ─────────────
+  // The six `BotSettings` fields (was the GLOBAL, SHARED `state.bot`) moved here so a
+  // cohort member can change their own bot mid-party. The KEYS deliberately match
+  // `BotSettings` verbatim so a `HeroConfig` is structurally a `BotSettings` (the bot
+  // systems just read `heroes[0].config`) and a `setBotSettings` patch applies straight
+  // through `applyHeroConfig`. In SOLO these mirror `state.bot` every step
+  // (`syncPrimaryHeroConfig`), so a 1-hero run is byte-identical (the bot systems read
+  // the same values they used to read off `state.bot`). EXCLUDED from `stateHash` (like
+  // `state.bot` always was — automation scaffolding, not battlefield state), so the
+  // canonical / determinism hashes stay byte-identical.
+  /** Potion-restock bot ON (was `state.bot.enabled`). */
+  enabled: boolean;
+  /** Sell-trip bot ON (was `state.bot.sellTripEnabled`). */
+  sellTripEnabled: boolean;
+  /** hp-potion restock target stack (was `state.bot.hpPotionTarget`). */
+  hpPotionTarget: number;
+  /** mana-potion restock target stack (was `state.bot.mpPotionTarget`). */
+  mpPotionTarget: number;
+  /** return-scroll restock target / warp fuel (was `state.bot.scrollReserve`). */
+  scrollReserve: number;
+  /** spending FLOOR — restock only spends gold above this (was `state.bot.goldReserve`). */
+  goldReserve: number;
 }
 
 export interface Hero {

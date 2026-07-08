@@ -3,6 +3,8 @@ import { CONFIG, SKILLS, initGameState, step } from "@/engine";
 import type { FrameInput, GameState } from "@/engine";
 import { makeParty, makeStubEnemy, soloSave } from "./helpers";
 import { startBossFight } from "@/engine/systems/boss";
+import { updateBots } from "@/engine/systems/bots";
+import { townLocation } from "@/engine/systems/world";
 
 /**
  * M8 party P1b — multi-hero engine determinism + per-hero routing/config isolation,
@@ -139,6 +141,72 @@ describe("M8 party P1b — per-hero config isolation (setHeroConfig)", () => {
     expect(h1.x).toBe(x1Before);
     expect(h1.config.autoHunt).toBe(false);
     expect(h0.config.autoHunt).toBe(true);
+  });
+});
+
+describe("per-hero idle-bot settings (2026-07-09 'ตั้งค่าบอทเป็นของใครของมัน')", () => {
+  it("(a) per-lane setBotSettings lands on THAT lane's hero config only; shared state.bot untouched by i>0", () => {
+    const s = twoHeroParty(7);
+    const botBefore = { ...s.bot };
+    step(s, [{}, { setBotSettings: { enabled: true, hpPotionTarget: 42 } }]);
+    expect(s.heroes[1].config.enabled).toBe(true);
+    expect(s.heroes[1].config.hpPotionTarget).toBe(42);
+    expect(s.heroes[0].config.enabled).toBe(false); // hero 0 untouched by lane 1's edit
+    expect(s.bot).toEqual(botBefore); // shared state.bot NOT mutated by a member (i>0) lane
+  });
+
+  it("(b) solo: primary setBotSettings updates state.bot AND heroes[0].config the SAME frame", () => {
+    const s = initGameState(1, soloSave("swordsman", 3));
+    step(s, { setBotSettings: { enabled: true, hpPotionTarget: 30, goldReserve: 500 } });
+    // state.bot is the persisted source of truth; heroes[0].config is re-mirrored this SAME
+    // frame (syncPrimaryHeroConfig after setBotSettings) so the bot systems — which now read
+    // config — see the change immediately, matching the pre-per-hero behaviour (byte-identical).
+    expect(s.bot.enabled).toBe(true);
+    expect(s.bot.hpPotionTarget).toBe(30);
+    expect(s.bot.goldReserve).toBe(500);
+    expect(s.heroes[0].config.enabled).toBe(true);
+    expect(s.heroes[0].config.hpPotionTarget).toBe(30);
+    expect(s.heroes[0].config.goldReserve).toBe(500);
+  });
+
+  it("(b) solo: a scripted setBotSettings run stays deterministic (hash-identical across two runs)", () => {
+    const script = (i: number): FrameInput =>
+      i === 5
+        ? { setBotSettings: { enabled: true, hpPotionTarget: 20 } }
+        : i === 60
+          ? { setBotSettings: { sellTripEnabled: true } }
+          : {};
+    const a = initGameState(1, soloSave("swordsman", 3));
+    const b = initGameState(1, soloSave("swordsman", 3));
+    expect(runHashes(b, 200, script)).toEqual(runHashes(a, 200, script));
+  });
+
+  it("(c) 2-hero: the bot gate reads heroes[0].config, NOT the shared state.bot", () => {
+    // A cohort standing in town: the town walk-out only fires past the enabled gate, which now
+    // reads heroes[0].config. state.bot says ON for BOTH bots — but the gate must honour config.
+    const base = (): GameState => {
+      const s = twoHeroParty(3);
+      s.phase = "battle";
+      s.location = townLocation()!;
+      s.unlockedZones = { map1: 7, map2: 6, map3: 6 };
+      s.lastFarmZone = { mapId: "map1", zoneIdx: 1 };
+      s.traveling = null;
+      s.fastTravelCast = null;
+      s.botWalk = null;
+      s.botDwell = null;
+      s.bot = { ...s.bot, enabled: true, sellTripEnabled: true }; // shared says ON
+      return s;
+    };
+    // heroes[0].config OFF → gate returns early → no walk-out (despite shared state.bot ON).
+    const off = base();
+    off.heroes[0].config = { ...off.heroes[0].config, enabled: false, sellTripEnabled: false };
+    updateBots(off);
+    expect(off.traveling).toBeNull();
+    // heroes[0].config ON → the cohort town walk-out begins a transit back to the farm.
+    const on = base();
+    on.heroes[0].config = { ...on.heroes[0].config, enabled: true };
+    updateBots(on);
+    expect(on.traveling).not.toBeNull();
   });
 });
 
