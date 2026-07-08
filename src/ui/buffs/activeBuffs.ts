@@ -16,9 +16,9 @@
 
 import { CONFIG } from "@/engine";
 
-/** Discriminates which i18n keys (`buffHub.chip.<kind>` / `buffHub.detail.<kind>`)
- * a badge resolves against — `BuffBadgeHub.tsx`'s only coupling to a specific
- * buff's copy. */
+/** Discriminates which i18n keys (`buffHub.source.<kind>` / `buffHub.chip.<kind>`
+ * / `buffHub.detail.<kind>`) a badge resolves against — `BuffBadgeHub.tsx`'s
+ * only coupling to a specific buff's copy. */
 export type BuffBadgeKind = "partyExp" | "warCry";
 
 export interface BuffBadge {
@@ -30,8 +30,16 @@ export interface BuffBadge {
   /** Win10-safe emoji (footgun #4) — rendered `aria-hidden` beside the
    * translated label; never baked into the i18n string itself. */
   icon: string;
-  /** ICU interpolation vars for BOTH `chip.<kind>` (compact label) and
-   * `detail.<kind>` (tap-to-open tooltip body). */
+  /** i18n key segment for the SOURCE name (`buffHub.source.<sourceKey>`) — v2
+   * owner ask: "อยากให้มีบอกด้วยว่าเป็นบัพจากอะไร" (chips must name what
+   * granted the buff, not just show a bare stat delta like "atk+"). Its own
+   * field (distinct from `kind`) so a future builder could share a `kind`'s
+   * detail copy while naming a different source; today every builder's
+   * `sourceKey` equals its `kind`. */
+  sourceKey: string;
+  /** ICU interpolation vars for `source.<sourceKey>` (compact source name),
+   * `chip.<kind>` (compact effect label), AND `detail.<kind>` (tap-to-open
+   * tooltip body) alike. */
   params: Record<string, string | number>;
 }
 
@@ -66,6 +74,7 @@ const partyExpBuilder: BuffBadgeBuilder = (input) => {
     id: "partyExp",
     kind: "partyExp",
     icon: "\u{1F91D}", // 🤝
+    sourceKey: "partyExp",
     params: { percent, count: input.heroesLength },
   };
 };
@@ -83,6 +92,7 @@ const warCryBuilder: BuffBadgeBuilder = (input) => {
     id: "warCry",
     kind: "warCry",
     icon: "⚔", // ⚔
+    sourceKey: "warCry",
     params: { percent, seconds },
   };
 };
@@ -101,4 +111,25 @@ export function buildActiveBuffBadges(input: ActiveBuffInput): BuffBadge[] {
     if (badge) badges.push(badge);
   }
   return badges;
+}
+
+/** Result of {@link capBuffBadges}: the badges to render as full chips plus
+ * whatever got bumped into the "+N" overflow chip. */
+export interface CappedBuffBadges {
+  visible: BuffBadge[];
+  overflow: BuffBadge[];
+}
+
+/** UX-audit weakness #4 fix: caps the strip at `maxVisible` TOTAL slots
+ * (including the overflow chip itself when one is needed) so the row never
+ * needs to wrap onto a second line — `BuffBadgeHub.tsx` renders one full-width
+ * bordered strip with a FIXED single-line height, and wrapping would blow that
+ * height out (the exact jitter the audit flagged). When the badge count fits
+ * within `maxVisible` already, everything shows as a real chip and there's no
+ * overflow chip at all. Pure + headlessly testable (`activeBuffs.test.ts`). */
+export function capBuffBadges(badges: readonly BuffBadge[], maxVisible: number): CappedBuffBadges {
+  const cap = Math.max(0, maxVisible);
+  if (badges.length <= cap) return { visible: [...badges], overflow: [] };
+  const visibleCount = Math.max(0, cap - 1); // reserve one slot for the overflow chip
+  return { visible: badges.slice(0, visibleCount), overflow: badges.slice(visibleCount) };
 }

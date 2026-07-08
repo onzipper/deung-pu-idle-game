@@ -257,6 +257,15 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09e.items.potionCd",
     ],
   },
+  // Buff Badge Hub v2 (owner: "อยากให้มีบอกด้วยว่าเป็นบัพจากอะไร ไม่ใช่แบบ
+  // atk+ ขึ้นมา งงๆ" + the UX audit's follow-up pass) — chips now name their
+  // source, the strip matches the CohortStatus/WorldBossBanner box language,
+  // and it no longer jitters or overflows onto a second line.
+  {
+    id: "2026-07-09f",
+    date: "2026-07-09",
+    items: ["releases.2026-07-09f.items.buffHubV2"],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
