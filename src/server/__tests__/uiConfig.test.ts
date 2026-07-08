@@ -155,6 +155,8 @@ describe("persistSave — uiConfig round-trip", () => {
     // Still refreshes the denormalized caches alongside it.
     expect(updateArgs.data.level).toBe(4);
     expect(typeof updateArgs.data.power).toBe("number");
+    // Ninja wave: the class-advancement tier cache is stamped from the blob too.
+    expect(updateArgs.data.tier).toBe(2);
   });
 
   it("leaves the stored config untouched when uiConfig is OMITTED", async () => {

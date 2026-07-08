@@ -132,6 +132,9 @@ export async function persistSave(
   const characterData: Prisma.CharacterUpdateInput = {
     level: data.hero.level,
     power,
+    // Ninja wave: class-advancement tier cache (1..3), stamped like level/power from
+    // the validated blob so the ninja-unlock gate / roster progress never parse saves.
+    tier: data.hero.tier,
   };
   // M8 presence cache: stamp the character's CURRENT zone (mapId:zoneIdx composite,
   // ≤32 chars) alongside the level/power caches so a friends-list poll can show

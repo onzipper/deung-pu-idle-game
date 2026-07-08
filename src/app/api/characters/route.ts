@@ -14,6 +14,7 @@ import { setActiveCharacterCookie } from "@/server/activeCharacter";
 import {
   createCharacter,
   createCharacterSchema,
+  getNinjaUnlock,
   listCharacters,
 } from "@/server/characters";
 
@@ -23,8 +24,14 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const userId = await getOrCreateUserId();
-    const characters = await listCharacters(userId);
-    return NextResponse.json({ characters });
+    // Both reads are account-scoped by the identity cookie; the roster carries the
+    // ninja-unlock progress so the client renders the 4th (locked) card without a
+    // second poll. `ninjaUnlock` is derived from Character.tier caches, never a blob.
+    const [characters, ninjaUnlock] = await Promise.all([
+      listCharacters(userId),
+      getNinjaUnlock(userId),
+    ]);
+    return NextResponse.json({ characters, ninjaUnlock });
   } catch (err) {
     console.error("[api/characters] GET failed:", err);
     return NextResponse.json({ error: "internal error" }, { status: 500 });
@@ -51,8 +58,10 @@ export async function POST(request: Request) {
     const userId = await getOrCreateUserId();
     const result = await createCharacter(userId, parsed.data);
     if (!result.ok) {
-      // limit -> 409 Conflict; duplicate name -> 409 Conflict.
-      return NextResponse.json({ error: result.error, code: result.code }, { status: 409 });
+      // ninja_locked -> 403 Forbidden (unmet unlock condition, UI maps to progress
+      // copy); limit / duplicate / ninja_only_slot -> 409 Conflict.
+      const status = result.code === "ninja_locked" ? 403 : 409;
+      return NextResponse.json({ error: result.error, code: result.code }, { status });
     }
     // First character created becomes the active one (convenience for the client);
     // subsequent creates leave the current selection untouched.

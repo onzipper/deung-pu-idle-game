@@ -71,6 +71,14 @@ model Character {
   baseClass String     @db.VarChar(16) // engine HeroClass string: swordsman | archer | mage
   level     Int        @default(1) // cache of engine level (re-derivable)
   power     Int        @default(0) // cache of derived combat power for HOF (re-derivable; widen to BigInt if it ever exceeds 2^31)
+  // Ninja wave: class-advancement TIER cache (1=base .. 3=tier-3), stamped by
+  // /api/save alongside level/power (src/server/persistSave) from the validated
+  // save blob (data.hero.tier). DENORMALIZED + RE-DERIVABLE — this column exists so
+  // the ninja-unlock gate + roster progress can be checked across an account's
+  // characters WITHOUT parsing every save blob. Additive + default 1: every pre-
+  // ninja row reads 1 until its owner logs in once and the next save stamps the real
+  // tier (progress may undercount until then — ACCEPTED, no blob-parsing backfill).
+  tier      Int        @default(1)
   // M8 presence cache: the character's CURRENT zone id, stamped by /api/save
   // alongside the level/power caches (src/server/persistSave). DENORMALIZED +
   // RE-DERIVABLE from SaveState.data (engine hero.zone) — this column exists ONLY so

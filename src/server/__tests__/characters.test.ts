@@ -27,13 +27,17 @@ const { mockPrisma } = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({ prisma: mockPrisma }));
 
 import {
+  computeNinjaUnlock,
   createCharacter,
   createCharacterSchema,
   deleteCharacter,
+  getNinjaUnlock,
   getOwnedLiveCharacter,
   listCharacters,
   powerFromSave,
   MAX_LIVE_CHARACTERS,
+  NINJA_UNLOCK_TIER,
+  REQUIRE_NINJA_UNLOCK,
 } from "@/server/characters";
 import { CONFIG, emptyDailies } from "@/engine";
 
@@ -44,6 +48,7 @@ const ROW = {
   baseClass: "archer",
   level: 3,
   power: 400,
+  tier: 1,
   createdAt: new Date("2026-01-01T00:00:00Z"),
 };
 
@@ -108,9 +113,9 @@ describe("createCharacter — cap + uniqueness (inside tx)", () => {
     expect(mockPrisma.character.create).toHaveBeenCalledOnce();
   });
 
-  it("rejects a 4th live character (limit)", async () => {
-    mockPrisma.character.count.mockResolvedValue(MAX_LIVE_CHARACTERS); // already 3 live
-    const r = await createCharacter(USER, { name: "Fourth", baseClass: "mage" });
+  it("rejects a character over the live cap (limit)", async () => {
+    mockPrisma.character.count.mockResolvedValue(MAX_LIVE_CHARACTERS); // already at cap
+    const r = await createCharacter(USER, { name: "Fifth", baseClass: "mage" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("limit");
     expect(mockPrisma.character.create).not.toHaveBeenCalled();
@@ -184,6 +189,7 @@ describe("listCharacters + powerFromSave", () => {
         baseClass: "archer",
         level: 3,
         power: 400,
+        tier: 1,
         createdAt: "2026-01-01T00:00:00.000Z",
       },
     ]);
@@ -220,5 +226,166 @@ describe("listCharacters + powerFromSave", () => {
     });
     expect(low).toBeGreaterThan(0);
     expect(high).toBeGreaterThan(low);
+  });
+});
+
+// Rows shaped as the tier-cache select {baseClass, tier}.
+const tierRows = (specs: [string, number][]) => specs.map(([baseClass, tier]) => ({ baseClass, tier }));
+const ALL_TIER3 = tierRows([
+  ["swordsman", 3],
+  ["archer", 3],
+  ["mage", 3],
+]);
+
+describe("computeNinjaUnlock — gate math over tier caches", () => {
+  it("locks when the flag is on (default) — sanity for the test suite", () => {
+    expect(REQUIRE_NINJA_UNLOCK).toBe(true);
+  });
+
+  it("unlocks when all three base lines are at tier 3", () => {
+    const u = computeNinjaUnlock(ALL_TIER3);
+    expect(u.unlocked).toBe(true);
+    expect(u.cleared).toBe(3);
+    expect(u.needed).toBe(3);
+    expect(u.requiredTier).toBe(NINJA_UNLOCK_TIER);
+    expect(u.baseTier3).toEqual({ swordsman: true, archer: true, mage: true });
+  });
+
+  it("stays locked when a base line is below tier 3 (progress 2/3)", () => {
+    const u = computeNinjaUnlock(
+      tierRows([
+        ["swordsman", 3],
+        ["archer", 3],
+        ["mage", 2],
+      ]),
+    );
+    expect(u.unlocked).toBe(false);
+    expect(u.cleared).toBe(2);
+    expect(u.baseTier3.mage).toBe(false);
+  });
+
+  it("stays locked when a base line is missing entirely", () => {
+    const u = computeNinjaUnlock(
+      tierRows([
+        ["swordsman", 3],
+        ["archer", 3],
+      ]),
+    );
+    expect(u.unlocked).toBe(false);
+    expect(u.cleared).toBe(2);
+    expect(u.maxTier.mage).toBe(0);
+  });
+
+  it("takes the MAX tier per base line across duplicate-class characters", () => {
+    const u = computeNinjaUnlock(
+      tierRows([
+        ["swordsman", 1],
+        ["swordsman", 3],
+        ["archer", 3],
+        ["mage", 3],
+      ]),
+    );
+    expect(u.maxTier.swordsman).toBe(3);
+    expect(u.unlocked).toBe(true);
+  });
+
+  it("ignores a ninja character's own tier for the gate", () => {
+    const u = computeNinjaUnlock(
+      tierRows([
+        ["swordsman", 3],
+        ["archer", 3],
+        ["mage", 3],
+        ["ninja", 3],
+      ]),
+    );
+    expect(u.unlocked).toBe(true);
+    expect(u.cleared).toBe(3);
+  });
+
+  it("treats a stale default-1 tier cache as tier 1 (may undercount, accepted)", () => {
+    const u = computeNinjaUnlock(
+      tierRows([
+        ["swordsman", 3],
+        ["archer", 3],
+        ["mage", 1], // never re-saved since deploy
+      ]),
+    );
+    expect(u.unlocked).toBe(false);
+    expect(u.cleared).toBe(2);
+  });
+});
+
+describe("getNinjaUnlock — roster progress payload", () => {
+  it("derives progress from the tier caches (never a save blob)", async () => {
+    mockPrisma.character.findMany.mockResolvedValue(ALL_TIER3);
+    const u = await getNinjaUnlock(USER);
+    expect(u.unlocked).toBe(true);
+    expect(mockPrisma.character.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: USER, deletedAt: null },
+        select: { baseClass: true, tier: true },
+      }),
+    );
+  });
+});
+
+describe("createCharacter — ninja unlock gate", () => {
+  it("allows a ninja when all three base lines are tier 3 (4th slot)", async () => {
+    mockPrisma.character.count.mockResolvedValue(3); // three base characters live
+    mockPrisma.character.findMany.mockResolvedValue(ALL_TIER3);
+    mockPrisma.character.findFirst.mockResolvedValue(null); // name free
+    mockPrisma.character.create.mockResolvedValue({ ...ROW, baseClass: "ninja", name: "Kage" });
+
+    const r = await createCharacter(USER, { name: "Kage", baseClass: "ninja" });
+    expect(r.ok).toBe(true);
+    expect(mockPrisma.character.create).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a ninja when the account has not cleared 3× tier 3 (ninja_locked)", async () => {
+    mockPrisma.character.count.mockResolvedValue(3);
+    mockPrisma.character.findMany.mockResolvedValue(
+      tierRows([
+        ["swordsman", 3],
+        ["archer", 3],
+        ["mage", 2],
+      ]),
+    );
+    const r = await createCharacter(USER, { name: "Kage", baseClass: "ninja" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("ninja_locked");
+    expect(mockPrisma.character.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a ninja on a mixed account missing a base line (ninja_locked)", async () => {
+    mockPrisma.character.count.mockResolvedValue(2);
+    mockPrisma.character.findMany.mockResolvedValue(
+      tierRows([
+        ["swordsman", 3],
+        ["archer", 3],
+      ]),
+    );
+    const r = await createCharacter(USER, { name: "Kage", baseClass: "ninja" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("ninja_locked");
+  });
+});
+
+describe("createCharacter — 4th slot is ninja-only", () => {
+  it("rejects a non-ninja 4th character (ninja_only_slot)", async () => {
+    mockPrisma.character.count.mockResolvedValue(MAX_LIVE_CHARACTERS - 1); // 3 live → next is the 4th
+    const r = await createCharacter(USER, { name: "Fourth", baseClass: "mage" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("ninja_only_slot");
+    expect(mockPrisma.character.create).not.toHaveBeenCalled();
+    // The 4th-slot guard short-circuits before the name-uniqueness read.
+    expect(mockPrisma.character.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("still allows a non-ninja 3rd character (base slots 1–3)", async () => {
+    mockPrisma.character.count.mockResolvedValue(2); // creating the 3rd
+    mockPrisma.character.findFirst.mockResolvedValue(null);
+    mockPrisma.character.create.mockResolvedValue(ROW);
+    const r = await createCharacter(USER, { name: "Third", baseClass: "mage" });
+    expect(r.ok).toBe(true);
   });
 });
