@@ -4,7 +4,7 @@
  * fresh `id` and (for enemies) the seeded RNG whose stream they own.
  */
 
-import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL } from "@/engine/config";
+import { CONFIG, HERO_TYPES, ENEMY_TYPES, SIGNATURE_SKILL, EVADE_TUNING } from "@/engine/config";
 import { emptyEquipped, ITEM_TEMPLATES, refineOf, type EquippedGear } from "@/engine/config/items";
 import { refinedStat } from "@/engine/config/refine";
 import type { Rng } from "@/engine/core/rng";
@@ -146,11 +146,13 @@ export function makeHero(
     config,
     // Combat aim (render-only facing observer) — re-derived each step. Transient.
     aimX: null,
-    // Dash-evade runtime (NINJA FEEL RETUNE) — ready to evade, hp window seeded at full.
-    // Transient; only ever touched for a `dashEvade` class (ninja). See Hero doc.
+    // Dash-evade runtime ("แนวๆ นินจา") — ready to evade, hp window seeded at full. Transient;
+    // only ever touched for a `dashEvade` class (ninja / archer). The window is seeded from this
+    // class's own tuning (0 for a non-evade class — never read, so any value is byte-identical).
+    // See Hero doc.
     evadeCd: 0,
     evadeHpMark: maxHp,
-    evadeMarkCd: CONFIG.ninja.evade.hpWindowSec,
+    evadeMarkCd: EVADE_TUNING[cls]?.hpWindowSec ?? 0,
   };
 }
 

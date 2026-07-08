@@ -13,7 +13,7 @@
  * behaviour is preserved (and made frame-rate independent).
  */
 
-import { CONFIG, HERO_TYPES, ENEMY_TYPES, type HeroType } from "@/engine/config";
+import { CONFIG, HERO_TYPES, ENEMY_TYPES, EVADE_TUNING, type HeroType } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp, sign } from "@/engine/core/math";
 import { dsin, dhypot } from "@/engine/core/dmath";
@@ -304,10 +304,12 @@ function pickEvadeDir(state: GameState, h: Hero, radius: number): -1 | 1 {
 }
 
 /**
- * DASH-EVADE (NINJA FEEL RETUNE 2026-07-08, `CONFIG.ninja.evade`) — when an AUTO-play hero
- * of a `dashEvade` class is SWARMED under pressure, blink OUT of the crowd toward its clear
- * side, then let the normal auto-hunt re-engage next steps. Returns true if it dashed (the
- * caller then SKIPS this step's approach-walk so the hero doesn't immediately walk back in).
+ * DASH-EVADE ("แนวๆ นินจา" auto swarm-escape, per-class `EVADE_TUNING`) — when an AUTO-play hero
+ * of a `dashEvade` class (ninja / archer) is SWARMED under pressure, blink OUT of the crowd toward
+ * its clear side, then let the normal auto-hunt (and, for the archer, the kite servo) re-engage
+ * next steps. Returns true if it dashed (the caller then SKIPS this step's approach-walk so the
+ * hero doesn't immediately walk back in). The archer reads a tighter/higher-reach block than the
+ * ninja (emergency escape vs belt-dweller relief) — see `EVADE_TUNING`.
  *
  * DETERMINISTIC: no RNG, no wall-clock. The three transient counters (`evadeCd` cooldown +
  * the `evadeHpMark`/`evadeMarkCd` damage-window) are ticked here by fixed dt and are a pure
@@ -315,8 +317,9 @@ function pickEvadeDir(state: GameState, h: Hero, radius: number): -1 | 1 {
  * (see the Hero doc for why they are hash-excluded). Called ONLY for a `dashEvade` class and
  * ONLY when no manual command is active (manual + boss forced-combat keep priority upstream).
  */
-function tryNinjaEvade(state: GameState, h: Hero): boolean {
-  const ev = CONFIG.ninja.evade;
+function tryDashEvade(state: GameState, h: Hero): boolean {
+  const ev = EVADE_TUNING[h.cls];
+  if (!ev) return false; // no tuning for this class → never evades (defensive; dashEvade gate above)
   // Cooldown tick.
   if (h.evadeCd > 0) h.evadeCd = Math.max(0, h.evadeCd - FIXED_DT);
   // Damage-window: measure hp lost since the last snapshot, THEN roll the window if due.
@@ -426,10 +429,10 @@ export function updateHeroes(state: GameState): void {
     // Only when no manual command is active — manual moveTo/attackTarget and boss forced-combat
     // keep priority (both leave `manualActive` false only in the auto/boss cases, and a real
     // manual command sets it true, suppressing the evade). Byte-identical for non-dashEvade
-    // classes (the `t.dashEvade` guard is false → tryNinjaEvade never runs, counters untouched).
+    // classes (the `t.dashEvade` guard is false → tryDashEvade never runs, counters untouched).
     let evaded = false;
     if (!manualActive && t.dashEvade) {
-      evaded = tryNinjaEvade(state, h);
+      evaded = tryDashEvade(state, h);
     }
 
     if (!manualActive && !evaded) {

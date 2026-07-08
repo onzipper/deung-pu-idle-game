@@ -1225,7 +1225,9 @@
           "partyFast": "⚡ Joining a party is faster now — no more waiting for the next refresh cycle",
           "partySpread": "🎯 Party bots now spread out across monsters instead of dog-piling one (bosses still get the full-party pile-on)",
           "questBossScale": "👹 Quest bosses now scale their HP with your party size",
-          "partyBuff10": "📈 The party EXP buff is now +10% per additional member"
+          "partyBuff10": "📈 The party EXP buff is now +10% per additional member",
+          "archerDash": "🏹 The archer can now evade! When melee mobs close in, it blinks away to a new firing position — far fewer deaths",
+          "partyShare": "⚖️ Party EXP share rebalanced — partying still levels clearly faster than solo, without leaving solo players far behind (the +10%/member buff is unchanged)"
         }
       }
     }

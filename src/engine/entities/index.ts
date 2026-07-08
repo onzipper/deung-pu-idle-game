@@ -474,7 +474,7 @@ export interface Hero {
   aimX: number | null;
   /**
    * DASH-EVADE runtime (NINJA FEEL RETUNE 2026-07-08) — three per-hero TRANSIENT counters that
-   * drive the auto dash-evade (systems/combat `tryNinjaEvade`, only for a `dashEvade` class):
+   * drive the auto dash-evade (systems/combat `tryDashEvade`, only for a `dashEvade` class):
    *   - `evadeCd`     : seconds until the next auto-evade is allowed (a fixed cooldown so the
    *                     ninja never dash-spams). Ticks down by fixed dt; set on each evade.
    *   - `evadeHpMark` : hp SNAPSHOT at the start of the current damage-sampling window — the

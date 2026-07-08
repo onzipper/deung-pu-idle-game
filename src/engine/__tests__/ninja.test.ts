@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CONFIG,
   HERO_TYPES,
+  EVADE_TUNING,
   PRIMARY_STAT,
   CLASS_SKILLS,
   SIGNATURE_SKILL,
@@ -409,8 +410,8 @@ describe("ninja dash-evade (auto swarm escape)", () => {
     expect(eventTypes(s, "heroDashed")).toBe(0); // still on cooldown
   });
 
-  it("NEVER dash-evades for a non-dashEvade class (sword/archer/mage)", () => {
-    for (const cls of ["swordsman", "archer", "mage"] as const) {
+  it("NEVER dash-evades for a non-dashEvade class (sword/mage)", () => {
+    for (const cls of ["swordsman", "mage"] as const) {
       const s = initGameState(7, soloSave(cls, 1));
       const h = s.heroes[0];
       s.spawnPaused = true;
@@ -439,6 +440,99 @@ describe("ninja dash-evade (auto swarm escape)", () => {
     step(s, { moveTo: { x: 900 } }); // player takes over — walk right
     expect(eventTypes(s, "heroDashed")).toBe(0);
     expect(h.x).toBeGreaterThan(400); // obeyed the move order, did not blink away
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DASH-EVADE for the ARCHER ("แนวๆ นินจา" solo death-spiral fix) — the same capability
+// with its OWN tighter/emergency tuning (EVADE_TUNING.archer). Proves it triggers when
+// melee corners the ranged squishy, respects its own longer cooldown, never fires under
+// manual, and that the per-class table is honoured (archer radius 78 ≠ ninja radius 95).
+// ---------------------------------------------------------------------------
+
+describe("archer dash-evade (ranged emergency escape)", () => {
+  /** A solo archer with a controllable hero + frozen mob field (autoCast off). */
+  const archerState = (): GameState => {
+    const s = initGameState(7, soloSave("archer", 1));
+    const h = s.heroes[0];
+    s.spawnPaused = true;
+    s.spawnBurst = false;
+    s.enemies = [];
+    h.config.autoCast = false;
+    h.x = 400;
+    return s;
+  };
+  /** An archer cornered by `n` engaged melee inside its tight evade radius, under hp pressure. */
+  const corneredArcher = (hpFrac = 0.3): GameState => {
+    const s = archerState();
+    const h = s.heroes[0];
+    h.hp = h.maxHp * hpFrac;
+    // Three foes packed within the archer's radius (78): a real breach of the kite.
+    s.enemies = [makeStubEnemy(1, 355), makeStubEnemy(2, 400), makeStubEnemy(3, 445)];
+    return s;
+  };
+
+  it("blinks OUT when melee breaches the kite AND hp is under pressure", () => {
+    const s = corneredArcher();
+    const h = s.heroes[0];
+    const x0 = h.x;
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(1);
+    // A decisive slip (not a hunt-walk), toward the clearer/open side, and it re-opens a kite gap.
+    expect(Math.abs(h.x - x0)).toBeGreaterThan(CONFIG.hunt.huntSpeed * FIXED_DT * 5);
+    expect(h.evadeCd).toBeGreaterThan(0);
+  });
+
+  it("does NOT evade for a mere 2-mob breach (the kite servo handles it — minEnemies 3)", () => {
+    const s = corneredArcher();
+    s.enemies = [makeStubEnemy(1, 380), makeStubEnemy(2, 420)]; // 2 < archer minEnemies (3)
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0);
+  });
+
+  it("does NOT evade while healthy (no hp/burst pressure) even when crowded", () => {
+    const s = corneredArcher(1.0); // full hp, no recent damage
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0);
+  });
+
+  it("respects its OWN (longer) evade cooldown — no back-to-back blink", () => {
+    const s = corneredArcher();
+    const h = s.heroes[0];
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(1);
+    const cd = h.evadeCd;
+    // Archer's cooldown is longer than the ninja's — assert it seeded from the archer table.
+    expect(cd).toBeCloseTo(EVADE_TUNING.archer!.cooldownSec, 5);
+    // Re-pin a fresh crowd around the new spot, still under pressure.
+    s.enemies = [makeStubEnemy(1, h.x - 20), makeStubEnemy(2, h.x), makeStubEnemy(3, h.x + 20)];
+    h.hp = h.maxHp * 0.3;
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0); // still on cooldown
+  });
+
+  it("NEVER evades while a manual command is active (manual keeps priority)", () => {
+    const s = corneredArcher(0.25);
+    const h = s.heroes[0];
+    s.events.length = 0;
+    step(s, { moveTo: { x: 100 } }); // player takes over — walk left
+    expect(eventTypes(s, "heroDashed")).toBe(0);
+    expect(h.x).toBeLessThan(400); // obeyed the move order, did not blink
+  });
+
+  it("honours the PER-CLASS table: a foe just outside archer radius (78) but inside ninja (95)", () => {
+    // Two foes point-blank + a third at distance 88 (outside 78, inside 95). Archer sees only 2
+    // inside its radius → below minEnemies → no evade; a ninja in the same spot WOULD evade.
+    const s = corneredArcher();
+    const h = s.heroes[0];
+    s.enemies = [makeStubEnemy(1, 400), makeStubEnemy(2, 415), makeStubEnemy(3, h.x + 88)];
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0); // 3rd foe outside the archer's tight radius
   });
 });
 

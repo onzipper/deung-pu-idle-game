@@ -657,3 +657,38 @@ sim BYTE-IDENTICAL for ALL FOUR classes (state-hash diff empty). Repo 1555 green
    chose +10%/คน knowingly so the spec ships un-reduced; the hottest reading is **archer-3p ×1.75**
    (under the ~1.8 concern line — still the solo-archer death-spiral denominator artifact, now +buff).
    If the owner wants it trimmed, the safe lever is `expShareRate` 0.6 → ~0.5 (do NOT touch his +10%).
+
+### Share trim (after respawn-rate scaling + archer evade) — 2026-07-08
+
+The numbers in point 3 above **predate two later landings**: (a) `PARTY_RESPAWN_SCALE_PER_MEMBER`
+(7778f1c) — the "real no-starvation lever" that point 1 flagged — which lifted cohort throughput
+from 45-68% of solo to **~95-100%**, and (b) the archer **dash-evade** (this wave), which raised the
+archer SOLO denominator (fewer death-spiral deaths → higher solo xp/hr). With throughput no longer
+starved, the `expShareRate 0.6` compensation became a **surplus**: measured per-member party xp/hr
+had inflated well past the ×1.3-1.5 band. Owner-approved a share trim (sweep 0.20-0.30; ladder buff
+stays owner-locked at +10%/member; measured with everything in play, archer-evade solo baselines).
+
+**Measured per-member xp/hr × solo (1800s × 5 seeds), archer-evade denominators:**
+
+| size | share | sword | archer | mage | ninja | mixed |
+|---|---|---|---|---|---|---|
+| 2p | 0.6 (old) | 2.17 | 1.56 | 2.21 | 1.37 | — |
+| 3p | 0.6 (old) | 2.73 | 3.88 | 3.77 | 3.07 | 3.66 |
+| 2p | **0.20 (chosen)** | 1.54 | 1.02 | 1.31 | 1.27 | — |
+| 3p | **0.20 (chosen)** | 1.71 | 1.87 | 2.15 | 1.89 | 2.39 |
+
+Sweep context (2p / 3p per-class): at 0.25 → 2p 1.66/1.08/1.47/1.54, 3p 1.79/2.36/2.32/2.02; at
+0.30 → 2p 1.74/1.11/1.56/1.37, 3p 1.96/1.91/2.59/2.18. **0.20 minimizes total band deviation and
+gives the tightest 3p spread.**
+
+**Chosen: `PARTY_EXP_SHARE_RATE = 0.20`.** It re-seats **2p** at/near band (sword 1.54, mage 1.31,
+ninja 1.27 in-band; archer 1.02 dips slightly UNDER — two clustered archers barely out-earn the now-
+stronger solo archer) and compresses **3p** from ×2.7-3.9 down to ×1.7-2.4.
+
+**LOUD FLAG (owner call):** **3p cannot be pulled strictly into ×1.3-1.5 by the share at ANY value in
+range** — the residual is a STRUCTURAL co-op snowball (shared survival → deeper reach in a fixed-time
+sim → geometrically higher xp/kill) STACKED on the owner-LOCKED +10%/member ladder (×1.20 at 3p) and
+the respawn throughput, none of which `expShareRate` governs (even share→0 leaves 3p ≳1.3-1.8). 0.20
+is the best BOTH-sizes-at-once compromise. If the owner wants 3p ≤1.5 strictly, the levers are the
+ladder buff (locked) or a reach/level-gap cap — NOT the share. Headcount ladder is preserved (3p >
+2p at every size). Gold/drops stay personal; quest-boss HP headcount scaling (point 2) untouched.

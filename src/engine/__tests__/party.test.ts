@@ -229,6 +229,18 @@ describe("M8 cohort exp — the share/buff math (config curves)", () => {
   it("goldShareMult stays INERT (gold is personal per owner)", () => {
     expect([P.goldShareMult(1), P.goldShareMult(2), P.goldShareMult(3)]).toEqual([1, 1, 1]);
   });
+  it("expShareRate is the TRIMMED value (0.20) — compensation removed after respawn scaling", () => {
+    // 0.6 was compensation for kill-starvation; the respawn-rate scale fixed throughput, so the
+    // share was trimmed to 0.20 to pull per-member party xp back toward the 1.3-1.5 target band
+    // (docs/balance-m79.md "Party feel pack — share trim"). Pinned so an accidental drift is caught.
+    expect(P.expShareRate).toBeCloseTo(0.2, 12);
+    // The +10%/extra-member ladder is OWNER-LOCKED and independent of the share trim; it is the
+    // monotonic headcount component (the per-kill pot itself is divided by `alive`, so per-kill-per-
+    // member is NOT monotonic in size at a low share — the xp/hr ladder comes from the buff + the
+    // larger cohort's greater total kill volume/reach, measured in the sim, not from per-kill share).
+    expect(P.expBuffPerMember).toBeCloseTo(0.1, 12);
+    expect(P.expBuff(3)).toBeGreaterThan(P.expBuff(2));
+  });
   it("spawnMaxAliveScale grows per extra member (density, not killGoal)", () => {
     expect(P.spawnMaxAliveScale(2)).toBeCloseTo(1 + P.spawnScalePerMember, 12);
     expect(P.spawnMaxAliveScale(3)).toBeCloseTo(1 + 2 * P.spawnScalePerMember, 12);
