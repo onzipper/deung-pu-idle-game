@@ -1212,6 +1212,13 @@
         "items": {
           "hofRedesign": "🏆 Hall of Fame panel redesigned: board tabs now show a podium (rank 1 + a ranks 2-3 reveal) right above that board's list, and tab switching is a lot smoother — no more panel jitter"
         }
+      },
+      "2026-07-09d": {
+        "items": {
+          "podium": "🏆 Champion podium redesigned — all 3 ranks visible at once",
+          "ninjaCadence": "🗡️ Ninja attacks faster with more frequent hits, same total damage",
+          "ninjaDash": "💨 Ninja bot now dash-evades out of surrounds on its own — fewer deaths"
+        }
       }
     }
   },
@@ -1252,8 +1259,7 @@
       "title": "🏆 Monthly Champions",
       "noSeason": "No season has closed yet — check back after the first month ends",
       "empty": "No champion yet",
-      "expandRunnersUp": "▾ Show ranks 2-3",
-      "collapseRunnersUp": "▴ Hide ranks 2-3",
+      "podiumEmpty": "Vacant",
       "unclaimedBanner": "🎁 You have {count} unclaimed reward(s) — tap to view",
       "claimButton": "Claim",
       "claiming": "Claiming...",

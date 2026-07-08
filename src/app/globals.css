@@ -155,6 +155,29 @@ body {
   animation-fill-mode: forwards;
 }
 
+/* HOF podium stage (owner-approved redesign) — the rank-1 champion card's
+ * "breathing" glow: prestige, not disco, so this is a SLOW (4s) box-shadow-
+ * only cycle on one element (never a per-frame JS/Pixi effect — this is a
+ * React/HTML card, plain CSS is the right tool per the M4 juice decision
+ * above). */
+@keyframes ddp-podium-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 14px -4px rgba(242, 177, 52, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  50% {
+    box-shadow:
+      0 0 26px -2px rgba(242, 177, 52, 0.65),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+}
+
+.animate-ddp-podium-glow {
+  animation: ddp-podium-glow 4s ease-in-out infinite;
+}
+
 /* M7.9 server-wide high-refine announcement banner (`AnnouncementBanner.tsx`)
  * — a single self-timed keyframe drives slide-in -> hold -> slide-out over
  * ~5s (matches the component's `DISPLAY_MS`) so a `key`-remounted div (fresh

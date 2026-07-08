@@ -79,7 +79,19 @@ export type PodiumResolution =
    * board specifically (defensive — the design doc expects rank 1 to always
    * exist once a season closes, but an empty array should never crash). */
   | { kind: "empty" }
-  | { kind: "ready"; champion: HofChampionRow; runnersUp: HofChampionRow[] };
+  /** Always exactly 3 fixed slots (podium stage redesign) — `rank1` always
+   * exists once a season has closed with at least one row; `rank2`/`rank3`
+   * are `null` on a short board (fewer than 3 champions crowned this
+   * category) and render as an engraved placeholder, never shifting the
+   * layout. Looked up by EXACT rank number (not "whatever's left") so a
+   * pathological rows array (e.g. rank1+rank3, no rank2) still slots
+   * correctly instead of misplacing rank3 into the rank2 seat. */
+  | {
+      kind: "ready";
+      rank1: HofChampionRow;
+      rank2: HofChampionRow | null;
+      rank3: HofChampionRow | null;
+    };
 
 /**
  * Re-keys the ALREADY-fetched `/api/hof/rewards` response by the currently
@@ -95,15 +107,22 @@ export function resolvePodium(
   if (rewards.season === null) return { kind: "noSeason" };
   const rows = rewards.champions[board];
   if (!rows || rows.length === 0) return { kind: "empty" };
-  const champion = rows.find((r) => r.rank === 1) ?? rows[0];
-  const runnersUp = rows.filter((r) => r !== champion).sort((a, b) => a.rank - b.rank);
-  return { kind: "ready", champion, runnersUp };
+  const rank1 = rows.find((r) => r.rank === 1) ?? rows[0];
+  const rank2 = rows.find((r) => r.rank === 2) ?? null;
+  const rank3 = rows.find((r) => r.rank === 3) ?? null;
+  return { kind: "ready", rank1, rank2, rank3 };
 }
 
-/** The rank-2-3 reveal always collapses on a board switch — a player who
- * expanded level's podium shouldn't land on power's podium pre-expanded. */
-export function nextPodiumExpandedOnBoardChange(): false {
-  return false;
+/** Parses the trailing rank number out of a structural title id
+ * (`"<board>.<rank>"`, see `titles.ts`) — lets the podium stage place the
+ * viewer's own unclaimed-award CTA on the SPECIFIC slot (1/2/3) it belongs
+ * to, rather than always anchoring it to one fixed spot regardless of which
+ * rank the player actually holds. `null` for an unparseable id (defensive;
+ * ids always come from the server's own mint). */
+export function rankFromTitleId(titleId: string): number | null {
+  const parts = titleId.split(".");
+  const rank = Number(parts[parts.length - 1]);
+  return Number.isInteger(rank) && rank > 0 ? rank : null;
 }
 
 /** My own unclaimed award for THIS specific board, if any — feeds the claim

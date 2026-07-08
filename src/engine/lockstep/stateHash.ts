@@ -34,6 +34,10 @@
  * ── EXCLUDED (transients / render observers — NOT part of the shared sim) ──────────
  *   state.events (per-step render/audio buffer, cleared each step)
  *   hero.aimX (render-only FACING observer, re-derived each step, never read by sim)
+ *   hero.evadeCd/evadeHpMark/evadeMarkCd (NINJA dash-evade counters) — a PURE deterministic
+ *     function of already-hashed shared state (hp / enemy positions / fixed dt), so they evolve
+ *     identically on every client; the observable they steer (hero.x) IS hashed, so divergence is
+ *     still caught. Excluding them keeps the 3-class canonical hash byte-identical (like aimX).
  *   The UI-mirrored global toggles that no lane mutates in a cohort (autoCast/
  *     autoAllocate/autoReturn/autoAdvance/auto-potion globals + thresholds): a cohort
  *     drives config PER HERO via `setHeroConfig`, and those globals never change once

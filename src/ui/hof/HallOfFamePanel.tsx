@@ -39,12 +39,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fetchHof } from "@/ui/hof/api";
 import { formatBossClearTime, formatPlainValue, splitOnlineSeconds } from "@/ui/hof/format";
 import { HofProfileModal } from "@/ui/hof/HofProfileModal";
-import { PodiumStrip, UnclaimedAwardsBanner } from "@/ui/hof/PodiumStrip";
+import { PODIUM_SKELETON_HEIGHT_CLASS, PodiumStrip, UnclaimedAwardsBanner } from "@/ui/hof/PodiumStrip";
 import { hofQueryKey } from "@/ui/hof/query";
 import {
   hasAnyUnclaimedAward,
   isMyEntry,
-  nextPodiumExpandedOnBoardChange,
   resolveBoardFetchDecision,
   resolveMyUnclaimedForBoard,
   resolvePodium,
@@ -205,27 +204,35 @@ function RankRow({
     <button
       type="button"
       onClick={onSelect}
-      className="flex min-h-11 w-full items-center gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2.5 py-2 text-left transition-transform duration-100 active:scale-[0.98]"
+      className="flex min-h-13 w-full items-center gap-2.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-3 py-2.5 text-left transition-transform duration-100 active:scale-[0.98]"
     >
+      {/* ONE rank marker only (medal for 1-3, #n otherwise) — the class icon
+       * is the only other leading glyph, so the row's left edge never has
+       * more than 2 competing icons before the name. */}
       <span aria-hidden className="w-6 shrink-0 text-center text-sm font-black">
         {RANK_MEDAL[entry.rank] ?? `#${entry.rank}`}
       </span>
       <span aria-hidden className="shrink-0 text-sm">
         {HERO_ICONS[entry.cls]}
       </span>
-      {/* Name + (optional) title stacked on separate lines — each truncates
-       * independently, fixing the old shrink-0/truncate collision where a
-       * right-aligned title span squeezed all the room out of the name. */}
+      {/* Name + (optional) title stacked on separate lines, with breathing
+       * room between them (leading-snug + a small top margin on the title) —
+       * each truncates independently, fixing the old shrink-0/truncate
+       * collision where a right-aligned title span squeezed all the room
+       * out of the name. */}
       <div className="min-w-0 flex-1">
-        <div className={`truncate text-xs ${nameCls || "font-bold text-ddp-ink"}`}>{entry.charName}</div>
-        {title && <div className="truncate text-[10px] font-semibold text-ddp-gold-bright">{title}</div>}
+        <div className={`truncate text-xs leading-snug ${nameCls || "font-bold text-ddp-ink"}`}>{entry.charName}</div>
+        {title && (
+          <div className="mt-0.5 truncate text-[10px] leading-snug font-semibold text-ddp-gold-bright">{title}</div>
+        )}
       </div>
-      <span className="shrink-0 text-[10px] text-ddp-ink-muted tabular-nums">
+      {/* Level + value get FIXED widths so every row's name column knows its
+       * budget regardless of which board's value format is widest (a boss
+       * clear time vs. a 6-digit gold total). */}
+      <span className="w-10 shrink-0 text-right text-[10px] text-ddp-ink-muted tabular-nums">
         {tCommon("levelBadge", { level: entry.level })}
       </span>
-      <span className="shrink-0 text-xs font-bold text-ddp-gold-bright tabular-nums">
-        {value}
-      </span>
+      <span className="w-20 shrink-0 text-right text-xs font-bold text-ddp-gold-bright tabular-nums">{value}</span>
     </button>
   );
 }
@@ -242,22 +249,14 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
   const [cls, setCls] = useState<HofClassFilter>("all");
   const [state, setState] = useState<PanelState>({ kind: "skeleton", rowCount: resolveSkeletonRowCount() });
   const [selected, setSelected] = useState<HofEntry | null>(null);
-  const [podiumExpanded, setPodiumExpanded] = useState(false);
   const cacheRef = useRef(new Map<string, HofResponse>());
   const rewards = useHofRewards();
 
   const query: HofQuery = { board, bossStage, cls };
   const key = hofQueryKey(query);
 
-  /** Board switches always go through this (never a raw `setBoard`) so the
-   * podium's ranks-2-3 reveal collapses in the SAME event as the tab click —
-   * a plain `useEffect(() => setPodiumExpanded(false), [board])` derives one
-   * piece of state from another and is the exact anti-pattern the
-   * `set-state-in-effect` rule flags (see React's "you might not need an
-   * effect" docs); doing it in the event handler avoids the extra render. */
   function selectBoard(next: HofBoard): void {
     setBoard(next);
-    setPodiumExpanded(nextPodiumExpandedOnBoardChange());
   }
 
   useEffect(() => {
@@ -304,7 +303,7 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
           onClick={onClose}
           className="absolute inset-0 bg-black/70"
         />
-        <div className="animate-onboarding-in relative flex h-[min(85vh,42rem)] w-full max-w-lg flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
+        <div className="animate-onboarding-in relative flex h-[min(85vh,42rem)] w-full max-w-lg flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) sm:max-w-2xl">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
             <button
@@ -325,17 +324,12 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
           )}
 
           {rewards.kind === "loading" && (
-            <div className="min-h-23 shrink-0 animate-pulse rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/20" />
+            <div
+              className={`${PODIUM_SKELETON_HEIGHT_CLASS} shrink-0 animate-pulse rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/5`}
+            />
           )}
           {rewards.kind === "ok" && (
-            <PodiumStrip
-              board={board}
-              resolution={resolvePodium(rewardsData, board)}
-              expanded={podiumExpanded}
-              onToggleExpand={() => setPodiumExpanded((v) => !v)}
-              myAward={myAwardForBoard}
-              t={t}
-            />
+            <PodiumStrip board={board} resolution={resolvePodium(rewardsData, board)} myAward={myAwardForBoard} t={t} />
           )}
 
           <div className="flex flex-wrap items-center gap-1.5">

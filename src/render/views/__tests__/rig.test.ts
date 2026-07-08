@@ -58,6 +58,9 @@ function makeHero(cls: Hero["cls"]): Hero {
     shadowed: false,
     config: defaultHeroConfig(),
     aimX: null,
+    evadeCd: 0,
+    evadeHpMark: 100,
+    evadeMarkCd: 0,
   };
 }
 
