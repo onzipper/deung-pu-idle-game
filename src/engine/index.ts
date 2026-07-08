@@ -102,6 +102,7 @@ export {
   worldBossZoneFor,
   worldBossFarmZones,
   worldBossLocationFor,
+  worldBossDamageDealt,
   type WorldBossPhase,
 } from "@/engine/systems/worldBoss";
 

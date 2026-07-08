@@ -10,9 +10,11 @@ import {
   worldBossZoneFor,
   worldBossFarmZones,
   worldBossLocationFor,
+  worldBossDamageDealt,
 } from "@/engine";
 import type { GameState, GameEvent, WorldLocation } from "@/engine";
 import { FIXED_DT } from "@/engine/core/loop";
+import { updateHeroes } from "@/engine/systems/combat";
 import { LockstepClient, stateHash } from "@/engine/lockstep";
 import { soloSave } from "./helpers";
 
@@ -402,6 +404,175 @@ describe("worldBoss byte-identical guards", () => {
     }
     expect(s.worldBoss?.active).toBe(true); // 400k HP survives an early hero
     expect(acted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SOLO forced-boss dog-pile (owner fix: the bot must pile on an ENGAGED world boss).
+// ---------------------------------------------------------------------------
+
+describe("worldBoss solo forced-boss", () => {
+  /** Seat a solo hero right on the boss (in melee reach) with the field frozen. */
+  function seatSoloOnBoss(wid: number): GameState {
+    const s = initGameState(101, soloSave("swordsman", 1));
+    seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    s.heroes[0].x = s.worldBoss!.entity!.x; // stand on it so it is trivially in reach
+    return s;
+  }
+
+  it("bot NEVER initiates: a full-HP (unengaged) boss is ignored + takes no damage", () => {
+    const s = seatSoloOnBoss(3);
+    const bx = s.worldBoss!.entity!.x;
+    for (let i = 0; i < 120; i++) {
+      s.heroes[0].x = bx; // keep it adjacent — still must not be attacked
+      updateHeroes(s);
+      expect(s.heroes[0].aimX).toBeNull(); // nothing acquired (passive-until-hit)
+    }
+    expect(s.worldBoss!.entity!.hp).toBe(s.worldBoss!.entity!.maxHp); // untouched
+    expect(worldBossDamageDealt(s)!.damage).toBe(0);
+  });
+
+  it("once ENGAGED (human first hit) the solo auto hero converges + drives HP down", () => {
+    const s = seatSoloOnBoss(4);
+    const wbEntity = s.worldBoss!.entity!;
+    wbEntity.hp = wbEntity.maxHp - 1; // simulate the human's first tap
+    const bx = wbEntity.x;
+    // The auto hero now FACES + attacks the forced boss (not idling / peeling to mobs).
+    updateHeroes(s);
+    expect(s.heroes[0].aimX).toBe(bx);
+    const hp0 = wbEntity.hp;
+    for (let i = 0; i < 200; i++) {
+      s.heroes[0].x = bx;
+      updateHeroes(s);
+    }
+    expect(wbEntity.hp).toBeLessThan(hp0); // the bot is now piling on
+    expect(worldBossDamageDealt(s)!.damage).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared server-wide HP sync + damage accounting.
+// ---------------------------------------------------------------------------
+
+describe("worldBoss shared-HP sync", () => {
+  function spawned(wid: number): GameState {
+    const s = initGameState(202, soloSave("mage", 1));
+    seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    return s;
+  }
+
+  it("clamps HP DOWN to the server pool", () => {
+    const wid = 5;
+    const s = spawned(wid);
+    const max = s.worldBoss!.entity!.maxHp;
+    step(s, { syncWorldBoss: { windowId: wid, hp: max - 3000 } });
+    expect(s.worldBoss!.entity!.hp).toBe(max - 3000);
+  });
+
+  it("NEVER heals: a sync above local HP is a no-op (local damage may run ahead)", () => {
+    const wid = 6;
+    const s = spawned(wid);
+    s.worldBoss!.entity!.hp = 1000; // local copy already ahead of the server
+    step(s, { syncWorldBoss: { windowId: wid, hp: 8000 } });
+    expect(s.worldBoss!.entity!.hp).toBe(1000); // unchanged — clamp is downward-only
+  });
+
+  it("ignores a sync for a DIFFERENT windowId", () => {
+    const wid = 7;
+    const s = spawned(wid);
+    const hp0 = s.worldBoss!.entity!.hp;
+    step(s, { syncWorldBoss: { windowId: wid + 99, hp: 1 } });
+    expect(s.worldBoss!.entity!.hp).toBe(hp0);
+  });
+
+  it("hp <= 0 resolves the defeat via worldBossDefeated", () => {
+    const wid = 8;
+    const s = spawned(wid);
+    step(s, { syncWorldBoss: { windowId: wid, hp: 0 } });
+    expect(eventTypes(s, "worldBossDefeated")).toBe(1);
+    expect(s.worldBoss?.defeated).toBe(true);
+    expect(s.worldBoss?.active).toBe(false);
+  });
+});
+
+describe("worldBoss damage accounting", () => {
+  it("worldBossDamageDealt accumulates hero damage, keyed to the window; null when dormant", () => {
+    const wid = 9;
+    const s = initGameState(303, soloSave("swordsman", 1));
+    // Dormant → null.
+    expect(worldBossDamageDealt(s)).toBeNull();
+    seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    const wbEntity = s.worldBoss!.entity!;
+    wbEntity.hp = wbEntity.maxHp - 1; // engage it (manual poke — NOT via applyDamage)
+    s.heroes[0].x = wbEntity.x;
+    expect(worldBossDamageDealt(s)).toEqual({ windowId: wid, damage: 0 });
+    const hpAfterEngage = wbEntity.hp;
+    for (let i = 0; i < 60; i++) {
+      s.heroes[0].x = wbEntity.x;
+      updateHeroes(s);
+    }
+    const read = worldBossDamageDealt(s)!;
+    expect(read.windowId).toBe(wid);
+    expect(read.damage).toBeGreaterThan(0);
+    // The counter == exactly the HP the HERO knocked off (the boss has huge HP → no overkill),
+    // i.e. it tracks applyDamage, not the manual engage poke above.
+    expect(read.damage).toBe(hpAfterEngage - wbEntity.hp);
+  });
+
+  it("spawn hp seed starts the fresh copy at the shared value (clamped to maxHp)", () => {
+    const wid = 10;
+    const s = initGameState(404, soloSave("archer", 1));
+    seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900, hp: 4200 } });
+    expect(s.worldBoss!.entity!.hp).toBe(4200);
+    expect(s.worldBoss!.entity!.hp).toBeLessThan(s.worldBoss!.entity!.maxHp); // engaged at spawn
+  });
+
+  it("damageDealt is MONOTONIC across a flee/re-entry within the same window", () => {
+    const wid = 11;
+    const s = initGameState(505, soloSave("swordsman", 1));
+    const loc = seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    const wbEntity = s.worldBoss!.entity!;
+    wbEntity.hp = wbEntity.maxHp - 1;
+    for (let i = 0; i < 60; i++) {
+      s.heroes[0].x = wbEntity.x;
+      updateHeroes(s);
+    }
+    const before = worldBossDamageDealt(s)!.damage;
+    expect(before).toBeGreaterThan(0);
+    // Flee (despawn, NOT defeated) then re-enter with a fresh intent.
+    s.location = { mapId: "map1", zoneIdx: loc.zoneIdx === 1 ? 2 : 1 };
+    step(s, {});
+    s.location = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 600 } });
+    expect(worldBossDamageDealt(s)!.damage).toBe(before); // carried forward, not reset
+  });
+});
+
+describe("worldBoss byte-identity of the forced-boss change", () => {
+  it("a DORMANT solo run is byte-identical (no world boss ever engaged)", () => {
+    const mk = (): GameState => {
+      const s = initGameState(9090, soloSave("swordsman", 1));
+      s.unlockedZones = { ...s.unlockedZones, map1: 6 };
+      return s;
+    };
+    const a = mk();
+    const b = mk();
+    for (let i = 0; i < 400; i++) {
+      step(a, {});
+      step(b, {});
+      expect(stateHash(a)).toBe(stateHash(b));
+    }
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });
 

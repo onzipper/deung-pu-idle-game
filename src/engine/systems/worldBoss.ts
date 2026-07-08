@@ -168,7 +168,12 @@ function retireWorldBoss(state: GameState, wb: WorldBossState, defeated: boolean
  * window. HP RESETS on re-entry = ACCEPTED v1 quirk (same class as the cohort re-seed HP
  * reset) — the boss is fully healed each time you walk back in.
  */
-function trySpawnWorldBoss(state: GameState, windowId: number, remainingSeconds: number): boolean {
+function trySpawnWorldBoss(
+  state: GameState,
+  windowId: number,
+  remainingSeconds: number,
+  hp?: number,
+): boolean {
   if (state.phase !== "battle") return false;
   if (!Number.isFinite(windowId) || !Number.isFinite(remainingSeconds) || remainingSeconds <= 0) {
     return false;
@@ -185,6 +190,17 @@ function trySpawnWorldBoss(state: GameState, windowId: number, remainingSeconds:
   if (zoneAt(state.location).kind !== "farm") return false;
 
   const countdown = Math.min(remainingSeconds, WORLD_BOSS.lifetimeMs / 1000);
+  const entity = makeWorldBoss(state.nextId++);
+  // SHARED-HP re-entry seed (optional): start the fresh copy at the server pool instead of
+  // full HP when the client supplies it, clamped to (0, maxHp]. The first `syncWorldBoss`
+  // would correct it anyway; this makes re-entry start at the shared value instantly.
+  if (hp !== undefined && Number.isFinite(hp)) {
+    entity.hp = Math.min(entity.maxHp, Math.max(0, hp));
+  }
+  // Keep `damageDealt` MONOTONIC per window: a flee → re-entry into the SAME window carries the
+  // accrued total forward (so the client's per-window watermark stays valid); a NEW window (or
+  // a first spawn) starts at 0.
+  const damageDealt = wb && wb.windowId === windowId ? (wb.damageDealt ?? 0) : 0;
   state.worldBoss = {
     windowId,
     mapId: loc.mapId,
@@ -192,7 +208,8 @@ function trySpawnWorldBoss(state: GameState, windowId: number, remainingSeconds:
     active: true,
     defeated: false,
     countdown,
-    entity: makeWorldBoss(state.nextId++),
+    entity,
+    damageDealt,
   };
   state.events.push({ type: "worldBossSpawned", windowId });
   return true;
@@ -206,8 +223,36 @@ function trySpawnWorldBoss(state: GameState, windowId: number, remainingSeconds:
 export function applyWorldBossSpawnIntents(state: GameState, lanes: FrameInput[]): void {
   for (const lane of lanes) {
     const intent = lane?.spawnWorldBoss;
-    if (intent) trySpawnWorldBoss(state, intent.windowId, intent.remainingSeconds);
+    if (intent) trySpawnWorldBoss(state, intent.windowId, intent.remainingSeconds, intent.hp);
   }
+}
+
+/**
+ * SHARED SERVER-WIDE WORLD-BOSS HP sync (lead lane). Clamp the live window's `entity.hp`
+ * DOWNWARD to the server-authoritative `hp` (`min(entity.hp, max(0, hp))`) iff the record
+ * matches `windowId` and is active — never heals (local damage may run ahead between syncs);
+ * a stale/duplicate sync that doesn't lower HP is a no-op. `hp <= 0` resolves the defeat via
+ * the shared `worldBossDefeated` path (`resolveWorldBossDeath` is idempotent). Dormant → no-op.
+ */
+export function applyWorldBossSync(state: GameState, intent: { windowId: number; hp: number }): void {
+  const wb = state.worldBoss;
+  if (!wb || !wb.active || !wb.entity) return;
+  if (wb.windowId !== intent.windowId) return;
+  if (!Number.isFinite(intent.hp)) return;
+  wb.entity.hp = Math.min(wb.entity.hp, Math.max(0, intent.hp));
+  if (wb.entity.hp <= 0) resolveWorldBossDeath(state);
+}
+
+/**
+ * Pure read: cumulative hero damage dealt to the LIVE world boss this window, or null when
+ * none is active. MONOTONIC per window (preserved across flee/re-entry, reset on a new
+ * windowId — see `WorldBossState.damageDealt`), so the client posts the delta above a
+ * last-posted watermark to the shared-HP server. Never mutates state.
+ */
+export function worldBossDamageDealt(state: GameState): { windowId: number; damage: number } | null {
+  const wb = state.worldBoss;
+  if (!wb || !wb.active || !wb.entity) return null;
+  return { windowId: wb.windowId, damage: wb.damageDealt ?? 0 };
 }
 
 /**
