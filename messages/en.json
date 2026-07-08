@@ -1508,7 +1508,8 @@
     "signalRelayRow": "To server",
     "signalNoMembers": "No teammates yet",
     "signalUnknownMember": "Teammate",
-    "signalShadowed": "disconnected"
+    "signalShadowed": "disconnected",
+    "caughtUp": "✓ in sync"
   },
   "chat": {
     "openButton": "Open chat",

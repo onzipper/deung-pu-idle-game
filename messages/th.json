@@ -1508,7 +1508,8 @@
     "signalRelayRow": "ไปเซิร์ฟเวอร์",
     "signalNoMembers": "ยังไม่มีเพื่อนร่วมวง",
     "signalUnknownMember": "เพื่อนร่วมทีม",
-    "signalShadowed": "หลุดการเชื่อมต่อ"
+    "signalShadowed": "หลุดการเชื่อมต่อ",
+    "caughtUp": "✓ ตามทัน"
   },
   "chat": {
     "openButton": "เปิดแชท",
