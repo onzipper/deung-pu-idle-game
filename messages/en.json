@@ -1004,7 +1004,8 @@
   },
   "dropFeed": {
     "gotItem": "Item obtained: {name}",
-    "gotStones": "Enhancement Stone ×{qty}"
+    "gotStones": "Enhancement Stone ×{qty}",
+    "overflow": "+{n}"
   },
   "announcements": {
     "landed": "🔥 {charName} landed a +{level} on {itemName}!",

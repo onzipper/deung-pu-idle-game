@@ -1004,7 +1004,8 @@
   },
   "dropFeed": {
     "gotItem": "ได้ไอเทม: {name}",
-    "gotStones": "หินเสริมพลัง ×{qty}"
+    "gotStones": "หินเสริมพลัง ×{qty}",
+    "overflow": "+{n}"
   },
   "announcements": {
     "landed": "🔥 {charName} ตี {itemName} +{level} สำเร็จ!",
