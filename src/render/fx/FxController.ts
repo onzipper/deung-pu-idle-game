@@ -25,6 +25,7 @@ import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import {
   BOSS_COLORS,
   HERO_COLORS,
+  MAX_PARTY_SIZE,
   PALETTE,
   PROJECTILE_COLORS,
   type BossMapId,
@@ -419,9 +420,11 @@ const REFINE_PRESTIGE_BOOST_THRESHOLD = 8;
 
 /** M9 pixel-fx weapon port — one `PixelWeaponFx` instance per hero slot,
  * created lazily on first non-null recipe (mobile GPU budget). Same
- * MAX_SLOTS=3 party-cap convention as every other per-hero-slot fx module
- * (`gearSparkle.ts`/`championAura.ts`/`warCryAura.ts`). */
-const WEAPON_FX_MAX_SLOTS = 3;
+ * `MAX_PARTY_SIZE` party-cap convention as every other per-hero-slot fx
+ * module (`gearSparkle.ts`/`championAura.ts`/`warCryAura.ts`) — already
+ * lazy, so bumping this constant costs nothing until a slot actually equips
+ * a recipe-worthy weapon. */
+const WEAPON_FX_MAX_SLOTS = MAX_PARTY_SIZE;
 const WEAPON_FX_POOL_SIZE = 140;
 /** Constant local origin, reused (never mutated) as the `toLocal` input that
  * resolves `view.weaponArm`'s own pivot point — zero per-frame allocation. */

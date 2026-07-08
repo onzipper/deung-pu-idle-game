@@ -32,17 +32,17 @@
  * construction (fixed color — unlike `gearAura.ts`'s per-hero-color flames,
  * this is always the same "championGold" family) — every frame only mutates
  * position/scale/alpha (transform-only), same build-once-per-rig convention
- * as the rest of `fx/`. Fixed cap `MAX_SLOTS * MOTES_PER_SLOT` (3 × 5 = 15
- * Graphics + 3 × 2 ring Graphics = 21 total), zero per-frame allocation.
+ * as the rest of `fx/`. Fixed cap `MAX_SLOTS * MOTES_PER_SLOT` (6 × 5 = 30
+ * Graphics + 6 × 1 ring Graphics = 36 total), zero per-frame allocation.
  */
 
 import { Container, Graphics } from "pixi.js";
-import { PALETTE, safeRadius } from "@/render/theme";
+import { MAX_PARTY_SIZE, PALETTE, safeRadius } from "@/render/theme";
 
 // ---------------------------------------------------------------------------
 // Knobs
 // ---------------------------------------------------------------------------
-const MAX_SLOTS = 3; // one aura per hero slot (party cap)
+const MAX_SLOTS = MAX_PARTY_SIZE; // one aura per hero slot (party cap)
 const MOTES_PER_SLOT = 5;
 
 /** Ring half-extents — deliberately TALLER than wide (rx < ry), the opposite
