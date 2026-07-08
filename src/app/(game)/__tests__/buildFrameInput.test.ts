@@ -31,6 +31,8 @@ function emptyPending(): PendingInput {
     useWarpScroll: null,
     spawnWorldBoss: null,
     setAsuraHotZone: null,
+    claimAsuraSigil: false,
+    craftLegendary: false,
   };
 }
 

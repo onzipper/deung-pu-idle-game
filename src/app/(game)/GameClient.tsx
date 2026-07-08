@@ -83,6 +83,11 @@ import {
   wantsBotTownTrip,
   zoneAt,
   isAsuraLocation,
+  // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3) — pure snapshot reads.
+  tomePagesFound,
+  hasAllZoneStones,
+  canCraftLegendary,
+  craftBlockReason,
   type GameEvent,
   type GameState,
   type Hero,
@@ -96,6 +101,7 @@ import { GameRenderer } from "@/render/GameRenderer";
 import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
+import { AsuraTomeAssembledModal } from "@/ui/asura/AsuraTomeAssembledModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
 import { selectAutoSellIds } from "@/ui/gear/autoSell";
 import {
@@ -536,6 +542,14 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     asuraEssence: state.asuraEssence,
     asuraZoneKills: { ...state.asuraZoneKills },
     asuraHotZoneIdx: state.asuraHotZone,
+    // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3) — pure engine reads,
+    // same one-way "engine computes, store just carries it" pattern as `asuraEssence`.
+    tomePagesFound: tomePagesFound(state),
+    tomeUnlocked: state.tomeUnlocked,
+    asuraSigils: state.asuraSigils,
+    hasAllZoneStones: hasAllZoneStones(state),
+    canCraftLegendary: canCraftLegendary(state),
+    craftBlockReason: craftBlockReason(state),
   };
 }
 
@@ -1856,6 +1870,21 @@ export function GameClient() {
           useGameStore.getState().pushNotice("asuraEliteKilled", { essence: ev.essence });
         } else if (ev.type === "asuraZoneStoneEarned") {
           useGameStore.getState().pushNotice("asuraZoneStoneEarned");
+        } else if (ev.type === "tomePageFound") {
+          // "ตำราตำนาน" secret-quest breadcrumb (endgame v1.3, owner: discoverable WITHOUT
+          // patch notes) — a dramatic, mysterious toast, no spoilers.
+          useGameStore.getState().pushNotice(`tomePageFound.page${ev.page}`);
+        } else if (ev.type === "tomeAssembled") {
+          // The 3rd page landed — celebratory reveal dialog (mounted at the top level,
+          // see `AsuraTomeAssembledModal.tsx`), NOT a toast.
+          useGameStore.getState().showTomeAssembledCelebration();
+        } else if (ev.type === "asuraSigilClaimed") {
+          useGameStore.getState().pushNotice("asuraSigilClaimed", { count: ev.count });
+        } else if (ev.type === "legendaryCraftBlocked") {
+          // Defensive only — the panel already gates the button on `canCraftLegendary`
+          // (client-side precondition check) before firing the server POST, so this only
+          // fires on a genuine same-frame race (e.g. essence spent by a concurrent claim).
+          useGameStore.getState().pushNotice(`asuraCraftBlocked.${ev.reason}`);
         }
       }
 
@@ -2516,6 +2545,9 @@ export function GameClient() {
       {/* UAT "what's new" patch-notes modal — mount only; all decision logic
           lives in `ui/hooks/usePatchNotes.ts` (see that file + `ui/patchNotes.ts`). */}
       <PatchNotesModal />
+      {/* "ตำราตำนาน" secret-quest reveal — mount only; the store's `tomeAssembledCelebration`
+          flag (flipped off the `tomeAssembled` engine event above) drives visibility. */}
+      <AsuraTomeAssembledModal />
     </>
   );
 }

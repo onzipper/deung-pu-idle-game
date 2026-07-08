@@ -39,8 +39,8 @@ import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import {
   FORTIFIER_FOR_SLOT,
-  ITEM_TEMPLATES,
   INVENTORY_CAP,
+  isLegendaryTemplate,
   lookupTemplate,
   type GearSlot,
   type HeroClass,
@@ -57,8 +57,8 @@ import { MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import {
   GEAR_SLOT_ICONS,
+  gearNameClass,
   HERO_ICONS,
-  prestigeNameClass,
   RARITY_COLORS,
   RARITY_GLOW,
   TIER_BORDER_COLORS,
@@ -82,7 +82,7 @@ function GridCell({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const template = ITEM_TEMPLATES[item.templateId];
+  const template = lookupTemplate(item.templateId);
   const tContent = useTranslations("content.items");
   const t = useTranslations("inventory");
   if (!template) return null; // stale/retired template — defensively skip
@@ -90,6 +90,9 @@ function GridCell({
   const colors = RARITY_COLORS[template.rarity];
   const glow = RARITY_GLOW[template.rarity];
   const equipped = item.equippedSlot !== null;
+  // "ตำราตำนาน" legendary (endgame v1.3): a distinct violet border/glow overrides the
+  // ordinary tier-6 fallback (its tier, 11, is above every TIER_BORDER_COLORS band).
+  const legendary = isLegendaryTemplate(item.templateId);
 
   return (
     <button
@@ -97,9 +100,11 @@ function GridCell({
       onClick={onSelect}
       aria-pressed={selected}
       aria-label={tContent(`${item.templateId}.name`)}
-      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${tierBorder(
-        template.tier,
-      )} ${glow} ${selected ? "ring-2 ring-ddp-gold-bright" : ""}`}
+      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${
+        legendary ? "border-fuchsia-400/80" : tierBorder(template.tier)
+      } ${legendary ? "shadow-[0_0_16px_4px_rgba(217,70,239,0.45)]" : glow} ${
+        selected ? "ring-2 ring-ddp-gold-bright" : ""
+      }`}
     >
       <span aria-hidden className="text-xl leading-none">
         {GEAR_SLOT_ICONS[template.slot]}
@@ -153,9 +158,9 @@ function StatDeltaChips({
   equippedRefineLevel: number;
 }) {
   const t = useTranslations("inventory");
-  const candidate = ITEM_TEMPLATES[candidateTemplateId];
+  const candidate = lookupTemplate(candidateTemplateId);
   if (!candidate) return null;
-  const equipped = equippedTemplateId ? ITEM_TEMPLATES[equippedTemplateId] : null;
+  const equipped = equippedTemplateId ? lookupTemplate(equippedTemplateId) : null;
   // M7.6 ตีบวก: compare REFINED stat blocks (both sides), not raw catalog stats
   // — a +7 sword genuinely out-damages a +0 of the same template.
   const candidateStats = refinedStatsOf(candidate, candidateRefineLevel);
@@ -213,7 +218,7 @@ function DetailCard({
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
-  const template = ITEM_TEMPLATES[item.templateId];
+  const template = lookupTemplate(item.templateId);
   const sellGuard = useConfirmGuard();
   if (!template) return null;
 
@@ -221,8 +226,10 @@ function DetailCard({
   const classBlocked = template.classReq !== null && template.classReq !== heroCls;
   const colors = RARITY_COLORS[template.rarity];
   const needsConfirm = template.rarity === "rare" || template.rarity === "epic";
-  // M7.6+ polish: +8 and up gets prestige-gold name styling (see ui/labels.ts).
-  const prestigeCls = prestigeNameClass(item.refineLevel);
+  // M7.6+ polish: +8 and up gets prestige-gold name styling; a "ตำราตำนาน" legendary
+  // (endgame v1.3, craft-only — never sold) always gets the gold-violet gradient instead.
+  const prestigeCls = gearNameClass(item.templateId, item.refineLevel);
+  const legendary = isLegendaryTemplate(item.templateId);
 
   function handleSell(): void {
     sellGuard.trigger(needsConfirm, () => onSell(item));
@@ -287,7 +294,8 @@ function DetailCard({
           </button>
         )}
 
-        {!equipped && (
+        {/* "ตำราตำนาน" legendary (endgame v1.3): bind-on-craft, never sellable — no button. */}
+        {!equipped && !legendary && (
           <button
             type="button"
             disabled={busy || !inTown}
@@ -315,6 +323,11 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   // ดินแดนอสูร (endgame v1): accrual-only, mysterious tone — see the module's
   // asuraEssence doc (never named as a recipe ingredient anywhere in copy).
   const asuraEssence = useGameStore((s) => s.asuraEssence);
+  // "ตำราตำนาน" secret-quest pages (endgame v1.3) — same mysterious-tone chip
+  // precedent as `asuraEssence` above; hidden again once the tome is unlocked
+  // (the real "⚒️ ตำราตำนาน" main-menu entry takes over from there).
+  const tomePagesFound = useGameStore((s) => s.tomePagesFound);
+  const tomeUnlocked = useGameStore((s) => s.tomeUnlocked);
   const heroCls = useGameStore((s) => s.heroes[0]?.cls);
   const inTown = useGameStore((s) => s.world.kind === "town");
   const sessionKnownTemplateIds = useGameStore((s) => s.sessionKnownTemplateIds);
@@ -337,7 +350,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
       .filter((i) => lookupTemplate(i.templateId)?.kind !== "fortifier")
       .filter((i) => {
         if (!classOnly || !heroCls) return true;
-        const tpl = ITEM_TEMPLATES[i.templateId];
+        const tpl = lookupTemplate(i.templateId);
         return !tpl || tpl.classReq === null || tpl.classReq === heroCls;
       })
       .sort(compareInventoryItems);
@@ -479,6 +492,18 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             >
               <span aria-hidden>✨</span>
               {asuraEssence.toLocaleString()}
+            </span>
+          )}
+          {/* "ตำราตำนาน" secret-quest burnt pages (endgame v1.3) — same mysterious-tone,
+              hide-until-owned chip as the essence one above; disappears once the tome is
+              unlocked (the real menu entry takes over). */}
+          {tomePagesFound > 0 && !tomeUnlocked && (
+            <span
+              title={t("tomePagesHint")}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-amber-800/50 bg-amber-950/25 px-2 py-0.5 text-[10px] font-bold tabular-nums text-amber-300"
+            >
+              <span aria-hidden>?</span>
+              {tomePagesFound}/3
             </span>
           )}
         </div>

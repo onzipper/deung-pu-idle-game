@@ -109,11 +109,23 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const t = useTranslations("refine");
   const tInv = useTranslations("inventory");
   const tContent = useTranslations("content.items");
+  const tLore = useTranslations("asura.tome.lore");
   const inventory = useGameStore((s) => s.inventory);
   const materials = useGameStore((s) => s.materials);
   const gold = useGameStore((s) => s.gold);
   const inTown = useGameStore((s) => s.world.kind === "town");
   const soundMuted = useGameStore((s) => s.soundMuted);
+  // "ตำราตำนาน" secret-quest breadcrumb (endgame v1.3, owner: discoverable WITHOUT patch
+  // notes) — TALKING to ลุงดึ๋ง while pages are held but the tome isn't yet assembled plays
+  // a short mysterious lore beat (escalating per page milestone) BEFORE the refine station.
+  // `loreDismissed` is local (fresh per NPC-talk mount, see `TownNpcPanelHost.tsx`), so
+  // walking away and talking again replays the SAME milestone's lore until it advances or
+  // the tome assembles — a deliberate, replayable breadcrumb, not a one-shot toast.
+  const tomePagesFound = useGameStore((s) => s.tomePagesFound);
+  const tomeUnlocked = useGameStore((s) => s.tomeUnlocked);
+  const [loreDismissed, setLoreDismissed] = useState(false);
+  const loreStage = tomePagesFound >= 2 ? 2 : tomePagesFound >= 1 ? 1 : 0;
+  const showLore = loreStage > 0 && !tomeUnlocked && !loreDismissed;
 
   const [activeTab, setActiveTab] = useState<GearSlot>("weapon");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -318,6 +330,10 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
           </button>
         </div>
 
+        {showLore ? (
+          <TomeLoreCard stage={loreStage as 1 | 2} onContinue={() => setLoreDismissed(true)} t={tLore} />
+        ) : (
+          <>
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-1 text-xs font-bold tabular-nums text-violet-300">
             <MaterialIcon className="h-3.5 w-3.5" />
@@ -603,8 +619,47 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
             </p>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
     </ModalPortal>
+  );
+}
+
+/**
+ * "ตำราตำนาน" secret-quest lore card (endgame v1.3) — RefinePanel's own
+ * mysterious-tone breadcrumb, shown INSTEAD of the refine station while
+ * `showLore` holds (see `RefinePanel`'s doc). `stage` 1 = first page found
+ * (ตำนานช่างตีเหล็กอสูร intro); 2 = second page found (deeper into the
+ * legend). Never shown at stage 0/3+ (the caller already gates that).
+ */
+function TomeLoreCard({
+  stage,
+  onContinue,
+  t,
+}: {
+  stage: 1 | 2;
+  onContinue: () => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-(--ddp-radius-md) border border-amber-800/40 bg-black/30 p-3">
+      <h3 className="text-sm font-black text-amber-300">{t(`stage${stage}.title`)}</h3>
+      <div className="space-y-2 text-[12px] leading-snug text-ddp-ink">
+        {(["line1", "line2", "line3", "line4"] as const).map((key) => (
+          <p key={key} className="rounded-(--ddp-radius-md) bg-black/25 p-2">
+            {t(`stage${stage}.${key}`)}
+          </p>
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={onContinue}
+        className="min-h-11 w-full rounded-(--ddp-radius-md) border border-amber-600/60 bg-amber-600/15 px-3 text-xs font-bold text-amber-200 transition-transform duration-100 active:scale-[0.98]"
+      >
+        {t("continueButton")}
+      </button>
+    </div>
   );
 }

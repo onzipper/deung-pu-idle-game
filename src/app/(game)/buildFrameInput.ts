@@ -67,6 +67,12 @@ export function buildFrameInput(
     // ดินแดนอสูร daily hot zone: same "GameClient's own schedule check queues this"
     // shape as `spawnWorldBoss` above — plain passthrough, location-based not per-hero.
     setAsuraHotZone: pending.setAsuraHotZone ?? undefined,
+    // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3): both queued ONLY after
+    // their respective server POST confirms (`ui/asura/tomeFlow.ts`) — plain passthrough,
+    // no hero-index remap needed (solo-hero-scoped, `craftLegendary` defaults its own `cls`
+    // engine-side to `state.heroes[0].cls`).
+    claimAsuraSigil: pending.claimAsuraSigil || undefined,
+    craftLegendary: pending.craftLegendary || undefined,
   };
 }
 

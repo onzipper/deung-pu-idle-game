@@ -106,6 +106,12 @@ function makeSnapshot(
     asuraEssence: 0,
     asuraZoneKills: {},
     asuraHotZoneIdx: null,
+    tomePagesFound: 0,
+    tomeUnlocked: false,
+    asuraSigils: 0,
+    hasAllZoneStones: false,
+    canCraftLegendary: false,
+    craftBlockReason: null,
   };
 }
 

@@ -19,10 +19,16 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ITEM_TEMPLATES, type GearSlot } from "@/engine";
+import { lookupTemplate, type GearSlot } from "@/engine";
 import { buildRealDollSlots, TEASER_SLOT_ICONS, type TeaserSlotKey } from "@/ui/gear/dollModel";
 import type { InventoryItem } from "@/ui/gear/types";
-import { GEAR_SLOT_ICONS, RARITY_COLORS, RARITY_GLOW, TIER_BORDER_COLORS } from "@/ui/labels";
+import {
+  GEAR_SLOT_ICONS,
+  gearNameClass,
+  RARITY_COLORS,
+  RARITY_GLOW,
+  TIER_BORDER_COLORS,
+} from "@/ui/labels";
 
 const TEASER_TOAST_MS = 1800;
 
@@ -43,10 +49,15 @@ function RealSlotButton({
 }) {
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
-  const template = item ? ITEM_TEMPLATES[item.templateId] : null;
+  const template = item ? lookupTemplate(item.templateId) : null;
   const tierCls = template ? tierBorder(template.tier) : "border-ddp-border-soft";
   const glow = template ? RARITY_GLOW[template.rarity] : "";
-  const nameCls = template ? RARITY_COLORS[template.rarity].text : "text-ddp-ink-muted/70";
+  // "ตำราตำนาน" legendary (endgame v1.3): gold-violet gradient name, else the
+  // ordinary per-rarity text color.
+  const nameCls =
+    item && template
+      ? gearNameClass(item.templateId, item.refineLevel) || RARITY_COLORS[template.rarity].text
+      : "text-ddp-ink-muted/70";
 
   return (
     <button

@@ -7,7 +7,7 @@
  * `src/ui/README.md`'s "Content i18n pattern" section.
  */
 
-import { REFINE, type GearSlot, type HeroClass, type ItemRarity } from "@/engine";
+import { isLegendaryTemplate, REFINE, type GearSlot, type HeroClass, type ItemRarity } from "@/engine";
 
 export const HERO_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F5E1}️", // 🗡️
@@ -115,4 +115,23 @@ export const PRESTIGE_REFINE_LEVEL = REFINE.failBands.degradeMax + 1; // 8
  */
 export function prestigeNameClass(refineLevel: number): string {
   return refineLevel >= PRESTIGE_REFINE_LEVEL ? "text-ddp-gold-bright font-black" : "";
+}
+
+/**
+ * "ตำราตำนาน" legendary craft-only weapons (endgame v1.3) get a distinct
+ * gold-violet gradient name accent — ALWAYS, regardless of awakening level (a
+ * fresh +0 legendary still reads as special, unlike ordinary gear's
+ * `prestigeNameClass` which only kicks in past +8). A non-legendary
+ * `templateId` falls through to the ordinary refine-prestige ladder.
+ */
+export const LEGENDARY_NAME_CLASS =
+  "bg-gradient-to-r from-ddp-gold-bright via-fuchsia-300 to-violet-400 bg-clip-text text-transparent font-black";
+
+/** Picks the name-span class for a gear item: legendary gradient first, else
+ * the ordinary `prestigeNameClass(refineLevel)` ladder. Callers that already
+ * resolve a template should pass its `templateId`; a `null`/`undefined` id
+ * (empty slot) safely falls through to the refine ladder ("" at +0). */
+export function gearNameClass(templateId: string | null | undefined, refineLevel: number): string {
+  if (templateId && isLegendaryTemplate(templateId)) return LEGENDARY_NAME_CLASS;
+  return prestigeNameClass(refineLevel);
 }
