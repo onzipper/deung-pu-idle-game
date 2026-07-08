@@ -28,6 +28,7 @@ import {
   postRespondPartyInvite,
   postSendEmoji,
 } from "@/ui/friends/api";
+import { shouldRefreshOnOpen } from "@/ui/friends/quickStart";
 import type { FriendsPanelWire, SendFriendRequestResult } from "@/ui/friends/types";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -88,6 +89,11 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
   const seenInviteIds = useRef(new Set<string>());
   const seenRequestIds = useRef(new Set<string>());
   const abortRef = useRef<AbortController | null>(null);
+  // Party quick-start (`ui/friends/quickStart.ts`): epoch ms of the last
+  // COMPLETED (non-aborted) fetch, feeding the open-effect's staleness gate
+  // below so re-opening the panel right after a mutation's own immediate
+  // refetch doesn't fire a redundant second GET.
+  const lastFetchAtRef = useRef<number | null>(null);
 
   const poll = useCallback(async () => {
     abortRef.current?.abort();
@@ -95,6 +101,7 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
     abortRef.current = controller;
     const res = await fetchFriendsPanel(controller.signal);
     if (res.kind === "aborted") return;
+    lastFetchAtRef.current = Date.now();
     if (res.kind === "guest") {
       setStatus("guest");
       setPanel(null);
@@ -184,8 +191,14 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
   useEffect(() => {
     if (status === "guest" || status === "loading") return;
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- immediate refetch on open, same one-shot-per-transition idiom as the mount probe above
-    if (open && !document.hidden) void poll(); // immediate refetch on open
+    // Party quick-start: opening the panel refetches immediately UNLESS a
+    // mutation's own immediate refetch (see `invitePartyMember`/
+    // `respondPartyInvite`/`leaveParty` below) already landed within the
+    // staleness window — avoids a redundant GET right after e.g. accepting an
+    // invite closes and reopens the panel in the same beat.
+    if (open && !document.hidden && shouldRefreshOnOpen(lastFetchAtRef.current, Date.now())) {
+      void poll();
+    }
 
     const ms = open ? OPEN_POLL_MS : CLOSED_POLL_MS;
     const id = window.setInterval(() => {
@@ -237,10 +250,18 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
 
   const sendEmoji = useCallback((toUserId: string, emoji: string) => postSendEmoji(toUserId, emoji), []);
 
+  // Party quick-start (owner ask): `/api/party/invite|respond|leave` return only
+  // `{ ok }` (no party snapshot — see `src/app/api/party/*`), so the fastest
+  // correct way to learn the resulting party state is ONE immediate refetch
+  // right here rather than waiting for the next 5s/15s interval tick. `poll()`
+  // pushes into `setParty` (`useGameStore`), which `GameClient.tsx` subscribes
+  // to directly and reacts to synchronously — so `PartySession.connect()`
+  // starts within a single `/api/friends` round trip of the tap (typically
+  // well under 1s), not the next scheduled poll.
   const invitePartyMember = useCallback(
     async (toUserId: string) => {
       const res = await postPartyInvite(toUserId);
-      void poll();
+      void poll(); // party quick-start: see comment above
       return res;
     },
     [poll],
@@ -249,7 +270,7 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
   const respondPartyInvite = useCallback(
     async (inviteId: string, accept: boolean) => {
       const res = await postRespondPartyInvite(inviteId, accept);
-      void poll();
+      void poll(); // party quick-start: see comment above
       return res.ok;
     },
     [poll],
@@ -257,7 +278,7 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
 
   const leaveParty = useCallback(async () => {
     const res = await postLeaveParty();
-    void poll();
+    void poll(); // party quick-start: see comment above
     return res.ok;
   }, [poll]);
 

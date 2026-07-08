@@ -102,7 +102,6 @@
       }
     },
     "autoSlotNextUnlockTier3": "4th slot unlocks at Class Tier 3 (Lv.{level})",
-    "atkBuffTooltip": "+{percent}% ATK",
     "skillInfoAria": "More info about {skillName}",
     "skillStat": {
       "damage": "DMG ×{mult}",
@@ -1219,6 +1218,15 @@
           "ninjaCadence": "🗡️ Ninja attacks faster with more frequent hits, same total damage",
           "ninjaDash": "💨 Ninja bot now dash-evades out of surrounds on its own — fewer deaths"
         }
+      },
+      "2026-07-09e": {
+        "items": {
+          "buffHub": "🤝 A new buff bar shows every active status in one place — tap a chip for details",
+          "partyFast": "⚡ Joining a party is faster now — no more waiting for the next refresh cycle",
+          "partySpread": "🎯 Party bots now spread out across monsters instead of dog-piling one (bosses still get the full-party pile-on)",
+          "questBossScale": "👹 Quest bosses now scale their HP with your party size",
+          "partyBuff10": "📈 The party EXP buff is now +10% per additional member"
+        }
       }
     }
   },
@@ -1347,6 +1355,16 @@
     "playingWith": "Playing with {names} in this zone",
     "waiting": "Waiting for teammate…",
     "reconnecting": "Reconnecting…"
+  },
+  "buffHub": {
+    "chip": {
+      "partyExp": "+{percent}% EXP ({count} players)",
+      "warCry": "+{percent}% ATK ({seconds}s)"
+    },
+    "detail": {
+      "partyExp": "Party buff: with {count} in your cohort, every kill grants +{percent}% EXP.",
+      "warCry": "War Cry: +{percent}% attack for the whole party, temporarily — {seconds}s left."
+    }
   },
   "worldBoss": {
     "pre": "🌟 Sia Jong is about to invade Map 1! {time} left",
