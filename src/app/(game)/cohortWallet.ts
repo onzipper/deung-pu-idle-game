@@ -44,8 +44,10 @@ export function walletSliceFrom(state: GameState): WalletSlice {
 }
 
 /** One shared-pot field's personal value: my pre-cohort base PLUS my equal-mean-field
- * share of the pot's drift since I joined (`trunc` toward zero), clamped >= 0. */
-function splitField(base: number, sharedBase: number, sharedNow: number, size: number): number {
+ * share of the pot's drift since I joined (`trunc` toward zero), clamped >= 0. Exported
+ * so `cohortProgress.ts` can reuse the exact same mean-field split for แก่นอสูร essence
+ * (a spendable economy quantity, same dupe-risk shape as gold/materials). */
+export function splitField(base: number, sharedBase: number, sharedNow: number, size: number): number {
   return Math.max(0, base + Math.trunc((sharedNow - sharedBase) / size));
 }
 

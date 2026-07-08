@@ -38,7 +38,9 @@
  * economy; a real per-member unlock-crediting scheme is future work, not solved here.
  */
 
+import { CONFIG, TOME_ALL_PAGES, zoneAt } from "@/engine";
 import type { BossClearBest, GameState, WorldLocation } from "@/engine";
+import { splitField } from "./cohortWallet";
 
 /** The world-progression fields a member's OWN persisted save must reflect, frozen at
  * cohort-join time — never the live (shared, possibly a deep friend's) cohort state. */
@@ -142,31 +144,140 @@ export function liveZoneKills(
 }
 
 /**
- * Owner bug batch B: settle MY personal zone-unlock progress from the shared cohort pot.
- * Semantics = FULL CREDIT PER PERSON — a kill made inside a cohort is one shared event all
- * present members participated in (playing solo would credit the same kill in full;
- * `zoneKills` only ever unlocks zones, never mints economy, so there is no dupe risk, and
- * dividing per-head would make partying strictly WORSE than solo for unlocking). So each
- * key's settled value = my FROZEN base (`base.zoneKills`) PLUS the shared pot's full delta
- * since I joined (`max(0, sharedNow[k] − sharedBase[k])`, floored so a re-seed / regression
- * never subtracts), over the UNION of every key. Every other `ProgressSlice` field
- * (`unlockedZones`/`stage`/`bossBest`/…) stays FROZEN — the accumulated kills unlock the
- * zone themselves once I'm back solo, via `applyProgressSlice`. Never mutates its inputs.
+ * The SHARED cohort-pot progression fields `settleProgressSlice` measures a member's
+ * personal share against. `zoneKills` IS part of `SharedCohortSave` (seeded from the
+ * authority), so its baseline is the authority's deep counts; the asura/tome fields are
+ * NOT in the shared save, so `buildCohortState` rebuilds them at 0/empty — their baseline
+ * is therefore always 0 and the pot grows from 0 as the cohort farms asura. Captured off
+ * the freshly-built cohort state at join (as `sharedBase`) and off the live state now
+ * (as `sharedNow`). */
+export interface SharedProgress {
+  zoneKills: Record<string, number>;
+  asuraEssence: number;
+  asuraZoneKills: Record<string, number>;
+  tomePages: number;
+}
+
+/** Snapshot the shared-progression fields off a live/built `GameState` — `zoneKills` folds
+ * the in-progress current-zone counter (`liveZoneKills`) so a kill made THIS frame counts;
+ * the asura record is deep-copied so the struct never aliases live state. */
+export function sharedProgressFrom(
+  state: Pick<GameState, "zoneKills" | "location" | "kills" | "asuraEssence" | "asuraZoneKills" | "tomePages">,
+): SharedProgress {
+  return {
+    zoneKills: liveZoneKills(state),
+    asuraEssence: state.asuraEssence,
+    asuraZoneKills: { ...state.asuraZoneKills },
+    tomePages: state.tomePages,
+  };
+}
+
+/** FULL-CREDIT union of a record field: my frozen base PLUS the shared pot's full delta per
+ * key since I joined (`max(0, now − base)`, floored so a re-seed / regression never
+ * subtracts), over the UNION of every key. Used for both `zoneKills` and `asuraZoneKills`
+ * (pure GATE counters — they only ever unlock zones / mint ศิลาโซน once, never divisible
+ * economy, so per-head splitting would make partying strictly WORSE than solo). */
+function unionFullCredit(
+  baseM: Record<string, number>,
+  sharedBaseM: Record<string, number>,
+  sharedNowM: Record<string, number>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const keys = new Set<string>([
+    ...Object.keys(baseM),
+    ...Object.keys(sharedBaseM),
+    ...Object.keys(sharedNowM),
+  ]);
+  for (const k of keys) {
+    out[k] = (baseM[k] ?? 0) + Math.max(0, (sharedNowM[k] ?? 0) - (sharedBaseM[k] ?? 0));
+  }
+  return out;
+}
+
+/**
+ * Owner bug batch B (+ 2026-07-09 asura per-member accounting): settle MY personal
+ * progression from the shared cohort pot. Per-field semantics, each chosen so partying is
+ * never worse than solo and no shared economy is duplicated N×:
+ *
+ *  - `zoneKills` / `asuraZoneKills`: FULL CREDIT PER PERSON (`unionFullCredit`). Pure GATE
+ *    counters (unlock a zone / earn a ศิลาโซน once) — dividing per head would strand a
+ *    partied player, and there is nothing to duplicate.
+ *  - `asuraEssence`: EQUAL MEAN-FIELD SPLIT (`splitField`, the exact recipe the wallet uses
+ *    for gold/materials) — a SPENDABLE economy quantity (12/craft), so full credit to every
+ *    member would mint it ×N. `max(0, base + trunc(drift/size))`.
+ *  - `tomePages`: bitmask OR (`base | sharedNow`) — idempotent; every member present at a
+ *    page's milestone banks that page. `tomeUnlocked` LATCHES: my frozen base OR the settled
+ *    pages being complete (`TOME_ALL_PAGES`).
+ *  - `asuraSigils`: `base + sigilClaims × sigilPerClaim` — NOT a drift split. Each z10 daily
+ *    claim is server-ledgered once/day/character, so a member's own claim count (tracked
+ *    client-side, incremented only after the server POST succeeds) is authoritative; the
+ *    shared pot's sigil value is meaningless here.
+ *
+ * Every other `ProgressSlice` field (`unlockedZones`/`stage`/`bossBest`/…) stays FROZEN —
+ * the accumulated `zoneKills` unlock the zones themselves once I'm back solo (via
+ * `applyProgressSlice` + the engine's own `checkZoneUnlock`, and `deriveUnlockedZones` for
+ * the live cohort DISPLAY). `size` is the cohort headcount (guarded >= 1). Never mutates
+ * its inputs.
  */
 export function settleProgressSlice(
   base: ProgressSlice,
-  sharedBaseZK: Record<string, number>,
-  sharedNowZK: Record<string, number>,
+  sharedBase: SharedProgress,
+  sharedNow: SharedProgress,
+  cohortSize: number,
+  sigilClaims: number,
 ): ProgressSlice {
-  const zoneKills: Record<string, number> = {};
-  const keys = new Set<string>([
-    ...Object.keys(base.zoneKills),
-    ...Object.keys(sharedBaseZK),
-    ...Object.keys(sharedNowZK),
-  ]);
-  for (const k of keys) {
-    const accrued = Math.max(0, (sharedNowZK[k] ?? 0) - (sharedBaseZK[k] ?? 0));
-    zoneKills[k] = (base.zoneKills[k] ?? 0) + accrued;
+  const size = Math.max(1, cohortSize);
+  const tomePages = base.tomePages | sharedNow.tomePages;
+  return {
+    ...base,
+    zoneKills: unionFullCredit(base.zoneKills, sharedBase.zoneKills, sharedNow.zoneKills),
+    asuraZoneKills: unionFullCredit(base.asuraZoneKills, sharedBase.asuraZoneKills, sharedNow.asuraZoneKills),
+    asuraEssence: splitField(base.asuraEssence, sharedBase.asuraEssence, sharedNow.asuraEssence, size),
+    asuraSigils: base.asuraSigils + Math.max(0, sigilClaims) * CONFIG.asura.tome.sigilPerClaim,
+    tomePages,
+    tomeUnlocked: base.tomeUnlocked || (tomePages & TOME_ALL_PAGES) === TOME_ALL_PAGES,
+  };
+}
+
+/**
+ * Owner live bug FIX 4 (2026-07-09, cohort case A z38 / B z31): derive MY OWN per-member
+ * unlocked-zone counts for the live cohort DISPLAY, so a member sees their own gauge /
+ * walk-arrows / GoalLadder — not the shared authority's (a fresh member partying at a deep
+ * friend's zone used to see the friend's unlocks, walk forward, then get engine-rejected on
+ * collapse). PURE mirror of the engine's `checkZoneUnlock` (world.ts): starting from my
+ * FROZEN persist-unlock base (`slice.unlockedZones` — the quest PREVIEW grant is deliberately
+ * NOT folded in, so a not-persist-unlocked map4 never cascades), cascade each map's count
+ * forward one zone at a time while the current FRONTIER farm zone's settled `zoneKills` has
+ * met `killGoal(stage)`. Mirrors the engine's exact rules:
+ *   - only a FARM frontier unlocks its neighbour (a town/boss frontier stops the cascade);
+ *   - the boss ROOM is unlocked once the last farm zone's quota is met (the engine bumps the
+ *     count to `bossIdx+1` there too) — but the cascade then STOPS: crossing to the NEXT map
+ *     requires a boss KILL, which is not purely derivable, so we are CONSERVATIVE and never
+ *     derive-unlock across a map boundary (`checkZoneUnlock` returns false for a cross-map
+ *     next zone as well).
+ * Never mutates its input. Idempotent (re-running on the result is a fixed point).
+ */
+export function deriveUnlockedZones(slice: ProgressSlice): Record<string, number> {
+  const out: Record<string, number> = { ...slice.unlockedZones };
+  for (const mapId of Object.keys(out)) {
+    let count = out[mapId] ?? 0;
+    // Cascade forward within THIS map only. `count` strictly increases or we break, so this
+    // terminates (once `count` exceeds the map's zones `zoneAt` no longer matches).
+    while (count > 0) {
+      const frontierIdx = count - 1;
+      const frontier = zoneAt({ mapId, zoneIdx: frontierIdx });
+      // `zoneAt` falls back to the FIRST farm for an unknown location — reject that (the
+      // resolved zone must be exactly the one asked for).
+      if (frontier.mapId !== mapId || frontier.zoneIdx !== frontierIdx) break;
+      if (frontier.kind !== "farm") break; // only a FARM frontier unlocks its neighbour
+      if ((slice.zoneKills[`${mapId}:${frontierIdx}`] ?? 0) < CONFIG.killGoal(frontier.stage)) break;
+      const nextIdx = count;
+      const next = zoneAt({ mapId, zoneIdx: nextIdx });
+      if (next.mapId !== mapId || next.zoneIdx !== nextIdx) break; // no next zone in this map
+      count = nextIdx + 1;
+      out[mapId] = count;
+      if (next.kind !== "farm") break; // boss room unlocked — a boss KILL opens the next map
+    }
   }
-  return { ...base, zoneKills };
+  return out;
 }

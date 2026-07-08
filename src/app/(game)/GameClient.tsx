@@ -89,6 +89,7 @@ import {
   hasAllZoneStones,
   canCraftLegendary,
   craftBlockReason,
+  TOME_ALL_PAGES,
   type GameEvent,
   type GameState,
   type Hero,
@@ -188,10 +189,12 @@ import {
 } from "./cohortWallet";
 import {
   applyProgressSlice,
-  liveZoneKills,
+  deriveUnlockedZones,
   progressSliceFrom,
   settleProgressSlice,
+  sharedProgressFrom,
   type ProgressSlice,
+  type SharedProgress,
 } from "./cohortProgress";
 import { TimeDirector } from "./timeDirector";
 import { WorldSession } from "./presence/worldSession";
@@ -916,12 +919,25 @@ export function GameClient() {
      * active (`serialize()`) and restored verbatim on `collapseToSolo()` — the fix for the
      * "partying with a deep player permanently unlocked my zones" live bug. Null while solo. */
     let cohortProgressBase: ProgressSlice | null = null;
-    /** PROGRESSION-INTEGRITY, owner bug batch B: the SHARED cohort pot's `zoneKills` at the
-     * moment I joined (or re-seeded) — the baseline `settleProgressSlice` measures the pot's
-     * kill-delta against, so I get FULL credit for kills made while in the cohort without
-     * double-counting across re-seeds (mirrors `cohortSharedBase`'s role for the wallet).
-     * Null while solo. */
-    let cohortZoneKillsBase: Record<string, number> | null = null;
+    /** PROGRESSION-INTEGRITY, owner bug batch B + 2026-07-09 asura per-member accounting: the
+     * SHARED cohort pot's progression baseline (`zoneKills` + asura essence/zone-kills/tome
+     * pages) at the moment I joined (or re-seeded) — what `settleProgressSlice` measures the
+     * pot's delta against, so I get FULL credit for kills / my mean-field share of essence
+     * without double-counting across re-seeds (mirrors `cohortSharedBase`'s role for the
+     * wallet). Null while solo. */
+    let cohortSettleBase: SharedProgress | null = null;
+    /** 2026-07-09 asura per-member accounting: MY own count of successful daily z10 sigil
+     * claims made WHILE in this cohort. The `claimAsuraSigil` engine intent is lane-0-only
+     * (a member's would be dead) so it's STRIPPED in a cohort; the claim is server-ledgered
+     * (once/day/character) and this counter — incremented only when the POST-gated intent is
+     * drained — feeds `settleProgressSlice` so my own settled sigils reflect my own claims.
+     * Reset on activate (folded into the re-based slice) / collapse. */
+    let cohortSigilClaims = 0;
+    /** FIX 4 (2026-07-09): my last-seen DERIVED per-member unlocked-zone counts (see
+     * `deriveUnlockedZones`), to fire a one-shot "new zone unlocked!" notice when a zone
+     * flips unlocked for ME mid-cohort (the engine's `zoneUnlocked` event never fires in the
+     * shared state a deep friend already unlocked). Null while solo / until first derived. */
+    let cohortPrevDerivedUnlocked: Record<string, number> | null = null;
     /** Owner bug batch A #2: my CLIENT-LOCAL bot-master toggle wish latch (see
      * `nextAutoHuntWish`). Holds a pressed `autoHunt` value until my hero's replicated
      * config confirms it; `null` = no pending wish. Cleared on activate/collapse. */
@@ -1127,8 +1143,14 @@ export function GameClient() {
      * `state`. Reads the live current-zone counter (`liveZoneKills`) so a kill made THIS
      * frame is credited immediately (both to the HUD gauge and to any save that lands). */
     function settledProgress(): ProgressSlice | null {
-      if (!cohortActive || !cohortProgressBase || !cohortZoneKillsBase) return null;
-      return settleProgressSlice(cohortProgressBase, cohortZoneKillsBase, liveZoneKills(state));
+      if (!cohortActive || !cohortProgressBase || !cohortSettleBase) return null;
+      return settleProgressSlice(
+        cohortProgressBase,
+        cohortSettleBase,
+        sharedProgressFrom(state),
+        Math.max(1, state.heroes.length),
+        cohortSigilClaims,
+      );
     }
 
     /** Cohort -> solo (design C): extract MY hero, rebuild solo via the exact same
@@ -1173,7 +1195,9 @@ export function GameClient() {
       cohortWalletBase = null;
       cohortSharedBase = null;
       cohortProgressBase = null;
-      cohortZoneKillsBase = null;
+      cohortSettleBase = null;
+      cohortSigilClaims = 0;
+      cohortPrevDerivedUnlocked = null;
       cohortAutoHuntWish = null;
       cohortBotSettingsWish = null;
       cohortActive = false;
@@ -1253,9 +1277,15 @@ export function GameClient() {
       cohortWalletBase = preWallet;
       cohortSharedBase = walletSliceFrom(built);
       cohortProgressBase = preProgress;
-      // Baseline the pot's zoneKills for THIS cohort (what `settleProgressSlice` measures the
-      // shared kill-delta against) + clear the bot-toggle wish latch for the fresh cohort.
-      cohortZoneKillsBase = liveZoneKills(built);
+      // Baseline the pot's progression (zoneKills + asura essence/zone-kills/tome pages) for
+      // THIS cohort (what `settleProgressSlice` measures the shared delta against) + clear the
+      // bot-toggle wish latch and the per-member sigil/derived-unlock trackers for the fresh
+      // cohort — on a re-seed the OLD cohort's sigil claims are already folded into
+      // `preProgress.asuraSigils` (via `settledProgress()`), so resetting to 0 never
+      // double-counts.
+      cohortSettleBase = sharedProgressFrom(built);
+      cohortSigilClaims = 0;
+      cohortPrevDerivedUnlocked = null;
       cohortAutoHuntWish = null;
       cohortBotSettingsWish = null;
       handshake = null;
@@ -2006,6 +2036,17 @@ export function GameClient() {
             // a leader's edit rewrites the shared `state.bot` under every member).
             input.setAutoHunt = undefined;
             input.setBotSettings = undefined;
+            // 2026-07-09 asura per-member accounting: `claimAsuraSigil` + `craftLegendary`
+            // are BOTH lane-0-only in `step()` (a member's copy is engine-dead), so in a
+            // cohort a member's daily z10 sigil claim would be server-consumed (ledgered) yet
+            // engine-LOST — the sigil silently vanishes. STRIP both; the sigil is instead
+            // counted here (the intent is only queued AFTER the server POST succeeds — see
+            // `tomeFlow.ts`) and fed to `settleProgressSlice` so my settled sigils reflect my
+            // own claims. Legendary CRAFT is DISABLED in the panel while partied (dupe-safe),
+            // stripped here as defense-in-depth.
+            if (input.claimAsuraSigil) cohortSigilClaims += 1;
+            input.claimAsuraSigil = undefined;
+            input.craftLegendary = undefined;
             // ECONOMY-INTEGRITY / mid-cohort automation: solo's global config mirror
             // (`syncPrimaryHeroConfig`) no-ops at heroes.length >= 2, so a bot/auto-cast/
             // potion toggle would be DEAD in a cohort. Derive my desired config from the
@@ -2316,12 +2357,27 @@ export function GameClient() {
           useGameStore.getState().pushNotice("asuraZoneStoneEarned");
         } else if (ev.type === "tomePageFound") {
           // "ตำราตำนาน" secret-quest breadcrumb (endgame v1.3, owner: discoverable WITHOUT
-          // patch notes) — a dramatic, mysterious toast, no spoilers.
-          useGameStore.getState().pushNotice(`tomePageFound.page${ev.page}`);
+          // patch notes) — a dramatic, mysterious toast, no spoilers. Cohort guard
+          // (2026-07-09): the shared state's page-found event fires for ALL members; skip the
+          // toast when MY frozen base already had this page bit (I've seen it before).
+          const pageBit = 1 << (ev.page - 1);
+          if (!(cohortActive && cohortProgressBase && cohortProgressBase.tomePages & pageBit)) {
+            useGameStore.getState().pushNotice(`tomePageFound.page${ev.page}`);
+          }
         } else if (ev.type === "tomeAssembled") {
           // The 3rd page landed — celebratory reveal dialog (mounted at the top level,
-          // see `AsuraTomeAssembledModal.tsx`), NOT a toast.
-          useGameStore.getState().showTomeAssembledCelebration();
+          // see `AsuraTomeAssembledModal.tsx`), NOT a toast. Cohort guard: skip when MY base
+          // already had the tome fully assembled (a member who long ago unlocked it must not
+          // re-see the reveal every time a partymate completes their own set).
+          if (
+            !(
+              cohortActive &&
+              cohortProgressBase &&
+              (cohortProgressBase.tomePages & TOME_ALL_PAGES) === TOME_ALL_PAGES
+            )
+          ) {
+            useGameStore.getState().showTomeAssembledCelebration();
+          }
         } else if (ev.type === "asuraSigilClaimed") {
           useGameStore.getState().pushNotice("asuraSigilClaimed", { count: ev.count });
         } else if (ev.type === "legendaryCraftBlocked") {
@@ -2360,21 +2416,54 @@ export function GameClient() {
           // reads `state.kills`) must show MY full-credit progress, not the shared pot's raw
           // counter — override it with my settled current-zone value (throwaway-view spread,
           // exactly like the wallet override; NEVER writes the live `state`, so it can't
-          // enter the hash). `unlockedZones` stays the shared live value (display only).
+          // enter the hash).
           const settledProg = settledProgress();
           const zk = `${state.location.mapId}:${state.location.zoneIdx}`;
           const kills = settledProg ? (settledProg.zoneKills[zk] ?? state.kills) : state.kills;
+          // FIX 4 (2026-07-09) + asura per-member accounting: override the progression fields
+          // `buildSnapshot` reads (`unlockedZones` via `effectiveUnlockedZones`/`worldNav`; the
+          // asura essence/zone-kills/sigils; tome pages/unlock + the derived `hasAllZoneStones`/
+          // `canCraftLegendary`/`craftBlockReason` gates) with MY OWN settled values, so every
+          // member sees their own gauge/walk-arrows/tome checklist — not the shared authority's.
+          // `unlockedZones` is DERIVED from my settled kills (`deriveUnlockedZones`, mirrors the
+          // engine's `checkZoneUnlock`) so a member who personally re-cleared a zone in the
+          // cohort sees it unlocked LIVE and can walk on.
+          let prog: Partial<GameState> = {};
+          if (settledProg) {
+            const derivedUnlocked = deriveUnlockedZones(settledProg);
+            // One-shot "new zone unlocked!" notice when a zone flips unlocked for ME (the
+            // engine's `zoneUnlocked` event never fires in the shared state the authority
+            // already unlocked). Compare against last frame's derived map.
+            if (cohortPrevDerivedUnlocked) {
+              for (const mapId of Object.keys(derivedUnlocked)) {
+                if ((derivedUnlocked[mapId] ?? 0) > (cohortPrevDerivedUnlocked[mapId] ?? 0)) {
+                  useGameStore.getState().pushNotice("cohortZoneUnlocked");
+                  break;
+                }
+              }
+            }
+            cohortPrevDerivedUnlocked = derivedUnlocked;
+            prog = {
+              unlockedZones: derivedUnlocked,
+              asuraEssence: settledProg.asuraEssence,
+              asuraZoneKills: settledProg.asuraZoneKills,
+              asuraSigils: settledProg.asuraSigils,
+              tomePages: settledProg.tomePages,
+              tomeUnlocked: settledProg.tomeUnlocked,
+            };
+          }
           snapState = w
             ? {
                 ...state,
                 heroes,
                 kills,
+                ...prog,
                 gold: w.gold,
                 goldEarned: w.goldEarned,
                 materials: w.materials,
                 consumables: { ...state.consumables, ...w.consumables },
               }
-            : { ...state, heroes, kills };
+            : { ...state, heroes, kills, ...prog };
         }
         store.syncFromEngine(buildSnapshot(snapState));
       }
