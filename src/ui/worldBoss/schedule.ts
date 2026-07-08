@@ -61,22 +61,23 @@ export function sameWorldBossStatus(a: WorldBossStatus, b: WorldBossStatus): boo
 /**
  * Should `GameClient.tsx` queue a `spawnWorldBoss` intent THIS frame? True
  * exactly when the schedule says "active", the derived status says I'm standing
- * IN the window's boss zone ("activeHere"), and the LIVE engine state hasn't
- * already recorded an entry for this window (spawned/despawned/defeated —
- * `liveWorldBossWindowId` is `state.worldBoss?.windowId ?? null`). This mirrors
- * the engine's own `trySpawnWorldBoss` idempotency guard (`wb.windowId ===
- * windowId || wb.active`), so a repeat call before the live state catches up is
- * still a safe no-op there too — this predicate is purely a "don't bother
+ * IN the window's boss zone ("activeHere"), and the LIVE engine state doesn't
+ * already BLOCK a respawn for this window: a boss is currently `active`, or this
+ * window was `defeated`. A NON-defeated despawn (fled the zone) no longer blocks —
+ * re-entry re-queues the spawn so the boss re-engages within its window (owner
+ * live bug 2, 2026-07-08). `live` is `state.worldBoss` trimmed to
+ * `{ windowId, active, defeated }` (or null when dormant). This mirrors the
+ * engine's own `trySpawnWorldBoss` idempotency guard (`wb.active || (wb.windowId
+ * === windowId && wb.defeated)`), so a repeat call before the live state catches
+ * up is still a safe no-op there too — this predicate is purely a "don't bother
  * queueing" cheap-path, not the actual dedupe authority.
  */
 export function shouldQueueWorldBossSpawn(
   phase: WorldBossPhase,
   status: WorldBossStatus,
-  liveWorldBossWindowId: number | null,
+  live: { windowId: number; active: boolean; defeated: boolean } | null,
 ): boolean {
-  return (
-    phase.phase === "active" &&
-    status.kind === "activeHere" &&
-    liveWorldBossWindowId !== phase.windowId
-  );
+  const blocked =
+    live !== null && live.windowId === phase.windowId && (live.active || live.defeated);
+  return phase.phase === "active" && status.kind === "activeHere" && !blocked;
 }

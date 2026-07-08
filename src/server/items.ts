@@ -149,8 +149,18 @@ export type ClaimClassification =
 export function classifyClaim(templateId: string, stage: number): ClaimClassification {
   if (!(templateId in ITEM_TEMPLATES)) return { ok: false, reason: "unknown_template" };
 
-  const farm = dropTableForStage(stage);
-  const boss = bossDropTableForStage(stage);
+  // Membership scans the SUPERSET table (class-gated lines admitted): whether a
+  // dagger could legitimately roll is decided by the ENGINE-side roster (a cohort
+  // with a ninja admits daggers into the SHARED table, and the rotating drop
+  // assignment may hand one to a NON-ninja member), so the server cannot narrow
+  // by the claimant's class — historical rule: classReq gates EQUIP, not the
+  // roll/claim. The plausibility ceiling already scans this same superset
+  // (maxSummedDropChance). Passing "ninja" IS the full superset while
+  // DROP_GATED_CLASSES has one member; grow this into a real superset helper if a
+  // second gated class ever lands. Omitting the class here was the live bug that
+  // silently rejected every dagger claim (owner report 2026-07-08).
+  const farm = dropTableForStage(stage, "ninja");
+  const boss = bossDropTableForStage(stage, "ninja");
   const inBoss = boss.some((e) => e.templateId === templateId);
   const inFarm = farm.some((e) => e.templateId === templateId);
 

@@ -12,6 +12,7 @@ import {
   worldBossLocationFor,
 } from "@/engine";
 import type { GameState, GameEvent, WorldLocation } from "@/engine";
+import { FIXED_DT } from "@/engine/core/loop";
 import { LockstepClient, stateHash } from "@/engine/lockstep";
 import { soloSave } from "./helpers";
 
@@ -204,6 +205,122 @@ describe("worldBoss spawn intent", () => {
     step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
     expect(eventTypes(s, "worldBossSpawned")).toBe(0);
     expect(s.worldBoss?.active).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Owner LIVE bug fixes (2026-07-08): presence sweep + flee/re-enter window.
+// ---------------------------------------------------------------------------
+
+describe("worldBoss presence sweep (bug 1: never rendered in town)", () => {
+  it("death in the boss zone -> auto-return retires the boss by the first town step", () => {
+    const wid = 5;
+    const s = initGameState(77, soloSave("swordsman", 1));
+    seatInBossZone(s, wid);
+    isolate(s);
+    s.autoReturn = false; // "รอที่เมือง" — the owner's repro: the hero DWELLS in town
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    expect(s.worldBoss?.active).toBe(true);
+
+    // Kill the hero (the boss's killing blow) then drive the REAL death -> respawnToTown
+    // -> transit -> town-arrival machinery purely through step() (nothing hand-forced
+    // beyond the death itself — no manual phase/location poke of the town branch).
+    for (const h of s.heroes) {
+      h.hp = 0;
+      h.dead = true;
+    }
+    let guard = 0;
+    while (zoneAt(s.location).kind !== "town" && guard++ < 5000) {
+      // The boss stays alive the whole walk home (its lifetime is a wall clock —
+      // tickWorldBossLifetime only counts the transit down, never despawns on zone-leave).
+      expect(s.worldBoss?.active).toBe(true);
+      step(s, {});
+    }
+    expect(zoneAt(s.location).kind).toBe("town"); // arrived (that step was the travel branch)
+
+    // The FIRST genuine TOWN step must retire it — the town branch never takes a battle
+    // step, so the presence sweep has to run there or the renderer draws the boss in town.
+    step(s, {});
+    expect(s.worldBoss?.active).toBe(false);
+    expect(s.worldBoss?.entity).toBeNull();
+    expect(s.worldBoss?.defeated).toBe(false);
+    expect(eventTypes(s, "worldBossDespawned")).toBe(1);
+  });
+});
+
+describe("worldBoss flee + re-entry (bug 2: the window is not burned)", () => {
+  const wid = 9;
+  const flee = (s: GameState, loc: WorldLocation): void => {
+    s.location = { mapId: "map1", zoneIdx: loc.zoneIdx === 1 ? 2 : 1 };
+  };
+
+  it("flee to an adjacent zone -> the next battle step retires it (NOT defeated)", () => {
+    const s = initGameState(21, soloSave("archer", 1));
+    const loc = seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    expect(s.worldBoss?.active).toBe(true);
+    flee(s, loc);
+    step(s, {});
+    expect(s.worldBoss?.active).toBe(false);
+    expect(s.worldBoss?.defeated).toBe(false);
+    expect(eventTypes(s, "worldBossDespawned")).toBe(1);
+  });
+
+  it("re-entry + fresh intent -> active again, countdown re-seeded from remainingSeconds", () => {
+    const s = initGameState(21, soloSave("archer", 1));
+    const loc = seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    flee(s, loc);
+    step(s, {});
+    expect(s.worldBoss?.active).toBe(false);
+    // Return + inject a FRESH (smaller, wall-clock-derived) remaining -> respawns.
+    s.location = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 600 } });
+    expect(s.worldBoss?.active).toBe(true);
+    expect(eventTypes(s, "worldBossSpawned")).toBe(1);
+    // Seeded from 600, less this step's single lifetime tick.
+    expect(s.worldBoss!.countdown).toBeCloseTo(600 - FIXED_DT, 5);
+  });
+
+  it("re-entry countdown is capped at the configured lifetime", () => {
+    const s = initGameState(21, soloSave("archer", 1));
+    const loc = seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    flee(s, loc);
+    step(s, {});
+    s.location = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 99_999 } });
+    expect(s.worldBoss?.active).toBe(true);
+    expect(s.worldBoss!.countdown).toBeCloseTo(lifetimeMs / 1000 - FIXED_DT, 5);
+  });
+
+  it("a DEFEATED window still blocks re-entry (a kill ends the window)", () => {
+    const s = initGameState(21, soloSave("archer", 1));
+    seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    s.worldBoss!.entity!.hp = 0;
+    step(s, {});
+    expect(s.worldBoss?.defeated).toBe(true);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 600 } });
+    expect(s.worldBoss?.active).toBe(false);
+    expect(eventTypes(s, "worldBossSpawned")).toBe(0);
+  });
+
+  it("an EXPIRED window (remainingSeconds <= 0) never revives on re-entry", () => {
+    const s = initGameState(21, soloSave("archer", 1));
+    const loc = seatInBossZone(s, wid);
+    isolate(s);
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 900 } });
+    flee(s, loc);
+    step(s, {});
+    s.location = { mapId: loc.mapId, zoneIdx: loc.zoneIdx };
+    step(s, { spawnWorldBoss: { windowId: wid, remainingSeconds: 0 } });
+    expect(s.worldBoss?.active).toBe(false);
+    expect(eventTypes(s, "worldBossSpawned")).toBe(0);
   });
 });
 

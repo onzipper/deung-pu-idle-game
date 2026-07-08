@@ -147,6 +147,23 @@ describe("classifyClaim", () => {
     const r = classifyClaim("w_sword_t1_rusty", 3);
     expect(r).toEqual({ ok: false, reason: "not_in_table" });
   });
+  it("accepts an on-band NINJA dagger as origin drop (the silently-rejected live bug)", () => {
+    // Membership must scan the SUPERSET table: the class-gated dagger line is
+    // absent from the legacy no-arg tables, so the pre-fix classifyClaim rejected
+    // every dagger claim `not_in_table` — owner-reported as "ninja weapons never
+    // drop" (2026-07-08). Cohort rotation also makes claimant-class narrowing
+    // wrong (a non-ninja member can legitimately receive an assigned dagger).
+    const r = classifyClaim("w_dagger_t1_kunai", 1);
+    expect(r).toEqual({ ok: true, origin: "drop", membershipKnown: true });
+  });
+  it("classifies a boss-pool exclusive dagger (next-tier seed) as origin boss", () => {
+    const r = classifyClaim("w_dagger_t2_tanto", 1);
+    expect(r).toEqual({ ok: true, origin: "boss", membershipKnown: true });
+  });
+  it("still rejects an off-band dagger", () => {
+    const r = classifyClaim("w_dagger_t1_kunai", 3);
+    expect(r).toEqual({ ok: false, reason: "not_in_table" });
+  });
 });
 
 describe("claimBatchSchema / equipSchema", () => {
