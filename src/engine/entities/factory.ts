@@ -146,6 +146,11 @@ export function makeHero(
     config,
     // Combat aim (render-only facing observer) — re-derived each step. Transient.
     aimX: null,
+    // Dash-evade runtime (NINJA FEEL RETUNE) — ready to evade, hp window seeded at full.
+    // Transient; only ever touched for a `dashEvade` class (ninja). See Hero doc.
+    evadeCd: 0,
+    evadeHpMark: maxHp,
+    evadeMarkCd: CONFIG.ninja.evade.hpWindowSec,
   };
 }
 

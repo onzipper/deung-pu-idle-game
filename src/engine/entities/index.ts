@@ -472,6 +472,25 @@ export interface Hero {
    * ref) rather than snapping to velocity.
    */
   aimX: number | null;
+  /**
+   * DASH-EVADE runtime (NINJA FEEL RETUNE 2026-07-08) — three per-hero TRANSIENT counters that
+   * drive the auto dash-evade (systems/combat `tryNinjaEvade`, only for a `dashEvade` class):
+   *   - `evadeCd`     : seconds until the next auto-evade is allowed (a fixed cooldown so the
+   *                     ninja never dash-spams). Ticks down by fixed dt; set on each evade.
+   *   - `evadeHpMark` : hp SNAPSHOT at the start of the current damage-sampling window — the
+   *                     baseline the "hp lost in the last window" burst-trigger compares against.
+   *   - `evadeMarkCd` : seconds until the next `evadeHpMark` snapshot (the window length).
+   *
+   * TRANSIENT — NOT persisted (no SAVE bump; rebuilt on load) and DELIBERATELY EXCLUDED from
+   * `stateHash` (like `aimX`): they are a PURE deterministic function of already-hashed shared
+   * state (hp / enemy positions / fixed dt), so they evolve identically on every lockstep client,
+   * and the observable they steer — `hero.x` — IS hashed, so any real divergence is still caught.
+   * For a non-`dashEvade` class they stay at their init values forever (never read/written), which
+   * is why sword/archer/mage movement + the canonical stateHash are byte-identical.
+   */
+  evadeCd: number;
+  evadeHpMark: number;
+  evadeMarkCd: number;
 }
 
 export interface Enemy {

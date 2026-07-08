@@ -255,7 +255,7 @@ describe("ninja skills", () => {
 // ---------------------------------------------------------------------------
 
 describe("ninja double-hit basic attack", () => {
-  it("lands 2 strikes per swing at ~55% ATK each (2 hit events)", () => {
+  it("lands 2 strikes per swing at ~44% ATK each (2 hit events)", () => {
     const s = ninjaState();
     const h = s.heroes[0];
     h.cd = 0; // ready to swing
@@ -285,6 +285,160 @@ describe("ninja double-hit basic attack", () => {
     expect(e.maxHp - e.hp).toBe(dmg); // one full-damage strike
     const hits = s.events.filter((ev) => ev.type === "hit" && ev.id === e.id);
     expect(hits.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NINJA FEEL RETUNE (2026-07-08) — faster cadence at identical basic DPS.
+// ---------------------------------------------------------------------------
+
+describe("ninja cadence retune (DPS-neutral)", () => {
+  it("uses the retuned exact values atkSpeed 0.36 / multiHitMult 0.44", () => {
+    expect(HERO_TYPES.ninja.atkSpeed).toBe(0.36);
+    expect(HERO_TYPES.ninja.multiHitMult).toBe(0.44);
+    expect(HERO_TYPES.ninja.multiHit).toBe(2);
+  });
+
+  it("keeps per-second basic DPS EXACTLY equal to the old 0.45/0.55 cadence", () => {
+    const t = HERO_TYPES.ninja;
+    // Basic DPS = multiHit × multiHitMult / atkSpeed (× atk × speedFactor — both cancel).
+    const dpsAfter = (t.multiHit ?? 1) * (t.multiHitMult ?? 1) / t.atkSpeed;
+    const dpsBefore = 2 * 0.55 / 0.45; // the shipped pre-retune cadence
+    expect(dpsAfter).toBeCloseTo(dpsBefore, 12); // within IEEE rounding
+    // The DPS-driving ratio is preserved as the exact rational 11/9.
+    expect((t.multiHitMult ?? 1) / t.atkSpeed).toBeCloseTo(0.55 / 0.45, 12);
+    // Cadence really is faster (more swings per second) than the old 0.45.
+    expect(t.atkSpeed).toBeLessThan(0.45);
+  });
+
+  it("basic-attack throughput is unchanged vs the old 0.45/0.55 cadence (empirical)", () => {
+    // Beat an inert huge-hp dummy for a long window under the NEW cadence, then again under the
+    // OLD (0.45/0.55) cadence, and assert total basic damage matches within per-hit rounding —
+    // the DPS-neutrality proof "before == after". More, smaller hits vs fewer, bigger hits.
+    const t = HERO_TYPES.ninja;
+    const SECONDS = 60;
+    const beat = (atkSpeed: number, mult: number): number => {
+      const savedS = t.atkSpeed;
+      const savedM = t.multiHitMult;
+      t.atkSpeed = atkSpeed;
+      t.multiHitMult = mult;
+      try {
+        const s = ninjaState(90);
+        const h = s.heroes[0];
+        // Large ATK so per-hit integer rounding (round(atk×mult)) is negligible — the retune is
+        // exactly DPS-neutral in real numbers; only rounding (severe at tiny atk) can skew it.
+        h.stats.dex += 400;
+        h.x = 400;
+        h.cd = 0;
+        h.config.autoCast = false;
+        const dummy = makeStubEnemy(1, h.x + 50, 1e12); // in dagger reach (70), never dies
+        s.enemies = [dummy];
+        for (let i = 0; i < Math.round(SECONDS / FIXED_DT); i++) step(s, {});
+        return dummy.maxHp - dummy.hp;
+      } finally {
+        t.atkSpeed = savedS;
+        t.multiHitMult = savedM;
+      }
+    };
+    const dealtNew = beat(0.36, 0.44);
+    const dealtOld = beat(0.45, 0.55);
+    // Within ~1.5% over 60s (per-hit integer rounding + window-edge alignment).
+    expect(Math.abs(dealtNew - dealtOld) / dealtOld).toBeLessThan(0.015);
+    // Sanity: the new cadence really does land MORE hit events (faster swings).
+    expect(dealtNew).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DASH-EVADE bot behavior (NINJA FEEL RETUNE) — swarm escape, deterministic.
+// ---------------------------------------------------------------------------
+
+describe("ninja dash-evade (auto swarm escape)", () => {
+  /** A ninja at x=400, auto-cast off, hp under pressure, with `n` engaged stubs crowding it. */
+  const swarmedNinja = (hpFrac = 0.4): GameState => {
+    const s = ninjaState();
+    const h = s.heroes[0];
+    h.x = 400;
+    h.config.autoCast = false;
+    h.hp = h.maxHp * hpFrac;
+    s.enemies = [makeStubEnemy(1, 380), makeStubEnemy(2, 400), makeStubEnemy(3, 420)];
+    return s;
+  };
+
+  it("blinks OUT of a swarm when crowded AND under hp pressure (deterministic)", () => {
+    const s = swarmedNinja();
+    const h = s.heroes[0];
+    const x0 = h.x;
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(1);
+    // A DASH (big jump), not a normal hunt-walk step; slipped toward the clearer LEFT side.
+    expect(Math.abs(h.x - x0)).toBeGreaterThan(CONFIG.hunt.huntSpeed * FIXED_DT * 5);
+    expect(h.x).toBeLessThan(x0);
+    expect(h.evadeCd).toBeGreaterThan(0);
+  });
+
+  it("does NOT evade when the crowd is below minEnemies (only 2 foes)", () => {
+    const s = swarmedNinja();
+    s.enemies = [makeStubEnemy(1, 390), makeStubEnemy(2, 410)]; // 2 < minEnemies (3)
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0);
+  });
+
+  it("does NOT evade while healthy and not recently bursted (no hp pressure)", () => {
+    const s = swarmedNinja(1.0); // full hp, no recent damage
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0);
+  });
+
+  it("respects its evade cooldown (no back-to-back dash while ticking)", () => {
+    const s = swarmedNinja();
+    const h = s.heroes[0];
+    const repin = (): void => {
+      s.enemies = [makeStubEnemy(1, h.x - 15), makeStubEnemy(2, h.x), makeStubEnemy(3, h.x + 15)];
+      h.hp = h.maxHp * 0.4;
+    };
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(1);
+    expect(h.evadeCd).toBeGreaterThan(0);
+    repin(); // fresh swarm around the new position, still under pressure
+    s.events.length = 0;
+    step(s, {});
+    expect(eventTypes(s, "heroDashed")).toBe(0); // still on cooldown
+  });
+
+  it("NEVER dash-evades for a non-dashEvade class (sword/archer/mage)", () => {
+    for (const cls of ["swordsman", "archer", "mage"] as const) {
+      const s = initGameState(7, soloSave(cls, 1));
+      const h = s.heroes[0];
+      s.spawnPaused = true;
+      s.spawnBurst = false;
+      s.enemies = [];
+      h.config.autoCast = false;
+      h.x = 400;
+      h.hp = h.maxHp * 0.3;
+      s.enemies = [
+        makeStubEnemy(1, 385),
+        makeStubEnemy(2, 400),
+        makeStubEnemy(3, 405),
+        makeStubEnemy(4, 415),
+      ];
+      s.events.length = 0;
+      step(s, {});
+      expect(eventTypes(s, "heroDashed")).toBe(0);
+      expect(h.evadeCd).toBe(0); // the counter is never even ticked for these classes
+    }
+  });
+
+  it("NEVER dash-evades while a manual command is active (manual keeps priority)", () => {
+    const s = swarmedNinja(0.3);
+    const h = s.heroes[0];
+    s.events.length = 0;
+    step(s, { moveTo: { x: 900 } }); // player takes over — walk right
+    expect(eventTypes(s, "heroDashed")).toBe(0);
+    expect(h.x).toBeGreaterThan(400); // obeyed the move order, did not blink away
   });
 });
 

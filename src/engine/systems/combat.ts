@@ -24,6 +24,7 @@ import {
   heroMaxManaOf,
 } from "@/engine/systems/stats";
 import { applyDamage, applyAoeDamage, damageInRadius, isHero } from "@/engine/systems/damage";
+import { dashHeroTo } from "@/engine/systems/dash";
 import { rollEnemyDrop } from "@/engine/systems/gear";
 import { creditKillGold } from "@/engine/systems/economy";
 import { grantKillXp } from "@/engine/systems/leveling";
@@ -244,6 +245,80 @@ function huntableTargetsFor(state: GameState, hero: Hero): CombatTarget[] {
   return state.enemies.filter((e) => e.engaged);
 }
 
+/**
+ * DASH-EVADE direction pick (NINJA FEEL RETUNE) — which way to blink OUT of a swarm.
+ * Escapes toward the side (relative to the hero) holding FEWER engaged enemies within
+ * `radius`; on a tie, away from the NEAREST engaged enemy. Fully deterministic (a pure
+ * count + min over shared state; ≤ id-order is irrelevant since only the side sign matters,
+ * and the nearest tie-break uses `<` so the first-seen nearest wins stably). Returns -1
+ * (blink left) or +1 (blink right).
+ */
+function pickEvadeDir(state: GameState, h: Hero, radius: number): -1 | 1 {
+  let left = 0;
+  let right = 0;
+  let nearest = Infinity;
+  let nearestSide: -1 | 1 = 1;
+  for (const e of state.enemies) {
+    if (e.hp <= 0 || !e.engaged) continue;
+    const dx = e.x - h.x;
+    const ad = Math.abs(dx);
+    if (ad <= radius) {
+      if (dx < 0) left++;
+      else right++;
+    }
+    if (ad < nearest) {
+      nearest = ad;
+      nearestSide = dx <= 0 ? -1 : 1;
+    }
+  }
+  if (left < right) return -1; // fewer foes to the left → escape left
+  if (right < left) return 1;
+  // Tie (or no engaged foe found): flee AWAY from the nearest engaged enemy.
+  return nearestSide <= 0 ? 1 : -1;
+}
+
+/**
+ * DASH-EVADE (NINJA FEEL RETUNE 2026-07-08, `CONFIG.ninja.evade`) — when an AUTO-play hero
+ * of a `dashEvade` class is SWARMED under pressure, blink OUT of the crowd toward its clear
+ * side, then let the normal auto-hunt re-engage next steps. Returns true if it dashed (the
+ * caller then SKIPS this step's approach-walk so the hero doesn't immediately walk back in).
+ *
+ * DETERMINISTIC: no RNG, no wall-clock. The three transient counters (`evadeCd` cooldown +
+ * the `evadeHpMark`/`evadeMarkCd` damage-window) are ticked here by fixed dt and are a pure
+ * function of shared hp/enemy state, so they evolve identically on every lockstep client
+ * (see the Hero doc for why they are hash-excluded). Called ONLY for a `dashEvade` class and
+ * ONLY when no manual command is active (manual + boss forced-combat keep priority upstream).
+ */
+function tryNinjaEvade(state: GameState, h: Hero): boolean {
+  const ev = CONFIG.ninja.evade;
+  // Cooldown tick.
+  if (h.evadeCd > 0) h.evadeCd = Math.max(0, h.evadeCd - FIXED_DT);
+  // Damage-window: measure hp lost since the last snapshot, THEN roll the window if due.
+  const lostFrac = (h.evadeHpMark - h.hp) / h.maxHp;
+  if (h.evadeMarkCd > 0) h.evadeMarkCd = Math.max(0, h.evadeMarkCd - FIXED_DT);
+  if (h.evadeMarkCd <= 0) {
+    h.evadeHpMark = h.hp;
+    h.evadeMarkCd = ev.hpWindowSec;
+  }
+  if (h.evadeCd > 0) return false; // still recovering from the last evade
+  // Swarm measure: engaged enemies crowding the hero.
+  let swarm = 0;
+  for (const e of state.enemies) {
+    if (e.hp > 0 && e.engaged && Math.abs(e.x - h.x) <= ev.radius) swarm++;
+  }
+  if (swarm < ev.minEnemies) return false;
+  // Pressure: low hp OR a recent burst of damage.
+  if (h.hp / h.maxHp >= ev.hpFrac && lostFrac < ev.hpLossFrac) return false;
+  // FIRE: blink to the clear side. Pass a far target in that direction so `dashHeroTo`'s
+  // maxReach cap produces a clean directional hop (clamped to the walkable field there).
+  const dir = pickEvadeDir(state, h, ev.radius);
+  dashHeroTo(state, h, h.x + dir * (ev.maxReach + CONFIG.ninja.dashLandGap + 1), ev.maxReach);
+  h.evadeCd = ev.cooldownSec;
+  h.evadeHpMark = h.hp; // reset the damage window after slipping out
+  h.evadeMarkCd = ev.hpWindowSec;
+  return true;
+}
+
 export function updateHeroes(state: GameState): void {
   const hunt = CONFIG.hunt;
   // Manual attack commands (M7.8) resolve against the FULL target list (not the
@@ -302,7 +377,18 @@ export function updateHeroes(state: GameState): void {
       }
     }
 
-    if (!manualActive) {
+    // DASH-EVADE (NINJA FEEL RETUNE): a swarmed `dashEvade` hero on AUTO blinks OUT of the
+    // crowd this step and SKIPS its approach-walk (so it doesn't immediately step back in).
+    // Only when no manual command is active — manual moveTo/attackTarget and boss forced-combat
+    // keep priority (both leave `manualActive` false only in the auto/boss cases, and a real
+    // manual command sets it true, suppressing the evade). Byte-identical for non-dashEvade
+    // classes (the `t.dashEvade` guard is false → tryNinjaEvade never runs, counters untouched).
+    let evaded = false;
+    if (!manualActive && t.dashEvade) {
+      evaded = tryNinjaEvade(state, h);
+    }
+
+    if (!manualActive && !evaded) {
       // AUTO-HUNT (M6 "สนามล่ามอน"): walk to the nearest alive target (deterministic
       // id tie-break) and stop at attack range — melee closes to contact, ranged
       // holds at a standoff and kites if the target crowds it. No formation anchor /

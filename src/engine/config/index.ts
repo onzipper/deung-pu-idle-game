@@ -866,6 +866,29 @@ export const CONFIG = {
     dashMaxReach: 300,
     // TWIN FANG (คมเงาคู่) r`radius` splash: neighbours of the primary take this fraction of a hit.
     twinSplashFrac: 0.6,
+    // ---- DASH-EVADE (NINJA FEEL RETUNE 2026-07-08, systems/combat `tryNinjaEvade`) ----
+    // When an AUTO-play ninja is SWARMED under pressure it blinks OUT of the crowd (reusing the
+    // `dashHeroTo` primitive → the heroDashed fx + event come free), then re-engages. The relief
+    // for the friction FLAG 2 ("a range-70 melee stands in the belt trading until dead", ~449
+    // deaths/run). FULLY DETERMINISTIC — no RNG, no wall-clock: the trigger reads only shared
+    // state + per-hero transient counters ticked by fixed dt. The balance pass sweeps these.
+    evade: {
+      // Count ENGAGED enemies within this world-x radius of the hero — the "swarm" measure.
+      radius: 95,
+      // Fire only when at least this many engaged foes are inside `radius` (a real crowd).
+      minEnemies: 3,
+      // Fire when hp fraction drops below this…
+      hpFrac: 0.55,
+      // …OR when the hero LOST at least this fraction of maxHp within `hpWindowSec` (a burst).
+      hpLossFrac: 0.18,
+      // Rolling window (s) over which the hp-loss burst is measured (a periodic snapshot).
+      hpWindowSec: 0.8,
+      // Minimum seconds between evades (own transient counter) — never dash-spams.
+      cooldownSec: 2.2,
+      // The evade hop DISTANCE cap (passed as `dashHeroTo` maxReach) — a decisive slip, clamped
+      // to the walkable field by the dash primitive. Below `dashMaxReach` (300)'s spirit.
+      maxReach: 280,
+    },
   },
 
   // ---- hero XP / levels (M5 "Character XP + Level system", 86d3jv7m3) ----
@@ -1521,6 +1544,14 @@ export interface HeroType {
   multiHit?: number;
   /** Per-hit fraction of ATK for a `multiHit` basic attack (absent = 1). */
   multiHitMult?: number;
+  /**
+   * DASH-EVADE capability (NINJA FEEL RETUNE, 2026-07-08): when true, an AUTO-play hero of
+   * this class uses its dash to SLIP OUT of a mob swarm under pressure (systems/combat
+   * `tryNinjaEvade`, tuned by `CONFIG.ninja.evade`) instead of standing in the belt trading
+   * until dead. Gated as a CAPABILITY (not a class check) so a future dash class can opt in;
+   * absent/false = the class never auto-evades (byte-identical movement — sword/archer/mage).
+   */
+  dashEvade?: boolean;
 }
 
 export const HERO_TYPES: Record<HeroClass, HeroType> = {
@@ -1562,12 +1593,14 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
   // wave, docs/balance-ninja.md); overrules the docs/ninja-design.md §1/§8 draft where the sim
   // proved a value unviable. Identity:
   //   - `range` 70 = the SHORTEST reach in the game (sword 96) — trades reach for tempo.
-  //   - `atkSpeed` 0.45 = the FASTEST base cadence (sword 0.5 / archer 0.72 / mage 1.15).
-  //   - `multiHit` 2 × `multiHitMult` 0.55 = the dagger DOUBLE-HIT (2 swings ≈ 1.1× atk/attack)
-  //     → basic DPS a touch above the sword's, paying for its short reach. Kept 0.55: the raw
-  //     ~+22% basic is offset by short-range repositioning + a mana-gated kit → EFFECTIVE boss
-  //     DPS is only ~+6% over sword in BOSSISO (s20 +17% / s25 +4% / s30 −4%), inside a fair
-  //     band — no trim needed (the draft feared an over-strong basic; the sim disproved it).
+  //   - `atkSpeed` 0.36 = the FASTEST base cadence by far (sword 0.5 / archer 0.72 / mage 1.15).
+  //     NINJA FEEL RETUNE (2026-07-08): 0.45→0.36 for more/faster swings (owner "ตีไวๆ").
+  //   - `multiHit` 2 × `multiHitMult` 0.44 = the dagger DOUBLE-HIT. multiHitMult 0.55→0.44 the
+  //     SAME retune × 0.8, so per-second basic DPS is IDENTICAL (0.44/0.36 = 0.55/0.45 = 11/9) —
+  //     more, smaller number-pops for the same power. EFFECTIVE boss DPS stays ~+6% over sword
+  //     in BOSSISO (raw ~+22% basic offset by short-range repositioning + a mana-gated kit).
+  //   - DASH-EVADE (`dashEvade: true`): under AUTO, a swarmed ninja blinks OUT of the belt
+  //     (systems/combat + `CONFIG.ninja.evade`) — the mobility relief for the friction FLAG 2.
   //   - `hpMult` 1.35 = squishier than the sword TANK (1.5), tougher than the ranged classes
   //     (archer 1.0 / mage 0.95). OVERRULES the draft 1.15: a 1.15 range-70 melee death-spirals
   //     the aggressive frontier (a squishy MELEE can't kite the belt like the archer does at
@@ -1579,13 +1612,21 @@ export const HERO_TYPES: Record<HeroClass, HeroType> = {
     offset: 30,
     attack: "melee",
     range: 70,
-    atkSpeed: 0.45,
     dmgMult: 1.0,
     hpMult: 1.35,
     projSpeed: 0,
     aoe: 0,
     multiHit: 2,
-    multiHitMult: 0.55,
+    // NINJA FEEL RETUNE (2026-07-08, owner: "ตีไวๆ เลขเด้งเยอะๆ ดาเมจประมาณนี้") — FASTER
+    // cadence at IDENTICAL per-second basic DPS. atkSpeed 0.45→0.36 and multiHitMult 0.55→0.44
+    // are BOTH the shipped values × 0.8, so the DPS-driving ratio multiHitMult/atkSpeed is
+    // preserved EXACTLY: 0.55/0.45 = 0.44/0.36 = 11/9. Basic DPS = multiHit × multiHitMult /
+    // atkSpeed = 2 × 0.44 / 0.36 = 2.4̄ = 2 × 0.55 / 0.45 (unchanged) — the hero just swings
+    // 25% more often for ~25% smaller per-hit numbers (more floating damage pops, same power).
+    // Skills are UNTOUCHED (eternal owner-locked). See docs/balance-ninja.md.
+    atkSpeed: 0.36,
+    multiHitMult: 0.44,
+    dashEvade: true,
   },
 };
 

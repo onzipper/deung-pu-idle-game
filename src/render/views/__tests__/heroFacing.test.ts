@@ -50,6 +50,9 @@ function hero(x: number, aimX: number | null): Hero {
     shadowed: false,
     config: defaultHeroConfig(),
     aimX,
+    evadeCd: 0,
+    evadeHpMark: 100,
+    evadeMarkCd: 0,
   };
 }
 
