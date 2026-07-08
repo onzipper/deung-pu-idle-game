@@ -43,6 +43,7 @@ import {
   applyWorldBossSpawnIntents,
   updateWorldBossAI,
   tickWorldBossLifetime,
+  sweepWorldBossPresence,
   resolveWorldBossDeath,
 } from "@/engine/systems/worldBoss";
 import { evolveHero } from "@/engine/systems/evolution";
@@ -508,6 +509,11 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     applyManualCommand(state, lanes);
     tickTownManualWalk(state);
     tickFastTravel(state);
+    // WORLD BOSS "เสี่ยจ๋อง": retire it if we're standing in town (its zone was left). The
+    // town branch never takes a battle step, so `updateWorldBossAI`'s zone-leave despawn
+    // never fires here — without this a death → auto-return-to-town leaves the boss active
+    // and the renderer draws it IN TOWN (owner live bug 1, 2026-07-08). Dormant → no-op.
+    sweepWorldBossPresence(state);
     state.time += FIXED_DT;
     state.rngState = rng.state();
     return state;
@@ -523,6 +529,9 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
     // is combat-free so the channel just counts down; arrival (`arriveAtZone`)
     // already resets `phase` to "battle", dismissing the victory pause.
     tickFastTravel(state);
+    // WORLD BOSS "เสี่ยจ๋อง": the victory pause is not "battle", so retire a lingering boss
+    // here too (same rationale as the town branch — this branch never takes a battle step).
+    sweepWorldBossPresence(state);
     state.rngState = rng.state();
     return state;
   }

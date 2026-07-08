@@ -1327,7 +1327,17 @@ export function GameClient() {
         store.setWorldBossStatus(worldBossStatus);
       }
       if (
-        shouldQueueWorldBossSpawn(worldBossPhase, worldBossStatus, state.worldBoss?.windowId ?? null)
+        shouldQueueWorldBossSpawn(
+          worldBossPhase,
+          worldBossStatus,
+          state.worldBoss
+            ? {
+                windowId: state.worldBoss.windowId,
+                active: state.worldBoss.active,
+                defeated: state.worldBoss.defeated,
+              }
+            : null,
+        )
       ) {
         store.queueSpawnWorldBoss(worldBossPhase.windowId, Math.ceil(worldBossPhase.msRemaining / 1000));
       }

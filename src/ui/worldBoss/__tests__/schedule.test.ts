@@ -91,15 +91,10 @@ describe("sameWorldBossStatus", () => {
 
 describe("shouldQueueWorldBossSpawn", () => {
   const windowId = 7;
+  const here = { kind: "activeHere", secondsLeft: 10 } as const;
 
   it("true only when active + activeHere + not already recorded live", () => {
-    expect(
-      shouldQueueWorldBossSpawn(
-        active(windowId, 10_000),
-        { kind: "activeHere", secondsLeft: 10 },
-        null,
-      ),
-    ).toBe(true);
+    expect(shouldQueueWorldBossSpawn(active(windowId, 10_000), here, null)).toBe(true);
   });
 
   it("false when merely active (not standing in the zone)", () => {
@@ -109,18 +104,47 @@ describe("shouldQueueWorldBossSpawn", () => {
   });
 
   it("false during pre/idle even if status were (incorrectly) activeHere", () => {
+    expect(shouldQueueWorldBossSpawn(pre(windowId, 10_000), here, null)).toBe(false);
+  });
+
+  it("false while a boss for this window is currently active", () => {
     expect(
-      shouldQueueWorldBossSpawn(pre(windowId, 10_000), { kind: "activeHere", secondsLeft: 10 }, null),
+      shouldQueueWorldBossSpawn(active(windowId, 10_000), here, {
+        windowId,
+        active: true,
+        defeated: false,
+      }),
     ).toBe(false);
   });
 
-  it("false once the live engine state already recorded this window", () => {
+  it("false once this window was defeated (window is over)", () => {
     expect(
-      shouldQueueWorldBossSpawn(
-        active(windowId, 10_000),
-        { kind: "activeHere", secondsLeft: 10 },
+      shouldQueueWorldBossSpawn(active(windowId, 10_000), here, {
         windowId,
-      ),
+        active: false,
+        defeated: true,
+      }),
     ).toBe(false);
+  });
+
+  it("true again after a NON-defeated despawn (fled the zone, re-entered) — re-queues", () => {
+    // Live slice is the retired-but-not-defeated record for this window: re-entry must re-queue.
+    expect(
+      shouldQueueWorldBossSpawn(active(windowId, 10_000), here, {
+        windowId,
+        active: false,
+        defeated: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("true when the live record is for a DIFFERENT window", () => {
+    expect(
+      shouldQueueWorldBossSpawn(active(windowId, 10_000), here, {
+        windowId: windowId - 1,
+        active: true,
+        defeated: true,
+      }),
+    ).toBe(true);
   });
 });

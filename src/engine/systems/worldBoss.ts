@@ -156,9 +156,17 @@ function retireWorldBoss(state: GameState, wb: WorldBossState, defeated: boolean
 /**
  * Try to spawn the world boss for `windowId` (idempotent). Spawns iff: the hero is in
  * the BATTLE phase, standing in the world-boss map's chosen farm zone for this window,
- * `remainingSeconds > 0`, and no boss for this windowId was already spawned/handled this
- * session AND none is currently active. Seeds the lifetime countdown from
- * `remainingSeconds` (capped at the configured lifetime). Returns true on a fresh spawn.
+ * `remainingSeconds > 0`, and no boss is currently active AND this window wasn't already
+ * DEFEATED. Seeds the lifetime countdown from `remainingSeconds` (capped at the
+ * configured lifetime). Returns true on a fresh spawn.
+ *
+ * RE-ENTRY (owner-expected "the boss lives in its zone the whole window"): a NON-defeated
+ * despawn (zone-leave / phase-change via `sweepWorldBossPresence`) no longer BURNS the
+ * window — the same windowId respawns when the hero returns, its countdown re-seeded from
+ * the intent's (wall-clock-derived, capped) `remainingSeconds`, so an EXPIRED window can't
+ * revive (`remainingSeconds <= 0` blocks above). Only a genuine kill (`defeated`) ends the
+ * window. HP RESETS on re-entry = ACCEPTED v1 quirk (same class as the cohort re-seed HP
+ * reset) — the boss is fully healed each time you walk back in.
  */
 function trySpawnWorldBoss(state: GameState, windowId: number, remainingSeconds: number): boolean {
   if (state.phase !== "battle") return false;
@@ -166,10 +174,11 @@ function trySpawnWorldBoss(state: GameState, windowId: number, remainingSeconds:
     return false;
   }
   const wb = state.worldBoss;
-  // Idempotent: this window already handled (spawned/defeated/despawned), or another
-  // window's boss is still active (one at a time). A cohort's several members may all
-  // inject the same intent — the first ordered lane wins; the rest no-op here.
-  if (wb && (wb.windowId === windowId || wb.active)) return false;
+  // Idempotent: a boss is already active (one at a time — a cohort's several members may
+  // all inject the same intent this step; the first ordered lane wins, the rest no-op), OR
+  // this window was already DEFEATED (a kill ends the window). A non-defeated despawn does
+  // NOT block — re-entry respawns (see the re-entry note above).
+  if (wb && (wb.active || (wb.windowId === windowId && wb.defeated))) return false;
   const loc = worldBossLocationFor(windowId);
   if (!loc) return false;
   if (state.location.mapId !== loc.mapId || state.location.zoneIdx !== loc.zoneIdx) return false;
@@ -202,24 +211,40 @@ export function applyWorldBossSpawnIntents(state: GameState, lanes: FrameInput[]
 }
 
 /**
- * Tick the world boss's despawn + AI one fixed BATTLE step. Despawns if the hero left
- * its zone / the phase is no longer battle, or its lifetime countdown expired; otherwise
- * runs the boss movement + mechanics via `updateBossEntity` — but only once ENGAGED
- * (a hero has damaged it), so it stays passive until attacked (never farms newbies).
+ * Retire the world boss (non-defeated) if it no longer belongs on the field: the phase is
+ * no longer "battle", or the player has left its zone. This is the transient-battlefield
+ * rule, factored OUT of `updateWorldBossAI` so it can also run in `step()`'s early-return
+ * branches that never take a battle step (TOWN + VICTORY) — otherwise a death → auto-return
+ * would leave `wb.active` true forever and the renderer (which mirrors `state.worldBoss`)
+ * would draw the boss standing in town (owner live bug 1, 2026-07-08). Dormant (no boss) →
+ * a no-op, so the solo canonical sim stays byte-identical.
  */
-export function updateWorldBossAI(state: GameState): void {
+export function sweepWorldBossPresence(state: GameState): void {
   const wb = state.worldBoss;
   if (!wb || !wb.active || !wb.entity) return;
-
-  // Zone-leave / phase-change despawn (transient battlefield content).
   if (
     state.phase !== "battle" ||
     state.location.mapId !== wb.mapId ||
     state.location.zoneIdx !== wb.zoneIdx
   ) {
     retireWorldBoss(state, wb, false);
-    return;
   }
+}
+
+/**
+ * Tick the world boss's despawn + AI one fixed BATTLE step. Despawns if the hero left
+ * its zone / the phase is no longer battle (via `sweepWorldBossPresence`), or its lifetime
+ * countdown expired; otherwise runs the boss movement + mechanics via `updateBossEntity` —
+ * but only once ENGAGED (a hero has damaged it), so it stays passive until attacked (never
+ * farms newbies).
+ */
+export function updateWorldBossAI(state: GameState): void {
+  const wb = state.worldBoss;
+  if (!wb || !wb.active || !wb.entity) return;
+
+  // Zone-leave / phase-change despawn (transient battlefield content).
+  sweepWorldBossPresence(state);
+  if (!wb.active || !wb.entity) return;
 
   // Lifetime countdown → despawn at 0.
   wb.countdown -= FIXED_DT;
@@ -246,9 +271,11 @@ export function updateWorldBossAI(state: GameState): void {
  *
  * The zone-LEAVE despawn is deliberately NOT applied here: `state.location` still holds the
  * DEPARTURE zone until `arriveAtZone` (a transit updates it only on arrival), so a same-window
- * transit keeps the boss; the genuine zone-change despawn fires on the first post-arrival
- * BATTLE step, when `updateWorldBossAI` sees the new location. Dormant (no boss) → a no-op, so
- * the solo canonical sim stays byte-identical.
+ * transit keeps the boss; the genuine zone-change despawn fires on the first POST-ARRIVAL step
+ * via `sweepWorldBossPresence` — the TOWN / VICTORY early-returns run the sweep directly (a
+ * death → auto-return-to-town arrives in the town branch, which never takes a battle step), and
+ * a battle arrival runs it inside `updateWorldBossAI`. Dormant (no boss) → a no-op, so the solo
+ * canonical sim stays byte-identical.
  */
 export function tickWorldBossLifetime(state: GameState): void {
   const wb = state.worldBoss;
