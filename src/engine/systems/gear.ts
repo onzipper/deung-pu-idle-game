@@ -17,13 +17,13 @@
 import { CONFIG } from "@/engine/config";
 import {
   DROP_GATED_CLASSES,
-  ITEM_TEMPLATES,
   bossDropTableForStage,
+  clampRefineForTemplate,
   dropTableForStage,
+  lookupTemplate,
   refineOf,
   type GearSlot,
 } from "@/engine/config/items";
-import { clampRefine } from "@/engine/config/refine";
 import { lootFloat, stoneFloat } from "@/engine/core/hash";
 import { clamp } from "@/engine/core/math";
 import { heroMaxHpOf } from "@/engine/systems/stats";
@@ -95,10 +95,12 @@ export function equipItem(
     reconcileMaxHp(hero);
     return;
   }
-  const t = ITEM_TEMPLATES[templateId];
+  const t = lookupTemplate(templateId);
   if (!t || t.slot !== slot) return; // unknown template / wrong slot
+  if (t.kind === "fortifier") return; // a "แกร่ง" fortifier is NOT equippable (legendary IS)
   if (t.classReq && t.classReq !== hero.cls) return; // class mismatch — reject
-  const refine = clampRefine(refineLevel);
+  // Per-kind refine/awaken clamp: a legendary caps at +5 (LEGENDARY_MAX_AWAKEN), gear at +10.
+  const refine = clampRefineForTemplate(templateId, refineLevel);
   // No change only if BOTH the template AND its refine level are unchanged (a
   // re-equip of the same item at a NEW +N — e.g. after a server-side refine —
   // must re-derive stats/HP).

@@ -28,8 +28,9 @@
  */
 
 import { CONFIG } from "@/engine/config";
+import { LEGENDARY_FOR_CLASS } from "@/engine/config/items";
 import { zoneAt } from "@/engine/systems/world";
-import type { Enemy, WorldLocation } from "@/engine/entities";
+import type { Enemy, HeroClass, WorldLocation } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
 /** The asura map id (contract alias for `CONFIG.asura.mapId`). */
@@ -184,4 +185,124 @@ export function onAsuraFarmKill(state: GameState, e: Enemy): void {
     state.asuraEssence += gained;
     state.events.push({ type: "eliteKilled", x: e.x, y: e.y, essence: gained });
   }
+  // "ตำราตำนาน" secret-quest PAGE triggers (endgame v1.3): the first ELITE kill drops page 1; the
+  // first kill in each depth-milestone farm zone drops pages 2/3. All idempotent (a page bit that's
+  // already set is a no-op), so this is safe to run on every asura kill.
+  if (e.elite) foundTomePage(state, PAGE_ELITE, 1);
+  const depthZones = CONFIG.asura.tome.pageDepthZones;
+  if (state.location.zoneIdx === depthZones[0]) foundTomePage(state, PAGE_DEPTH_1, 2);
+  if (state.location.zoneIdx === depthZones[1]) foundTomePage(state, PAGE_DEPTH_2, 3);
+}
+
+// ---------------------------------------------------------------------------
+// "ตำราตำนาน" secret tome + legendary craft (endgame v1.2/v1.3, docs/endgame-design.md).
+// ---------------------------------------------------------------------------
+
+/** Secret-quest page BITMASK bits (persisted in `state.tomePages`, SAVE v20). */
+export const PAGE_ELITE = 1 << 0; // page 1 — first ELITE kill ever
+export const PAGE_DEPTH_1 = 1 << 1; // page 2 — first kill in the z5 farm
+export const PAGE_DEPTH_2 = 1 << 2; // page 3 — first kill in the z10 farm
+/** All 3 pages assembled → the craft menu unlocks. */
+export const TOME_ALL_PAGES = PAGE_ELITE | PAGE_DEPTH_1 | PAGE_DEPTH_2;
+/** Number of secret-quest pages (for the "n/3" readout). */
+export const TOME_PAGE_COUNT = 3;
+
+/** How many tome pages this save has discovered (0..3). */
+export function tomePagesFound(state: GameState): number {
+  let n = 0;
+  for (let b = 0; b < TOME_PAGE_COUNT; b++) if (state.tomePages & (1 << b)) n++;
+  return n;
+}
+
+/**
+ * Discover one secret-quest page (idempotent): set its bit if unset, emit `tomePageFound`, and —
+ * when the 3rd page lands — latch `tomeUnlocked` + emit `tomeAssembled` (the craft menu opens,
+ * permanently). A page already found is a no-op (no re-emit). Deterministic; NO RNG.
+ */
+export function foundTomePage(state: GameState, pageBit: number, pageNumber: number): void {
+  if (state.tomePages & pageBit) return; // already found
+  state.tomePages |= pageBit;
+  state.events.push({
+    type: "tomePageFound",
+    page: pageNumber,
+    pagesFound: tomePagesFound(state),
+    pagesTotal: TOME_PAGE_COUNT,
+  });
+  if (!state.tomeUnlocked && (state.tomePages & TOME_ALL_PAGES) === TOME_ALL_PAGES) {
+    state.tomeUnlocked = true;
+    state.events.push({ type: "tomeAssembled" });
+  }
+}
+
+/**
+ * Bank a DAILY z10 ตราอสูร sigil (`claimAsuraSigil` intent — the server stamps the day so it fires
+ * ONCE/day; the engine just holds the count, client-authoritative v1). Adds `sigilPerClaim` and
+ * emits `asuraSigilClaimed`. Deterministic; NO RNG / wall-clock.
+ */
+export function grantAsuraSigil(state: GameState): void {
+  state.asuraSigils += CONFIG.asura.tome.sigilPerClaim;
+  state.events.push({ type: "asuraSigilClaimed", count: state.asuraSigils });
+}
+
+/** Whether all 10 ศิลาโซน are earned (every asura farm zone reached `zoneStoneGoal`) — the PERMANENT
+ *  "climb every zone once" gate (checked, never consumed). Pure read (UI checklist + craft guard). */
+export function hasAllZoneStones(state: GameState): boolean {
+  const goal = CONFIG.asura.zoneStoneGoal;
+  for (let depth = 0; depth < CONFIG.asura.farmZones; depth++) {
+    if ((state.asuraZoneKills[`${ASURA_MAP_ID}:${depth}`] ?? 0) < goal) return false;
+  }
+  return true;
+}
+
+/**
+ * The first UNMET craft precondition for the solo hero, or null when the recipe is fully satisfied —
+ * a PURE read the UI's tome checklist + the craft guard share. Order matches `craftLegendary`'s
+ * block reason. Checks only the counts the ENGINE owns (tome unlock, essence, sigils, the 10 zone
+ * stones, the gold/materials forge sink); the t10-weapon requirement is the SERVER's (item ledger).
+ */
+export function craftBlockReason(
+  state: GameState,
+): "locked" | "essence" | "sigils" | "stones" | "gold" | "materials" | null {
+  const cost = CONFIG.asura.tome.craft;
+  if (!state.tomeUnlocked) return "locked";
+  if (state.asuraEssence < cost.essence) return "essence";
+  if (state.asuraSigils < cost.sigils) return "sigils";
+  if (!hasAllZoneStones(state)) return "stones";
+  if (state.gold < cost.gold) return "gold";
+  if (state.materials < cost.materials) return "materials";
+  return null;
+}
+
+/** Pure UI affordance: can the tome craft fire right now (engine-owned preconditions all met)? */
+export function canCraftLegendary(state: GameState): boolean {
+  return craftBlockReason(state) === null;
+}
+
+/**
+ * Apply the `craftLegendary` intent (the tome recipe). The ENGINE validates + consumes ONLY the
+ * counts it owns (essence, sigils, gold, materials — the 10 zone stones are a permanent GATE, never
+ * consumed) and emits `legendaryCraftRequested { cls, templateId }`; the SERVER then consumes the
+ * equipped/held t10 class weapon + MINTS the bind-on-craft legendary instance (item-instance
+ * ledger — mirrors the refine/goldCredit engine↔server split). A blocked craft emits
+ * `legendaryCraftBlocked { reason }` and consumes nothing. `cls` defaults to the solo hero's class
+ * (the craft is for your own class). Returns whether a craft was requested. Deterministic; NO RNG.
+ */
+export function craftLegendary(state: GameState, cls?: HeroClass): boolean {
+  const reason = craftBlockReason(state);
+  if (reason) {
+    state.events.push({ type: "legendaryCraftBlocked", reason });
+    return false;
+  }
+  const cost = CONFIG.asura.tome.craft;
+  const forClass = cls ?? state.heroes[0]?.cls ?? "swordsman";
+  state.asuraEssence = Math.max(0, state.asuraEssence - cost.essence);
+  state.asuraSigils = Math.max(0, state.asuraSigils - cost.sigils);
+  state.gold = Math.max(0, state.gold - cost.gold);
+  state.materials = Math.max(0, state.materials - cost.materials);
+  state.events.push({
+    type: "legendaryCraftRequested",
+    cls: forClass,
+    templateId: LEGENDARY_FOR_CLASS[forClass],
+  });
+  return true;
 }

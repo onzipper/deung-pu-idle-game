@@ -20,7 +20,7 @@
  */
 
 import { CONFIG, HERO_TYPES, PRIMARY_STAT, SKILL_TYPES } from "@/engine/config";
-import { ITEM_TEMPLATES, refineOf } from "@/engine/config/items";
+import { lookupTemplate, refineOf } from "@/engine/config/items";
 import type { EquippedGear } from "@/engine/config/items";
 import { refinedStat } from "@/engine/config/refine";
 import type { Hero, HeroClass, HeroStats, StatKey } from "@/engine/entities";
@@ -139,8 +139,10 @@ export function heroManaRegen(cls: HeroClass, intValue: number = ST.base[cls].in
 
 function equipStatSum(equipped: EquippedGear, key: "atk" | "def" | "hp"): number {
   let sum = 0;
-  const w = equipped.weapon ? ITEM_TEMPLATES[equipped.weapon] : undefined;
-  const a = equipped.armor ? ITEM_TEMPLATES[equipped.armor] : undefined;
+  // lookupTemplate (not a bare ITEM_TEMPLATES read) so a "ตำราตำนาน" legendary weapon resolves
+  // its stat block — legendaries live in the SEPARATE catalog like fortifiers (gear count frozen).
+  const w = equipped.weapon ? lookupTemplate(equipped.weapon) : undefined;
+  const a = equipped.armor ? lookupTemplate(equipped.armor) : undefined;
   // M7.6 ตีบวก: each item's flat stat is scaled by its per-slot refine level
   // (+0 → ×1, so an unrefined loadout is byte-identical to pre-M7.6).
   if (w) sum += refinedStat(w.stats[key] ?? 0, refineOf(equipped, "weapon"));

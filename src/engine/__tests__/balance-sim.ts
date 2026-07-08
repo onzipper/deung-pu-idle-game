@@ -325,6 +325,9 @@ function makeSave(cls: HeroClass, seed: number): SaveData {
     // ดินแดนอสูร (endgame v1): cold start has no essence / zone counters.
     asuraEssence: 0,
     asuraZoneKills: {},
+    asuraSigils: 0,
+    tomePages: 0,
+    tomeUnlocked: false,
     hero: {
       cls,
       level: 1,
@@ -1385,6 +1388,9 @@ function makeIsoSave(cls: HeroClass, mapId: string, lastFarmIdx: number, stage: 
     materials: 0,
     asuraEssence: 0,
     asuraZoneKills: {},
+    asuraSigils: 0,
+    tomePages: 0,
+    tomeUnlocked: false,
     hero: {
       cls,
       level: 90,
@@ -1837,6 +1843,9 @@ function makeAsuraSave(cls: HeroClass, refine: number, level: number, startDepth
     materials: 0,
     asuraEssence: 0,
     asuraZoneKills: {},
+    asuraSigils: 0,
+    tomePages: 0,
+    tomeUnlocked: false,
     hero: {
       cls,
       level,

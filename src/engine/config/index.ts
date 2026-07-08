@@ -405,6 +405,36 @@ export const CONFIG = {
       /** xp/gold/stone multiplier while farming the day's hot zone (+40%, owner band +30-50%). */
       rewardMult: 1.4,
     },
+    // ---- "ตำราตำนาน" secret tome + legendary craft (endgame v1.2/v1.3) ----
+    // The SECRET 3-page quest unlocks the craft menu (systems/asura). All FIRST-CUT knobs — the
+    // asura SIM/economy wave finalizes them; inert until a hero farms asura, so s1-30 byte-identical.
+    tome: {
+      /** The asura FARM zoneIdx whose FIRST-EVER kill drops tome page 2 + page 3 respectively.
+       *  DEVIATION (docs adapt): v1.3 named "หน้ากระดาษจากบอส z5 + z10", but asura has a SINGLE
+       *  unbeatable capstone boss room (s40) and z5 has none — so pages 2-3 anchor to the first
+       *  kill in the z5 farm (idx 4, the +9 band) and the z10 farm (idx 9, the deepest +10 farm),
+       *  the cleanest depth-anchored triggers that still gate on reaching those bands. Page 1 is
+       *  the first ELITE kill (docs: "เศษกระดาษไหม้จาก Elite ตัวแรก"). */
+      pageDepthZones: [4, 9] as const,
+      /** The tome-craft RECIPE the ENGINE validates + consumes on `craftLegendary` (the counts it
+       *  owns): แก่นอสูร essence + ตราอสูร sigils + a gold/stone forge SINK (inflation drain). The
+       *  t10-class-weapon consumption + the legendary item MINT are SERVER-side (item-instance
+       *  ledger). The 10 ศิลาโซน (all asura zones at `zoneStoneGoal`) are a PERMANENT gate — checked,
+       *  never consumed ("ครั้งเดียวตลอดชีพ"). */
+      craft: {
+        /** แก่นอสูร essence consumed per craft (~10-15 knob; first legendary ≈ 1-1.5 days). */
+        essence: 12,
+        /** ตราอสูร sigils consumed per craft — v1.3: ×1 for the FIRST legendary (1-day-able). */
+        sigils: 1,
+        /** Forge gold sink (deliberate inflation drain, docs §3). */
+        gold: 50000,
+        /** Forge หิน (enhancement-stone / materials) sink. */
+        materials: 200,
+      },
+      /** Sigils granted per DAILY z10 claim (`claimAsuraSigil` — the server stamps the day; the
+       *  engine just holds the count like essence, client-authoritative v1). */
+      sigilPerClaim: 1,
+    },
   },
 
   // ---- hunting field ("สนามล่ามอน", M6 combat rework, decided 2026-07-05) ----

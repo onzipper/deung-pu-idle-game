@@ -252,4 +252,24 @@ export type GameEvent =
   //    zone's ศิลา craft material is now earned — fires once per zone, lifetime).
   | { type: "eliteSpawned"; id: number; kind: EnemyKind; x: number; y: number }
   | { type: "eliteKilled"; x: number; y: number; essence: number }
-  | { type: "asuraZoneStoneEarned"; mapId: string; zoneIdx: number };
+  | { type: "asuraZoneStoneEarned"; mapId: string; zoneIdx: number }
+  // "ตำราตำนาน" secret tome + legendary craft (endgame v1.2/v1.3, systems/asura.ts). One-way,
+  // deterministic (no RNG draw), NEVER persisted (the tome flags live on SaveData). Render/UI hook
+  // these (a "พบเศษกระดาษปริศนา…" toast, the tome-assembled fanfare, a per-class legendary forge fx).
+  // NB (footgun #6): new kinds need render/audio + toast entries in the UI/render waves; unhandled
+  // they fall to the FxController/audio DEFAULT (a safe no-op), no crash.
+  //  - tomePageFound: a secret-quest page was just discovered (`page` 1-3; `pagesFound`/`pagesTotal`
+  //    for the "n/3" flavor readout). Fires ONCE per page, lifetime.
+  //  - tomeAssembled: the 3rd page landed → the "⚒️ ตำราตำนาน" craft menu is permanently unlocked.
+  //  - asuraSigilClaimed: a daily z10 ตราอสูร sigil was banked (`count` = new total).
+  //  - legendaryCraftRequested: the engine validated + consumed the recipe counts it owns; the
+  //    SERVER must now consume the equipped/held t10 `cls` weapon + MINT `templateId` (bind-on-craft).
+  //  - legendaryCraftBlocked: a craft intent was rejected (which precondition failed).
+  | { type: "tomePageFound"; page: number; pagesFound: number; pagesTotal: number }
+  | { type: "tomeAssembled" }
+  | { type: "asuraSigilClaimed"; count: number }
+  | { type: "legendaryCraftRequested"; cls: HeroClass; templateId: string }
+  | {
+      type: "legendaryCraftBlocked";
+      reason: "locked" | "essence" | "sigils" | "stones" | "gold" | "materials";
+    };

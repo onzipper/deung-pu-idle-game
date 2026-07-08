@@ -268,6 +268,9 @@ describe("events are transient (never persisted)", () => {
       "materials",
       "asuraEssence",
       "asuraZoneKills",
+      "asuraSigils",
+      "tomePages",
+      "tomeUnlocked",
       "lastSeen",
     ]);
   });

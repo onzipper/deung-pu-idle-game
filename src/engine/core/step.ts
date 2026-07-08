@@ -14,7 +14,7 @@
 import { FIXED_DT } from "@/engine/core/loop";
 import { createRng } from "@/engine/core/rng";
 import type { GameState } from "@/engine/state";
-import type { BotSettings, HeroConfig, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
+import type { BotSettings, HeroClass, HeroConfig, ShopItemId, StatKey, WorldLocation } from "@/engine/entities";
 import type { GearSlot } from "@/engine/config/items";
 import { equipItem } from "@/engine/systems/gear";
 import { applyHeroConfig, syncPrimaryHeroConfig } from "@/engine/systems/heroConfig";
@@ -46,7 +46,7 @@ import {
   sweepWorldBossPresence,
   resolveWorldBossDeath,
 } from "@/engine/systems/worldBoss";
-import { applyAsuraHotZone } from "@/engine/systems/asura";
+import { applyAsuraHotZone, craftLegendary, grantAsuraSigil } from "@/engine/systems/asura";
 import { evolveHero } from "@/engine/systems/evolution";
 import { acceptQuest } from "@/engine/systems/quests";
 import { processStatAllocation } from "@/engine/systems/allocation";
@@ -318,6 +318,22 @@ export interface FrameInput {
    * once per drained input.
    */
   setAsuraHotZone?: { dayKey: number };
+  /**
+   * ดินแดนอสูร daily z10 ตราอสูร SIGIL claim (endgame v1.3). Banks `CONFIG.asura.tome.sigilPerClaim`
+   * sigils (like `asuraEssence`, a plain count). The SERVER stamps the Bangkok day so it fires ONCE
+   * per day (client-authoritative v1 — the engine just holds the count). Lead lane 0. Applied once
+   * per drained input.
+   */
+  claimAsuraSigil?: boolean;
+  /**
+   * ดินแดนอสูร "ตำราตำนาน" LEGENDARY craft (endgame v1.2/v1.3). The engine VALIDATES + CONSUMES only
+   * the counts it owns (tome unlocked + essence/sigils/gold/materials; the 10 ศิลาโซน are a permanent
+   * gate) and emits `legendaryCraftRequested { cls, templateId }`; the SERVER then consumes the t10
+   * class weapon + MINTS the bind-on-craft legendary (item-instance ledger — the refine/goldCredit
+   * split). A blocked craft emits `legendaryCraftBlocked { reason }`. `cls` defaults to the solo
+   * hero's class. Lead lane 0. Applied once per drained input.
+   */
+  craftLegendary?: boolean | { cls?: HeroClass };
 }
 
 /**
@@ -432,6 +448,12 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   // day-key (lead lane 0). Applied here (before the early returns) so `state.asuraHotZone` is
   // always current; the reward multiplier is read in `resolveDeaths`. Dormant/idempotent otherwise.
   if (primary.setAsuraHotZone) applyAsuraHotZone(state, primary.setAsuraHotZone.dayKey);
+  // ดินแดนอสูร "ตำราตำนาน" (endgame v1.3, lead lane 0): a daily z10 sigil claim (server-day-stamped),
+  // then the legendary craft (validates + consumes the engine-owned counts, emits the mint request).
+  if (primary.claimAsuraSigil) grantAsuraSigil(state);
+  if (primary.craftLegendary) {
+    craftLegendary(state, typeof primary.craftLegendary === "object" ? primary.craftLegendary.cls : undefined);
+  }
   // Equip / unequip gear (M7) — per hero from its own lane; validated inside equipItem.
   // `refineLevel` (M7.6) is the server-decided +N (default 0).
   for (let i = 0; i < state.heroes.length; i++) {

@@ -162,6 +162,18 @@ export {
   asuraHotZoneFor,
   asuraRewardMult,
   asuraZoneKey,
+  // "ตำราตำนาน" secret tome + legendary craft (endgame v1.3) PURE reads — the UI's tome checklist
+  // + craft affordance derive from these; the mutators (grantAsuraSigil / craftLegendary /
+  // foundTomePage) are engine-internal (driven only through `step()` intents).
+  tomePagesFound,
+  hasAllZoneStones,
+  canCraftLegendary,
+  craftBlockReason,
+  TOME_ALL_PAGES,
+  TOME_PAGE_COUNT,
+  PAGE_ELITE,
+  PAGE_DEPTH_1,
+  PAGE_DEPTH_2,
 } from "@/engine/systems/asura";
 
 // NPC shop / consumables read helpers (M6 "เมืองหลัก"): the UI derives shop prices

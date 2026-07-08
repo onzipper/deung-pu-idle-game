@@ -310,6 +310,25 @@ export interface GameState {
    */
   asuraSpawnTally: number;
   /**
+   * ดินแดนอสูร ตราอสูร SIGIL bank (endgame v1.3, SAVE v20). A plain per-character COUNT (like
+   * `asuraEssence`) fed by the daily z10 `claimAsuraSigil` intent (the server stamps the day —
+   * client-authoritative v1). CONSUMED by a legendary craft (`CONFIG.asura.tome.craft.sigils`).
+   * Persisted.
+   */
+  asuraSigils: number;
+  /**
+   * "ตำราตำนาน" SECRET-QUEST page BITMASK (endgame v1.3, SAVE v20): bit0 = page 1 (first ELITE
+   * kill), bit1 = page 2 (first kill in the z5 farm), bit2 = page 3 (first kill in the z10 farm).
+   * Monotonic (pages are never lost). All 3 bits → `tomeUnlocked` latches. Persisted.
+   */
+  tomePages: number;
+  /**
+   * "ตำราตำนาน" craft-menu UNLOCK latch (endgame v1.3, SAVE v20): true once all 3 secret pages are
+   * assembled (`tomePages` complete). Gates the `craftLegendary` intent. Once true, stays true.
+   * Persisted.
+   */
+  tomeUnlocked: boolean;
+  /**
    * Per-step event buffer for render/audio juice. Cleared at the START of each
    * `step()`, filled during the step, drained by the outside layers after it.
    * Deterministic, one-way (engine never reads it), and NEVER persisted.
@@ -412,6 +431,12 @@ export interface SaveData {
   /** ดินแดนอสูร ศิลาโซน per-zone lifetime kill counters keyed "asura:zoneIdx" (endgame v1,
    * SAVE v19). Accrue-only in v1. */
   asuraZoneKills: Record<string, number>;
+  /** ดินแดนอสูร ตราอสูร sigil bank (endgame v1.3, SAVE v20). Daily z10 grant; craft consumes. */
+  asuraSigils: number;
+  /** "ตำราตำนาน" secret-quest page bitmask (endgame v1.3, SAVE v20): bit0/1/2 = the 3 pages. */
+  tomePages: number;
+  /** "ตำราตำนาน" craft-menu unlock latch (endgame v1.3, SAVE v20): all 3 pages assembled. */
+  tomeUnlocked: boolean;
   /** Server-set wall-clock of last save, for offline idle. */
   lastSeen: number;
 }
@@ -615,6 +640,12 @@ export function initGameState(
     asuraZoneKills: { ...(save?.asuraZoneKills ?? {}) },
     asuraHotZone: null,
     asuraSpawnTally: 0,
+    // "ตำราตำนาน" secret tome + ตราอสูร sigils (endgame v1.3, SAVE v20): restore the sigil bank +
+    // page bitmask + unlock latch (all accrue/persist like the essence family); a fresh/pre-v20
+    // start begins empty (no sigils, no pages, locked).
+    asuraSigils: Math.max(0, Math.floor(save?.asuraSigils ?? 0)),
+    tomePages: Math.max(0, Math.floor(save?.tomePages ?? 0)),
+    tomeUnlocked: save?.tomeUnlocked === true,
     events: [],
   };
   initHeroes(state);
@@ -858,6 +889,11 @@ export function toSaveData(state: GameState): SaveData {
     // (accrue-only). The hot-zone index + elite tally are transient — never persisted.
     asuraEssence: state.asuraEssence,
     asuraZoneKills: { ...state.asuraZoneKills },
+    // "ตำราตำนาน" secret tome + ตราอสูร sigils (endgame v1.3, SAVE v20): the sigil bank + secret-
+    // quest page bitmask + craft-unlock latch (all accrue-only / monotonic in v1).
+    asuraSigils: state.asuraSigils,
+    tomePages: state.tomePages,
+    tomeUnlocked: state.tomeUnlocked,
     lastSeen: 0,
   };
 }

@@ -188,6 +188,12 @@ export const saveDataSchema = z
     // ints — `migrate`'s `normalizeZoneKills` drops garbage, so a stale entry never needlessly 400s.
     asuraEssence: z.number().int().min(0).optional(),
     asuraZoneKills: z.record(z.string(), z.number().int().nonnegative()).optional(),
+    // "ตำราตำนาน" secret tome + ตราอสูร sigils (endgame v1.3, SAVE v20). All OPTIONAL so a pre-v20
+    // (or trimmed) payload is backfilled by `migrate()` (sigils -> 0, pages -> 0, unlocked -> false).
+    // Loose non-negative ints / bool — `migrate` floors + coerces, so a stale value never needlessly 400s.
+    asuraSigils: z.number().int().min(0).optional(),
+    tomePages: z.number().int().min(0).optional(),
+    tomeUnlocked: z.boolean().optional(),
     // M7.95 "Hall of Fame" observers (SAVE v16). All OPTIONAL so a pre-v16 (or
     // trimmed) payload is backfilled by `migrate()` (goldEarned -> 0, bossBest -> {},
     // levelCapAt -> null). Loose non-negative numbers — `normalizeBossBest` /

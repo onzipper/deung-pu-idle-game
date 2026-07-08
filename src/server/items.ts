@@ -259,9 +259,9 @@ export interface ItemInstanceDTO {
   acquiredAt: string;
   /** M7.6 RO-style refine +level (+0..+REFINE.maxRefine). */
   refineLevel: number;
-  /** Item category — "gear" (equippable) or "fortifier" (the "แกร่ง" consumable). The
-   *  UI wave uses this to render/route fortifiers apart from gear. */
-  kind: "gear" | "fortifier";
+  /** Item category — "gear" (equippable), "fortifier" (the "แกร่ง" consumable), or "legendary"
+   *  (a "ตำราตำนาน" craft-only weapon — endgame v1.3). The UI wave routes each apart. */
+  kind: "gear" | "fortifier" | "legendary";
 }
 
 interface InstanceRow {
