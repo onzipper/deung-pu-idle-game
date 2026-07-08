@@ -189,6 +189,9 @@ import {
   type ProgressSlice,
 } from "./cohortProgress";
 import { TimeDirector } from "./timeDirector";
+import { WorldSession } from "./presence/worldSession";
+import { GhostStore, GHOST_CAP_DEFAULT } from "./presence/ghostStore";
+import { buildPresenceSnapshot, shouldPublish, type PresenceSnapshot } from "./presence/presencePublish";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
  * relay `g` payloads (handshake messages / lockstep `TurnMessage`s) — mirrors
@@ -264,6 +267,10 @@ const CATCHUP_MIN_HIDDEN_MS = 5_000;
 
 /** Wall time between periodic autosave POSTs. */
 const AUTOSAVE_INTERVAL_MS = 30_000;
+
+/** Ghost-presence publish cadence (~3Hz, docs/ghost-presence-design.md §3). One snapshot
+ * of MY hero per beat, sent only when it changed or every 3rd beat (keepalive). */
+const PRESENCE_BEAT_MS = 330;
 
 /**
  * Wall-clock budget for replaying capped offline-idle time synchronously on
@@ -1407,6 +1414,43 @@ export function GameClient() {
       onMemberShadowChanged: onPartyMemberShadowChanged,
     });
 
+    // ---- Ghost presence "world layer" (docs/ghost-presence-design.md). A SEPARATE socket
+    // from `partySession` that carries render-only presence (+ chat, later). THE ONE RULE:
+    // inbound presence flows ONLY into `ghostStore`; it has no path into `pendingInput`,
+    // `state`, or the lockstep stream (invariants §2). Dormant unless `ghostsVisible` &&
+    // the tab is visible — solo/feature-off costs nothing beyond one boolean per frame. ----
+    const ghostStore = new GhostStore();
+    const worldSession = new WorldSession({
+      onGhost: (payload) => ghostStore.upsert(payload, performance.now()),
+      // Chat frames are buffered by the socket layer for a later chat UI (out of scope);
+      // no-op consumer for now keeps the socket chat-ready without wiring UI.
+      onChat: () => {},
+    });
+    /** Presence publish accumulator (≈330ms beat) + monotonic seq + last-SENT snapshot for
+     * change detection. Purely local publish bookkeeping — never read by the sim. */
+    let presenceAccumMs = 0;
+    let presenceBeatIndex = 0;
+    let presenceSeq = 0;
+    let lastSentPresence: PresenceSnapshot | null = null;
+    /** fps valve (design §7): a smoothed frame-time EMA steps the ghost cap 12→6→0 so a
+     * struggling device sheds ghost rigs first. Client-local, display-only. */
+    let ghostFpsEmaMs = 1000 / 60;
+    let ghostCap = GHOST_CAP_DEFAULT;
+    /** Drives `worldSession.connect/disconnect`: on only while the store flag is set AND
+     * the tab is visible. Recomputed by `syncWorldSessionActive()`. */
+    let ghostsFeatureOn = useGameStore.getState().ghostsVisible;
+    let unsubscribeGhosts: (() => void) | undefined;
+    function syncWorldSessionActive(): void {
+      const active = ghostsFeatureOn && document.visibilityState === "visible";
+      if (active) {
+        worldSession.connect();
+      } else {
+        worldSession.disconnect();
+        ghostStore.clear();
+        renderer.setGhosts([]);
+      }
+    }
+
     let rafId = 0;
     let lastTime = performance.now();
     let uiSyncAccum = 0;
@@ -1944,6 +1988,53 @@ export function GameClient() {
         }
       }
 
+      // ---- Ghost presence (render-only; THE ONE RULE — never touches `state`) ----
+      // Publish MY hero read-only on a ~3Hz beat, and feed the peer render list to the
+      // renderer. Gated on the feature flag; a disabled/dormant socket makes this a couple
+      // of cheap boolean checks. `worldSession.me`/`publish` no-op until the socket is up.
+      if (ghostsFeatureOn) {
+        const me = worldSession.me;
+        // My hero is `heroes[myCohortIndex]` in a cohort (index 0 solo) — same resolution
+        // every other "my hero" read in this loop uses. Read-only: `buildPresenceSnapshot`
+        // samples x/cls/tier and returns a fresh object, never mutating `state`.
+        const myHero = state.heroes[myCohortIndex] ?? state.heroes[0];
+        presenceAccumMs += elapsed * 1000;
+        if (presenceAccumMs >= PRESENCE_BEAT_MS) {
+          presenceAccumMs = 0;
+          if (me && myHero) {
+            const candidate = buildPresenceSnapshot(
+              myHero,
+              { charId: me.charId, displayName: me.displayName },
+              presenceSeq + 1,
+            );
+            if (shouldPublish(lastSentPresence, candidate, presenceBeatIndex)) {
+              presenceSeq++;
+              worldSession.publish(candidate);
+              lastSentPresence = candidate;
+            }
+            presenceBeatIndex++;
+          }
+        }
+        // fps valve: smooth the frame time and step the cap down on sustained slowness
+        // (design §7). Thresholds ~45fps → 6, ~30fps → 0; recovers when frames speed up.
+        ghostFpsEmaMs += (elapsed * 1000 - ghostFpsEmaMs) * 0.05;
+        const wantCap = ghostFpsEmaMs > 33 ? 0 : ghostFpsEmaMs > 22 ? 6 : GHOST_CAP_DEFAULT;
+        if (wantCap !== ghostCap) {
+          ghostCap = wantCap;
+          ghostStore.setCap(ghostCap);
+        }
+        // Dedupe: never render my OWN ghost, nor a cohort peer (already a fully-simulated
+        // real hero in my field). Peers key on displayName — the party wire carries no
+        // charId (see `GhostStore.setExcluded`). Cheap set rebuild per frame.
+        const excluded = new Set<string>();
+        if (me) excluded.add(me.charId);
+        if (cohortActive) for (const n of cohortMemberNames.values()) excluded.add(n);
+        ghostStore.setExcluded(excluded);
+        const nowMs = performance.now();
+        ghostStore.prune(nowMs);
+        renderer.setGhosts(ghostStore.list(nowMs));
+      }
+
       renderer.draw(state, frameEvents);
       if (frameEvents.length) audio.consumeEvents(frameEvents);
 
@@ -1954,6 +2045,11 @@ export function GameClient() {
       if (zoneKey !== lastZoneKey) {
         lastZoneKey = zoneKey;
         partySession.setZone(state.location.mapId, state.location.zoneIdx);
+        // Same seam drives the world socket's presence room (pleave+pjoin). Idempotent:
+        // `setZone` no-ops if the zone is unchanged, and does nothing while disconnected
+        // (the next open re-`pjoin`s the current zone). Presence rides EVERY zone,
+        // including town (the social space) — unlike lockstep cohorts, which skip town.
+        worldSession.setZone(state.location.mapId, state.location.zoneIdx);
       }
 
       // ---- M7.5 bot-status toasts (transition detection; engine untouched) ----
@@ -2416,6 +2512,9 @@ export function GameClient() {
           collapseToSolo(); // no-op if not in an active cohort
           partySession.teardown(); // closes the socket -> relay grace -> peers shadow me
         }
+        // Ghost presence: a hidden tab pauses rAF, so stop publishing + close the world
+        // socket clean (peers despawn my ghost on silence). Mirrors the party pattern.
+        syncWorldSessionActive();
         return;
       }
       if (document.visibilityState === "visible") {
@@ -2425,6 +2524,8 @@ export function GameClient() {
         // when already live, so a hide that never actually tore down is a safe no-op.
         const party = useGameStore.getState().party;
         if (party) partySession.setParty(party);
+        // Ghost presence: reopen the world socket if the feature is on (idempotent).
+        syncWorldSessionActive();
       }
     }
 
@@ -2740,6 +2841,18 @@ export function GameClient() {
       });
       partySession.setParty(useGameStore.getState().party);
 
+      // Ghost presence: react to the Settings toggle. Flipping it on/off lazily opens or
+      // closes the world socket (and clears ghosts) via `syncWorldSessionActive`. Feed the
+      // CURRENT value now (a hydrate may have landed before this subscription attaches).
+      ghostsFeatureOn = useGameStore.getState().ghostsVisible;
+      unsubscribeGhosts = useGameStore.subscribe((next, prev) => {
+        if (next.ghostsVisible !== prev.ghostsVisible) {
+          ghostsFeatureOn = next.ghostsVisible;
+          syncWorldSessionActive();
+        }
+      });
+      syncWorldSessionActive();
+
       // HOF seasonal rewards: the Settings title picker (`TitleSection.tsx`)
       // writes a fresh `mySocialBadge` straight into the store the instant
       // `POST /api/hof/title` succeeds — this subscription is the ONLY thing
@@ -2773,7 +2886,9 @@ export function GameClient() {
       unsubscribeReload?.();
       unsubscribeParty?.();
       unsubscribeSocialBadge?.();
+      unsubscribeGhosts?.();
       partySession.teardown();
+      worldSession.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       document.removeEventListener("pointerdown", onPointerDown, { capture: true });

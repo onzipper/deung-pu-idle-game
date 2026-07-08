@@ -567,6 +567,30 @@ function writeSoundMuted(muted: boolean): void {
   }
 }
 
+/** localStorage key for the ghost-presence "show other players" preference (ghost-
+ *  presence Wave 2). Same UI-owned client-preference tier as `SOUND_MUTED_STORAGE_KEY`
+ *  — NOT `SaveData`. Default ON: absence of the key reads as visible. */
+const GHOSTS_VISIBLE_STORAGE_KEY = "ddp-ghosts-visible";
+
+export function readStoredGhostsVisible(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    // Default ON — only an explicit "0" disables (any other value / unset = visible).
+    return window.localStorage.getItem(GHOSTS_VISIBLE_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeGhostsVisible(visible: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(GHOSTS_VISIBLE_STORAGE_KEY, visible ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
 /** localStorage key for the FTUE-completed flag. Same client-preference
  * pattern as `SOUND_MUTED_STORAGE_KEY` above: UI-owned, not `SaveData`.
  * M5+: fold into server save (cross-device sync) — until then this is a
@@ -1236,6 +1260,12 @@ export interface HudState {
    * every frame and applies it to the `AudioController`, same pattern as
    * `autoCast`/`autoAllocate`. */
   soundMuted: boolean;
+  /** Ghost-presence "show other players in the world" preference (Wave 2), persisted to
+   * localStorage (NOT SaveData — see `GHOSTS_VISIBLE_STORAGE_KEY`). Default ON. The
+   * integration loop reads it to drive the world socket + ghost layer; toggling OFF
+   * disconnects the socket and clears ghosts. Purely cosmetic/render — never touches the
+   * sim (the One Rule, docs/ghost-presence-design.md §2). */
+  ghostsVisible: boolean;
 
   // ---- onboarding/FTUE (M4.8) — see src/ui/onboarding/steps.ts for the
   // data-driven step registry and pure trigger/advance logic; this store
@@ -1284,6 +1314,11 @@ export interface HudState {
    * (see `soundMuted`'s doc comment). Does NOT re-persist (avoids a
    * redundant localStorage write on every mount). */
   setSoundMuted: (muted: boolean) => void;
+  /** Toggle the ghost-presence layer (persists). */
+  toggleGhostsVisible: () => void;
+  /** Mount-effect-only: apply the persisted ghost preference post-hydration (mirrors
+   * `setSoundMuted`; does NOT re-persist). */
+  setGhostsVisible: (visible: boolean) => void;
 
   /** Onboarding-controller-only: begin the FTUE at step 0. Callers must have
    * already checked `!ftueCompleted && hasSyncedOnce && isFreshSave(...)`. */
@@ -1622,6 +1657,10 @@ export const useGameStore = create<HudState>((set, get) => ({
   autoManaThreshold: CONFIG.shop.autoDefaults.manaThreshold,
   optimisticStatSpend: {},
   soundMuted: false,
+  // Default ON pre-hydration (matches `readStoredGhostsVisible`'s default); corrected
+  // post-mount via `setGhostsVisible`. Safe either way — a one-frame extra ghost socket
+  // never affects the sim.
+  ghostsVisible: true,
 
   hasSyncedOnce: false,
   ftueCompleted: true,
@@ -1653,6 +1692,13 @@ export const useGameStore = create<HudState>((set, get) => ({
       return { soundMuted };
     }),
   setSoundMuted: (soundMuted) => set({ soundMuted }),
+  toggleGhostsVisible: () =>
+    set((s) => {
+      const ghostsVisible = !s.ghostsVisible;
+      writeGhostsVisible(ghostsVisible);
+      return { ghostsVisible };
+    }),
+  setGhostsVisible: (ghostsVisible) => set({ ghostsVisible }),
 
   startOnboarding: () => set({ onboardingStepIndex: 0 }),
   setOnboardingStepIndex: (onboardingStepIndex) => set({ onboardingStepIndex }),

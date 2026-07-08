@@ -150,6 +150,7 @@
     "title": "Settings",
     "closeButton": "Close",
     "audioLanguageGroup": "Audio & language",
+    "showGhosts": "Show other players in the world",
     "botModal": {
       "title": "Bot settings",
       "closeButton": "Close",

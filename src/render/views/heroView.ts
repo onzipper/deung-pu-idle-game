@@ -1797,8 +1797,30 @@ function resolveAttack(anim: HeroAnimState, dt: number): AttackFx {
   return out;
 }
 
+/**
+ * The exact subset of `Hero` fields `updateHeroView` reads. A real engine `Hero`
+ * is assignable to it (all existing call sites keep compiling unchanged), and the
+ * ghost-presence layer (`src/app/(game)/presence`) can drive the SAME rig with a
+ * synthesized display-only stub — no fake full `Hero` construction, no engine
+ * coupling. Keep this in sync if `updateHeroView` starts reading a new field.
+ */
+export type HeroRenderModel = Pick<
+  Hero,
+  | "cls"
+  | "x"
+  | "aimX"
+  | "equipped"
+  | "tier"
+  | "shadowed"
+  | "cd"
+  | "dead"
+  | "hp"
+  | "maxHp"
+  | "reviveTimer"
+>;
+
 /** Redraw an existing hero view in place for the current frame's state. */
-export function updateHeroView(view: HeroView, hero: Hero, ctx: HeroFrameContext): void {
+export function updateHeroView(view: HeroView, hero: HeroRenderModel, ctx: HeroFrameContext): void {
   if (view.cls !== hero.cls) {
     view.cls = hero.cls;
     buildRig(view, hero.cls);

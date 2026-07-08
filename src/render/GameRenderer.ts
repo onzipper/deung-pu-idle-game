@@ -49,6 +49,7 @@ import {
   type EnemyView,
 } from "@/render/views/enemyView";
 import { createHeroView, updateHeroView, type HeroView } from "@/render/views/heroView";
+import { GhostLayer, type GhostDrawItem } from "@/render/views/ghostLayer";
 import { createNpcView, updateNpcView, type NpcView } from "@/render/views/npcView";
 import {
   createProjectileView,
@@ -108,6 +109,13 @@ export class GameRenderer {
   private world: Container | null = null;
   private layers: Layers | null = null;
   private heroPool: Pool<HeroView> | null = null;
+  /** Ghost-presence layer (docs/ghost-presence-design.md §3.5): OTHER online players in
+   * my zone, drawn BELOW my own heroes, walk/idle-only, excluded from hit-testing. Fed a
+   * display-only list via `setGhosts()`; NEVER reads `GameState`. Null until `create()`. */
+  private ghostLayer: GhostLayer | null = null;
+  /** The last ghost render list `setGhosts()` received — applied every `draw()` with the
+   * real dt (so the rig walk cadence uses the same clock as `fx/`). */
+  private ghostList: readonly GhostDrawItem[] = [];
   private enemyPool: Pool<EnemyView> | null = null;
   private projectilePool: Pool<ProjectileView> | null = null;
   private bossView: BossView | null = null;
@@ -244,12 +252,17 @@ export class GameRenderer {
     this.world = world;
 
     const background = new Container();
+    const ghosts = new Container();
     const entities = new Container();
     const projectiles = new Container();
     const fx = new Container();
     const overlay = new Container();
-    world.addChild(background, entities, projectiles, fx, overlay);
+    // `ghosts` sits BETWEEN background and entities: other players' ghosts draw UNDER my
+    // own hero/party (design §3.5 z-order) and, being outside `entities`, are invisible to
+    // `hitTestPointer` (which only scans `state.enemies`/`worldBoss`) — invariant #5.
+    world.addChild(background, ghosts, entities, projectiles, fx, overlay);
     this.layers = { background, entities, projectiles, fx, overlay };
+    this.ghostLayer = new GhostLayer(ghosts);
 
     // Persistent, subtle bloom on the projectiles + fx layers ONLY (never the
     // whole stage) — one shared filter instance, see `createBloomFilter()`'s
@@ -391,6 +404,12 @@ export class GameRenderer {
     });
     heroPool.endFrame();
 
+    // Ghost-presence layer: OTHER players in my zone, drawn under my heroes. Driven by the
+    // SAME real-dt walk clock as the pooled heroes above; `ghostList` is a pure display
+    // feed (`setGhosts`) that never touches `state`. Empty list = nothing drawn (solo /
+    // feature off) at zero cost.
+    this.ghostLayer?.update(this.ghostList, dt);
+
     // Enemies list is empty during the boss phase (the sim clears it on entry).
     // M7.9 "new mob species": resolved from the CURRENT zone, same
     // `zoneAt(state.location).mapId` plumbing as the boss theme below — safe
@@ -506,6 +525,9 @@ export class GameRenderer {
     this.heroPool?.clear();
     this.enemyPool?.clear();
     this.projectilePool?.clear();
+    this.ghostLayer?.destroy();
+    this.ghostLayer = null;
+    this.ghostList = [];
     this.heroPool = null;
     this.enemyPool = null;
     this.projectilePool = null;
@@ -702,6 +724,19 @@ export class GameRenderer {
    */
   setHeroDisplayNames(names: ReadonlyMap<number, string> | null): void {
     this.heroDisplayNames = names;
+  }
+
+  /**
+   * Ghost-presence render seam (docs/ghost-presence-design.md §3.5): the interpolated,
+   * capped, deduped list of OTHER players in my zone to draw as walk/idle ghosts below my
+   * own heroes. Produced by the ui-side `GhostStore` from the world socket, re-supplied
+   * every frame (positions are freshly interpolated). Empty/default = nothing drawn (solo
+   * or feature off) — the solo render output is pixel-identical to before this seam. This
+   * is a pure DISPLAY feed; it never enters `GameState` (the One Rule, design §2). Safe
+   * to call any time; applied in the next `draw()`.
+   */
+  setGhosts(items: readonly GhostDrawItem[]): void {
+    this.ghostList = items;
   }
 
   /**

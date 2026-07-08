@@ -150,6 +150,7 @@
     "title": "ตั้งค่า",
     "closeButton": "ปิด",
     "audioLanguageGroup": "เสียง & ภาษา",
+    "showGhosts": "แสดงผู้เล่นคนอื่นในโลก",
     "botModal": {
       "title": "ตั้งค่าบอท",
       "closeButton": "ปิด",
