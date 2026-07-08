@@ -18,9 +18,10 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import type { HeroClass } from "@/engine";
 import { CONFIG, SKILLS } from "@/engine";
+import { useCastKey } from "@/ui/hooks/useCastKey";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { InfoTip } from "@/ui/components/InfoTip";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
@@ -47,17 +48,6 @@ const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
   // matches `HERO_COLORS.ninja.body` in render/theme.ts (slate/graphite rig tone)
   ninja: { solid: "#6c7a99", soft: "rgba(108, 122, 153, 0.55)" },
 };
-
-/** Detects a fresh cast (cd jumped back up) to restart the CSS sweep. */
-function useCastKey(cd: number): number {
-  const prev = useRef(cd);
-  const [castKey, setCastKey] = useState(0);
-  useEffect(() => {
-    if (cd > prev.current + 0.05) setCastKey((k) => k + 1);
-    prev.current = cd;
-  }, [cd]);
-  return castKey;
-}
 
 /** One learned skill: a cast button + an AUTO-slot toggle badge + a tap-to-open
  * ⓘ detail popover (owner ask, UX-fix wave: "every skill button gets a

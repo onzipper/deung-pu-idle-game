@@ -80,6 +80,8 @@ import {
   worldNav,
   worldBossPhaseAt,
   effectiveUnlockedZones,
+  wantsBotTownTrip,
+  zoneAt,
   type GameEvent,
   type GameState,
   type Hero,
@@ -154,6 +156,7 @@ import {
 } from "./partySession";
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
+import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import {
   desiredHeroConfig,
   dropAssignedIndex,
@@ -429,6 +432,14 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     ready: {
       hpPotion: canUseConsumable(state, "hpPotion"),
       manaPotion: canUseConsumable(state, "manaPotion"),
+    },
+    cds: {
+      hpPotion: state.consumableCds.hpPotion ?? 0,
+      manaPotion: state.consumableCds.manaPotion ?? 0,
+    },
+    maxCds: {
+      hpPotion: CONFIG.shop.items.hpPotion.cooldown,
+      manaPotion: CONFIG.shop.items.manaPotion.cooldown,
     },
   };
 
@@ -1261,6 +1272,9 @@ export function GameClient() {
     let botPrevTravelReason: string | null = null;
     let botPrevDwell = false;
     let botTownActivityUntil = 0;
+    // M8 party (owner 2026-07-08): last `now` this client left the cohort for a bot
+    // restock/sell trip — see `cohortBotTrip.ts`'s `shouldLeaveCohortForBotTrip` doc.
+    let lastBotTripLeaveAtMs: number | null = null;
     // Town NPCs phase 3 (final): rotating greeting-line index per NPC (2-3
     // lines each, see messages/*.json's `townNpc.<id>.greetings`) — bumped
     // every tap-to-talk so repeat conversations don't feel like a broken
@@ -1529,6 +1543,54 @@ export function GameClient() {
       // fast-travel/warp updates the beat only on ARRIVAL (peers briefly hold — waiting chip
       // covers it), the accepted tradeoff of beat-driven re-derivation.
       if (cohortActive && hasZoneChangeIntent(store.pendingInput)) collapseToSolo();
+
+      // M8 party (owner 2026-07-08, "ไม่ว่าจะเล่นเดี่ยวหรือปาร์ตี้ บอทยังคงต้องทำงานเหมือนเดิม"): the
+      // shared cohort state must never travel on one member's automation (8822f54's guard is
+      // correct), so when MY hero's bot wants a restock/sell trip, THIS client alone leaves
+      // the cohort via the SAME `collapseToSolo()` escape hatch the zone-change intent above
+      // uses — the now-solo engine's own `updateBots` (heroes.length back to 1) then runs the
+      // trip completely normally starting THIS SAME frame (walk to town, chores, walk back to
+      // the farm frontier), and the existing zone-beat protocol re-forms the party the moment
+      // I'm standing back in the same zone as my friends (identical mechanism to walking INTO
+      // a friend's zone — see `cohortBotTrip.ts`'s module doc). `wantsBotTownTrip` is evaluated
+      // against MY virtualized wallet slice (not the raw shared state.gold/consumables), so the
+      // decision matches what solo will actually see the instant `collapseToSolo()` settles it.
+      if (cohortActive) {
+        const myWallet = myVirtualWallet();
+        const myHero = state.heroes[myCohortIndex];
+        if (
+          myWallet &&
+          myHero &&
+          !myHero.dead &&
+          !state.traveling &&
+          !state.fastTravelCast &&
+          state.phase === "battle" && // never mid a shared boss fight
+          zoneAt(state.location).kind === "farm"
+        ) {
+          const want = wantsBotTownTrip(
+            state.bot,
+            { hpPotion: myWallet.consumables.hpPotion ?? 0, manaPotion: myWallet.consumables.manaPotion ?? 0 },
+            myWallet.gold,
+            shopStageOf(state),
+            store.inventory.length,
+            state.sellTripWatermark,
+          );
+          if (
+            shouldLeaveCohortForBotTrip({
+              cohortActive,
+              needRestock: want.needRestock,
+              needSell: want.needSell,
+              nowMs: now,
+              lastLeaveAtMs: lastBotTripLeaveAtMs,
+              debounceMs: BOT_TRIP_LEAVE_DEBOUNCE_MS,
+            })
+          ) {
+            lastBotTripLeaveAtMs = now;
+            collapseToSolo();
+            store.pushNotice("botLeftCohortForTrip");
+          }
+        }
+      }
 
       let frameEvents: GameEvent[];
       if (cohortActive && cohortEngine) {

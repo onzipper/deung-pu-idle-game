@@ -254,6 +254,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09e.items.partyBuff10",
       "releases.2026-07-09e.items.archerDash",
       "releases.2026-07-09e.items.partyShare",
+      "releases.2026-07-09e.items.potionCd",
     ],
   },
 ];

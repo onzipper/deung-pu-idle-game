@@ -966,6 +966,7 @@
     "botSelling": "💰 Bot is selling at the shop...",
     "botRestocked": "🧪 Bot restocked (HP +{hp} / MP +{mp} / scroll +{scroll})",
     "botReturning": "🏃 Bot is heading back to the farm...",
+    "botLeftCohortForTrip": "🤖 Bot needs to restock — heading to town, will rejoin the party after",
     "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
@@ -1231,7 +1232,8 @@
           "questBossScale": "👹 Quest bosses now scale their HP with your party size",
           "partyBuff10": "📈 The party EXP buff is now +10% per additional member",
           "archerDash": "🏹 The archer can now evade! When melee mobs close in, it blinks away to a new firing position — far fewer deaths",
-          "partyShare": "⚖️ Party EXP share rebalanced — partying still levels clearly faster than solo, without leaving solo players far behind (the +10%/member buff is unchanged)"
+          "partyShare": "⚖️ Party EXP share rebalanced — partying still levels clearly faster than solo, without leaving solo players far behind (the +10%/member buff is unchanged)",
+          "potionCd": "⏱️ Potion buttons now show their cooldown like skill buttons"
         }
       }
     }

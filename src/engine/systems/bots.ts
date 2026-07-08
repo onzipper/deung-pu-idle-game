@@ -41,6 +41,21 @@ import { npcInRange, townNpcConfig } from "@/engine/systems/townNpcs";
 import type { BotSettings, TownNpcId } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
+/** The restock predicate only reads these two potion counts (structurally compatible
+ * with `ConsumableCounts` — kept narrow so callers outside `engine/` don't need that
+ * type, per the same "duplicated deliberately" convention as `MAX_CLAIM_BATCH` etc.
+ * elsewhere in this codebase). */
+export interface BotRestockConsumables {
+  hpPotion: number;
+  manaPotion: number;
+}
+
+/** `{ needRestock, needSell }` — see `wantsBotTownTrip`'s doc. */
+export interface BotTripWant {
+  needRestock: boolean;
+  needSell: boolean;
+}
+
 /** The town NPC the idle bot transacts with (buy/sell/salvage). The refine smith
  * (ลุงดึ๋ง) is deliberately PLAYER-ONLY — refine is never botted (M6 town NPCs ph.2). */
 const MERCHANT: TownNpcId = "npc:pahpu";
@@ -95,6 +110,49 @@ export function setBotSettings(state: GameState, patch: Partial<BotSettings>): v
 }
 
 /**
+ * Pure "does the bot want a town trip right now" predicate — the restock (hpShort/
+ * mpShort vs `hpPotionTarget`/`mpPotionTarget` + spendable-gold affordability) and
+ * sell-trip (bag at/over `INVENTORY_CAP`, not latched) decisions `updateBots` makes
+ * while farming, extracted so a caller who ALREADY knows it's safe to ask (no
+ * location/phase/traveling gate here — that's `updateBots`'s job) can evaluate it
+ * without duplicating the arithmetic.
+ *
+ * Restock trips fire on EMPTY, not below-target (owner call 2026-07-06): a target of
+ * 80 must NOT warp at 79 to buy one bottle — the trip happens when a tracked potion
+ * type runs OUT (stock 0 with a non-zero target). The affordability gate prevents a
+ * trip LIVELOCK — a broke hero that can't buy would otherwise trip, buy nothing,
+ * return, and immediately re-trip without ever farming.
+ *
+ * M8 party (owner 2026-07-08, "ไม่ว่าจะเล่นเดี่ยวหรือปาร์ตี้ บอทยังคงต้องทำงานเหมือนเดิม"):
+ * ALSO the pure core `GameClient`'s cohort branch calls (with the caller's OWN
+ * virtualized wallet slice, not the raw shared `state.gold`/`state.consumables`) to
+ * decide whether MY hero's bot wants a trip badly enough to leave the cohort and go
+ * do it solo — see `cohortBotTrip.ts`'s module doc for the full leave/rejoin loop.
+ */
+export function wantsBotTownTrip(
+  bot: BotSettings,
+  consumables: BotRestockConsumables,
+  gold: number,
+  shopStage: number,
+  inventoryCount: number | undefined,
+  sellTripWatermark: number | null,
+): BotTripWant {
+  const hpShort = bot.hpPotionTarget > 0 && consumables.hpPotion <= 0;
+  const mpShort = bot.mpPotionTarget > 0 && consumables.manaPotion <= 0;
+  const spendable = Math.max(0, gold - bot.goldReserve);
+  const canAfford =
+    (hpShort && spendable >= shopPriceAt("hpPotion", shopStage)) ||
+    (mpShort && spendable >= shopPriceAt("manaPotion", shopStage));
+  const needRestock = bot.enabled && (hpShort || mpShort) && canAfford;
+  const needSell =
+    bot.sellTripEnabled &&
+    typeof inventoryCount === "number" &&
+    inventoryCount >= INVENTORY_CAP &&
+    sellTripWatermark === null; // latched = a prior sweep sold nothing
+  return { needRestock, needSell };
+}
+
+/**
  * Per-step bot trigger check (called from step in the battle path). Initiates a town
  * trip when a restock and/or sell is due while FARMING; a no-op otherwise (both bots
  * off, not in a farm zone, mid-transit / mid-cast, dead, or nothing pending).
@@ -129,25 +187,6 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
   const hero = state.heroes[0];
   if (!hero || hero.dead) return;
 
-  // Restock trips fire on EMPTY, not below-target (owner call 2026-07-06): a
-  // target of 80 must NOT warp at 79 to buy one bottle — the trip happens when a
-  // tracked potion type runs OUT (stock 0 with a non-zero target), and the town
-  // stop then refills all the way to the targets. Between trips, any OTHER bot
-  // trip (e.g. a sell trip) opportunistically tops potions up while it's at the
-  // shop anyway (see onBotTownArrival), so a dry spell is rare in practice.
-  // The affordability gate below prevents a trip LIVELOCK — a broke hero that
-  // can't buy would otherwise trip, buy nothing, return, and immediately re-trip
-  // without ever farming. So the bot waits at the farm, banking gold, until a
-  // restock trip is actually worthwhile.
-  const hpShort = bot.hpPotionTarget > 0 && state.consumables.hpPotion <= 0;
-  const mpShort = bot.mpPotionTarget > 0 && state.consumables.manaPotion <= 0;
-  const spendable = Math.max(0, state.gold - bot.goldReserve);
-  const stage = shopStageOf(state);
-  const canAfford =
-    (hpShort && spendable >= shopPriceAt("hpPotion", stage)) ||
-    (mpShort && spendable >= shopPriceAt("manaPotion", stage));
-  const needRestock = bot.enabled && (hpShort || mpShort) && canAfford;
-
   // A prior sell sweep gave up with the bag still at `sellTripWatermark` items —
   // stay latched until the count actually drops below it (a manual/late sell
   // landed) so we never loop sweeps/trips that sell nothing.
@@ -159,11 +198,14 @@ export function updateBots(state: GameState, inventoryCount?: number): void {
     state.sellTripWatermark = null;
   }
 
-  const needSell =
-    bot.sellTripEnabled &&
-    typeof inventoryCount === "number" &&
-    inventoryCount >= INVENTORY_CAP &&
-    state.sellTripWatermark === null; // latched = a prior sweep sold nothing
+  const { needRestock, needSell } = wantsBotTownTrip(
+    bot,
+    state.consumables,
+    state.gold,
+    shopStageOf(state),
+    inventoryCount,
+    state.sellTripWatermark,
+  );
 
   const kind = zoneAt(state.location).kind;
   if (kind === "town") {

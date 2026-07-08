@@ -15,6 +15,7 @@ import {
   heroMaxHpOf,
   npcInRange,
   townNpcConfig,
+  wantsBotTownTrip,
   type FrameInput,
   type GameState,
 } from "@/engine";
@@ -112,6 +113,53 @@ describe("SAVE v10 -> v11 migration (bot settings)", () => {
     expect(m.bot.enabled).toBe(false); // non-boolean -> false
     expect(m.bot.hpPotionTarget).toBe(defaultBotSettings().hpPotionTarget); // negative -> default
     expect(m.bot.goldReserve).toBe(0); // negative -> default (0)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wantsBotTownTrip — pure restock/sell-trip predicate (M8 party extraction)
+// ---------------------------------------------------------------------------
+
+describe("wantsBotTownTrip (pure predicate)", () => {
+  const bot = { ...defaultBotSettings(), enabled: true, hpPotionTarget: 15, mpPotionTarget: 15 };
+  const stage = 3;
+
+  it("no trip when both bots off, even with empty stock + full bag", () => {
+    const off = { ...defaultBotSettings() }; // both bots default OFF
+    const want = wantsBotTownTrip(off, { hpPotion: 0, manaPotion: 0 }, 100_000, stage, INVENTORY_CAP, null);
+    expect(want).toEqual({ needRestock: false, needSell: false });
+  });
+
+  it("needRestock true on EMPTY stock (not below-target) with affordable gold", () => {
+    const want = wantsBotTownTrip(bot, { hpPotion: 0, manaPotion: 15 }, 100_000, stage, undefined, null);
+    expect(want.needRestock).toBe(true);
+    expect(want.needSell).toBe(false);
+  });
+
+  it("needRestock false on low-but-nonzero stock (owner's empty-trigger rule)", () => {
+    const want = wantsBotTownTrip(bot, { hpPotion: 1, manaPotion: 1 }, 100_000, stage, undefined, null);
+    expect(want.needRestock).toBe(false);
+  });
+
+  it("needRestock false when broke (affordability livelock guard)", () => {
+    const poor = { ...bot, goldReserve: 50 };
+    const want = wantsBotTownTrip(poor, { hpPotion: 0, manaPotion: 0 }, 50, stage, undefined, null);
+    expect(want.needRestock).toBe(false);
+  });
+
+  it("needSell true only at/over INVENTORY_CAP with sellTripEnabled and no latch", () => {
+    const sellBot = { ...bot, sellTripEnabled: true };
+    expect(
+      wantsBotTownTrip(sellBot, { hpPotion: 15, manaPotion: 15 }, 100_000, stage, INVENTORY_CAP, null).needSell,
+    ).toBe(true);
+    expect(
+      wantsBotTownTrip(sellBot, { hpPotion: 15, manaPotion: 15 }, 100_000, stage, INVENTORY_CAP - 1, null).needSell,
+    ).toBe(false);
+    // Latched (a prior sweep sold nothing) — stays false even at cap until cleared.
+    expect(
+      wantsBotTownTrip(sellBot, { hpPotion: 15, manaPotion: 15 }, 100_000, stage, INVENTORY_CAP, INVENTORY_CAP)
+        .needSell,
+    ).toBe(false);
   });
 });
 
