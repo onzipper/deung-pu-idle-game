@@ -25,6 +25,14 @@ model User {
   displayName  String?   @db.VarChar(24) // account handle, sized like Character.name
   friendCode   String?   @unique @db.VarChar(16) // short human-shareable code (~8 chars); minted by app code at register time
   registeredAt DateTime? // null = still a guest; set when the account layer is claimed
+  // Self-service displayName RENAME rate-limit. Holds the Asia/Bangkok (UTC+7)
+  // serverDay (the SAME axis DailyClaim.serverDay uses — src/server/dailyQuests.ts
+  // `serverDayFor`) of the LAST displayName rename. The rename endpoint compare-and-
+  // sets this in one atomic guarded UPDATE (renameDay != today) so a name can change
+  // at most ONCE per server-day. Additive + NULLABLE = every existing row reads null
+  // (never renamed → allowed today). Client clocks are never trusted (server computes
+  // the day, like SaveState.lastSeen).
+  renameDay    Int? // Asia/Bangkok serverDay of the last displayName rename (once/day guard)
   saves        SaveState[]
   characters   Character[]
   // M8 friend graph (account<->account). Two relation NAMES per table because a User
@@ -113,6 +121,12 @@ model Character {
   // Validated field-by-field server-side before write (src/server/uiConfig.ts);
   // an unknown/out-of-bounds shape is rejected, never stored raw.
   uiConfig  Json?
+  // Self-service character-name RENAME rate-limit (mirrors User.renameDay). Holds the
+  // Asia/Bangkok (UTC+7) serverDay of the LAST rename; the rename endpoint compare-and-
+  // sets it (renameDay != today) so a character renames at most ONCE per server-day.
+  // Additive + NULLABLE (pre-existing rows read null = never renamed → allowed today).
+  // HOF/announcement snapshots keep their historical names by design — no backfill.
+  renameDay Int? // Asia/Bangkok serverDay of the last character-name rename (once/day guard)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete: slot freed, row kept for audit

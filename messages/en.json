@@ -753,7 +753,21 @@
       "playButton": "Play",
       "selecting": "Entering game...",
       "deleteButton": "Delete",
-      "selectError": "Couldn't select this character — try again"
+      "selectError": "Couldn't select this character — try again",
+      "renameAria": "Rename character"
+    },
+    "rename": {
+      "title": "Rename character",
+      "cooldownHint": "You can rename once per day.",
+      "label": "New name",
+      "placeholder": "Enter a new character name",
+      "hint": "2-24 characters, Thai/English letters and digits only (no spaces or symbols)",
+      "saveButton": "Save new name",
+      "saving": "Saving...",
+      "cancelButton": "Cancel",
+      "nameTaken": "That name is already taken — try another",
+      "cooldown": "You can rename once per day — try again tomorrow",
+      "error": "Rename failed — try again"
     },
     "delete": {
       "title": "Delete \"{name}\"?",
@@ -852,6 +866,16 @@
       "retryButton": "Retry",
       "emailLabel": "Email",
       "displayNameLabel": "Display name",
+      "noDisplayName": "Not set",
+      "renameEditAria": "Rename display name",
+      "renamePlaceholder": "Enter a new display name",
+      "renameHint": "Up to 24 characters — once per day",
+      "renameSave": "Save",
+      "renameSaving": "Saving...",
+      "renameCancel": "Cancel",
+      "renameSuccess": "Display name updated",
+      "renameCooldown": "You can rename once per day — try again tomorrow",
+      "renameError": "Rename failed — try again",
       "friendCodeLabel": "Friend code",
       "copyButton": "Copy",
       "copied": "Copied!",
@@ -1316,7 +1340,8 @@
           "worldBossBotEngage": "🤖 Your bot now piles onto เสี่ยจ๋อง if it's already engaged nearby (it still won't pick the first fight — never farms newcomers).",
           "partyInviteToasts": "🔔 Party invites now give clear feedback (accept/decline/expired) and friends who are already in a party show a chip on their row.",
           "cohortLeakFix": "🗺️ Fixed a party bug where playing alongside a far-progressed friend could leak their zone unlocks into your own save.",
-          "botToggleFix": "🔁 Fixed the bot on/off switch in a party — each member's toggle now only affects their OWN hero."
+          "botToggleFix": "🔁 Fixed the bot on/off switch in a party — each member's toggle now only affects their OWN hero.",
+          "rename": "✏️ You can now rename your account and characters in Settings / the character-select screen (once per day)."
         }
       }
     }

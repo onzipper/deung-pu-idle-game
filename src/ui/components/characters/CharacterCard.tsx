@@ -15,9 +15,16 @@ export interface CharacterCardProps {
   selecting: boolean;
   onSelect: () => void;
   onRequestDelete: () => void;
+  onRequestRename: () => void;
 }
 
-export function CharacterCard({ character, selecting, onSelect, onRequestDelete }: CharacterCardProps) {
+export function CharacterCard({
+  character,
+  selecting,
+  onSelect,
+  onRequestDelete,
+  onRequestRename,
+}: CharacterCardProps) {
   const t = useTranslations("characters");
   const tCommon = useTranslations("common");
   const tContent = useTranslations("content");
@@ -41,6 +48,15 @@ export function CharacterCard({ character, selecting, onSelect, onRequestDelete 
             {tContent(`classes.${character.baseClass}.name`)}
           </span>
         </div>
+        <button
+          type="button"
+          onClick={onRequestRename}
+          disabled={selecting}
+          aria-label={t("card.renameAria")}
+          className="rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2 py-1 text-[13px] leading-none hover:border-emerald-400/60 disabled:opacity-50"
+        >
+          ✏️
+        </button>
         <span className="rounded-full border border-ddp-border-soft bg-black/40 px-2 py-0.5 text-[11px] font-bold text-ddp-gold-bright tabular-nums">
           {tCommon("levelBadge", { level: character.level })}
         </span>

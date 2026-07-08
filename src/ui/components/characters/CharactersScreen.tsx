@@ -23,6 +23,7 @@ import { MAX_LIVE_CHARACTERS_CLIENT } from "@/ui/characters/constants";
 import { CharacterCard } from "@/ui/components/characters/CharacterCard";
 import { CreateCharacterForm } from "@/ui/components/characters/CreateCharacterForm";
 import { DeleteCharacterDialog } from "@/ui/components/characters/DeleteCharacterDialog";
+import { RenameCharacterDialog } from "@/ui/components/characters/RenameCharacterDialog";
 import type { CharacterDTO, NinjaUnlockDTO } from "@/ui/components/characters/types";
 
 type LoadStatus = "loading" | "error" | "ready";
@@ -39,6 +40,7 @@ export function CharactersScreen() {
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CharacterDTO | null>(null);
+  const [renameTarget, setRenameTarget] = useState<CharacterDTO | null>(null);
 
   // No sync `setStatus("loading")` at the top: the initial state is already
   // "loading", and the retry button (a real event handler, not an effect)
@@ -92,6 +94,11 @@ export function CharactersScreen() {
   function handleCreated(character: CharacterDTO) {
     setCharacters((prev) => [character, ...prev]);
     void selectAndEnter(character.id);
+  }
+
+  function handleRenamed(character: CharacterDTO) {
+    setCharacters((prev) => prev.map((c) => (c.id === character.id ? { ...c, ...character } : c)));
+    setRenameTarget(null);
   }
 
   function handleDeleted(characterId: string) {
@@ -176,6 +183,7 @@ export function CharactersScreen() {
                   selecting={selectingId === c.id}
                   onSelect={() => void selectAndEnter(c.id)}
                   onRequestDelete={() => setDeleteTarget(c)}
+                  onRequestRename={() => setRenameTarget(c)}
                 />
               ))}
             </div>
@@ -188,6 +196,14 @@ export function CharactersScreen() {
           character={deleteTarget}
           onCancel={() => setDeleteTarget(null)}
           onDeleted={handleDeleted}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameCharacterDialog
+          character={renameTarget}
+          onCancel={() => setRenameTarget(null)}
+          onRenamed={handleRenamed}
         />
       )}
     </div>

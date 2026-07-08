@@ -304,6 +304,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09i.items.partyInviteToasts",
       "releases.2026-07-09i.items.cohortLeakFix",
       "releases.2026-07-09i.items.botToggleFix",
+      "releases.2026-07-09i.items.rename",
     ],
   },
 ];
