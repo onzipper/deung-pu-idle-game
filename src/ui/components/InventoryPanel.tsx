@@ -441,7 +441,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         onClick={onClose}
         className="absolute inset-0 bg-black/70"
       />
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) md:max-w-2xl">
+      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-hidden rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) md:max-w-2xl">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
           <button
@@ -456,8 +456,16 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         {/* Paper-doll (approved audit design): pinned LEFT column on desktop,
             pinned horizontal strip above the tabs on mobile — outside the
             bag's own overflow-y-auto container, same tier as the capacity
-            bar/tabs below, so it never scrolls away. */}
-        <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:items-start md:gap-4">
+            bar/tabs below, so it never scrolls away.
+            NOTE: no `items-start` on the md:flex-row axis — that would
+            override the default cross-axis stretch, leaving the bag column
+            sized to its own (unbounded) content instead of the row's actual
+            available height, which is exactly what let the bag grid below
+            grow past the modal's bottom rounded edge on desktop (owner
+            screenshot). Stretch (default) keeps both columns pinned to the
+            row's height so the bag's `min-h-0`/`overflow-y-auto` chain has
+            something bounded to clip against. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:gap-4">
         <EquipmentDoll
           inventory={inventory}
           activeTab={activeTab}
@@ -571,7 +579,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           </button>
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {items.length === 0 ? (
             <p className="text-[11px] text-ddp-ink-muted/70">{t("emptySlotHint")}</p>
           ) : (
