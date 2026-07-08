@@ -298,8 +298,9 @@ body {
  * (until-now withheld) outcome, for EVERY outcome, before the success/fail/
  * break-specific juice above takes over. Plain opacity fade, no layout cost. */
 @keyframes ddp-refine-flash {
+  /* Peak 0.45 warm amber (element bg), not 0.85 white — dark-room friendly. */
   0% {
-    opacity: 0.85;
+    opacity: 0.45;
   }
   100% {
     opacity: 0;

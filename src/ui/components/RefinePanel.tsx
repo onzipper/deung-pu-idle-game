@@ -493,7 +493,10 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
               {isReveal && (
                 <span
                   aria-hidden
-                  className="animate-refine-flash pointer-events-none absolute inset-0 rounded-(--ddp-radius-md) bg-white"
+                  // Warm amber at reduced peak (0.45 via the keyframe) instead of white @0.85 —
+                  // a pure-white flash is painful for players in a dark room and risky for
+                  // photosensitive users (owner note 2026-07-08); the reveal beat stays.
+                  className="animate-refine-flash pointer-events-none absolute inset-0 rounded-(--ddp-radius-md) bg-amber-200"
                 />
               )}
               <div className="flex items-center gap-2">
