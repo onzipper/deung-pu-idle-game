@@ -805,7 +805,10 @@ export class GameRenderer {
 
     const bw = safeRadius(WORLD_WIDTH - 120);
     const bx = 60;
-    const by = 16;
+    // by 16 -> 24: the gold nameplate sits ABOVE this bar (plateY = by - plateH - 2);
+    // at by=16 that put the plate at world y=-4, clipped past the canvas top -> the
+    // boss NAME overflowed the screen (owner report 2026-07-08). 24 keeps plate y=2.
+    const by = 24;
     const bh = 16; // taller than the stage boss's 12px bar — reads as "bigger"
     const pct = boss.maxHp > 0 ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : 0;
 
