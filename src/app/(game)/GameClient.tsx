@@ -117,6 +117,7 @@ import {
   selectUiConfig,
   writeUiConfig,
   type DailyBoardSummary,
+  type CohortStatusState,
   type DailyQuestSummary,
   type EngineSnapshot,
   type HeroQuestSummary,
@@ -192,9 +193,18 @@ const WORLD_BOSS_REWARD_MATERIALS = 350;
 
 /** Party handshake deadline safety net (partySession.ts D1/D2 fixes). A re-seed exchange
  * that hasn't converged within `HANDSHAKE_DEADLINE_MS` is aborted + retried; a trip backs
- * the next window off to `HANDSHAKE_RETRY_MS` so a genuinely-absent peer doesn't thrash. */
-const HANDSHAKE_DEADLINE_MS = 10_000;
-const HANDSHAKE_RETRY_MS = 15_000;
+ * the next window off to `HANDSHAKE_RETRY_MS` so a genuinely-absent peer doesn't thrash.
+ * Tuned tight (RTT is ~42ms p95, the exchange is ~2 round-trips): a handshake still
+ * unconverged after 3s is genuinely stuck, so this is pure recovery latency for the rare
+ * lost-message case — kept far above the exchange time to never abort a live formation. */
+const HANDSHAKE_DEADLINE_MS = 3_000;
+const HANDSHAKE_RETRY_MS = 6_000;
+
+/** Grace before the "connecting" cohort chip is allowed to show. A same-zone re-form
+ * (leaving for a town trip + walking back) now converges in well under this, so a seamless
+ * re-join never flashes the chip at all; only a genuinely slow/stuck formation surfaces it.
+ * Any terminal chip state (active/solo/waiting/reconnecting) cancels a pending grace. */
+const CONNECTING_CHIP_GRACE_MS = 600;
 
 /** Wall-clock seconds between throttled engine -> UI snapshots. */
 const UI_SYNC_INTERVAL = 1 / CONFIG.uiSyncHz;
@@ -802,6 +812,27 @@ export function GameClient() {
      * after a trip so repeated failures don't thrash. Reset to base on a successful
      * `activateCohort()`/`collapseToSolo()`. */
     let handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS;
+    /** Grace timer for the "connecting" chip (see `CONNECTING_CHIP_GRACE_MS`): a re-form
+     * that resolves within the grace never flashes "connecting". `pushCohortStatus` is the
+     * single funnel for every chip transition — it DEFERS a "connecting" push and cancels
+     * that deferral the instant any terminal state (active/solo/waiting/reconnecting)
+     * arrives, so a seamless re-join goes straight solo/active -> active with no flicker. */
+    let connectingChipTimer: ReturnType<typeof setTimeout> | null = null;
+    function pushCohortStatus(status: CohortStatusState): void {
+      if (status.kind === "connecting") {
+        if (connectingChipTimer) return; // a grace is already pending — don't restart it
+        connectingChipTimer = setTimeout(() => {
+          connectingChipTimer = null;
+          useGameStore.getState().setCohortStatus({ kind: "connecting" });
+        }, CONNECTING_CHIP_GRACE_MS);
+        return;
+      }
+      if (connectingChipTimer) {
+        clearTimeout(connectingChipTimer);
+        connectingChipTimer = null;
+      }
+      useGameStore.getState().setCohortStatus(status);
+    }
     /** ECONOMY-INTEGRITY (cohortWallet.ts): my personal wallet AT THE MOMENT I joined
      * this cohort (my pre-cohort solo wallet, or the settled value from the prior cohort
      * on a re-seed) + the shared pot at that same moment. `virtualWallet(base, sharedBase,
@@ -856,7 +887,7 @@ export function GameClient() {
 
     function refreshCohortStatus(): void {
       if (!cohortActive) return;
-      useGameStore.getState().setCohortStatus({ kind: "active", names: [...cohortMemberNames.values()] });
+      pushCohortStatus({ kind: "active", names: [...cohortMemberNames.values()] });
       renderer.setHeroDisplayNames(currentHeroDisplayNames());
       pushHeroSocialBadges();
     }
@@ -998,7 +1029,7 @@ export function GameClient() {
       cohortMemberNames = new Map();
       renderer.setHeroDisplayNames(null);
       renderer.setPovHeroIndex(0);
-      useGameStore.getState().setCohortStatus({ kind: "solo" });
+      pushCohortStatus({ kind: "solo" });
       pushHeroSocialBadges(); // switch the nameplate/aura seam back to my solo badge
     }
 
@@ -1008,8 +1039,9 @@ export function GameClient() {
       handshake?.abort();
       // The one honest use of the "connecting" chip: a same-zone cohort exists and
       // the re-seed handshake is actually in flight (relay-connected states without
-      // a cohort show nothing — see `onPartyStatusChange`).
-      useGameStore.getState().setCohortStatus({ kind: "connecting" });
+      // a cohort show nothing — see `onPartyStatusChange`). Deferred by
+      // `pushCohortStatus` so a re-form that converges within the grace never flashes it.
+      pushCohortStatus({ kind: "connecting" });
       myTicketSlot = partySession.slot;
       // Pre-handshake, "my own hero" is `heroes[0]` while solo, or `heroes[myCohortIndex]`
       // if this is a re-seed of an ALREADY-active cohort (e.g. a 3rd member joins).
@@ -1084,17 +1116,17 @@ export function GameClient() {
         // event stream — stale shadow flags would wrongly exclude a now-live peer from the
         // next formation, so clear them and let fresh member-shadowed events re-populate.
         shadowedTicketSlots.clear();
-        useGameStore.getState().setCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
+        pushCohortStatus({ kind: "reconnecting" }); // overrides "solo" above
       } else if (status === "connecting" && !cohortActive) {
-        useGameStore.getState().setCohortStatus({ kind: "connecting" });
+        pushCohortStatus({ kind: "connecting" });
       } else if (status === "connected" && !cohortActive) {
         // Connected to the relay but no same-zone cohort (yet) — the chip's "solo"
         // (hidden) state, per its design. Without this branch the "connecting" label
         // from the previous status sticks forever while alone in a zone, reading as
         // a stuck connection when the session is actually live and waiting.
-        useGameStore.getState().setCohortStatus({ kind: "solo" });
+        pushCohortStatus({ kind: "solo" });
       } else if (status === "off" && !cohortActive) {
-        useGameStore.getState().setCohortStatus({ kind: "solo" });
+        pushCohortStatus({ kind: "solo" });
       }
     }
 
@@ -1135,7 +1167,7 @@ export function GameClient() {
         handshake?.abort();
         handshake = null;
         collapseToSolo();
-        useGameStore.getState().setCohortStatus({ kind: "solo" });
+        pushCohortStatus({ kind: "solo" });
         return;
       }
       const changed = !sameSlots(live, lastCohortSlots);
@@ -1635,7 +1667,7 @@ export function GameClient() {
         frameEvents = collected;
         // Map the engine's waiting flag onto the HUD chip on TRANSITIONS only.
         if (waiting && !cohortPrevWaiting) {
-          useGameStore.getState().setCohortStatus({ kind: "waiting" });
+          pushCohortStatus({ kind: "waiting" });
         } else if (!waiting && cohortPrevWaiting) {
           refreshCohortStatus(); // resumed — restore "active" (names)
         }
@@ -2436,6 +2468,7 @@ export function GameClient() {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
       if (autosaveTimer) clearInterval(autosaveTimer);
+      if (connectingChipTimer) clearTimeout(connectingChipTimer);
       unsubscribeReload?.();
       unsubscribeParty?.();
       unsubscribeSocialBadge?.();

@@ -243,11 +243,20 @@ export class PartySession {
     void this.connect(gen);
   }
 
-  /** Record my current zone + (re)broadcast a beat + re-derive the cohort locally. */
+  /** Record my current zone + (re)broadcast a beat + re-derive the cohort locally.
+   *
+   * ORDER MATTERS: the beat is broadcast BEFORE `recomputeCohort()` (which fires
+   * `onCohortChanged`, the hook the caller uses to send a reseed-offer). On the wire my
+   * arrival beat MUST precede that offer — a peer that dropped me while I roamed solo
+   * (town potion trip / warp) still lists only itself, so an offer that lands before my
+   * beat is discarded as foreign (`receiveOffer`'s cohort check) and the whole re-form
+   * stalls until the handshake deadline (~seconds — the "reconnecting every trip" seam).
+   * Beat-first, the peer re-derives the cohort from my beat and is ready for the offer
+   * that follows. The `welcome` handler already orders it this way; this must match. */
   setZone(mapId: string, zoneIdx: number): void {
     this.myZone = { mapId, zoneIdx };
-    this.recomputeCohort();
     if (this.status === "connected") this.broadcastZoneBeat();
+    this.recomputeCohort();
   }
 
   /** Send an opaque game payload (a lockstep `TurnMessage`, typically). No-op while
@@ -292,13 +301,19 @@ export class PartySession {
       this.setStatus("off");
       return;
     }
-    // Best-effort ONLY: prewake nudges a sleeping Render instance, but its result
-    // never gates the join — the websocket handshake below is exempt from CORS,
-    // wakes the instance just as well, and has its own retry path (ws close ->
-    // scheduleReconnect). Gating here once bricked party mode when a cross-origin
-    // /health response lacked CORS headers while the relay itself was healthy.
-    await this.prewake(ticket.relayUrl, gen);
-    if (gen !== this.generation) return;
+    // Prewake ONLY on a reconnect (`reconnectAttempt > 0`), never on the first attempt.
+    // A sleeping Render instance is only plausible AFTER a socket failure; on the happy
+    // path the relay is kept awake externally (UptimeRobot) and, failing that, the ws
+    // handshake below wakes it just as well and has its own retry (ws close ->
+    // scheduleReconnect, which bumps `reconnectAttempt` so the NEXT try prewakes). Firing
+    // the serial /health round-trip on every connect only added latency to the common
+    // case — the "long เชื่อมต่อ on join" seam. Best-effort even when it does run: its
+    // result never gates the join (the ws handshake is CORS-exempt; gating here once
+    // bricked party mode when a cross-origin /health lacked CORS headers).
+    if (this.reconnectAttempt > 0) {
+      await this.prewake(ticket.relayUrl, gen);
+      if (gen !== this.generation) return;
+    }
     this.mySlot = ticket.slot;
     this.openSocket(ticket.relayUrl, ticket.ticket, gen);
   }
