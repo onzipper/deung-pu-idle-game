@@ -66,7 +66,11 @@ describe("WorldSession — connect + zone switch", () => {
 
     expect(ws.me?.charId).toBe("c1");
     let frames = sock.parsed();
-    expect(frames).toEqual([{ t: "pjoin", v: 1, ticket: "TICKET", zone: "map-1:2" }]);
+    // Wave 3 "chat UI": cjoin now fires unconditionally on open, ahead of pjoin.
+    expect(frames).toEqual([
+      { t: "cjoin", v: 1, ticket: "TICKET" },
+      { t: "pjoin", v: 1, ticket: "TICKET", zone: "map-1:2" },
+    ]);
 
     sock.sent.length = 0;
     ws.setZone("map-1", 3);
@@ -107,6 +111,40 @@ describe("WorldSession — connect + zone switch", () => {
 
     expect(ghosts).toEqual([{ v: 1, cid: "peer" }]);
     expect(chats).toEqual([{ t: "c", entry: { text: "hi" } }]);
+  });
+
+  it("setPresenceEnabled(false) sends pleave and suppresses future pjoin; re-enabling rejoins", async () => {
+    const ws = new WorldSession({ onGhost: () => {} });
+    ws.setZone("map-1", 1);
+    ws.connect();
+    await flush();
+    const sock = instances[0];
+    sock.open();
+    sock.sent.length = 0;
+
+    ws.setPresenceEnabled(false);
+    expect(sock.parsed()).toEqual([{ t: "pleave", v: 1 }]);
+
+    sock.sent.length = 0;
+    ws.setZone("map-1", 2); // zone changes while disabled never pjoin
+    expect(sock.parsed()).toEqual([]);
+
+    sock.sent.length = 0;
+    ws.setPresenceEnabled(true); // re-enabling immediately pjoins the CURRENT zone
+    expect(sock.parsed()).toEqual([{ t: "pjoin", v: 1, ticket: "TICKET", zone: "map-1:2" }]);
+  });
+
+  it("sendChat sends a {t:'c',v:1,text} frame only while connected", async () => {
+    const ws = new WorldSession({ onGhost: () => {} });
+    ws.sendChat("too early"); // not connected -> dropped
+    ws.setZone("map-1", 1);
+    ws.connect();
+    await flush();
+    const sock = instances[0];
+    sock.open();
+    sock.sent.length = 0;
+    ws.sendChat("hello ดึ๋งปุ๊");
+    expect(sock.parsed()).toEqual([{ t: "c", v: 1, text: "hello ดึ๋งปุ๊" }]);
   });
 
   it("disconnect sends pleave, closes clean (1000), and clears identity", async () => {

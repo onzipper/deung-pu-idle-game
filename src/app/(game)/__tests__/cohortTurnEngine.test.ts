@@ -266,6 +266,74 @@ describe("CohortTurnEngine issue continues during a stall", () => {
 
 // ── (11) shadowed-slot auto-fill (fix A.1) ────────────────────────────────────────────
 
+// ── Wave 3 network HUD: bufferedAhead() exposure + perSlotLag() ──────────────────────
+
+describe("CohortTurnEngine bufferedAhead() (Wave 3, now public)", () => {
+  it("is callable from outside and reports 0 with an empty buffer beyond the pre-seed", () => {
+    const eng = new CohortTurnEngine(2, 0, 0);
+    // Pre-seeded turns 0..INPUT_DELAY_TURNS-1 are fully buffered at construction time.
+    expect(eng.bufferedAhead()).toBe(INPUT_DELAY_TURNS);
+  });
+});
+
+describe("CohortTurnEngine perSlotLag() (Wave 3 network HUD)", () => {
+  it("reports the full INPUT_DELAY_TURNS gap for a peer index with no delivered lane yet", () => {
+    const eng = new CohortTurnEngine(2, 0, 0);
+    expect(eng.perSlotLag().get(1)).toBe(INPUT_DELAY_TURNS);
+  });
+
+  it("excludes my own index and any shadowed index from the map", () => {
+    const eng = new CohortTurnEngine(3, 0, 0);
+    eng.setSlotShadowed(2, true);
+    const lag = eng.perSlotLag();
+    expect(lag.has(0)).toBe(false); // never reports on myself
+    expect(lag.has(2)).toBe(false); // shadowed — excluded
+    expect(lag.has(1)).toBe(true);
+  });
+
+  it("stays flat at INPUT_DELAY_TURNS for a never-delivering peer even as I keep issuing", () => {
+    const rec = makeRecorder(idle);
+    const eng = new CohortTurnEngine(2, 0, 0); // slot 1 never delivers anything
+    let now = 0;
+    for (let t = 0; t < 30; t++) {
+      now += 50;
+      eng.tick(50, now, rec.io);
+    }
+    expect(rec.sent.length).toBeGreaterThan(5); // confirms issuance actually advanced
+    expect(eng.perSlotLag().get(1)).toBe(INPUT_DELAY_TURNS);
+  });
+
+  it("grows for a peer lane that stopped updating while I keep issuing", () => {
+    const rec = makeRecorder(idle);
+    const eng = new CohortTurnEngine(2, 0, 0);
+    eng.deliver({ slot: 1, executeTurn: 5, input: {} }); // one lane, then silence
+    let now = 0;
+    while (rec.sent.length < 10) {
+      now += 50;
+      eng.tick(50, now, rec.io);
+    }
+    const issueTurn = rec.sent.length; // issueTurn increments 1:1 with each self-send
+    expect(eng.perSlotLag().get(1)).toBe(issueTurn - 5);
+  });
+
+  it("reads ~0 for a peer whose lane keeps pace with mine", () => {
+    const recA = makeRecorder(idle, (m) => engB.deliver(m));
+    const recB = makeRecorder(idle, (m) => engA.deliver(m));
+    const engA = new CohortTurnEngine(2, 0, 0);
+    const engB = new CohortTurnEngine(2, 1, 0);
+    let now = 0;
+    for (let t = 0; t < 30; t++) {
+      now += SUB_STEP_MS;
+      engA.tick(SUB_STEP_MS, now, recA.io);
+      engB.tick(SUB_STEP_MS, now, recB.io);
+    }
+    // Both issue at the same real-time cadence, so each sees the other essentially caught
+    // up — never more than a turn or two behind (never the full stale-fallback constant).
+    expect(engA.perSlotLag().get(1)).toBeLessThan(INPUT_DELAY_TURNS);
+    expect(engB.perSlotLag().get(0)).toBeLessThan(INPUT_DELAY_TURNS);
+  });
+});
+
 describe("CohortTurnEngine shadowed-slot auto-fill (fix A.1)", () => {
   it("a never-sending index stalls both peers until shadowed, then both advance with {} auto-fill", () => {
     // Distinct scripts per live slot so any lane mixing would show; slot 2 has NO engine

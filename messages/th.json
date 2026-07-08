@@ -1078,7 +1078,8 @@
       "stones": "ยังพิชิตศิลาไม่ครบทุกโซน",
       "gold": "ทองไม่พอ",
       "materials": "หินเสริมพลังไม่พอ"
-    }
+    },
+    "chatRateLimited": "พิมพ์เร็วไปหน่อย รอแป๊บนึงแล้วส่งใหม่นะ"
   },
   "refine": {
     "openButton": "ตีบวก",
@@ -1491,7 +1492,22 @@
     "connecting": "กำลังเชื่อมต่อปาร์ตี้…",
     "playingWith": "เล่นกับ {names} ในโซนนี้",
     "waiting": "รอเพื่อน…",
-    "reconnecting": "กำลังเชื่อมต่อใหม่…"
+    "reconnecting": "กำลังเชื่อมต่อใหม่…",
+    "signalChipLabel": "สถานะการเชื่อมต่อปาร์ตี้",
+    "signalPopoverTitle": "สัญญาณปาร์ตี้",
+    "signalRelayRow": "ไปเซิร์ฟเวอร์",
+    "signalNoMembers": "ยังไม่มีเพื่อนร่วมวง",
+    "signalUnknownMember": "เพื่อนร่วมทีม",
+    "signalShadowed": "หลุดการเชื่อมต่อ"
+  },
+  "chat": {
+    "openButton": "เปิดแชท",
+    "title": "แชทโลก",
+    "closeButton": "ปิด",
+    "hint": "ข้อความเก็บไว้ 30 นาที",
+    "placeholder": "พิมพ์ข้อความ…",
+    "sendButton": "ส่ง",
+    "empty": "ยังไม่มีข้อความ ทักทายกันหน่อยสิ!"
   },
   "buffHub": {
     "source": {

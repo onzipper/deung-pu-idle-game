@@ -1078,7 +1078,8 @@
       "stones": "Haven't mastered every zone yet",
       "gold": "Not enough gold",
       "materials": "Not enough refine stones"
-    }
+    },
+    "chatRateLimited": "Sending too fast — wait a moment and try again"
   },
   "refine": {
     "openButton": "Refine",
@@ -1491,7 +1492,22 @@
     "connecting": "Connecting to party…",
     "playingWith": "Playing with {names} in this zone",
     "waiting": "Waiting for teammate…",
-    "reconnecting": "Reconnecting…"
+    "reconnecting": "Reconnecting…",
+    "signalChipLabel": "Party connection status",
+    "signalPopoverTitle": "Party signal",
+    "signalRelayRow": "To server",
+    "signalNoMembers": "No teammates yet",
+    "signalUnknownMember": "Teammate",
+    "signalShadowed": "disconnected"
+  },
+  "chat": {
+    "openButton": "Open chat",
+    "title": "World Chat",
+    "closeButton": "Close",
+    "hint": "Messages are kept for 30 minutes",
+    "placeholder": "Type a message…",
+    "sendButton": "Send",
+    "empty": "No messages yet — say hi!"
   },
   "buffHub": {
     "source": {

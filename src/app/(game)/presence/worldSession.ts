@@ -17,8 +17,9 @@ interface WorldSessionHandlers {
   /** A peer presence snapshot (`{t:"p",payload}` frame). The RAW payload — the caller's
    *  `GhostStore` validates it. This is the entire presence write surface. */
   onGhost: (payload: unknown) => void;
-  /** A chat frame (`c` / `c-history` / `c-rej`). Buffered for a later chat UI (not in
-   *  this wave's scope) — kept as an opaque forward so the socket layer is chat-ready. */
+  /** A chat frame (`{t:"c"|"c-history"|"c-rej", ...}`), RAW and unvalidated — the
+   *  caller's `ui/chat/chatMessages.ts#parseChatFrame` is the one place that trusts its
+   *  shape (THE ONE RULE, module doc: this class never inspects chat content itself). */
   onChat?: (frame: unknown) => void;
   /** Diagnostic connection-status hook (optional). */
   onStatus?: (status: WorldConnStatus) => void;
@@ -48,6 +49,14 @@ export class WorldSession {
   private status: WorldConnStatus = "off";
   private myZone: string | null = null;
   private wantConnected = false;
+  /** Wave 3 "chat UI": the socket now opens for EITHER ghost-presence OR chat (the
+   *  caller decouples the two — see `GameClient.tsx`'s `syncWorldSessionActive`). When
+   *  presence itself is off (`ghostsVisible` false but chat is open), this stays `false`
+   *  so `pjoin`/`p` never fire — the connection exists for chat only. Global chat
+   *  (`cjoin`/`c`) is unconditional once connected, independent of this flag. Defaults
+   *  `true` so a caller that never touches it (tests, older call sites) keeps the
+   *  original always-join-presence behavior. */
+  private presenceEnabled = true;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped on every teardown/connect so a slow in-flight ticket fetch from a superseded
@@ -108,22 +117,46 @@ export class WorldSession {
 
   /** Record my current zone and (re)join its presence room. Zone switch = pleave + pjoin
    *  (design §3.1). No-op transport side while not connected — `pjoin` is (re)sent on the
-   *  next successful open. */
+   *  next successful open. `myZone` is tracked even while `presenceEnabled` is false, so
+   *  flipping it back on later (`setPresenceEnabled(true)`) can join the CURRENT zone
+   *  immediately instead of waiting for the next zone change. */
   setZone(mapId: string, zoneIdx: number): void {
     const zone = `${mapId}:${zoneIdx}`;
     if (zone === this.myZone) return;
     this.myZone = zone;
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.presenceEnabled && this.ws?.readyState === WebSocket.OPEN) {
       this.sendRaw({ t: "pleave", v: 1 });
       this.joinPresence();
     }
   }
 
+  /** Wave 3 "chat UI": gate presence room membership independently of the socket's own
+   *  connect/disconnect lifecycle (`GameClient.tsx` may now keep the socket open for chat
+   *  alone while `ghostsVisible` is off). Turning it off `pleave`s immediately; turning it
+   *  on `pjoin`s the current zone immediately if already connected. Chat (`cjoin`/`c`) is
+   *  entirely unaffected by this flag. */
+  setPresenceEnabled(enabled: boolean): void {
+    if (this.presenceEnabled === enabled) return;
+    this.presenceEnabled = enabled;
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    if (enabled) this.joinPresence();
+    else this.sendRaw({ t: "pleave", v: 1 });
+  }
+
   /** Publish MY presence snapshot (one-way; there is no echo/apply path — invariant #6).
-   *  Dropped silently while not connected or before a zone is known. */
+   *  Dropped silently while not connected, before a zone is known, or while presence is
+   *  disabled (`setPresenceEnabled(false)`). */
   publish(payload: unknown): void {
-    if (this.ws?.readyState !== WebSocket.OPEN || !this.myZone) return;
+    if (!this.presenceEnabled || this.ws?.readyState !== WebSocket.OPEN || !this.myZone) return;
     this.sendRaw({ t: "p", v: 1, payload });
+  }
+
+  /** Wave 3 "chat UI": send one chat message. Server-side (`scripts/party-relay/server.js`)
+   *  bounds it to 120 chars / 1-per-2s per connection and stamps `{name,charId}` FROM the
+   *  ticket — this is a thin, trusting wrapper; a rejection comes back as a `c-rej` frame
+   *  via `onChat`, not a return value here. No-op while not connected. */
+  sendChat(text: string): void {
+    this.sendRaw({ t: "c", v: 1, text });
   }
 
   private setStatus(s: WorldConnStatus): void {
@@ -141,9 +174,17 @@ export class WorldSession {
   }
 
   private joinPresence(): void {
-    if (!this.identity || !this.myZone) return;
+    if (!this.presenceEnabled || !this.identity || !this.myZone) return;
     // Re-mint isn't needed per-zone: the ticket authorizes the connection, not the room.
     this.sendRaw({ t: "pjoin", v: 1, ticket: this.currentTicket, zone: this.myZone });
+  }
+
+  /** Wave 3 "chat UI": join the ONE server-wide chat room — unconditional (independent of
+   *  `presenceEnabled`), so a socket kept open for chat-only still gets history + live
+   *  messages. The relay replies with `{t:"c-history", entries}` immediately on join. */
+  private joinChat(): void {
+    if (!this.identity) return;
+    this.sendRaw({ t: "cjoin", v: 1, ticket: this.currentTicket });
   }
 
   private currentTicket = "";
@@ -190,7 +231,8 @@ export class WorldSession {
       if (gen !== this.generation) return;
       this.reconnectAttempt = 0;
       this.setStatus("connected");
-      this.joinPresence(); // pjoin with my current zone (if known)
+      this.joinChat(); // cjoin (Wave 3): unconditional — chat works even with presence off
+      this.joinPresence(); // pjoin with my current zone, gated on `presenceEnabled`
     };
     ws.onmessage = (ev: MessageEvent) => {
       if (gen !== this.generation) return;

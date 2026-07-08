@@ -53,6 +53,12 @@ import {
 import type { InventoryItem, ItemInstanceWire, SellItemResultWire } from "@/ui/gear/types";
 import { ingestAnnouncements } from "@/ui/announcements/queue";
 import type { AnnouncementEntry, AnnouncementWire } from "@/ui/announcements/types";
+import {
+  capChatMessages,
+  nextUnreadCount,
+  type ChatMessage,
+  type RawChatEntry,
+} from "@/ui/chat/chatMessages";
 import type { PartyWire } from "@/ui/friends/types";
 
 /**
@@ -1013,6 +1019,11 @@ export interface NoticeEntry {
 const MAX_NOTICES = 3;
 let noticeSeq = 0;
 
+/** Wave 3 "global chat" — a plain incrementing id for the React key (the relay never
+ *  hands us one; `${charId}:${t}` could collide within the same ms). Module-level like
+ *  `noticeSeq`/`dropFeedSeq` above. */
+let chatMsgSeq = 0;
+
 /** In-flight fast-travel channel UI state (M7.5), or `null`. `key` bumps on
  * every NEW channel start so the CSS progress-bar animation restarts even if
  * the target zone is the same as a previous (blocked/completed) attempt. */
@@ -1037,6 +1048,35 @@ export type CohortStatusState =
   /** A cohort member's turn lane hasn't arrived in ~2s — the sim is paused for them. */
   | { kind: "waiting" }
   | { kind: "reconnecting" };
+
+/**
+ * M8 party Wave 3 "signal chip" (docs/ghost-presence-design.md) — the network-quality
+ * popover's data, pushed by `GameClient.tsx` at ~1Hz (RTT itself is EMA-smoothed off a
+ * ~5s ping/pong cadence, see `app/(game)/cohortNet.ts#emaRtt`). Distinct from
+ * `cohortStatus` (which drives whether the chip renders at all / its pulsing state) —
+ * this only carries the DETAIL shown in the tap-to-open popover, so it can lag a beat
+ * behind a status transition without any visible glitch. */
+export interface CohortNetMember {
+  /** The member's PARTY TICKET slot (0..5) — never a userId/cuid. */
+  slot: number;
+  /** Resolved display name, or `null` if not yet known (see `resolveMemberDisplayName`). */
+  name: string | null;
+  /** `myIssueTurn - theirLastReceivedExecuteTurn` (see `CohortTurnEngine#perSlotLag`) —
+   *  the popover multiplies by `TURN_MS` for a "Nms behind" display figure. */
+  lagTurns: number;
+  shadowed: boolean;
+}
+
+export interface CohortNetState {
+  /** EMA-smoothed round-trip to the relay over the PARTY socket, or `null` before the
+   *  first pong lands. */
+  rttMs: number | null;
+  /** The ticket slot the chip should visually call out while `cohortStatus.kind ===
+   *  "waiting"` (the laggiest member) — `null` outside that state. */
+  waitingOnSlot: number | null;
+  /** Every OTHER live cohort member (never includes me) — empty while solo. */
+  perMember: CohortNetMember[];
+}
 
 /**
  * World boss "เสี่ยจ๋อง" (hourly world boss) HUD status — display-ready, pushed by
@@ -1163,8 +1203,24 @@ export interface HudState {
   party: PartyWire | null;
   /** The lockstep cohort HUD chip's state — see `CohortStatusState`'s doc. */
   cohortStatus: CohortStatusState;
+  /** Wave 3 signal-chip popover detail — see `CohortNetState`'s doc. */
+  cohortNet: CohortNetState;
   /** World boss "เสี่ยจ๋อง" countdown-banner state — see `WorldBossStatus`'s doc. */
   worldBossStatus: WorldBossStatus;
+
+  // ---- Wave 3 "global chat" (docs/ghost-presence-design.md) — carried over the
+  // SEPARATE world socket (`presence/worldSession.ts`), never the party/lockstep one.
+  // Pure parse/prune/unread math lives in `ui/chat/chatMessages.ts`; this store only
+  // holds the resulting state + the fire-once send intent. ----
+  /** Newest-last, capped to `CHAT_MAX_MESSAGES` — the panel prunes to the 30-min window
+   *  at RENDER time (`pruneToWindow`), so the store itself never needs a background
+   *  timer. Works for guests too (server allows guest chat, no moderation v1). */
+  chatMessages: ChatMessage[];
+  /** Unread count while the panel is closed (`nextUnreadCount`) — cleared to 0 on open. */
+  chatUnread: number;
+  /** Chat panel open/closed — ALSO gates whether `GameClient.tsx` keeps the world socket
+   *  open for chat alone when `ghostsVisible` is off (see `syncWorldSessionActive`). */
+  chatOpen: boolean;
 
   // ---- HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) ----
   /** MY OWN chosen title (already localized, via `ui/hof/titles.ts`) + champion
@@ -1509,8 +1565,22 @@ export interface HudState {
   /** `GameClient.tsx`-only: reflect the cohort session's current state into the HUD
    * chip — see `cohortStatus`'s doc. */
   setCohortStatus: (status: CohortStatusState) => void;
+  /** `GameClient.tsx`-only: ~1Hz push of the signal-chip popover detail — see
+   * `cohortNet`'s doc. */
+  setCohortNet: (net: CohortNetState) => void;
   /** `GameClient.tsx`-only: see `mySocialBadge`'s doc. */
   setMySocialBadge: (badge: { title: string | null; champion: boolean } | null) => void;
+
+  // ---- Wave 3 "global chat" ----
+  /** `GameClient.tsx`-only: a `c-history` frame just landed — replaces `chatMessages`
+   * wholesale (never bumps `chatUnread`; a history dump on (re)join isn't a "new"
+   * message). */
+  ingestChatHistory: (entries: RawChatEntry[]) => void;
+  /** `GameClient.tsx`-only: one live `c` frame — appends + bumps `chatUnread` per
+   * `nextUnreadCount`. */
+  ingestChatMessage: (entry: RawChatEntry) => void;
+  /** `ChatButton.tsx`-only: open/close the panel — opening clears `chatUnread`. */
+  setChatOpen: (open: boolean) => void;
 
   // ---- World boss "เสี่ยจ๋อง" ----
   /** `GameClient.tsx`-only: push the countdown-banner state on a TRANSITION (see
@@ -1627,8 +1697,13 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   party: null,
   cohortStatus: { kind: "solo" },
+  cohortNet: { rttMs: null, waitingOnSlot: null, perMember: [] },
   worldBossStatus: { kind: "idle" },
   mySocialBadge: null,
+
+  chatMessages: [],
+  chatUnread: 0,
+  chatOpen: false,
 
   myCharacterId: null,
   announcementQueue: [],
@@ -1934,7 +2009,17 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   setParty: (party) => set({ party }),
   setCohortStatus: (status) => set({ cohortStatus: status }),
+  setCohortNet: (net) => set({ cohortNet: net }),
   setMySocialBadge: (badge) => set({ mySocialBadge: badge }),
+
+  ingestChatHistory: (entries) =>
+    set({ chatMessages: capChatMessages(entries.map((e) => ({ ...e, id: `chat-${chatMsgSeq++}` }))) }),
+  ingestChatMessage: (entry) =>
+    set((s) => ({
+      chatMessages: capChatMessages([...s.chatMessages, { ...entry, id: `chat-${chatMsgSeq++}` }]),
+      chatUnread: nextUnreadCount(s.chatUnread, s.chatOpen),
+    })),
+  setChatOpen: (open) => set((s) => ({ chatOpen: open, chatUnread: open ? 0 : s.chatUnread })),
 
   setWorldBossStatus: (status) => set({ worldBossStatus: status }),
   queueSpawnWorldBoss: (windowId, remainingSeconds, hp) =>

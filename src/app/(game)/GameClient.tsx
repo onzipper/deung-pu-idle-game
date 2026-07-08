@@ -126,6 +126,7 @@ import {
   writeUiConfig,
   type DailyBoardSummary,
   type CohortStatusState,
+  type CohortNetState,
   type DailyQuestSummary,
   type EngineSnapshot,
   type HeroQuestSummary,
@@ -168,6 +169,7 @@ import {
   type PartyConnStatus,
 } from "./partySession";
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
+import { emaRtt, pickWaitingSlot } from "./cohortNet";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
@@ -192,6 +194,8 @@ import { TimeDirector } from "./timeDirector";
 import { WorldSession } from "./presence/worldSession";
 import { GhostStore, GHOST_CAP_DEFAULT } from "./presence/ghostStore";
 import { buildPresenceSnapshot, shouldPublish, type PresenceSnapshot } from "./presence/presencePublish";
+import { parseChatFrame } from "@/ui/chat/chatMessages";
+import { onSendChatRequest } from "@/ui/chat/chatSendSignal";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
  * relay `g` payloads (handshake messages / lockstep `TurnMessage`s) — mirrors
@@ -271,6 +275,12 @@ const AUTOSAVE_INTERVAL_MS = 30_000;
 /** Ghost-presence publish cadence (~3Hz, docs/ghost-presence-design.md §3). One snapshot
  * of MY hero per beat, sent only when it changed or every 3rd beat (keepalive). */
 const PRESENCE_BEAT_MS = 330;
+
+/** Wave 3 network HUD (docs/ghost-presence-design.md): RTT ping cadence over the PARTY
+ * socket (relay echoes it point-to-point) and the `cohortNet` store-push cadence. Both
+ * are wall-clock accumulators like `PRESENCE_BEAT_MS` above, not per-rAF-frame writes. */
+const COHORT_PING_INTERVAL_MS = 5_000;
+const COHORT_NET_PUSH_MS = 1_000;
 
 /**
  * Wall-clock budget for replaying capped offline-idle time synchronously on
@@ -918,6 +928,15 @@ export function GameClient() {
     let cohortPrevWaiting = false;
     let lastZoneKey: string | null = null;
 
+    // ---- Wave 3 "signal chip" network HUD (docs/ghost-presence-design.md) ----
+    /** EMA-smoothed RTT to the relay over the PARTY socket (`partySession.ping`'s pong
+     * echo), or `null` before the first sample. Survives cohort collapse/reform (still
+     * meaningful once reconnected — a fresh EMA seed on the next pong reads fine either
+     * way, so this is deliberately never reset). */
+    let cohortRttMs: number | null = null;
+    let cohortPingAccumMs = 0;
+    let cohortNetAccumMs = 0;
+
     // ---- HOF seasonal rewards (owner-approved docs/hof-rewards-design.md) ----
     /** At most one `/api/hof/rewards` fetch in flight — refreshed on every town
      * arrival (cheap read; also the lazy-finalize trigger, see `refreshHofOnTownArrival`'s
@@ -1149,6 +1168,12 @@ export function GameClient() {
       renderer.setHeroDisplayNames(null);
       renderer.setPovHeroIndex(0);
       pushCohortStatus({ kind: "solo" });
+      // Wave 3 network HUD: clear the popover's stale member rows immediately (the chip
+      // itself is already hidden by "solo" above — this just keeps `cohortNet` honest for
+      // the instant something reads it before the next push). RTT survives (still
+      // meaningful — the party socket itself may still be connected).
+      cohortNetAccumMs = 0;
+      useGameStore.getState().setCohortNet({ rttMs: cohortRttMs, waitingOnSlot: null, perMember: [] });
       pushHeroSocialBadges(); // switch the nameplate/aura seam back to my solo badge
     }
 
@@ -1412,6 +1437,11 @@ export function GameClient() {
       onGameMessage: onPartyGameMessage,
       onStatusChange: onPartyStatusChange,
       onMemberShadowChanged: onPartyMemberShadowChanged,
+      // Wave 3 network HUD: `n` is the `Date.now()` I stamped the ping with, so the
+      // round trip is just "now minus that" — EMA-smoothed for display stability.
+      onPong: (n) => {
+        cohortRttMs = emaRtt(cohortRttMs, Date.now() - n, 0.3);
+      },
     });
 
     // ---- Ghost presence "world layer" (docs/ghost-presence-design.md). A SEPARATE socket
@@ -1422,9 +1452,20 @@ export function GameClient() {
     const ghostStore = new GhostStore();
     const worldSession = new WorldSession({
       onGhost: (payload) => ghostStore.upsert(payload, performance.now()),
-      // Chat frames are buffered by the socket layer for a later chat UI (out of scope);
-      // no-op consumer for now keeps the socket chat-ready without wiring UI.
-      onChat: () => {},
+      // Wave 3 "chat UI": parse the raw relay frame (the ONE place that trusts its
+      // shape, see `ui/chat/chatMessages.ts`) and hand the typed result straight to the
+      // store — mirrors `onGhost` -> `ghostStore.upsert` above, just a different sink.
+      onChat: (frame) => {
+        const parsed = parseChatFrame(frame);
+        if (!parsed) return;
+        if (parsed.kind === "history") {
+          useGameStore.getState().ingestChatHistory(parsed.entries);
+        } else if (parsed.kind === "message") {
+          useGameStore.getState().ingestChatMessage(parsed.entry);
+        } else {
+          useGameStore.getState().pushNotice("chatRateLimited");
+        }
+      },
     });
     /** Presence publish accumulator (≈330ms beat) + monotonic seq + last-SENT snapshot for
      * change detection. Purely local publish bookkeeping — never read by the sim. */
@@ -1436,12 +1477,19 @@ export function GameClient() {
      * struggling device sheds ghost rigs first. Client-local, display-only. */
     let ghostFpsEmaMs = 1000 / 60;
     let ghostCap = GHOST_CAP_DEFAULT;
-    /** Drives `worldSession.connect/disconnect`: on only while the store flag is set AND
-     * the tab is visible. Recomputed by `syncWorldSessionActive()`. */
+    /** Drives `worldSession.connect/disconnect`: on only while EITHER the ghosts flag is
+     * set OR the chat panel is open, AND the tab is visible. Recomputed by
+     * `syncWorldSessionActive()`. */
     let ghostsFeatureOn = useGameStore.getState().ghostsVisible;
+    /** Wave 3 "chat UI": the socket must stay open while the chat panel is open even if
+     * ghost-presence is off — decoupled per docs/ghost-presence-design.md Wave 3. */
+    let chatFeatureOn = useGameStore.getState().chatOpen;
     let unsubscribeGhosts: (() => void) | undefined;
+    let unsubscribeChatOpen: (() => void) | undefined;
+    let unsubscribeChatSend: (() => void) | undefined;
     function syncWorldSessionActive(): void {
-      const active = ghostsFeatureOn && document.visibilityState === "visible";
+      const active = (ghostsFeatureOn || chatFeatureOn) && document.visibilityState === "visible";
+      worldSession.setPresenceEnabled(ghostsFeatureOn);
       if (active) {
         worldSession.connect();
       } else {
@@ -1986,6 +2034,45 @@ export function GameClient() {
           step(state, i === 0 ? firstInput : {});
           frameEvents.push(...state.events);
         }
+      }
+
+      // ---- Wave 3 "signal chip" network HUD (docs/ghost-presence-design.md) ----
+      // RTT ping over the PARTY socket (~5s cadence; `partySession.ping` no-ops
+      // internally while the socket isn't OPEN, so this accumulator can run
+      // unconditionally without an extra "am I connected" branch here) + a ~1Hz push of
+      // per-member lane lag/names into `cohortNet` for the chip's tap-to-open popover.
+      cohortPingAccumMs += elapsed * 1000;
+      if (cohortPingAccumMs >= COHORT_PING_INTERVAL_MS) {
+        cohortPingAccumMs -= COHORT_PING_INTERVAL_MS;
+        partySession.ping(Date.now());
+      }
+      if (cohortActive && cohortEngine) {
+        cohortNetAccumMs += elapsed * 1000;
+        if (cohortNetAccumMs >= COHORT_NET_PUSH_MS) {
+          cohortNetAccumMs = 0;
+          const lagMap = cohortEngine.perSlotLag();
+          const perMember: CohortNetState["perMember"] = [];
+          lastCohortSlots.forEach((ticketSlot, idx) => {
+            if (ticketSlot === myTicketSlot) return;
+            perMember.push({
+              slot: ticketSlot,
+              name: cohortMemberNames.get(ticketSlot) ?? null,
+              lagTurns: lagMap.get(idx) ?? 0,
+              shadowed: shadowedTicketSlots.has(ticketSlot),
+            });
+          });
+          useGameStore.getState().setCohortNet({
+            rttMs: cohortRttMs,
+            waitingOnSlot: pickWaitingSlot(cohortPrevWaiting, perMember),
+            perMember,
+          });
+        }
+      } else if (cohortNetAccumMs !== 0) {
+        // Cohort just ended — clear the stale member rows once (cheap transition-only
+        // write; `cohortNetAccumMs` only ever moves inside the branch above, so this
+        // guard fires exactly once per collapse, never every solo frame).
+        cohortNetAccumMs = 0;
+        useGameStore.getState().setCohortNet({ rttMs: cohortRttMs, waitingOnSlot: null, perMember: [] });
       }
 
       // ---- Ghost presence (render-only; THE ONE RULE — never touches `state`) ----
@@ -2851,6 +2938,20 @@ export function GameClient() {
           syncWorldSessionActive();
         }
       });
+      // Wave 3 "chat UI": the chat panel opening/closing ALSO drives the world socket
+      // lifecycle (decoupled from `ghostsVisible` — see `syncWorldSessionActive`'s doc).
+      chatFeatureOn = useGameStore.getState().chatOpen;
+      unsubscribeChatOpen = useGameStore.subscribe((next, prev) => {
+        if (next.chatOpen !== prev.chatOpen) {
+          chatFeatureOn = next.chatOpen;
+          syncWorldSessionActive();
+        }
+      });
+      // Wave 3 "chat UI": the panel's send button reaches the live `worldSession`
+      // instance through this signal (same "UI dispatches, GameClient's loop/effect
+      // drains it" shape as `updateReloadRequested` above, just a CustomEvent instead of
+      // a store field since sending is repeatable/non-engine — see `chatSendSignal.ts`).
+      unsubscribeChatSend = onSendChatRequest((text) => worldSession.sendChat(text));
       syncWorldSessionActive();
 
       // HOF seasonal rewards: the Settings title picker (`TitleSection.tsx`)
@@ -2887,6 +2988,8 @@ export function GameClient() {
       unsubscribeParty?.();
       unsubscribeSocialBadge?.();
       unsubscribeGhosts?.();
+      unsubscribeChatOpen?.();
+      unsubscribeChatSend?.();
       partySession.teardown();
       worldSession.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
