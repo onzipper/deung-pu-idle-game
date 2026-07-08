@@ -25,6 +25,10 @@ export interface FriendWire {
   title: string | null;
   /** Holds a gold-aura title (rank-1 of level/power/gold — NOT online). */
   champion: boolean;
+  /** True iff this friend already belongs to SOME party (mine or another) —
+   *  drives the "🤝 already in a party" chip. The invite button stays enabled
+   *  regardless (owner-approved informed-manual flow) — see `FriendsPanel.tsx`. */
+  inParty: boolean;
 }
 
 export interface IncomingRequestWire {

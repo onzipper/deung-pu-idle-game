@@ -1427,10 +1427,10 @@ export class FxController {
           this.travelPortal.cancelChannel();
           break;
         case "moveOrdered":
-          this.onMoveOrdered(ev.x);
+          this.onMoveOrdered(ev.x, ev.heroIdx);
           break;
         case "targetLocked":
-          this.onTargetLocked(ev.id, state);
+          this.onTargetLocked(ev.id, ev.heroIdx, state);
           break;
         case "tomePageFound":
           this.onTomePageFound(ev, state);
@@ -1733,8 +1733,17 @@ export class FxController {
    * concentric fading rings at the (already-clamped) `moveOrdered.x`, jewel-
    * tone `orderMove` on the shared `RingPool` (flat-alpha stroked circles,
    * never additive — footgun 10). Ground-anchored like every other
-   * effectively-1D-on-x beat in this file. */
-  private onMoveOrdered(x: number): void {
+   * effectively-1D-on-x beat in this file.
+   *
+   * POV-gated (owner bug batch A #3, "tap-ring pov-only"): `moveOrdered` fires
+   * for WHICHEVER cohort lane the command landed on (every client's `state`
+   * carries every member's command — lockstep shares one `GameState`), so
+   * without this gate a peer's own ground tap rang on every OTHER member's
+   * screen too. Same convention as the skill-spectacle pov gate elsewhere in
+   * this file (`ev.slot === this.povHeroIndex`). Solo is always heroIdx 0 ===
+   * the default `povHeroIndex` 0 — pixel-identical. */
+  private onMoveOrdered(x: number, heroIdx: number): void {
+    if (heroIdx !== this.povHeroIndex) return;
     for (const r of MOVE_MARKER_RINGS) {
       this.rings.spawn({
         x,
@@ -1752,8 +1761,12 @@ export class FxController {
    * at the target's CURRENT position (on top of `updateTargetLock()`'s own
    * persistent reticle, which keeps tracking it every frame after). A no-op
    * if the target already despawned the same instant (render lags the
-   * engine by nothing here, but a defensive lookup costs nothing). */
-  private onTargetLocked(id: number, state: GameState): void {
+   * engine by nothing here, but a defensive lookup costs nothing).
+   *
+   * POV-gated for the same reason as `onMoveOrdered` above — a peer's tap-a-
+   * monster order must not pulse-ring on my screen. */
+  private onTargetLocked(id: number, heroIdx: number, state: GameState): void {
+    if (heroIdx !== this.povHeroIndex) return;
     const enemy = state.enemies.find((e) => e.id === id);
     if (!enemy) return;
     this.rings.spawn({

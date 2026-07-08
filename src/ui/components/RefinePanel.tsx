@@ -9,16 +9,25 @@
  * SERVER-AUTHORITATIVE roll (CLAUDE.md — the client never rolls): this panel
  * only reads `@/engine/config/refine`'s pure DISPLAY helpers (`refineCost`,
  * `successChanceForLevel`, `failModeForLevel`) to show cost/odds BEFORE the
- * attempt, then calls `ui/gear/refineFlow.ts`'s `executeRefine` (POST first,
- * store-apply on response) and owns the JUICE timing around that call:
+ * attempt, then calls `ui/gear/refineFlow.ts`'s `executeRefine` (POST only —
+ * no store mutation) and drives `ui/gear/refineReveal.ts`'s pure reveal state
+ * machine around it.
  *
- *   click -> ~1s anticipation build-up (hammer-strike ticks, charging glow) —
- *   the network call fires immediately in parallel and is awaited alongside a
- *   minimum suspense timer (`Promise.all`), so a fast response never feels
- *   instant and a slow one never extends past the visual build-up finishing
- *   late -> reveal: success (flash + rising "+N!" + chime), degrade (dull thud
- *   + falling "-1"), break (shatter burst + red screen-edge flash + somber
- *   sting).
+ * Reveal redesign (owner: "ผลลัพธ์เผยตอนค้อนลงเท่านั้น" — the result must NEVER be
+ * visible before the final hammer strike lands): the network call fires
+ * immediately on click, but EVERY visible update (the +N level, gold/stones,
+ * item list, equipped stats, outcome text) is withheld in `refineReveal.ts`'s
+ * `held` value until the state machine transitions into `{ kind: "reveal" }` —
+ * see that module's doc for the exact invariant. Choreography:
+ *
+ *   click -> locks the button -> `beatPlanFor()` picks a 2/3/4-beat slow->fast
+ *   hammer sequence (2 for a guaranteed-success "ใช้แกร่ง" fortify, 3 for the
+ *   safe/degrade bands, 4 + a subtle shake for the +8..+10 break band) ->
+ *   final strike lands -> white flash -> REVEAL at that exact frame: success
+ *   (rising "+N!" + chime), degrade (dull thud + falling "-1"), break (shatter
+ *   burst + red screen-edge flash + somber sting). `applyRefineResult` (the
+ *   actual store commit) is called from THIS reveal transition, not from the
+ *   network response — see the `revealState` effect below.
  *
  * Audio: a dedicated `AudioEngine` instance (`render/audio/refineSfx.ts`) —
  * this is a UI-initiated action, not a `GameEvent` the engine emitted, so it
@@ -27,7 +36,7 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from "react";
 import {
   FORTIFIER_FOR_SLOT,
   ITEM_TEMPLATES,
@@ -41,7 +50,8 @@ import {
 } from "@/engine";
 import { Coin, MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
-import { executeRefine, type RefineFlowResult } from "@/ui/gear/refineFlow";
+import { applyRefineResult, executeRefine } from "@/ui/gear/refineFlow";
+import { IDLE_REVEAL_STATE, beatPlanFor, refineRevealReducer } from "@/ui/gear/refineReveal";
 import { groupIntoStacks, type ItemStack } from "@/ui/gear/stacking";
 import { useGameStore } from "@/ui/store/gameStore";
 import {
@@ -69,15 +79,11 @@ const KNOWN_API_ERRORS = new Set([
   "network",
 ]);
 
-/** Visual/audio suspense window (ms) — the network call and this timer run
- * concurrently; the reveal waits for whichever finishes LAST. */
-const CHARGE_MS = 1000;
-const STRIKE_COUNT = 4;
 /** How long the outcome banner (+N! / -1 / shatter) stays up before the panel
  * returns to its idle picker state. */
 const OUTCOME_DISPLAY_MS = 1300;
-
-type Phase = "idle" | "charging" | "success" | "degrade" | "safe" | "break";
+/** How long the final-beat shake (break band only) lingers before clearing. */
+const SHAKE_MS = 340;
 
 function stackKey(stack: Pick<ItemStack, "templateId" | "refineLevel">): string {
   return `${stack.templateId}:${stack.refineLevel}`;
@@ -129,13 +135,25 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
 
   const [activeTab, setActiveTab] = useState<GearSlot>("weapon");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [revealState, dispatch] = useReducer(refineRevealReducer, IDLE_REVEAL_STATE);
   const [frozenStack, setFrozenStack] = useState<ItemStack | null>(null);
   const [errorReason, setErrorReason] = useState<string | null>(null);
-  const [outcomeLevel, setOutcomeLevel] = useState<number | null>(null);
-  /** World-boss wave: was the LAST resolved attempt a guaranteed-success fortify?
-   * Drives the distinct success copy in the outcome banner. */
-  const [outcomeFortified, setOutcomeFortified] = useState(false);
+  /** Which beat of the CURRENT attempt's hammer sequence has visually landed
+   * (0..totalBeats). Deliberately separate from `revealState`'s own gating
+   * `beat` counter: a fast network response can transition the state machine
+   * straight from "striking" to "reveal" on the SAME beat that lands, but the
+   * escalating spark spans below still need to render every beat that fired. */
+  const [visualBeat, setVisualBeat] = useState(0);
+  /** Final-beat impact shake (break/+8..+10 band only) — plays across the
+   * reveal transition too (see `beatPlanFor`'s doc), so it's independent of
+   * `revealState.kind`. */
+  const [shaking, setShaking] = useState(false);
+  /** Whether the CURRENT attempt is a guaranteed-success "ใช้แกร่ง" fortify —
+   * combined with `band` (stable while `frozenStack` pins the item) this is
+   * enough to recompute the exact plan used to schedule this attempt's
+   * timers, purely from render-time state (no refs — reading a ref during
+   * render trips `react-hooks/refs`). */
+  const [usingFortifier, setUsingFortifier] = useState(false);
 
   const audioRef = useRef<AudioEngine | null>(null);
   if (audioRef.current == null) audioRef.current = createRefineAudio();
@@ -147,16 +165,28 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
     return () => audio?.destroy();
   }, []);
 
-  // The outcome reveal is tap-to-skip (owner request): a tap during the reveal
-  // fast-forwards straight to the settled end state instead of forcing the
-  // player to wait out the full animation before the next hammer. `settleRef`
-  // holds the exact same settle closure the timer would have run, so skipping
-  // and letting it play out naturally produce an IDENTICAL end state.
-  const revealTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settleRef = useRef<(() => void) | null>(null);
+  // The outcome reveal is tap-to-skip (owner request): a tap during the strike
+  // build-up OR the reveal fast-forwards straight to the settled end state
+  // instead of forcing the player to wait out the full animation before the
+  // next hammer — see the `revealState` effect below (its cleanup does the
+  // actual "return to idle picker" reset, so a skip and a natural timeout
+  // settle produce an IDENTICAL end state).
+  const beatTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const shakeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The in-flight attempt's target instance + template — stashed here (not
+   * `frozenStack` state) so the reveal effect below never needs `frozenStack`
+   * in its dependency array. */
+  const pendingAttemptRef = useRef<{ instanceId: string; templateId: string } | null>(null);
+
+  function clearBeatTimers(): void {
+    beatTimersRef.current.forEach(clearTimeout);
+    beatTimersRef.current = [];
+  }
+
   useEffect(
     () => () => {
-      if (revealTimeoutRef.current != null) clearTimeout(revealTimeoutRef.current);
+      clearBeatTimers();
+      if (shakeTimeoutRef.current != null) clearTimeout(shakeTimeoutRef.current);
     },
     [],
   );
@@ -178,16 +208,16 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const displayStack = frozenStack ?? liveStack;
   const template = displayStack ? ITEM_TEMPLATES[displayStack.templateId] : null;
 
-  // Non-idle covers BOTH the charging build-up and the outcome reveal window
-  // (success/degrade/safe/break) — a tap during the reveal must not race a
-  // second `handleRefine` against the still-frozen stale snapshot (that race
-  // is what corrupted the frozenStack/selectedKey handoff and forced a manual
-  // re-select). The button re-enables exactly when the reveal finishes and
-  // `revealOutcome`'s trailing `setSelectedKey` has already re-anchored
-  // selection to the item's new refine level.
-  const busy = phase !== "idle";
-  const isReveal =
-    phase === "success" || phase === "degrade" || phase === "safe" || phase === "break";
+  // Non-idle covers the strike build-up AND the outcome reveal window — a tap
+  // must not race a second `handleRefine` against the still-frozen stale
+  // snapshot (that race is what corrupted the frozenStack/selectedKey handoff
+  // and forced a manual re-select). The button re-enables exactly when the
+  // reveal finishes and its settle closure has already re-anchored selection
+  // to the item's new refine level.
+  const busy = revealState.kind !== "idle";
+  const isReveal = revealState.kind === "reveal";
+  const revealHeld = revealState.kind === "reveal" ? revealState.held : null;
+  const isCharging = revealState.kind === "pending" || revealState.kind === "striking";
   const atMax = displayStack ? displayStack.refineLevel >= REFINE.maxRefine : false;
   const targetLevel = displayStack ? displayStack.refineLevel + 1 : 0;
   const cost = template && !atMax ? refineCost(template.tier, targetLevel) : null;
@@ -201,6 +231,10 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const fortifierCount = fortifierTemplateId
     ? inventory.filter((i) => i.templateId === fortifierTemplateId).length
     : 0;
+  // Pure re-derivation of the CURRENT attempt's beat plan — safe to compute at
+  // render time (no refs) since `band` stays stable while `frozenStack` pins
+  // the item through the whole striking/reveal window.
+  const activePlan = beatPlanFor(usingFortifier ? "fortified" : band);
 
   const disabledReason: string | null = !displayStack
     ? "pickItem"
@@ -225,69 +259,91 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
     audio?.resume(); // real user gesture — idempotent, cheap to call every time
 
     setFrozenStack(snapshot);
-    setPhase("charging");
     setErrorReason(null);
-    setOutcomeLevel(null);
-    setOutcomeFortified(false);
+    setVisualBeat(0);
+    setShaking(false);
+    setUsingFortifier(useFortifier);
+    pendingAttemptRef.current = { instanceId, templateId: snapshot.templateId };
 
-    if (audio) {
-      for (let i = 0; i < STRIKE_COUNT; i++) {
-        playRefineChargeTick(audio, i, (i * CHARGE_MS) / STRIKE_COUNT / 1000);
-      }
-    }
+    const plan = beatPlanFor(useFortifier ? "fortified" : band);
+    dispatch({ type: "start", totalBeats: plan.totalBeats });
 
-    const [result] = await Promise.all([
-      executeRefine(instanceId, useFortifier),
-      new Promise<void>((resolve) => setTimeout(resolve, CHARGE_MS)),
-    ]);
+    // Schedule the strike choreography up front (own timers, not the reducer —
+    // the reducer stays a pure "what beat are we on" state machine). The
+    // network call below fires in parallel and may resolve before or after
+    // any of these beats land; either ordering is handled by the reducer.
+    clearBeatTimers();
+    let elapsedMs = 0;
+    plan.beatDelaysMs.forEach((delay, i) => {
+      elapsedMs += delay;
+      const isFinalBeat = i === plan.totalBeats - 1;
+      const timer = setTimeout(() => {
+        if (audio) playRefineChargeTick(audio, i);
+        setVisualBeat(i + 1);
+        if (isFinalBeat && plan.shake) {
+          setShaking(true);
+          if (shakeTimeoutRef.current != null) clearTimeout(shakeTimeoutRef.current);
+          shakeTimeoutRef.current = setTimeout(() => setShaking(false), SHAKE_MS);
+        }
+        dispatch({ type: "beat" });
+      }, elapsedMs);
+      beatTimersRef.current.push(timer);
+    });
 
-    revealOutcome(result, snapshot);
-  }
-
-  function revealOutcome(result: RefineFlowResult, snapshot: ItemStack): void {
-    const audio = audioRef.current;
+    const result = await executeRefine(instanceId, useFortifier);
     if (!result.ok) {
-      setPhase("idle");
+      clearBeatTimers();
+      dispatch({ type: "settle" });
       setFrozenStack(null);
       setErrorReason(result.reason);
+      pendingAttemptRef.current = null;
       return;
     }
 
-    setOutcomeLevel(result.refineLevel);
-    setOutcomeFortified(result.fortified);
-    if (result.destroyed) {
-      setPhase("break");
-      if (audio) playRefineBreak(audio);
-    } else if (result.outcome === "success") {
-      setPhase("success");
-      if (audio) playRefineSuccess(audio);
-    } else if (result.outcome === "degrade") {
-      setPhase("degrade");
-      if (audio) playRefineDegrade(audio);
-    } else {
-      setPhase("safe"); // fail within the +1-3 band: attempt spent, nothing changed
-      if (audio) playRefineDegrade(audio);
-    }
-
-    const settle = () => {
-      revealTimeoutRef.current = null;
-      settleRef.current = null;
-      setPhase("idle");
-      setFrozenStack(null);
-      setSelectedKey(result.destroyed ? null : `${snapshot.templateId}:${result.refineLevel}`);
-    };
-    settleRef.current = settle;
-    revealTimeoutRef.current = setTimeout(settle, OUTCOME_DISPLAY_MS);
+    dispatch({ type: "resultReady", held: result });
   }
 
-  /** Tap-to-skip: only meaningful during the reveal phases (never charging —
-   * that build-up always plays out in full). Never calls `handleRefine`
-   * itself, so a skip tap can never double-fire an attempt; it just retires
-   * the current reveal early so the NEXT tap is free to start a fresh one. */
+  // The reveal transition (and ONLY the reveal transition) commits the
+  // withheld result to the store + plays outcome SFX — the exact enforcement
+  // point for "ผลลัพธ์เผยตอนค้อนลงเท่านั้น": nothing above this effect ever touches
+  // gold/materials/inventory before the state machine says `reveal`. The
+  // cleanup (NOT a one-off closure) does the "return to idle picker" reset,
+  // so it runs identically whether reveal ends via the natural timeout below
+  // OR an early skip tap (`skipReveal` just dispatches `"skip"`, which flips
+  // `revealState` away from `reveal` immediately and lets THIS cleanup fire).
+  useEffect(() => {
+    if (revealState.kind !== "reveal") return;
+    const held = revealState.held;
+    const audio = audioRef.current;
+    const attempt = pendingAttemptRef.current;
+    if (attempt) applyRefineResult(attempt.instanceId, held);
+
+    if (audio) {
+      if (held.outcomeKind === "break") playRefineBreak(audio);
+      else if (held.outcomeKind === "success") playRefineSuccess(audio);
+      else playRefineDegrade(audio); // degrade + safe share the dull-thud sting
+    }
+
+    const timer = setTimeout(() => dispatch({ type: "settle" }), OUTCOME_DISPLAY_MS);
+
+    return () => {
+      clearTimeout(timer);
+      setFrozenStack(null);
+      const finished = pendingAttemptRef.current;
+      pendingAttemptRef.current = null;
+      setSelectedKey(
+        held.destroyed || !finished ? null : `${finished.templateId}:${held.refineLevel}`,
+      );
+    };
+  }, [revealState]);
+
+  /** Tap-to-skip (owner: stays): a tap during EITHER the strike build-up or the
+   * reveal jumps straight to reveal / retires it early. Never calls
+   * `handleRefine` itself, so a skip tap can never double-fire an attempt. */
   function skipReveal(): void {
-    if (!isReveal) return;
-    if (revealTimeoutRef.current != null) clearTimeout(revealTimeoutRef.current);
-    settleRef.current?.();
+    if (!busy) return;
+    clearBeatTimers();
+    dispatch({ type: "skip" });
   }
 
   return (
@@ -305,7 +361,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
         className="absolute inset-0 bg-black/70"
       />
 
-      {phase === "break" && (
+      {revealHeld?.outcomeKind === "break" && (
         <div
           aria-hidden
           className="animate-refine-edge-flash pointer-events-none fixed inset-0 z-80"
@@ -426,26 +482,45 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
           {displayStack && template && (
             <div
               className={`relative flex flex-col gap-2.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 p-3 ${
-                isReveal ? "cursor-pointer" : ""
-              }`}
-              onClick={isReveal ? skipReveal : undefined}
-              role={isReveal ? "button" : undefined}
+                busy ? "cursor-pointer" : ""
+              } ${shaking ? "animate-refine-shake" : ""}`}
+              onClick={busy ? skipReveal : undefined}
+              role={busy ? "button" : undefined}
             >
+              {/* Reveal-frame white flash — plays for every outcome, right before
+                  the outcome-specific juice below takes over (owner spec: "final
+                  strike -> white flash -> REVEAL at that exact frame"). */}
+              {isReveal && (
+                <span
+                  aria-hidden
+                  // Warm amber at reduced peak (0.45 via the keyframe) instead of white @0.85 —
+                  // a pure-white flash is painful for players in a dark room and risky for
+                  // photosensitive users (owner note 2026-07-08); the reveal beat stays.
+                  className="animate-refine-flash pointer-events-none absolute inset-0 rounded-(--ddp-radius-md) bg-amber-200"
+                />
+              )}
               <div className="flex items-center gap-2">
                 <span
                   aria-hidden
                   className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-amber-500/60 bg-black/50 text-xl ${
-                    busy ? "animate-refine-charge" : ""
+                    isCharging ? "animate-refine-charge" : ""
                   }`}
-                  style={busy ? { animationDuration: `${CHARGE_MS}ms` } : undefined}
+                  style={
+                    isCharging
+                      ? {
+                          animationDuration: `${activePlan.beatDelaysMs.reduce((a, b) => a + b, 0)}ms`,
+                        }
+                      : undefined
+                  }
                 >
                   {GEAR_SLOT_ICONS[template.slot]}
-                  {busy &&
-                    Array.from({ length: STRIKE_COUNT }).map((_, i) => (
+                  {isCharging &&
+                    Array.from({ length: visualBeat }).map((_, i) => (
                       <span
                         key={i}
+                        aria-hidden
                         className="animate-refine-strike absolute inset-0"
-                        style={{ animationDelay: `${(i * CHARGE_MS) / STRIKE_COUNT}ms` }}
+                        style={{ "--strike-scale": `${1.15 + i * 0.06}` } as CSSProperties}
                       />
                     ))}
                 </span>
@@ -462,33 +537,35 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                   </span>
                 </div>
 
-                {/* Outcome banner (M4 juice, per spec) */}
-                {phase === "success" && outcomeLevel !== null && (
+                {/* Outcome banner (M4 juice, per spec) — ONLY ever rendered off
+                    `revealHeld`, which is null until the state machine reaches
+                    `reveal`, so no number here can leak before the final strike. */}
+                {revealHeld?.outcomeKind === "success" && (
                   <span className="animate-refine-rise absolute top-0 right-1 text-lg font-black text-emerald-400">
-                    +{outcomeLevel}!{" "}
-                    {outcomeFortified && (
+                    +{revealHeld.refineLevel}!{" "}
+                    {revealHeld.fortified && (
                       <span className="text-sm text-violet-300">{t("outcomeFortified")}</span>
                     )}
                   </span>
                 )}
-                {phase === "degrade" && (
+                {revealHeld?.outcomeKind === "degrade" && (
                   <span className="animate-refine-fall absolute top-0 right-1 text-lg font-black text-amber-400">
                     -1
                   </span>
                 )}
-                {phase === "safe" && (
+                {revealHeld?.outcomeKind === "safe" && (
                   <span className="absolute top-0 right-1 text-xs font-bold text-ddp-ink-muted">
                     {t("outcomeSafeFail")}
                   </span>
                 )}
-                {phase === "break" && (
+                {revealHeld?.outcomeKind === "break" && (
                   <span className="absolute top-0 right-1 text-sm font-black text-rose-400">
                     {t("outcomeBreak")}
                   </span>
                 )}
               </div>
 
-              {phase === "break" && (
+              {revealHeld?.outcomeKind === "break" && (
                 <div aria-hidden className="pointer-events-none absolute inset-0">
                   {Array.from({ length: 7 }).map((_, i) => (
                     <span
@@ -558,14 +635,14 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      // Only truly inert while charging or while genuinely
-                      // unable to act at idle — during the reveal the button
-                      // must stay clickable (native `disabled` blocks click
-                      // entirely) so a tap on it can skip straight to settle.
-                      disabled={phase === "charging" || (phase === "idle" && !!disabledReason)}
+                      // Only truly inert while genuinely unable to act at idle —
+                      // during striking/reveal the button must stay clickable
+                      // (native `disabled` blocks click entirely) so a tap on it
+                      // can skip straight to reveal / settle.
+                      disabled={revealState.kind === "idle" && !!disabledReason}
                       title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
                       onClick={() => {
-                        if (isReveal) {
+                        if (busy) {
                           skipReveal();
                           return;
                         }
@@ -582,10 +659,10 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     {fortifierCount > 0 && (
                       <button
                         type="button"
-                        disabled={phase === "charging" || (phase === "idle" && !!disabledReason)}
+                        disabled={revealState.kind === "idle" && !!disabledReason}
                         title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
                         onClick={() => {
-                          if (isReveal) {
+                          if (busy) {
                             skipReveal();
                             return;
                           }

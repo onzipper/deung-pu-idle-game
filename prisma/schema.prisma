@@ -25,6 +25,14 @@ model User {
   displayName  String?   @db.VarChar(24) // account handle, sized like Character.name
   friendCode   String?   @unique @db.VarChar(16) // short human-shareable code (~8 chars); minted by app code at register time
   registeredAt DateTime? // null = still a guest; set when the account layer is claimed
+  // Self-service displayName RENAME rate-limit. Holds the Asia/Bangkok (UTC+7)
+  // serverDay (the SAME axis DailyClaim.serverDay uses — src/server/dailyQuests.ts
+  // `serverDayFor`) of the LAST displayName rename. The rename endpoint compare-and-
+  // sets this in one atomic guarded UPDATE (renameDay != today) so a name can change
+  // at most ONCE per server-day. Additive + NULLABLE = every existing row reads null
+  // (never renamed → allowed today). Client clocks are never trusted (server computes
+  // the day, like SaveState.lastSeen).
+  renameDay    Int? // Asia/Bangkok serverDay of the last displayName rename (once/day guard)
   saves        SaveState[]
   characters   Character[]
   // M8 friend graph (account<->account). Two relation NAMES per table because a User
@@ -113,6 +121,12 @@ model Character {
   // Validated field-by-field server-side before write (src/server/uiConfig.ts);
   // an unknown/out-of-bounds shape is rejected, never stored raw.
   uiConfig  Json?
+  // Self-service character-name RENAME rate-limit (mirrors User.renameDay). Holds the
+  // Asia/Bangkok (UTC+7) serverDay of the LAST rename; the rename endpoint compare-and-
+  // sets it (renameDay != today) so a character renames at most ONCE per server-day.
+  // Additive + NULLABLE (pre-existing rows read null = never renamed → allowed today).
+  // HOF/announcement snapshots keep their historical names by design — no backfill.
+  renameDay Int? // Asia/Bangkok serverDay of the last character-name rename (once/day guard)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime? // soft delete: slot freed, row kept for audit
@@ -463,6 +477,53 @@ model WorldBossClaim {
 
   @@unique([characterId, windowId]) // at most one claim per hourly window per character
   @@index([characterId, windowId]) // "did this character claim window W" + cascade-side reads
+}
+
+// World boss "เสี่ยจ๋อง" — the SERVER-WIDE shared HP pool for one hourly window
+// (owner-approved: one boss, one pool, every online player chips the SAME hp down
+// together). ADDITIVE + ISOLATED (no existing table/column changes). The row is
+// LAZILY created on the FIRST damage report of a window (src/server/worldBoss.ts
+// `reportWorldBossDamage`) with `hpRemaining = CONFIG.worldBoss.hp` — a concurrent
+// second first-report collides on the @id and is swallowed (P2002), so exactly one
+// pool is minted per window. `hpRemaining` is decremented ATOMICALLY and floored at 0
+// via a single `GREATEST(hpRemaining - dmg, 0)` raw UPDATE (Prisma cannot express the
+// floor), so concurrent chips from many players never drive it negative and never
+// lose a decrement. `defeatedAt` is stamped EXACTLY ONCE (a guarded
+// `... WHERE hpRemaining = 0 AND defeatedAt IS NULL` UPDATE — the first writer to see
+// 0 wins the stamp), and it is the AUTHORITATIVE "the boss died" signal the claim
+// endpoint gates on. `windowId` is the SERVER-computed floor(now / periodMs) hourly
+// bucket (Int: floor of an ms epoch stays well under 2^31 for centuries), the SAME
+// axis as WorldBossClaim.windowId, so a kill and its claims bucket together.
+//
+// CLIENT-TRUST v1: damage numbers are NOT yet server-re-derived (that is the M5
+// anti-cheat re-derivation wave). A generous per-post plausibility CAP (WORLD_BOSS_DAMAGE
+// in src/server/worldBoss.ts) only rejects an absurd/overflow forged number; a real
+// per-hit re-derivation replaces it when M5 lands. Rows are transient per-window; a
+// future prune sweep can drop old windows (none needed at this scale yet).
+model WorldBossWindow {
+  windowId    Int       @id // SERVER-computed hourly window bucket (floor(now / periodMs))
+  hpRemaining Int // shared pool, atomically decremented & floored at 0
+  defeatedAt  DateTime? // server-stamped ONCE when the pool first hits 0 (the claim gate)
+  createdAt   DateTime  @default(now())
+}
+
+// World boss "เสี่ยจ๋อง" — the per-(character, window) PARTICIPATION ledger. One row per
+// character that reported >=1 damage for a window; `total` is the running sum of their
+// (capped) reported damage, UPSERTed by the damage endpoint in the same request. This is
+// the participation PROOF v1: the claim endpoint accepts a claim only when this row exists
+// with total > 0 (you fought the boss) AND the WorldBossWindow pool is defeated. Additive +
+// ISOLATED; `characterId` is a RAW denormalized cuid (NO FK — the SoldItem/ItemEvent
+// "transient, no FK" convention), so this table never touches the Character model. @@unique
+// ([characterId, windowId]) is the upsert key (and blocks a duplicate participation row).
+model WorldBossDamage {
+  id          String   @id @default(cuid())
+  characterId String // raw cuid -> Character.id (no FK; transient per-window)
+  windowId    Int // SERVER-computed hourly window bucket (matches WorldBossWindow.windowId)
+  total       Int      @default(0) // running sum of this character's (capped) reported damage
+  updatedAt   DateTime @updatedAt
+
+  @@unique([characterId, windowId]) // upsert key + at most one row per (character, window)
+  @@index([windowId]) // enumerate a window's participants (future audit / prune)
 }
 
 // Endgame "ดินแดนอสูร" (docs/endgame-design.md v1.3) — the per-(character, day) DAILY

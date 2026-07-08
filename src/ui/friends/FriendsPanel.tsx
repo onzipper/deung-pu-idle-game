@@ -25,6 +25,7 @@ import type {
   PartyWire,
 } from "@/ui/friends/types";
 import { parseFriendZone, relativeTimeFrom } from "@/ui/friends/format";
+import { friendErrorKey, partyErrorKey } from "@/ui/friends/partyErrors";
 import { sortFriendsByPresence } from "@/ui/friends/sortFriends";
 import type { UseFriendsPoll } from "@/ui/friends/useFriendsPoll";
 import { requestOpenAccountSettings } from "@/ui/openSettingsSignal";
@@ -38,24 +39,19 @@ const MAX_PARTY_SIZE = 6;
 /** Windows-10-safe leader marker (footgun #4: pre-2020 glyphs only). */
 const LEADER_GLYPH = "★"; // ★
 
-const ERROR_KEY_BY_CODE: Record<string, string> = {
-  account_required: "errorAccountRequired",
-  not_found: "errorNotFound",
-  self: "errorSelf",
-  already_friends: "errorAlreadyFriends",
-  already_pending: "errorAlreadyPending",
-  too_many_pending: "errorTooManyPending",
-  bad_emoji: "errorBadEmoji",
-  not_friends: "errorNotFriends",
-  rate_limited: "errorRateLimited",
-  party_full: "errorPartyFull",
-  already_member: "errorAlreadyMember",
-  already_invited: "errorAlreadyInvited",
-  already_in_party: "errorAlreadyInParty",
-};
-
+/** NEVER-SILENT rule: every friend-request-side mutation (send/respond/remove/
+ * emoji) maps its error code through this — never a raw server code, never a
+ * swallowed non-ok response. See `ui/friends/partyErrors.ts`. */
 function errorMessage(code: string, t: Translator): string {
-  return t(ERROR_KEY_BY_CODE[code] ?? "errorGeneric");
+  return t(friendErrorKey(code));
+}
+
+/** Same rule for party mutations (invite/respond/leave) — a SEPARATE mapping
+ * because `not_found` means something different in a party-invite-response
+ * context (invite no longer valid) than in a friend-request context (no
+ * player found). See `ui/friends/partyErrors.ts`. */
+function partyErrorMessage(code: string, t: Translator): string {
+  return t(partyErrorKey(code));
 }
 
 /** HOF seasonal title chip (owner-approved docs/hof-rewards-design.md) — a
@@ -439,7 +435,7 @@ function FriendRow({
       setInviteNotice(t("partyInviteSent"));
       window.setTimeout(() => setInviteNotice(null), 3000);
     } else {
-      setActionError(errorMessage(res.code, t));
+      setActionError(partyErrorMessage(res.code, t));
       window.setTimeout(() => setActionError(null), 3000);
     }
   }
@@ -462,6 +458,14 @@ function FriendRow({
         {cls && <span aria-hidden className="shrink-0 text-sm">{HERO_ICONS[cls] ?? ""}</span>}
         <span className="min-w-0 flex-1 truncate text-xs font-bold text-ddp-ink">{name}</span>
         <TitleChip title={friend.title} champion={friend.champion} tHof={tHof} />
+        {friend.inParty && (
+          <span
+            className="shrink-0 rounded-full border border-ddp-border-soft bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-ddp-ink-muted"
+            title={t("chipInPartyHint")}
+          >
+            {t("chipInParty")}
+          </span>
+        )}
         {friend.currentCharacter && (
           <span className="shrink-0 text-[10px] text-ddp-ink-muted tabular-nums">
             {tCommon("levelBadge", { level: friend.currentCharacter.level })}
@@ -695,12 +699,18 @@ function PartySection({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleLeave() {
     setConfirming(false);
     setLeaving(true);
-    await poll.leaveParty();
+    setError(null);
+    const res = await poll.leaveParty();
     setLeaving(false);
+    if (!res.ok) {
+      setError(partyErrorMessage(res.code, t));
+      window.setTimeout(() => setError(null), 5000);
+    }
   }
 
   return (
@@ -727,6 +737,10 @@ function PartySection({
           />
         ))}
       </div>
+
+      {error && (
+        <span className="text-right text-[11px] font-semibold text-ddp-bad">{error}</span>
+      )}
 
       <div className="flex items-center justify-end gap-1.5 pt-0.5">
         {!confirming ? (
@@ -762,6 +776,67 @@ function PartySection({
   );
 }
 
+/**
+ * Owner-approved informed-manual party-invite UX (case 2, never-silent rule):
+ * accepting while ALREADY in a party is a real, expected failure mode (the
+ * server enforces one-party-per-user, `already_in_party`) — NOT an auto-switch
+ * dialog. This row surfaces whatever the server says (already_in_party /
+ * party_full / the invite having gone stale) as a clear inline error rather
+ * than silently doing nothing.
+ */
+function PartyInviteRow({
+  invite,
+  poll,
+  t,
+}: {
+  invite: IncomingPartyInviteWire;
+  poll: UseFriendsPoll;
+  t: Translator;
+}) {
+  const [responding, setResponding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleRespond(accept: boolean) {
+    setResponding(true);
+    setError(null);
+    const res = await poll.respondPartyInvite(invite.inviteId, accept);
+    setResponding(false);
+    if (!res.ok) {
+      setError(partyErrorMessage(res.code, t));
+      window.setTimeout(() => setError(null), 5000);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/5 px-2.5 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">
+          {invite.fromDisplayName ?? t("unknownPlayer")}
+        </span>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            type="button"
+            disabled={responding}
+            onClick={() => void handleRespond(true)}
+            className="min-h-9 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 disabled:opacity-50"
+          >
+            {t("acceptButton")}
+          </button>
+          <button
+            type="button"
+            disabled={responding}
+            onClick={() => void handleRespond(false)}
+            className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad/50 bg-ddp-bad/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-bad disabled:opacity-50"
+          >
+            {t("declineButton")}
+          </button>
+        </div>
+      </div>
+      {error && <span className="text-[11px] font-semibold text-ddp-bad">{error}</span>}
+    </div>
+  );
+}
+
 function PartyInvitesSection({
   invites,
   poll,
@@ -778,30 +853,7 @@ function PartyInvitesSection({
       </h3>
       <div className="flex flex-col gap-1.5">
         {invites.map((inv) => (
-          <div
-            key={inv.inviteId}
-            className="flex items-center justify-between gap-2 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/5 px-2.5 py-2"
-          >
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">
-              {inv.fromDisplayName ?? t("unknownPlayer")}
-            </span>
-            <div className="flex shrink-0 gap-1.5">
-              <button
-                type="button"
-                onClick={() => void poll.respondPartyInvite(inv.inviteId, true)}
-                className="min-h-9 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/15 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300"
-              >
-                {t("acceptButton")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void poll.respondPartyInvite(inv.inviteId, false)}
-                className="min-h-9 rounded-(--ddp-radius-md) border border-ddp-bad/50 bg-ddp-bad/10 px-2.5 py-1.5 text-[11px] font-bold text-ddp-bad"
-              >
-                {t("declineButton")}
-              </button>
-            </div>
-          </div>
+          <PartyInviteRow key={inv.inviteId} invite={inv} poll={poll} t={t} />
         ))}
       </div>
     </section>

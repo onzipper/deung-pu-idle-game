@@ -753,7 +753,21 @@
       "playButton": "Play",
       "selecting": "Entering game...",
       "deleteButton": "Delete",
-      "selectError": "Couldn't select this character — try again"
+      "selectError": "Couldn't select this character — try again",
+      "renameAria": "Rename character"
+    },
+    "rename": {
+      "title": "Rename character",
+      "cooldownHint": "You can rename once per day.",
+      "label": "New name",
+      "placeholder": "Enter a new character name",
+      "hint": "2-24 characters, Thai/English letters and digits only (no spaces or symbols)",
+      "saveButton": "Save new name",
+      "saving": "Saving...",
+      "cancelButton": "Cancel",
+      "nameTaken": "That name is already taken — try another",
+      "cooldown": "You can rename once per day — try again tomorrow",
+      "error": "Rename failed — try again"
     },
     "delete": {
       "title": "Delete \"{name}\"?",
@@ -852,6 +866,16 @@
       "retryButton": "Retry",
       "emailLabel": "Email",
       "displayNameLabel": "Display name",
+      "noDisplayName": "Not set",
+      "renameEditAria": "Rename display name",
+      "renamePlaceholder": "Enter a new display name",
+      "renameHint": "Up to 24 characters — once per day",
+      "renameSave": "Save",
+      "renameSaving": "Saving...",
+      "renameCancel": "Cancel",
+      "renameSuccess": "Display name updated",
+      "renameCooldown": "You can rename once per day — try again tomorrow",
+      "renameError": "Rename failed — try again",
       "friendCodeLabel": "Friend code",
       "copyButton": "Copy",
       "copied": "Copied!",
@@ -1309,6 +1333,16 @@
           "cohortTitleFix": "🏅 Fixed party members' titles/champion auras sometimes showing on the wrong nameplate — everyone's tag is correct now.",
           "ninjaUnlockOpen": "🥷 The ninja class is now open to everyone — no unlock required."
         }
+      },
+      "2026-07-09i": {
+        "items": {
+          "worldBossSharedHp": "🩸 World boss เสี่ยจ๋อง now shares ONE health bar across the whole server — every player who joins the fight chips in against the same pool.",
+          "worldBossBotEngage": "🤖 Your bot now piles onto เสี่ยจ๋อง if it's already engaged nearby (it still won't pick the first fight — never farms newcomers).",
+          "partyInviteToasts": "🔔 Party invites now give clear feedback (accept/decline/expired) and friends who are already in a party show a chip on their row.",
+          "cohortLeakFix": "🗺️ Fixed a party bug where playing alongside a far-progressed friend could leak their zone unlocks into your own save.",
+          "botToggleFix": "🔁 Fixed the bot on/off switch in a party — each member's toggle now only affects their OWN hero.",
+          "rename": "✏️ You can now rename your account and characters in Settings / the character-select screen (once per day)."
+        }
       }
     }
   },
@@ -1441,7 +1475,10 @@
     "errorPartyFull": "Party is full (max 6)",
     "errorAlreadyMember": "Already in the same party",
     "errorAlreadyInvited": "Invite already sent — wait for a response",
-    "errorAlreadyInParty": "Leave your current party first to join a new one",
+    "errorAlreadyInParty": "You already have a party — leave your current one first to accept this invite",
+    "errorPartyInviteExpired": "This invite is no longer valid (expired, withdrawn, or already answered)",
+    "chipInParty": "🤝 Already in a party",
+    "chipInPartyHint": "This friend is already in another party — you can still invite them",
     "warpToFriendButton": "Warp to them",
     "warpToFriendButtonWithCount": "Warp to them ({count})",
     "warpNoScrollHint": "Buy a Warp Scroll from Auntie Pu",

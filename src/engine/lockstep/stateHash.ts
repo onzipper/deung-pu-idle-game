@@ -304,7 +304,10 @@ export function stateHash(state: GameState): number {
   // damage), so it MUST fold in — but ONLY when present, so a DORMANT state (no world
   // boss ever spawned) hashes byte-identically to pre-feature (the solo canonical /
   // determinism suites stay green). The record persists after a despawn/defeat (entity
-  // nulled) — that too is sim-relevant (it blocks a same-window respawn) so it folds. ---
+  // nulled) — that too is sim-relevant (it blocks a same-window respawn) so it folds.
+  // `wb.damageDealt` is EXCLUDED (like the ninja evade counters): a pure deterministic function
+  // of the already-hashed damage sequence (identical on every client), a client→server readout
+  // observer that never steers the sim. ---
   const wb = state.worldBoss;
   if (wb) {
     h = mix(h, 0x77626f73 /* "wbos" */);

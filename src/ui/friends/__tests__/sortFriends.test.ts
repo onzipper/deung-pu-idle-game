@@ -12,6 +12,7 @@ function friend(overrides: Partial<FriendWire> & Pick<FriendWire, "userId">): Fr
     lastSeenAt: null,
     title: null,
     champion: false,
+    inParty: false,
     ...overrides,
   };
 }

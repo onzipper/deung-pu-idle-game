@@ -79,6 +79,7 @@ import {
   unlockedAutoSlotCount,
   worldNav,
   worldBossPhaseAt,
+  worldBossDamageDealt,
   effectiveUnlockedZones,
   wantsBotTownTrip,
   zoneAt,
@@ -136,11 +137,14 @@ import {
   type UiConfig,
   type WorldBossStatus,
 } from "@/ui/store/gameStore";
-import { postWorldBossClaim } from "@/ui/worldBoss/api";
+import { getWorldBossState, postWorldBossClaim, postWorldBossDamage } from "@/ui/worldBoss/api";
 import {
+  authorityReportDelta,
   deriveWorldBossStatus,
   sameWorldBossStatus,
+  shouldPollHp,
   shouldQueueWorldBossSpawn,
+  shouldSendParticipationPing,
 } from "@/ui/worldBoss/schedule";
 import { asuraDayKeyForMs } from "@/ui/asura/schedule";
 import { fetchHofRewards } from "@/ui/hof/rewardsApi";
@@ -171,10 +175,12 @@ import {
   desiredHeroConfig,
   dropAssignedIndex,
   heroConfigDiff,
+  myAutoHuntDisplay,
   virtualWallet,
   walletSliceFrom,
   type WalletSlice,
 } from "./cohortWallet";
+import { applyProgressSlice, progressSliceFrom, type ProgressSlice } from "./cohortProgress";
 import { TimeDirector } from "./timeDirector";
 
 /** Narrow, allocation-cheap "is this a plain JSON object" guard for parsing opaque
@@ -199,6 +205,13 @@ const MAX_CLAIM_BATCH = 64;
  * known fixed reward is applied directly rather than diffed against a
  * possibly-stale local mirror. */
 const WORLD_BOSS_REWARD_MATERIALS = 350;
+
+/** SHARED-HP client driver (M8.6) cadence: how often the AUTHORITY posts its accrued
+ * damage delta (and a non-authority cohort member polls the read-only state endpoint) —
+ * generous enough to keep well clear of any rate limiting while still feeling live on the
+ * HP bar. Mirrors `server/worldBoss.ts`'s generous `maxDamagePerPost` cap design intent
+ * (a batched report, not per-hit). */
+const WB_DAMAGE_REPORT_MS = 10_000;
 
 /** Party handshake deadline safety net (partySession.ts D1/D2 fixes). A re-seed exchange
  * that hasn't converged within `HANDSHAKE_DEADLINE_MS` is aborted + retried; a trip backs
@@ -485,7 +498,9 @@ function buildSnapshot(state: GameState): EngineSnapshot {
     // doc) + per-map unlocked-zone counts (M6 SAVE v8 field, surfaced for the
     // fast-travel picker's lock read).
     bot: { ...state.bot },
-    autoHunt: state.autoHunt,
+    // Bot MASTER switch display (M8 party live bug fix — see `myAutoHuntDisplay`'s doc):
+    // MY OWN hero's config, never the shared `state.autoHunt` legacy field.
+    autoHunt: myAutoHuntDisplay(state),
     // M7.9 tier-3 preview (owner "option ข"): surface the EFFECTIVE unlocked counts —
     // the persisted map + any active tier-3 quest grant (map4 z1) folded in — so the
     // fast-travel picker + walk arrows offer the preview zone. Derived, never persisted
@@ -864,6 +879,14 @@ export function GameClient() {
      * while solo. */
     let cohortWalletBase: WalletSlice | null = null;
     let cohortSharedBase: WalletSlice | null = null;
+    /** PROGRESSION-INTEGRITY (cohortProgress.ts): my OWN world-progression fields, FROZEN
+     * at the moment I joined this cohort (or, on a re-seed of an already-active cohort,
+     * unchanged — it never drifts while active, see `activateCohort`'s doc). Unlike the
+     * wallet's divisible drift-split, there's no principled per-member share of shared
+     * world-unlock progress, so this is substituted verbatim into every SAVE payload while
+     * active (`serialize()`) and restored verbatim on `collapseToSolo()` — the fix for the
+     * "partying with a deep player permanently unlocked my zones" live bug. Null while solo. */
+    let cohortProgressBase: ProgressSlice | null = null;
     /** The cohort's lockstep turn scheduler while active (issue/execute cadence, buffer,
      * catch-up, stall/waiting) — see `cohortTurnEngine.ts`. `null` while solo. */
     let cohortEngine: CohortTurnEngine | null = null;
@@ -893,6 +916,35 @@ export function GameClient() {
      * transitions only (see `sameWorldBossStatus`'s doc: comparing `secondsLeft`
      * too gives the countdown its ~1Hz cadence for free). */
     let lastWorldBossStatus: WorldBossStatus = { kind: "idle" };
+
+    // ---- World boss SHARED-HP client driver (M8.6) ----
+    // `/api/worldboss/state` GET seeds a fresh spawn/re-entry at the REAL server hp instead
+    // of full (see `spawnWorldBoss{hp}`'s doc); the periodic damage report + its dedup rule
+    // (only the cohort AUTHORITY posts the full delta, everyone else pings once then polls)
+    // lives in `ui/worldBoss/schedule.ts`'s doc comment — this is just the stateful
+    // bookkeeping GameClient owns, same tier as `lastWorldBossStatus` above.
+    /** The window whose hp seed I've already fetched-or-attempted (fetched once per window,
+     * regardless of outcome — a failed fetch just leaves the spawn seedless, same as before
+     * this driver existed). `null` = no window seeded yet. */
+    let wbSeedAttemptedWindow: number | null = null;
+    /** Resolved hp for `wbSeedAttemptedWindow`, once the GET resolves — undefined while
+     * in flight/failed (the spawn intent's `hp` stays unset, engine falls back to full). */
+    let wbSeedHp: number | undefined;
+    /** The window my damage-report/ping bookkeeping below is scoped to; resets (with
+     * `wbReportedDamage`/`wbPingedWindow`) whenever the live `worldBossDamageDealt` window
+     * changes OR goes dormant (fight ended / collapsed to solo mid-fight — a fresh solo
+     * rebuild never carries `state.worldBoss` over, see `partyHandshake.ts`, so the next
+     * real spawn always starts this bookkeeping clean). */
+    let wbReportWindow: number | null = null;
+    /** AUTHORITY watermark: damage already CONFIRMED posted for `wbReportWindow` (only
+     * advanced on a successful POST response — a failed post retries the same delta, now
+     * possibly larger, on the next cadence tick). */
+    let wbReportedDamage = 0;
+    /** Non-authority latch: the window my one-shot participation ping already fired for
+     * (set BEFORE the request resolves so a slow response can't double-fire). */
+    let wbPingedWindow: number | null = null;
+    let wbNetworkInFlight = false;
+    let wbLastReportAt = 0;
     /** ดินแดนอสูร daily hot zone: the last Bangkok day-key QUEUED via
      * `setAsuraHotZone` — re-queued only when it changes (idempotent, same
      * shape as `lastWorldBossStatus`'s "only push on transition" idiom). */
@@ -1027,6 +1079,7 @@ export function GameClient() {
       // authority-seeded pot). Overwrite the rebuilt solo wallet with my settled share so
       // leaving a party keeps my own gold/materials/potions, not the shared pot's.
       const settled = myVirtualWallet();
+      const progress = cohortProgressBase;
       state = extractSoloState(state, myCohortIndex, seed);
       if (settled) {
         state.gold = settled.gold;
@@ -1034,8 +1087,17 @@ export function GameClient() {
         state.materials = settled.materials;
         state.consumables = { ...state.consumables, ...settled.consumables };
       }
+      // PROGRESSION-INTEGRITY: `extractSoloState` rebuilds `location`/`unlockedZones`/
+      // `stage`/`zoneKills`/`lastFarmZone`/`bossBest`/`levelCapAt` from the cohort's SHARED
+      // slice (`sharedSaveFromState`) — restore MY OWN frozen snapshot over it instead, so
+      // leaving a party never adopts a deep friend's world unlocks (or, for the asura/tome
+      // fields — not part of the shared slice at all — resets them from the fresh rebuild's
+      // zeroed defaults back to what I actually had). Safe to mutate here: this `state` is
+      // the freshly-built SOLO state, no longer shared with any other client.
+      if (progress) applyProgressSlice(state, progress);
       cohortWalletBase = null;
       cohortSharedBase = null;
+      cohortProgressBase = null;
       cohortActive = false;
       handshake?.abort();
       handshake = null;
@@ -1061,7 +1123,8 @@ export function GameClient() {
       myTicketSlot = partySession.slot;
       // Pre-handshake, "my own hero" is `heroes[0]` while solo, or `heroes[myCohortIndex]`
       // if this is a re-seed of an ALREADY-active cohort (e.g. a 3rd member joins).
-      const myProgression = progressionFromHero(cohortActive ? state.heroes[myCohortIndex] : state.heroes[0]);
+      const myHero = cohortActive ? state.heroes[myCohortIndex] : state.heroes[0];
+      const myProgression = progressionFromHero(myHero);
       handshake = new PartyHandshake({
         mySlot: myTicketSlot,
         cohortSlots,
@@ -1069,6 +1132,12 @@ export function GameClient() {
         myProgression,
         mySharedSave: sharedSaveFromState(state),
         mintSeed: () => Date.now() >>> 0,
+        // Owner bug batch A #2 ("position reset on cohort re-form"): attach my CURRENT
+        // x ONLY when this re-seed continues a cohort I was ALREADY active in — e.g.
+        // someone else joins/leaves my zone and everyone's handshake restarts. A fresh
+        // solo->cohort join has no meaningful position in this cohort yet, so it's
+        // omitted and the joiner spawns at the formation anchor, same as before.
+        myX: cohortActive ? myHero.x : undefined,
       });
       handshakeStartedAt = performance.now();
       handshake.start();
@@ -1088,9 +1157,15 @@ export function GameClient() {
       // size (state is overwritten below). Computed via `myVirtualWallet` which reads the
       // current bases + live state.
       const preWallet: WalletSlice = myVirtualWallet() ?? walletSliceFrom(state);
+      // PROGRESSION-INTEGRITY: my progress base is FROZEN at whatever it already was if
+      // this is a re-seed of an already-active cohort (it never drifts while active, so
+      // there's nothing new to capture); otherwise (a fresh join from solo) snapshot my
+      // current world-progression fields right now, before `state` is overwritten below.
+      const preProgress: ProgressSlice = cohortProgressBase ?? progressSliceFrom(state);
       state = built;
       cohortWalletBase = preWallet;
       cohortSharedBase = walletSliceFrom(built);
+      cohortProgressBase = preProgress;
       handshake = null;
       handshakeDeadlineMs = HANDSHAKE_DEADLINE_MS; // converged — reset the backoff
       cohortActive = true;
@@ -1517,7 +1592,92 @@ export function GameClient() {
             : null,
         )
       ) {
-        store.queueSpawnWorldBoss(worldBossPhase.windowId, Math.ceil(worldBossPhase.msRemaining / 1000));
+        const spawnWindowId = worldBossPhase.windowId;
+        // SHARED-HP seed (M8.6): fetch the server pool's current hp ONCE per window (fire-
+        // and-forget; a failed/slow fetch just leaves the spawn seedless this frame — the
+        // engine falls back to full hp, backward-compatible, and the very next damage-report
+        // round trip corrects it anyway). Harmless to run on every cohort client (only the
+        // first slot-ordered lane's spawn intent is ever applied — see `applyWorldBossSpawnIntents`).
+        if (wbSeedAttemptedWindow !== spawnWindowId) {
+          wbSeedAttemptedWindow = spawnWindowId;
+          wbSeedHp = undefined;
+          void getWorldBossState(spawnWindowId).then((res) => {
+            if (res && res.ok && wbSeedAttemptedWindow === spawnWindowId) wbSeedHp = res.hp;
+          });
+        }
+        store.queueSpawnWorldBoss(
+          spawnWindowId,
+          Math.ceil(worldBossPhase.msRemaining / 1000),
+          wbSeedAttemptedWindow === spawnWindowId ? wbSeedHp : undefined,
+        );
+      }
+
+      // SHARED-HP client driver (M8.6): while the live sim has an ENGAGED world boss,
+      // report/poll on the `WB_DAMAGE_REPORT_MS` cadence — see `ui/worldBoss/schedule.ts`'s
+      // module doc for the cohort dedup rule (only the lowest-slot AUTHORITY posts the
+      // periodic full delta; every other member sends one participation ping then polls).
+      // Reads `worldBossDamageDealt` (not `state.worldBoss` directly) so this is a no-op the
+      // instant the fight ends/despawns/is defeated (the read goes null) OR I collapse to
+      // solo mid-fight (a fresh solo rebuild never carries `state.worldBoss` over).
+      {
+        const dealt = worldBossDamageDealt(state);
+        if (dealt) {
+          if (wbReportWindow !== dealt.windowId) {
+            wbReportWindow = dealt.windowId;
+            wbReportedDamage = 0;
+            wbPingedWindow = null;
+          }
+          const isAuthority = !cohortActive || myCohortIndex === 0;
+          const windowId = dealt.windowId;
+          if (isAuthority) {
+            const delta = authorityReportDelta(
+              dealt.damage,
+              wbReportedDamage,
+              now - wbLastReportAt,
+              WB_DAMAGE_REPORT_MS,
+            );
+            if (delta > 0 && !wbNetworkInFlight) {
+              wbNetworkInFlight = true;
+              wbLastReportAt = now;
+              void postWorldBossDamage(windowId, delta).then((res) => {
+                wbNetworkInFlight = false;
+                // Only advance the watermark on a CONFIRMED post — a failure (network/422/410)
+                // retries the same (now possibly larger) delta on the next cadence tick.
+                if (res && res.ok) {
+                  if (wbReportWindow === windowId) wbReportedDamage += delta;
+                  useGameStore.getState().queueSyncWorldBoss(windowId, res.hp);
+                }
+              });
+            }
+          } else {
+            if (
+              shouldSendParticipationPing(dealt.damage, windowId, wbPingedWindow) &&
+              !wbNetworkInFlight
+            ) {
+              wbNetworkInFlight = true;
+              wbPingedWindow = windowId; // latch BEFORE the request resolves
+              const pingDamage = Math.max(1, dealt.damage - wbReportedDamage);
+              void postWorldBossDamage(windowId, pingDamage).then((res) => {
+                wbNetworkInFlight = false;
+                if (res && res.ok) {
+                  if (wbReportWindow === windowId) wbReportedDamage = Math.max(wbReportedDamage, pingDamage);
+                  useGameStore.getState().queueSyncWorldBoss(windowId, res.hp);
+                } else {
+                  if (wbPingedWindow === windowId) wbPingedWindow = null; // retry next observed-positive frame
+                }
+              });
+            } else if (shouldPollHp(now - wbLastReportAt, WB_DAMAGE_REPORT_MS) && !wbNetworkInFlight) {
+              wbLastReportAt = now;
+              void getWorldBossState(windowId).then((res) => {
+                if (res && res.ok) useGameStore.getState().queueSyncWorldBoss(windowId, res.hp);
+              });
+            }
+          }
+        } else if (wbReportWindow !== null) {
+          wbReportWindow = null;
+          wbReportedDamage = 0;
+          wbPingedWindow = null;
+        }
       }
 
       // ดินแดนอสูร (ASURA) daily hot zone: cheap per-frame day-key check, same
@@ -1662,6 +1822,16 @@ export function GameClient() {
             const pending = store.drainPendingInput();
             if (pending.buyShopItem) manualBuyThisFrame = true;
             const input = buildFrameInput(pending, store.inventory.length, myCohortIndex);
+            // Bot-toggle fix (defense-in-depth, see `myAutoHuntDisplay`'s doc): the LEGACY
+            // `setAutoHunt` intent (from `toggleBotMaster`) only ever writes the SHARED,
+            // lane-0-owned `state.autoHunt` global (`step()`'s `primary.setAutoHunt`) —
+            // superseded in a cohort by the per-hero `setHeroConfig` replication below, which
+            // now reads a correctly-personal `store.autoHunt`. Drop it here so a lane-0 member
+            // (the leader) never mutates that pointless-but-persisted/hashed shared field
+            // (which would otherwise still bleed into `SharedCohortSave`); a non-lane-0
+            // member's copy is already redundant with `setHeroConfig` (both target the SAME
+            // hero) and equally safe to drop.
+            input.setAutoHunt = undefined;
             // ECONOMY-INTEGRITY / mid-cohort automation: solo's global config mirror
             // (`syncPrimaryHeroConfig`) no-ops at heroes.length >= 2, so a bot/auto-cast/
             // potion toggle would be DEAD in a cohort. Derive my desired config from the
@@ -1950,6 +2120,14 @@ export function GameClient() {
         // blob). `myVirtualWallet` reads the live pot, never mutating it.
         const w = myVirtualWallet();
         const base = { ...state, heroes: [mine] };
+        // PROGRESSION-INTEGRITY (cohortProgress.ts): same shape as the wallet override —
+        // `base` is a THROWAWAY shallow clone (never the live `state`, so mutating its
+        // scalar fields here can't desync the lockstep sim), overwritten with MY frozen
+        // world-progression snapshot so autosave/the hide beacon never persist a deep
+        // friend's zone unlocks (or wipe my own asura/tome progress, which isn't part of
+        // the shared slice at all and would otherwise save as the cohort rebuild's zeroed
+        // defaults — see `cohortProgress.ts`'s module doc).
+        if (cohortProgressBase) applyProgressSlice(base, cohortProgressBase);
         return toSaveData(
           w
             ? {

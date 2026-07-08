@@ -368,14 +368,17 @@ export function updateHeroes(state: GameState): void {
 
   // TARGET-SPREAD + BOSS DOG-PILE (M8 "party feel pack", owner "แต่มีบอส ทุกคนต้องรุม"). Only a
   // MULTI-HERO cohort spreads — solo keeps plain `huntTarget` (byte-identical). A boss ALWAYS
-  // pulls the WHOLE party: the stage/quest-boss phase (`bossPhase`) clears the enemy list so all
+  // pulls EVERY auto hero: the stage/quest-boss phase (`bossPhase`) clears the enemy list so all
   // heroes already target the boss, and an ENGAGED world boss (passive-until-hit → hp < maxHp)
-  // is a `forcedBoss` every auto hero converges on, EXEMPT from the claim/spread (claimable by
-  // all). Spread applies ONLY to ordinary farm mobs with no engaged boss present.
+  // is a `forcedBoss` that EVERY auto hero — SOLO INCLUDED — converges on until it dies/despawns,
+  // EXEMPT from the claim/spread (claimable by all). The `hp < maxHp` gate keeps passive-until-
+  // attacked intact: the bot NEVER initiates (the first hit is always a human tap / manual
+  // attackTarget); it only piles on once a human has engaged it. Dormant (no world boss) → null,
+  // so the solo canonical sim is byte-identical. Spread applies ONLY to ordinary farm mobs.
   const multi = state.heroes.length > 1;
   const wb = state.worldBoss;
   const forcedBoss: CombatTarget | null =
-    multi && !bossPhase && wb && wb.active && wb.entity && wb.entity.hp < wb.entity.maxHp
+    !bossPhase && wb && wb.active && wb.entity && wb.entity.hp < wb.entity.maxHp
       ? wb.entity
       : null;
   // The world-boss id is NEVER claimed even before it engages (a boss is everyone's target).
@@ -387,7 +390,14 @@ export function updateHeroes(state: GameState): void {
     if (h.dead) continue;
     const t = HERO_TYPES[h.cls];
     // Per-hero huntable set (M8 party P1b) — each hero honours its own autoHunt config.
-    const targets = huntableTargetsFor(state, h);
+    // The WORLD BOSS is EXCLUDED from AUTO acquisition: an un-engaged one must never be
+    // auto-initiated (passive-until-hit — the FIRST hit is always a human tap / manual
+    // attackTarget, so the bot never farms it), and an ENGAGED one is driven by `forcedBoss`
+    // below (the whole-party focus target, not the nearest-mob picker). Manual commands still
+    // reach it (`commandTargets` = full `getTargets`), as do in-flight homing shots. Filtered
+    // only when a world boss is active (`wbId` non-null) → byte-identical to pre-feature otherwise.
+    let targets = huntableTargetsFor(state, h);
+    if (wbId !== null) targets = targets.filter((tg) => tg.id !== wbId);
 
     // MANUAL command (M7.8 "Manual Play") takes priority over auto-hunt, unless the
     // boss phase is forcing combat (then commands are ignored — see `bossPhase`).

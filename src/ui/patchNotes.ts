@@ -291,6 +291,22 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09h.items.ninjaUnlockOpen",
     ],
   },
+  // World boss "เสี่ยจ๋อง" goes SHARED-HP server-wide (one pool, everyone chips in) +
+  // bots now pile onto an already-engaged boss; party invite UX case 2 (toasts +
+  // "already partied" friend chip); two cohort live-bug fixes (world-progression leak,
+  // per-member bot toggle).
+  {
+    id: "2026-07-09i",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09i.items.worldBossSharedHp",
+      "releases.2026-07-09i.items.worldBossBotEngage",
+      "releases.2026-07-09i.items.partyInviteToasts",
+      "releases.2026-07-09i.items.cohortLeakFix",
+      "releases.2026-07-09i.items.botToggleFix",
+      "releases.2026-07-09i.items.rename",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

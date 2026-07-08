@@ -252,19 +252,62 @@ body {
   animation-fill-mode: forwards;
 }
 
-/* One hammer-strike pulse (synced to `playRefineChargeTick`'s SFX beats via a
- * `key`-remounted, per-strike `animation-delay`). */
+/* One hammer-strike pulse (synced to `playRefineChargeTick`'s SFX beats — each
+ * beat mounts a fresh `key`-ed span, so the animation always plays once from
+ * mount). `--strike-scale` escalates per beat (set inline by RefinePanel) so
+ * later strikes in the sequence read as harder impacts. */
 @keyframes ddp-refine-strike {
   0%,
   100% {
     transform: scale(1);
   }
   50% {
-    transform: scale(1.22);
+    transform: scale(var(--strike-scale, 1.22));
   }
 }
 .animate-refine-strike {
   animation: ddp-refine-strike 0.2s ease-out;
+}
+
+/* Reveal-redesign (owner: "ผลลัพธ์เผยตอนค้อนลงเท่านั้น"): the +8..+10 "break" risk
+ * band's final beat gets a subtle shake — extra weight for the riskiest
+ * attempts, short + gentle enough it never reads as disorienting. */
+@keyframes ddp-refine-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-3px);
+  }
+  40% {
+    transform: translateX(3px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+.animate-refine-shake {
+  animation: ddp-refine-shake 0.32s ease-in-out;
+}
+
+/* Reveal-frame white flash — fires the instant the state machine reveals the
+ * (until-now withheld) outcome, for EVERY outcome, before the success/fail/
+ * break-specific juice above takes over. Plain opacity fade, no layout cost. */
+@keyframes ddp-refine-flash {
+  /* Peak 0.45 warm amber (element bg), not 0.85 white — dark-room friendly. */
+  0% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.animate-refine-flash {
+  animation: ddp-refine-flash 0.22s ease-out forwards;
 }
 
 /* Success: "+N!" rises and fades. */

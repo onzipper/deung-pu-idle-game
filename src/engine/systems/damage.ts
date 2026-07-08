@@ -53,6 +53,12 @@ export function applyDamage(
     if (def > 0) amount = Math.max(CONFIG.gear.minDamage, amount - def);
   }
   target.hp -= amount;
+  // SHARED WORLD-BOSS damage accounting: accrue every point dealt to the live world-boss
+  // entity onto its transient per-window counter (only heroes can hurt it, so this IS the
+  // hero-damage total). HASH-EXCLUDED but deterministic — read out by `worldBossDamageDealt`
+  // and batched to the shared-HP server. No-op for any other target (dormant = byte-identical).
+  const wb = state.worldBoss;
+  if (wb && wb.active && wb.entity === target) wb.damageDealt = (wb.damageDealt ?? 0) + amount;
   // Survivor-retaliation: a mob that took damage and LIVED starts fighting back.
   // A killed mob (hp <= 0) is NOT engaged (it's removed this step) — so a skill
   // that one-shots a passive cluster wakes nobody, and only survivors retaliate.

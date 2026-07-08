@@ -69,8 +69,11 @@ export interface UseFriendsPoll {
   invitePartyMember: (
     toUserId: string,
   ) => Promise<{ ok: true } | { ok: false; code: string }>;
-  respondPartyInvite: (inviteId: string, accept: boolean) => Promise<boolean>;
-  leaveParty: () => Promise<boolean>;
+  respondPartyInvite: (
+    inviteId: string,
+    accept: boolean,
+  ) => Promise<{ ok: true } | { ok: false; code: string }>;
+  leaveParty: () => Promise<{ ok: true } | { ok: false; code: string }>;
 }
 
 export function useFriendsPoll(open: boolean): UseFriendsPoll {
@@ -271,7 +274,7 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
     async (inviteId: string, accept: boolean) => {
       const res = await postRespondPartyInvite(inviteId, accept);
       void poll(); // party quick-start: see comment above
-      return res.ok;
+      return res;
     },
     [poll],
   );
@@ -279,7 +282,7 @@ export function useFriendsPoll(open: boolean): UseFriendsPoll {
   const leaveParty = useCallback(async () => {
     const res = await postLeaveParty();
     void poll(); // party quick-start: see comment above
-    return res.ok;
+    return res;
   }, [poll]);
 
   return {

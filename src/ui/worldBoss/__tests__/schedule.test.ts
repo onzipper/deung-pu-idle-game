@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { worldBossLocationFor, type WorldBossPhase } from "@/engine";
 import {
+  authorityReportDelta,
   deriveWorldBossStatus,
   formatCountdown,
   sameWorldBossStatus,
+  shouldPollHp,
   shouldQueueWorldBossSpawn,
+  shouldSendParticipationPing,
 } from "../schedule";
 
 function idle(windowId: number, msToSpawn: number): WorldBossPhase {
@@ -146,5 +149,44 @@ describe("shouldQueueWorldBossSpawn", () => {
         defeated: true,
       }),
     ).toBe(true);
+  });
+});
+
+describe("authorityReportDelta (SHARED-HP client driver, M8.6)", () => {
+  it("nothing to post when the total hasn't moved above the watermark", () => {
+    expect(authorityReportDelta(500, 500, 999_999, 10_000)).toBe(0);
+    expect(authorityReportDelta(400, 500, 999_999, 10_000)).toBe(0); // regressed — never negative
+  });
+
+  it("holds a positive delta until the cadence elapses", () => {
+    expect(authorityReportDelta(800, 500, 4_000, 10_000)).toBe(0);
+    expect(authorityReportDelta(800, 500, 10_000, 10_000)).toBe(300); // exactly at cadence
+    expect(authorityReportDelta(800, 500, 15_000, 10_000)).toBe(300);
+  });
+});
+
+describe("shouldSendParticipationPing (SHARED-HP client driver, M8.6)", () => {
+  it("false while my view of the shared total is still zero", () => {
+    expect(shouldSendParticipationPing(0, 7, null)).toBe(false);
+  });
+
+  it("true the first time the total turns positive for a fresh window", () => {
+    expect(shouldSendParticipationPing(1, 7, null)).toBe(true);
+  });
+
+  it("false once already pinged for that SAME window (latched before the request resolves)", () => {
+    expect(shouldSendParticipationPing(500, 7, 7)).toBe(false);
+  });
+
+  it("true again for a NEW window even if a prior window was pinged", () => {
+    expect(shouldSendParticipationPing(1, 8, 7)).toBe(true);
+  });
+});
+
+describe("shouldPollHp (SHARED-HP client driver, M8.6)", () => {
+  it("false before the cadence elapses, true at/after it", () => {
+    expect(shouldPollHp(4_000, 10_000)).toBe(false);
+    expect(shouldPollHp(10_000, 10_000)).toBe(true);
+    expect(shouldPollHp(20_000, 10_000)).toBe(true);
   });
 });

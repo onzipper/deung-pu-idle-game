@@ -28,7 +28,7 @@ import { prisma } from "@/lib/db";
 import { computeOfflineTime, type OfflineResult } from "@/server/offline";
 import { powerFromSave } from "@/server/characters";
 import { upsertLeaderboardEntry } from "@/server/leaderboard";
-import { parseUiConfig, uiConfigWriteValue } from "@/server/uiConfig";
+import { parseUiConfig } from "@/server/uiConfig";
 
 // HANDOFF: the incoming-save payload zod (`saveDataSchema`) now lives in the
 // engine (`src/engine/state/saveSchema.ts`, colocated with the SAVE_VERSION shape)
@@ -152,8 +152,26 @@ export async function persistSave(
   }
   if (uiConfig !== undefined) {
     const uic = parseUiConfig(uiConfig);
-    if (uic.ok) characterData.uiConfig = uiConfigWriteValue(uic.data);
-    else console.warn("[persistSave] rejected uiConfig (kept prior):", uic.error);
+    if (uic.ok) {
+      // MERGE, never blind-overwrite: the autosave body only ever carries the
+      // client-owned automation fields (`UiConfig` in gameStore.ts) — it has NO
+      // `displayTitle` key at all (that field is written ONLY by
+      // `setDisplayTitle`/POST /api/hof/title). A straight `uic.data` write was
+      // clobbering a previously-chosen title back to absent on the very next
+      // autosave tick, which is why a peer's friends-poll title read as null
+      // (bug: "my title invisible to others"). Read-merge-write so any field the
+      // incoming payload omits (today: displayTitle; tomorrow: any new one) keeps
+      // its stored value, while every field actually sent still wins.
+      const prior = await prisma.character.findUnique({
+        where: { id: characterId },
+        select: { uiConfig: true },
+      });
+      const base =
+        prior?.uiConfig && typeof prior.uiConfig === "object" && !Array.isArray(prior.uiConfig)
+          ? (prior.uiConfig as Record<string, unknown>)
+          : {};
+      characterData.uiConfig = { ...base, ...uic.data } as Prisma.InputJsonObject;
+    } else console.warn("[persistSave] rejected uiConfig (kept prior):", uic.error);
   }
 
   await prisma.$transaction([

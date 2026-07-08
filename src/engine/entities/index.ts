@@ -625,6 +625,14 @@ export interface Boss {
  *  - `countdown` : seconds until the lifetime despawn (seeded from the intent's
  *    `remainingSeconds`, decremented per FIXED_DT battle step).
  *  - `entity`    : the Boss entity (null when inactive) — a Boss with `variety` mechanics.
+ *  - `damageDealt` : cumulative hero damage dealt to THIS window's boss (MONOTONIC per
+ *    window — preserved across a flee/re-entry respawn, reset only on a new windowId).
+ *    HASH-EXCLUDED (like the ninja evade counters): a pure deterministic function of the
+ *    already-hashed damage sequence (identical on every lockstep client), read out by
+ *    `worldBossDamageDealt` for the client to batch to the shared-HP server against a
+ *    last-posted watermark. Never persisted. OPTIONAL on the type only (so hand-built
+ *    literals in the outer layers stay valid, like `Boss.variety`); `trySpawnWorldBoss`
+ *    always seeds it to a number, and the read/write sites default a missing value to 0.
  */
 export interface WorldBossState {
   windowId: number;
@@ -634,6 +642,7 @@ export interface WorldBossState {
   defeated: boolean;
   countdown: number;
   entity: Boss | null;
+  damageDealt?: number;
 }
 
 export interface Projectile {

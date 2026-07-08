@@ -33,6 +33,11 @@ export function AccountSection() {
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [copied, setCopied] = useState(false);
+  // displayName rename (once/day) — inline edit + feedback (house style: no toast).
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [renameMsg, setRenameMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   async function refresh() {
     try {
@@ -69,6 +74,40 @@ export function AccountSection() {
       // fall through to re-enable the button below
     }
     setLoggingOut(false);
+  }
+
+  function startEditName() {
+    setNameDraft(info?.displayName ?? "");
+    setRenameMsg(null);
+    setEditingName(true);
+  }
+
+  async function submitRename() {
+    const displayName = nameDraft.trim();
+    if (!displayName || savingName) return;
+    setSavingName(true);
+    setRenameMsg(null);
+    try {
+      const res = await fetch("/api/account/rename", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName }),
+      });
+      if (res.ok) {
+        setEditingName(false);
+        setRenameMsg({ kind: "ok", text: t("renameSuccess") });
+        await refresh();
+      } else {
+        const data = (await res.json().catch(() => null)) as { code?: string } | null;
+        setRenameMsg({
+          kind: "err",
+          text: data?.code === "rename_cooldown" ? t("renameCooldown") : t("renameError"),
+        });
+      }
+    } catch {
+      setRenameMsg({ kind: "err", text: t("renameError") });
+    }
+    setSavingName(false);
   }
 
   function handleCopyFriendCode() {
@@ -115,12 +154,66 @@ export function AccountSection() {
             <span className="text-ddp-ink-muted">{t("emailLabel")}</span>
             <span className="font-semibold text-ddp-ink">{info.email}</span>
           </div>
-          {info.displayName && (
+          <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-2 text-[12px]">
               <span className="text-ddp-ink-muted">{t("displayNameLabel")}</span>
-              <span className="font-semibold text-ddp-ink">{info.displayName}</span>
+              {!editingName && (
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-ddp-ink">
+                    {info.displayName ?? t("noDisplayName")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={startEditName}
+                    aria-label={t("renameEditAria")}
+                    className="rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2 py-0.5 text-[12px] leading-none hover:border-emerald-400/60"
+                  >
+                    ✏️
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+            {editingName && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    maxLength={24}
+                    autoFocus
+                    placeholder={t("renamePlaceholder")}
+                    className="min-h-11 min-w-0 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/40 px-3 py-2 text-sm font-medium text-ddp-ink outline-none focus:border-emerald-400/60"
+                  />
+                  <button
+                    type="button"
+                    disabled={savingName || nameDraft.trim().length === 0}
+                    onClick={() => void submitRename()}
+                    className="min-h-11 rounded-(--ddp-radius-md) border border-emerald-400/60 bg-emerald-400/10 px-3 py-2 text-xs font-bold text-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingName ? t("renameSaving") : t("renameSave")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingName(false)}
+                    className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-border bg-black/30 px-3 py-2 text-xs font-bold text-ddp-ink-muted hover:text-ddp-ink"
+                  >
+                    {t("renameCancel")}
+                  </button>
+                </div>
+                <span className="text-[10.5px] leading-snug text-ddp-ink-muted">
+                  {t("renameHint")}
+                </span>
+              </div>
+            )}
+            {renameMsg && (
+              <span
+                className={`text-[11px] font-semibold ${renameMsg.kind === "ok" ? "text-emerald-300" : "text-ddp-bad"}`}
+              >
+                {renameMsg.text}
+              </span>
+            )}
+          </div>
           {info.friendCode && (
             <button
               type="button"

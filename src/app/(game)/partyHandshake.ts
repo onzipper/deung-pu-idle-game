@@ -148,11 +148,24 @@ export interface CohortSeat {
  * from each owner's OWN progression. Deterministic given identical inputs — this is
  * THE single build path every client (and a 1-member "cohort", i.e. a solo rebuild —
  * see `extractSoloState`) calls, mirroring `lockstep.test.ts`'s `buildCohort` helper.
+ *
+ * `positions` (owner bug batch A #2, "position reset on cohort re-form"): an OPTIONAL
+ * slot -> live x map. `makeHero` always places a fresh hero at its formation anchor
+ * (`CONFIG.baseAnchor + type.offset`) — correct for a genuinely-new joiner (it has no
+ * meaningful position in this cohort/zone yet), but WRONG for a member who was already
+ * standing somewhere when a reform was triggered by someone else joining: every seat
+ * used to get rebuilt through `makeHero` unconditionally, so an existing member's live
+ * x was silently discarded on every re-seed. A slot present in `positions` has its
+ * freshly-built hero's `x` overridden to that value post-construction; a slot ABSENT
+ * (including every slot when `positions` itself is omitted — old-format offers, or a
+ * fresh solo->cohort join) keeps `makeHero`'s anchor default. Backward-compatible: a
+ * caller that never passes this argument is byte-identical to before.
  */
 export function buildCohortState(
   seed: number,
   sharedSave: SharedCohortSave,
   order: readonly CohortSeat[],
+  positions?: ReadonlyMap<number, number>,
 ): GameState {
   const s = initGameState(seed);
   s.stage = sharedSave.stage;
@@ -172,8 +185,8 @@ export function buildCohortState(
   s.materials = sharedSave.materials;
   const sorted = [...order].sort((a, b) => a.slot - b.slot);
   s.heroClass = sorted[0]?.progression.cls ?? s.heroClass;
-  s.heroes = sorted.map(({ progression: p }, i) =>
-    makeHero(
+  s.heroes = sorted.map(({ slot, progression: p }, i) => {
+    const hero = makeHero(
       i + 1,
       p.cls,
       p.level,
@@ -192,8 +205,14 @@ export function buildCohortState(
       { ...p.config },
       [...p.mainClaimed],
       { serverDay: p.dailies.serverDay, quests: p.dailies.quests.map((q) => ({ ...q })) },
-    ),
-  );
+    );
+    // Carry an EXISTING member's live x forward across a re-form (see this function's
+    // doc) — a slot absent from `positions` (a genuinely-new joiner, or an old-format
+    // caller) keeps `makeHero`'s formation-anchor default untouched.
+    const knownX = positions?.get(slot);
+    if (knownX !== undefined) hero.x = knownX;
+    return hero;
+  });
   s.nextId = sorted.length + 1;
   return s;
 }
@@ -220,6 +239,14 @@ export interface ReseedOfferMsg {
   /** Present ONLY on the seed authority's (lowest cohort slot) own offer — see the
    * module doc for why the shared slice comes from exactly one member. */
   authority?: { baseSeed: number; sharedSave: SharedCohortSave };
+  /** OPTIONAL, owner bug batch A #2: my own hero's CURRENT x, sent ONLY when this
+   * offer continues an ALREADY-active cohort (a re-form triggered by someone else
+   * joining/leaving my zone) — see `buildCohortState`'s `positions` doc. Omitted for
+   * a fresh solo->cohort join (the sender has no meaningful position in this cohort
+   * yet — it spawns at the formation anchor, as before) and by any old-format
+   * sender (backward-compatible: `receiveOffer` simply won't have an x for that
+   * slot, so it keeps the anchor default). */
+  x?: number;
 }
 
 export interface ReseedAckMsg {
@@ -251,6 +278,10 @@ export interface PartyHandshakeOptions {
   /** Mints the fresh room seed — called ONLY if I'm the authority. Injected (not
    * read here) so tests can supply a deterministic fake. */
   mintSeed: () => number;
+  /** OPTIONAL, owner bug batch A #2: my hero's CURRENT x, sent on my offer ONLY when
+   * set — see `ReseedOfferMsg.x`'s doc. The caller passes this ONLY when re-forming
+   * an already-active cohort (omit it on a fresh solo->cohort join). */
+  myX?: number;
 }
 
 /**
@@ -274,7 +305,11 @@ export class PartyHandshake {
   private readonly leaderSlot: number;
   private readonly offers = new Map<
     number,
-    { progression: CohortProgression; authority?: { baseSeed: number; sharedSave: SharedCohortSave } }
+    {
+      progression: CohortProgression;
+      authority?: { baseSeed: number; sharedSave: SharedCohortSave };
+      x?: number;
+    }
   >();
   private readonly acks = new Map<number, number>();
   private lastOfferSeq: number | null = null;
@@ -307,10 +342,10 @@ export class PartyHandshake {
    * (including mine) is recorded, keeping exactly one code path. */
   start(): void {
     if (this.phaseValue !== "offering") return;
-    const { mySlot, myProgression, mySharedSave, mintSeed, send } = this.opts;
+    const { mySlot, myProgression, mySharedSave, mintSeed, myX, send } = this.opts;
     const authority =
       mySlot === this.leaderSlot ? { baseSeed: mintSeed(), sharedSave: mySharedSave } : undefined;
-    send({ kind: "reseed-offer", slot: mySlot, progression: myProgression, authority });
+    send({ kind: "reseed-offer", slot: mySlot, progression: myProgression, authority, x: myX });
   }
 
   /** Feed one relay-delivered `reseed-offer` (including my own echo). `seq` is the
@@ -318,7 +353,7 @@ export class PartyHandshake {
   receiveOffer(fromSlot: number, msg: ReseedOfferMsg, seq: number): void {
     if (this.phaseValue !== "offering") return;
     if (!this.opts.cohortSlots.includes(fromSlot)) return; // stale/foreign slot — ignore
-    this.offers.set(fromSlot, { progression: msg.progression, authority: msg.authority });
+    this.offers.set(fromSlot, { progression: msg.progression, authority: msg.authority, x: msg.x });
     if (this.offers.size < this.opts.cohortSlots.length) return;
     // All N offers observed. Every client reaches this exact branch at the SAME seq
     // (see the class doc) — record it, move to acking, and ack.
@@ -344,7 +379,20 @@ export class PartyHandshake {
       .slice()
       .sort((a, b) => a - b)
       .map((slot) => ({ slot, progression: this.offers.get(slot)!.progression }));
-    this.resultValue = buildCohortState(authorityOffer.baseSeed, authorityOffer.sharedSave, order);
+    // Owner bug batch A #2: fold every offer's OPTIONAL `x` into a slot -> position
+    // map — a slot whose offer omitted it (a fresh joiner, or an old-format sender)
+    // is simply absent, so `buildCohortState` leaves it at the formation anchor.
+    const positions = new Map<number, number>();
+    for (const slot of this.opts.cohortSlots) {
+      const x = this.offers.get(slot)?.x;
+      if (x !== undefined) positions.set(slot, x);
+    }
+    this.resultValue = buildCohortState(
+      authorityOffer.baseSeed,
+      authorityOffer.sharedSave,
+      order,
+      positions,
+    );
     this.phaseValue = "done";
   }
 

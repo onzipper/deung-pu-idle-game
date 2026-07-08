@@ -259,6 +259,102 @@ describe("M8 party handshake — restart on a shadowed member (D1/D2)", () => {
   });
 });
 
+describe("owner bug batch A #2 — position reset on cohort re-form", () => {
+  /** Like `runHandshakeCohort` but lets the caller supply a per-slot `myX` (only some
+   * slots — the "existing members" — pass one; a "new joiner" passes `undefined`). */
+  function runHandshakeWithX(
+    cohortSlots: number[],
+    progressionOf: (slot: number) => CohortProgression,
+    xOf: (slot: number) => number | undefined,
+    shuffleSeed: number,
+  ): PartyHandshake[] {
+    const rng = createRng(shuffleSeed);
+    const pending: { fromSlot: number; msg: PartyWireMsg }[] = [];
+    let seqCounter = 0;
+    const shared = sharedSave();
+    const handshakes = new Map<number, PartyHandshake>();
+    for (const slot of cohortSlots) {
+      handshakes.set(
+        slot,
+        new PartyHandshake({
+          mySlot: slot,
+          cohortSlots,
+          send: (msg) => pending.push({ fromSlot: slot, msg }),
+          myProgression: progressionOf(slot),
+          mySharedSave: shared,
+          mintSeed: () => 4242,
+          myX: xOf(slot),
+        }),
+      );
+    }
+    function flush(): void {
+      while (pending.length > 0) {
+        const batch = pending.splice(0, pending.length);
+        for (let i = batch.length - 1; i > 0; i--) {
+          const j = Math.floor(rng.next() * (i + 1));
+          [batch[i], batch[j]] = [batch[j], batch[i]];
+        }
+        for (const item of batch) {
+          const seq = seqCounter++;
+          for (const slot of cohortSlots) {
+            const h = handshakes.get(slot)!;
+            if (item.msg.kind === "reseed-offer") h.receiveOffer(item.fromSlot, item.msg, seq);
+            else h.receiveAck(item.fromSlot, item.msg);
+          }
+        }
+      }
+    }
+    for (const slot of cohortSlots) handshakes.get(slot)!.start();
+    flush();
+    return cohortSlots.map((slot) => handshakes.get(slot)!);
+  }
+
+  it("a re-form preserves EXISTING members' x, and anchors a genuinely-new joiner", () => {
+    const slots = [0, 1, 2];
+    // Slots 0 and 1 were already standing somewhere in the zone (a re-seed triggered by
+    // slot 2 walking in); slot 2 is the brand-new joiner (no `myX`).
+    const hs = runHandshakeWithX(
+      slots,
+      (s) => prog(s === 0 ? "swordsman" : s === 1 ? "archer" : "mage", 10 + s),
+      (s) => (s === 2 ? undefined : 999 + s * 10),
+      0x2024,
+    );
+    for (const h of hs) expect(h.phase).toBe("done");
+    const built = hs[0].result!;
+    expect(built.heroes[0].x).toBe(999); // slot 0's live x carried through
+    expect(built.heroes[1].x).toBe(1009); // slot 1's live x carried through
+    // Slot 2 (the new joiner) lands at its class's formation anchor — the SAME x a
+    // fresh `makeHero` would place it at, not either existing member's carried x.
+    expect(built.heroes[2].x).toBe(makeHero(3, "mage", 12).x);
+    expect(built.heroes[2].x).not.toBe(999);
+    expect(built.heroes[2].x).not.toBe(1009);
+    // Every client converges on the SAME rebuilt state (still byte-identical).
+    expect(stateHash(hs[1].result!)).toBe(stateHash(hs[0].result!));
+    expect(stateHash(hs[2].result!)).toBe(stateHash(hs[0].result!));
+  });
+
+  it("an old-format offer (no `x` at all) leaves every hero at the formation anchor, as before", () => {
+    const slots = [0, 1];
+    const hs = runHandshakeCohort(slots, (s) => prog(s === 0 ? "swordsman" : "archer", 5 + s), 0xaaaa);
+    for (const h of hs) expect(h.phase).toBe("done");
+    const solo0 = makeHero(1, "swordsman", 5);
+    const solo1 = makeHero(1, "archer", 6);
+    expect(hs[0].result!.heroes[0].x).toBe(solo0.x);
+    expect(hs[0].result!.heroes[1].x).toBe(solo1.x);
+  });
+
+  it("buildCohortState with no `positions` argument at all is unchanged (backward-compatible)", () => {
+    const built = buildCohortState(2024, sharedSave(7), [
+      { slot: 0, progression: prog("swordsman", 12) },
+      { slot: 1, progression: prog("mage", 20) },
+    ]);
+    const solo0 = makeHero(1, "swordsman", 12);
+    const solo1 = makeHero(2, "mage", 20);
+    expect(built.heroes[0].x).toBe(solo0.x);
+    expect(built.heroes[1].x).toBe(solo1.x);
+  });
+});
+
 describe("M8 party handshake — cohort -> solo extraction (design C)", () => {
   it("extractSoloState rebuilds a valid 1-hero state carrying MY hero's own progression", () => {
     const cohort = buildCohortState(2024, sharedSave(7), [

@@ -41,6 +41,7 @@ import { processSkills, setAutoSlot } from "@/engine/systems/skills";
 import { startBossFight, updateBoss } from "@/engine/systems/boss";
 import {
   applyWorldBossSpawnIntents,
+  applyWorldBossSync,
   updateWorldBossAI,
   tickWorldBossLifetime,
   sweepWorldBossPresence,
@@ -306,8 +307,24 @@ export interface FrameInput {
    * the ordered lanes make first-wins deterministic). `remainingSeconds` seeds a
    * deterministic lifetime countdown (decremented per FIXED_DT step; reaching 0 despawns
    * it — as does leaving the zone). Applied from every lane in slot order.
+   *
+   * SHARED-HP RE-ENTRY (optional `hp`): when the client already knows the server-authoritative
+   * pool for this window (a re-entry into a boss the server tracks), it may seed `entity.hp`
+   * directly at spawn so the fresh copy starts at the shared value instead of full HP — the
+   * first `syncWorldBoss` corrects it within a step anyway, so `hp` is a backward-compatible
+   * optimisation (omit it → spawns at full `CONFIG.worldBoss.hp`). Clamped to `(0, maxHp]`.
    */
-  spawnWorldBoss?: { windowId: number; remainingSeconds: number };
+  spawnWorldBoss?: { windowId: number; remainingSeconds: number; hp?: number };
+  /**
+   * SHARED SERVER-WIDE WORLD-BOSS HP sync (authoritative-downward only). The client batches the
+   * server's authoritative remaining HP for the live window; the engine CLAMPS
+   * `entity.hp = min(entity.hp, max(0, hp))` iff `state.worldBoss` matches `windowId` and is
+   * active — it NEVER heals the local copy (local damage may legitimately run AHEAD of the
+   * server between syncs; the server pool only ever ratchets HP DOWN). `hp <= 0` resolves the
+   * defeat via the normal `worldBossDefeated` path. IDEMPOTENT (a stale/duplicate sync that
+   * doesn't lower HP is a no-op). Lead lane (lane 0). Applied once per drained input.
+   */
+  syncWorldBoss?: { windowId: number; hp: number };
   /**
    * ดินแดนอสูร (ASURA) daily HOT-ZONE (endgame v1). The CLIENT computes the Asia/Bangkok day-key
    * off its wall clock (the engine never reads a clock — same split as `spawnWorldBoss`) and
@@ -592,6 +609,9 @@ export function step(state: GameState, input: FrameInput | PartyInput = {}): Gam
   // WORLD BOSS "เสี่ยจ๋อง": apply this step's spawn intents (all lanes, first-wins) BEFORE
   // combat so a freshly-spawned boss is targetable this same step. Dormant with no intent.
   applyWorldBossSpawnIntents(state, lanes);
+  // SHARED-HP sync (lead lane, authoritative-downward): clamp the local copy to the server pool
+  // BEFORE combat so this step fights the corrected HP; a <= 0 sync resolves the defeat here.
+  if (primary.syncWorldBoss) applyWorldBossSync(state, primary.syncWorldBoss);
   updateSpawns(state, rng); // maintain the farm zone's mob pool (M6 "สนามล่ามอน")
   updateEnemies(state); // no-op during the boss phase (field is cleared)
   if (state.phase === "boss") updateBoss(state);

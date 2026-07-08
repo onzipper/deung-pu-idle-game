@@ -22,6 +22,7 @@ import {
   type HeroClass,
 } from "@/engine";
 import { prisma } from "@/lib/db";
+import { serverDayFor } from "@/server/dailyQuests";
 
 /**
  * Max LIVE characters per account. Ninja wave: 3 → 4. The first three slots hold
@@ -139,6 +140,20 @@ export const createCharacterSchema = z
   .strict();
 
 export type CreateCharacterInput = z.infer<typeof createCharacterSchema>;
+
+/**
+ * POST /api/characters/rename body. Reuses the EXACT creation `nameSchema` (2–24
+ * Thai/EN alnum, trimmed) — rename is held to the same validity + global-CI
+ * uniqueness bar as creation. `characterId` is bounded (opaque cuid).
+ */
+export const renameCharacterSchema = z
+  .object({
+    characterId: z.string().min(1).max(64),
+    name: nameSchema,
+  })
+  .strict();
+
+export type RenameCharacterInput = z.infer<typeof renameCharacterSchema>;
 
 /** Public character shape returned to the client (never leaks internal columns). */
 export interface CharacterDTO {
@@ -310,6 +325,77 @@ class SlotError extends Error {
   constructor(public readonly kind: CreateErrorCode) {
     super(kind);
   }
+}
+
+export type RenameErrorCode = "not_found" | "name_taken" | "rename_cooldown";
+
+export type RenameResult =
+  | { ok: true; character: CharacterDTO }
+  | { ok: false; code: RenameErrorCode };
+
+/**
+ * Rename a LIVE character owned by `userId`, limited to ONCE per Asia/Bangkok
+ * server-day. All checks + the write run in ONE transaction:
+ *   1. owner + liveness gate (`userId` + `deletedAt: null`) — else `not_found`
+ *      (never leaks whether the id exists for another account),
+ *   2. once/day guard: `renameDay === today` → `rename_cooldown`,
+ *   3. global case-insensitive uniqueness among LIVE rows EXCLUDING self (the
+ *      same bar `createCharacter` enforces; utf8mb4 CI collation) → `name_taken`,
+ *   4. the write is an ATOMIC compare-and-set (guarded `updateMany` where
+ *      `renameDay` is null or a prior day) so a concurrent double-rename lands
+ *      zero rows → `rename_cooldown`. The server computes the day from its own
+ *      wall-clock (client clocks never trusted). HOF/announcement snapshots keep
+ *      the historical name by design (no backfill).
+ */
+export async function renameCharacter(
+  userId: string,
+  characterId: string,
+  name: string,
+  now: Date = new Date(),
+): Promise<RenameResult> {
+  const today = serverDayFor(now);
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.character.findFirst({
+      where: { id: characterId, userId, deletedAt: null },
+      select: { id: true, renameDay: true },
+    });
+    if (!row) return { ok: false, code: "not_found" };
+    if (row.renameDay === today) return { ok: false, code: "rename_cooldown" };
+
+    // Global CI uniqueness among LIVE rows, excluding this character itself
+    // (renaming to your own current name would otherwise self-collide).
+    const dup = await tx.character.findFirst({
+      where: { deletedAt: null, name, id: { not: characterId } },
+      select: { id: true },
+    });
+    if (dup) return { ok: false, code: "name_taken" };
+
+    const res = await tx.character.updateMany({
+      where: {
+        id: characterId,
+        userId,
+        deletedAt: null,
+        OR: [{ renameDay: null }, { renameDay: { not: today } }],
+      },
+      data: { name, renameDay: today },
+    });
+    if (res.count === 0) return { ok: false, code: "rename_cooldown" };
+
+    const updated = await tx.character.findFirst({
+      where: { id: characterId },
+      select: {
+        id: true,
+        name: true,
+        baseClass: true,
+        level: true,
+        power: true,
+        tier: true,
+        createdAt: true,
+      },
+    });
+    // updated is non-null: the guarded update above matched exactly this row.
+    return { ok: true, character: toDTO(updated!) };
+  });
 }
 
 /**

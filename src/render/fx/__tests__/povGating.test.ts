@@ -153,3 +153,87 @@ describe("M8 party P6 — FxController POV skill-fx gating", () => {
     fx.destroy();
   });
 });
+
+/**
+ * Owner bug batch A #3 ("TAP-RING POV-ONLY", other players' ground-click rings
+ * showed on my screen): `moveOrdered`/`targetLocked` now carry `heroIdx` (the
+ * cohort lane the manual command landed on — mirrors `skillCast.slot`), and
+ * `FxController.onMoveOrdered`/`onTargetLocked` gate the ring-ping fx on it
+ * exactly like the skill-spectacle screen-beat gate above. Solo default
+ * `povHeroIndex` 0 + heroIdx 0 stays pixel-identical.
+ */
+describe("owner bug batch A #3 — tap-ring pov-only (moveOrdered / targetLocked)", () => {
+  function moveOrderedEvent(heroIdx: number, x = 321): GameEvent {
+    return { type: "moveOrdered", x, heroIdx };
+  }
+
+  it("a PEER's (non-POV) ground-tap never rings on my screen", () => {
+    const { fx, fxContainer } = makeFx();
+    const state = twoHeroState();
+    settle(fx, state);
+    const beforeVisible = countVisibleDescendants(fxContainer);
+
+    // Default povHeroIndex is 0 — heroIdx 1 (the peer) is NOT my POV hero.
+    fx.consumeEvents([moveOrderedEvent(1)], state);
+
+    expect(countVisibleDescendants(fxContainer)).toBe(beforeVisible);
+    fx.destroy();
+  });
+
+  it("MY OWN ground-tap (heroIdx === povHeroIndex) still rings", () => {
+    const { fx, fxContainer } = makeFx();
+    const state = twoHeroState();
+    fx.setPovHeroIndex(1); // this client's own hero is slot 1
+    settle(fx, state);
+    const beforeVisible = countVisibleDescendants(fxContainer);
+
+    fx.consumeEvents([moveOrderedEvent(1)], state);
+
+    expect(countVisibleDescendants(fxContainer)).toBeGreaterThan(beforeVisible);
+    fx.destroy();
+  });
+
+  it("solo guard: default povHeroIndex 0 + a heroIdx-0 moveOrdered rings exactly as before", () => {
+    const { fx, fxContainer } = makeFx();
+    const state = initGameState(1, undefined, "archer");
+    settle(fx, state);
+    const beforeVisible = countVisibleDescendants(fxContainer);
+
+    fx.consumeEvents([moveOrderedEvent(0)], state);
+
+    expect(countVisibleDescendants(fxContainer)).toBeGreaterThan(beforeVisible);
+    fx.destroy();
+  });
+
+  it("a PEER's tap-a-monster targetLocked pulse never rings on my screen", () => {
+    const { fx, fxContainer } = makeFx();
+    const state = twoHeroState();
+    const mob: GameState["enemies"][number] = {
+      id: 999,
+      kind: "normal",
+      x: 400,
+      y: 0,
+      hp: 10,
+      maxHp: 10,
+      atk: 5,
+      speed: 40,
+      size: 20,
+      behavior: "melee",
+      range: 0,
+      cd: 0,
+      engageOffset: 0,
+      homeX: 400,
+      aggressive: false,
+      aggroRadius: 0,
+      engaged: false,
+    };
+    const withEnemy: GameState = { ...state, enemies: [mob] };
+    settle(fx, withEnemy);
+    const beforeVisible = countVisibleDescendants(fxContainer);
+
+    fx.consumeEvents([{ type: "targetLocked", id: mob.id, heroIdx: 1 }], withEnemy);
+
+    expect(countVisibleDescendants(fxContainer)).toBe(beforeVisible);
+    fx.destroy();
+  });
+});

@@ -62,21 +62,21 @@ function applyOneCommand(state: GameState, heroIdx: number, input: FrameInput): 
 
   if (input.cancelCommand && h.command) {
     h.command = null;
-    state.events.push({ type: "commandCancelled" });
+    state.events.push({ type: "commandCancelled", heroIdx });
   }
 
   if (input.moveTo && Number.isFinite(input.moveTo.x)) {
     const [minX, maxX] = walkBounds(state);
     const x = clamp(input.moveTo.x, minX, maxX);
     h.command = { kind: "move", x };
-    state.events.push({ type: "moveOrdered", x });
+    state.events.push({ type: "moveOrdered", x, heroIdx });
   }
 
   if (input.attackTarget) {
     const target = findAliveTarget(state, input.attackTarget.id);
     if (target) {
       h.command = { kind: "attack", targetId: target.id };
-      state.events.push({ type: "targetLocked", id: target.id });
+      state.events.push({ type: "targetLocked", id: target.id, heroIdx });
     }
     // Invalid / dead / despawned id -> ignore gracefully (clears nothing).
   }

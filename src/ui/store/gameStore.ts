@@ -473,8 +473,18 @@ export interface PendingInput {
   useWarpScroll: WorldLocation | null;
   /** World boss "เสี่ยจ๋อง" spawn intent (queued by `GameClient.tsx`'s own schedule
    * check, never a direct player action — last-wins per frame). The engine's own
-   * `trySpawnWorldBoss` is idempotent per windowId, so a repeat is a safe no-op. */
-  spawnWorldBoss: { windowId: number; remainingSeconds: number } | null;
+   * `trySpawnWorldBoss` is idempotent per windowId, so a repeat is a safe no-op.
+   * `hp` (SHARED-HP client driver, M8.6): the server-authoritative pool level fetched
+   * from `GET /api/worldboss/state` on zone-entry, seeding a fresh spawn/re-entry at the
+   * REAL shared value instead of full hp — optional (undefined while the fetch hasn't
+   * resolved yet; the engine falls back to full hp, backward-compatible). */
+  spawnWorldBoss: { windowId: number; remainingSeconds: number; hp?: number } | null;
+  /** World boss "เสี่ยจ๋อง" SHARED-HP sync (M8.6) — queued by `GameClient.tsx`'s own
+   * damage-report round trip (`POST /api/worldboss/damage`'s response), never a direct
+   * player action (last-wins per frame). The engine's `applyWorldBossSync` only ever
+   * clamps hp DOWNWARD and is a no-op for a stale/foreign windowId, so a repeat/late
+   * delivery is always safe. */
+  syncWorldBoss: { windowId: number; hp: number } | null;
   /** ดินแดนอสูร daily HOT-ZONE day-key (queued by `GameClient.tsx`'s own schedule
    * check while standing in asura — never a direct player action, last-wins per
    * frame). The engine resolves the zone deterministically off this — see
@@ -519,6 +529,7 @@ function emptyPendingInput(): PendingInput {
     claimMainReward: null,
     useWarpScroll: null,
     spawnWorldBoss: null,
+    syncWorldBoss: null,
     setAsuraHotZone: null,
     claimAsuraSigil: false,
     craftLegendary: false,
@@ -1472,8 +1483,12 @@ export interface HudState {
   setWorldBossStatus: (status: WorldBossStatus) => void;
   /** `GameClient.tsx`-only: queue the spawn intent while standing in the window's
    * boss zone during the "active" phase (last-wins per frame) — see
-   * `PendingInput.spawnWorldBoss`'s doc. */
-  queueSpawnWorldBoss: (windowId: number, remainingSeconds: number) => void;
+   * `PendingInput.spawnWorldBoss`'s doc. `hp` (M8.6) is the server-fetched shared pool
+   * level, once resolved. */
+  queueSpawnWorldBoss: (windowId: number, remainingSeconds: number, hp?: number) => void;
+  /** `GameClient.tsx`-only: queue the shared-HP sync intent from a damage-report
+   * round trip's response (last-wins per frame) — see `PendingInput.syncWorldBoss`'s doc. */
+  queueSyncWorldBoss: (windowId: number, hp: number) => void;
 
   // ---- ดินแดนอสูร (ASURA) endgame v1 ----
   /** `GameClient.tsx`-only: queue today's Bangkok day-key while standing in
@@ -1876,10 +1891,12 @@ export const useGameStore = create<HudState>((set, get) => ({
   setMySocialBadge: (badge) => set({ mySocialBadge: badge }),
 
   setWorldBossStatus: (status) => set({ worldBossStatus: status }),
-  queueSpawnWorldBoss: (windowId, remainingSeconds) =>
+  queueSpawnWorldBoss: (windowId, remainingSeconds, hp) =>
     set((s) => ({
-      pendingInput: { ...s.pendingInput, spawnWorldBoss: { windowId, remainingSeconds } },
+      pendingInput: { ...s.pendingInput, spawnWorldBoss: { windowId, remainingSeconds, hp } },
     })),
+  queueSyncWorldBoss: (windowId, hp) =>
+    set((s) => ({ pendingInput: { ...s.pendingInput, syncWorldBoss: { windowId, hp } } })),
 
   queueSetAsuraHotZone: (dayKey) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, setAsuraHotZone: { dayKey } } })),

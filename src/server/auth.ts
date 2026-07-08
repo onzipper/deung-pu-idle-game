@@ -32,6 +32,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { serverDayFor } from "@/server/dailyQuests";
 
 // ── Password hashing (scrypt, self-describing) ───────────────────────────────
 
@@ -134,6 +135,26 @@ export const registerSchema = z
 
 export const loginSchema = z.object({ email: emailSchema, password: passwordSchema }).strict();
 
+/**
+ * displayName RENAME body. Reuses the SAME trim + clamp-to-24 shape as the
+ * registration `displayNameSchema`, but a rename must be NON-EMPTY (you cannot
+ * rename yourself to blank — unlike registration, where an absent handle is a
+ * valid null). VarChar(24) is utf8mb4 so Thai is safe; no charset restriction
+ * (matches registration's lenient handle rule — the strict alnum rule is the
+ * Character.name gate, not the account handle's).
+ */
+export const renameDisplayNameSchema = z
+  .object({
+    displayName: z
+      .string()
+      .max(200)
+      .transform((v) => v.trim().slice(0, 24))
+      .pipe(z.string().min(1, "display name required")),
+  })
+  .strict();
+
+export type RenameDisplayNameInput = z.infer<typeof renameDisplayNameSchema>;
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 
@@ -222,6 +243,41 @@ export async function loginAccount(input: LoginInput): Promise<LoginResult> {
   const ok = await verifyPassword(input.password, user.passwordHash);
   if (!ok) return { ok: false, code: "bad_credentials" };
   return { ok: true, userId: user.id };
+}
+
+export type RenameDisplayNameResult =
+  | { ok: true; displayName: string }
+  | { ok: false; code: "rename_cooldown" | "account_required" };
+
+/**
+ * Self-service displayName rename, limited to ONCE per Asia/Bangkok server-day.
+ * Only registered accounts have a displayName (a guest has none), so an
+ * unregistered row is rejected `account_required`. The once/day guard is an
+ * ATOMIC compare-and-set: a single guarded `updateMany` writes the new name +
+ * today's `renameDay` ONLY when `renameDay` is null or a prior day — a second
+ * rename the same day matches zero rows (`count === 0`) → `rename_cooldown`, so
+ * two concurrent requests can never both succeed. The server computes the day
+ * from its own wall-clock (client clocks never trusted, like SaveState.lastSeen).
+ * displayName is NOT unique in the schema (friendCode is the real handle), so no
+ * collision check is needed.
+ */
+export async function renameDisplayName(
+  userId: string,
+  displayName: string,
+  now: Date = new Date(),
+): Promise<RenameDisplayNameResult> {
+  const today = serverDayFor(now);
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { registeredAt: true },
+  });
+  if (!user?.registeredAt) return { ok: false, code: "account_required" };
+  const res = await prisma.user.updateMany({
+    where: { id: userId, OR: [{ renameDay: null }, { renameDay: { not: today } }] },
+    data: { displayName, renameDay: today },
+  });
+  if (res.count === 0) return { ok: false, code: "rename_cooldown" };
+  return { ok: true, displayName };
 }
 
 /** The Settings → My Account read model for the current identity cookie. */
