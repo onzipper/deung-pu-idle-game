@@ -114,6 +114,22 @@ const enemyHpDamp = (n: number): number =>
 const PARTY_EXP_SHARE_RATE = 0.6;
 const PARTY_EXP_BUFF_PER_MEMBER = 0.1;
 const PARTY_SPAWN_SCALE_PER_MEMBER = 0.5;
+// M8 "party feel pack" follow-up (2026-07-08, owner-approved) — per-headcount RESPAWN-RATE
+// scaling. PARTY_SPAWN_SCALE_PER_MEMBER above lifts the maxAlive CAP, but a solo hero already
+// SATURATES the respawn cadence (respawnDelay-bound), so a bigger cap alone barely moved
+// kills/hero/min (stayed 45-68% of solo). Owner call: scale spawn THROUGHPUT with cohort size
+// too — the respawnDelay countdown is DIVIDED by (1 + rate×(N−1)) so a 2p field refills ×1.6
+// faster / 3p ×2.2, composing 1:1 with the maxAlive scale (cap and refill grow together, the
+// field reads full for N bodies AND replenishes as N bodies clear it). xp/gold inflation is
+// ACCEPTED (owner: "เงินเฟ้อ เดี๋ยวหากิจมาละลายทีหลัง"). IDENTITY at solo (size 1) → the
+// respawn countdown is byte-identical, and the seeded spawn DRAW order is untouched (a faster
+// countdown just reaches the SAME kind→temperament→placement→makeEnemy sequence sooner; no solo
+// baseline exists for cohorts so a faster stream advance is fine). Sim-swept 0.4-0.7: 0.6 is the
+// sweet spot — kills/hero/min rose from 45-68% of solo (respawn-cap starve) to 75-98% (2p ×1.6
+// field, 3p ×2.2; the ×2.0 maxAlive cap was the bind before). 0.7 gained nothing at 3p (spread-
+// clustering caps kills once the field is full) while inflating xp more; the residual ~75% cases
+// (2p archer / 3p sword) are clustering/death-spiral bound, NOT respawn bound.
+const PARTY_RESPAWN_SCALE_PER_MEMBER = 0.6;
 // M8 "party feel pack" (2026-07-08) — QUEST-boss HP headcount scaling. STAGE bosses stay as-is
 // (owner: melting at headcount is a party REWARD, a feature). QUEST bosses — the tier-1 class-
 // change exam boss + the tier-2 young-Glacial-Sovereign — must NOT melt to a party ("ไม่มีการ
@@ -129,6 +145,11 @@ const partyQuestBossHpScale = (size: number): number =>
 // extra member. Pure; deterministic (only + - *).
 const partyExpBuff = (size: number): number =>
   size <= 1 ? 1 : 1 + PARTY_EXP_BUFF_PER_MEMBER * (size - 1);
+// Respawn-delay MULTIPLIER for a cohort of size S (>=1): the delay is DIVIDED by
+// (1 + rate×(S−1)) so throughput rises with headcount, composing 1:1 with the maxAlive scale.
+// Solo (size 1) → 1 (byte-identical countdown). Pure; deterministic (only + - * /).
+const partyRespawnDelayScale = (size: number): number =>
+  size <= 1 ? 1 : 1 / (1 + PARTY_RESPAWN_SCALE_PER_MEMBER * (size - 1));
 // Per-hero-per-kill xp multiplier for a cohort: the group buff × the EQUAL share of the
 // per-kill xp pot (killer 1.0 + each other alive hero PARTY_EXP_SHARE_RATE), distributed
 // evenly across the `alive` present heroes. Solo (size 1) → 1 (byte-identical). Only
@@ -510,6 +531,8 @@ export const CONFIG = {
     expBuffPerMember: PARTY_EXP_BUFF_PER_MEMBER,
     /** `maxAlive` growth per extra member so more heroes don't starve one field. */
     spawnScalePerMember: PARTY_SPAWN_SCALE_PER_MEMBER,
+    /** Respawn-RATE growth per extra member (delay ÷(1+rate×(N−1))) so throughput scales too. */
+    respawnScalePerMember: PARTY_RESPAWN_SCALE_PER_MEMBER,
     /** QUEST-boss (class-change exam + young-Sovereign) HP scale per extra member. */
     questBossHpPerMember: PARTY_QUEST_BOSS_HP_PER_MEMBER,
     // QUEST-boss HP × cohort size (class-change exam + tier-3 young Sovereign only; STAGE
@@ -532,6 +555,11 @@ export const CONFIG = {
     // personal) nor the seeded draw order.
     spawnMaxAliveScale: (partySize: number): number =>
       partySize <= 1 ? 1 : 1 + PARTY_SPAWN_SCALE_PER_MEMBER * (partySize - 1),
+    // Mob respawn-DELAY scale per cohort size (owner-approved throughput fix): the delay is
+    // DIVIDED by (1+rate×(N−1)) so the field REFILLS faster for more bodies, composing 1:1
+    // with spawnMaxAliveScale (a solo saturates the delay cap, so the cap alone barely moves
+    // kills/hero/min). Solo → 1 (byte-identical); read by systems/hunt.updateSpawns.
+    respawnDelayScale: partyRespawnDelayScale,
   },
   heroBaseAtk: 10,
   heroBaseHp: 150,

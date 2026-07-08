@@ -139,6 +139,13 @@ export function updateSpawns(state: GameState, rng: Rng): void {
   // more heroes just raises the cap the SAME draw sequence fills toward.
   const poolScale = CONFIG.party.spawnMaxAliveScale(state.heroes.length);
   if (poolScale !== 1) sp.maxAlive = Math.max(1, Math.round(sp.maxAlive * poolScale));
+  // M8 party feel pack follow-up (owner-approved) — scale spawn THROUGHPUT with cohort size,
+  // not just the cap: a solo already saturates the respawn cadence, so the maxAlive bump above
+  // barely moves kills/hero/min. DIVIDING the delay makes the field REFILL faster for N bodies.
+  // Identity at solo (respawnScale === 1) → the countdown is byte-identical; a faster countdown
+  // for a cohort just reaches the SAME seeded draw sequence sooner (draw ORDER unperturbed).
+  const respawnScale = CONFIG.party.respawnDelayScale(state.heroes.length);
+  if (respawnScale !== 1) sp.respawnDelay = sp.respawnDelay * respawnScale;
 
   if (state.spawnBurst) {
     // Gradual re-entry fill: seed only a fraction of the cap; the trickle below

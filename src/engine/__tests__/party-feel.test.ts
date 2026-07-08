@@ -12,6 +12,10 @@ import {
 import type { GameState, HeroClass } from "@/engine";
 import { updateHeroes } from "@/engine/systems/combat";
 import { startBossFight } from "@/engine/systems/boss";
+import { updateSpawns, zoneSpawnParams } from "@/engine/systems/hunt";
+import { zoneAt } from "@/engine/systems/world";
+import { createRng } from "@/engine/core/rng";
+import { FIXED_DT } from "@/engine/core/loop";
 import { makeStubEnemy, soloSave } from "./helpers";
 
 /**
@@ -189,6 +193,70 @@ describe("party feel — quest-boss HP scales with cohort size (exam ≠ melt)",
     startBossFight(p2);
     expect(p2.boss!.hp).toBe(makeBoss(0, 20, ov, P.questBossHpScale(2)).hp);
     expect(p2.boss!.hp).toBeGreaterThan(solo.boss!.hp);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b) RESPAWN-RATE HEADCOUNT SCALING (owner-approved throughput fix)
+// ---------------------------------------------------------------------------
+describe("party feel — respawn rate scales with cohort size (throughput, not just cap)", () => {
+  const P = CONFIG.party;
+
+  it("respawnDelayScale: solo ×1.0, delay ÷(1+rate×(N−1))", () => {
+    const rt = P.respawnScalePerMember;
+    expect(rt).toBeCloseTo(0.6, 12);
+    expect(P.respawnDelayScale(1)).toBe(1); // solo — identity
+    expect(P.respawnDelayScale(2)).toBeCloseTo(1 / (1 + rt), 12); // 0.6 → ×1.6 throughput
+    expect(P.respawnDelayScale(3)).toBeCloseTo(1 / (1 + 2 * rt), 12); // → ×2.2 throughput
+    expect(P.respawnDelayScale(6)).toBeCloseTo(1 / (1 + 5 * rt), 12);
+    // strictly faster (shorter delay) as the cohort grows
+    expect(P.respawnDelayScale(3)).toBeLessThan(P.respawnDelayScale(2));
+  });
+
+  /** N heroes of `cls` in a fresh farm-zone battle state (stage 3). */
+  function farmParty(cls: HeroClass, size: number, seed = 5): GameState {
+    const s = initGameState(seed, soloSave(cls, 3));
+    s.heroes = [];
+    for (let i = 0; i < size; i++) s.heroes.push(makeHero(i + 1, cls));
+    s.nextId = size + 1;
+    return s;
+  }
+
+  it("SOLO respawn countdown is BYTE-IDENTICAL (spawnCd == base respawnDelay)", () => {
+    const s = farmParty("swordsman", 1);
+    const base = zoneSpawnParams(zoneAt(s.location)).respawnDelay;
+    expect(zoneAt(s.location).kind).toBe("farm");
+    s.enemies = [];
+    updateSpawns(s, createRng(1)); // burst branch sets spawnCd = respawnDelay
+    expect(s.spawnCd).toBe(base); // unscaled — no party machinery ran
+  });
+
+  it("PARTY respawn delay is divided by the throughput scale (2p ×1.5, 3p ×2.0)", () => {
+    const base = zoneSpawnParams(zoneAt(farmParty("swordsman", 1).location)).respawnDelay;
+    for (const size of [2, 3]) {
+      const s = farmParty("swordsman", size);
+      s.enemies = [];
+      updateSpawns(s, createRng(1));
+      expect(s.spawnCd).toBeCloseTo(base * P.respawnDelayScale(size), 9);
+    }
+  });
+
+  it("a 3p field REFILLS faster: same steps yield more trickle spawns than solo", () => {
+    // Drain past the burst, then count trickle spawns over a fixed window while the
+    // cap stays out of reach (heroes never attack — spawnPaused off, mobs just accrue).
+    const trickled = (size: number): number => {
+      const s = farmParty("mage", size, 9);
+      const rng = createRng(7);
+      updateSpawns(s, rng); // consume the entry burst
+      s.spawnBurst = false;
+      const start = s.enemies.length;
+      const secs = zoneSpawnParams(zoneAt(s.location)).respawnDelay * 6; // 6 base-delays
+      for (let t = 0; t < secs; t += FIXED_DT) updateSpawns(s, rng);
+      return s.enemies.length - start;
+    };
+    const solo = trickled(1);
+    const p3 = trickled(3);
+    expect(p3).toBeGreaterThan(solo); // faster cadence + higher cap → strictly more mobs
   });
 });
 
