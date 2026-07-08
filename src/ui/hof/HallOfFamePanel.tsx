@@ -23,9 +23,11 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fetchHof } from "@/ui/hof/api";
+import { ChampionsSection } from "@/ui/hof/ChampionsSection";
 import { formatBossClearTime, formatPlainValue, splitOnlineSeconds } from "@/ui/hof/format";
 import { HofProfileModal } from "@/ui/hof/HofProfileModal";
 import { hofQueryKey } from "@/ui/hof/query";
+import { isMyEntry } from "@/ui/hof/rewardsLogic";
 import {
   HOF_BOSS_STAGES,
   type HofBoard,
@@ -207,6 +209,8 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
             </button>
           </div>
 
+          <ChampionsSection />
+
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             {BOARD_ORDER.map((b) => (
               <TabButton key={b} active={board === b} onClick={() => setBoard(b)}>
@@ -269,7 +273,13 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
         </div>
       </div>
 
-      {selected && <HofProfileModal entry={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <HofProfileModal
+          entry={selected}
+          isMe={state.kind === "ok" && isMyEntry(state.data.me?.rank, selected.rank)}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </ModalPortal>
   );
 }
