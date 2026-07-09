@@ -188,7 +188,8 @@
 - [x] **ตั้งค่า → โลกมีมิติ**: toggle 3 ตัว (สนามลึก+พื้น / กล้อง / บรรยากาศ) default ON, localStorage tier, ปิดทั้งหมด = ภาพเดิม pixel-identical (มี identity tests ปัก)
 - [x] แถมรอบเดียวกัน: **ประกาศเวลตันทุกคน** ครั้งเดียวต่อตัวละคร (singletonKey `cap:<charId>`) แทน "คนแรกของเซิร์ฟ" + copy ธีมเวลตัน th/en — ไม่ต้อง db push (comment-only schema)
 - [x] Suite 2004→**2120** (+116), tsc/eslint/next build clean — **deploy: web redeploy อย่างเดียว ไม่มี db push ไม่มี relay**
-- [ ] **ค้าง**: patch notes รอบ release · เจ้าของเช็คตอนเล่น: จิ้มม็อบไกล/ใกล้กลางซูม, อ่านเลขดาเมจกลางคืน, hp bar ย่อตามลึกรับได้ไหม, fps มือถือ
+- [x] **Release round (2026-07-09, merge main PR #43 — เจ้าของยืนยัน)**: แก้ตามรีพอร์ตเจ้าของ 2 จุดก่อนปล่อย — (1) **กลางคืนมืดไป มองม็อบไม่เห็น** → entities tint ผ่อน 50% เข้าหาขาว (`ENTITY_TINT_RELIEF` ใหม่ใน dayNight.ts, ฉากหลัง/ghost ยังโดนเต็มคง mood) + `OVERLAY_ALPHA_MAX` 0.35→0.26 (overlay ทับ fx/เลขดาเมจด้วย ลด tint อย่างเดียวไม่พอ) — knob 2 ตัวถ้ายังไม่พอใจปรับเลขได้เลย (2) **ฉายาตัวเองหายบนจอตัวเอง** (เพื่อนเห็นปกติ) → `mySocialBadge` เคยเติมเฉพาะ bot `townArrived`/เลือกฉายาใหม่ ตอนนี้ fetch ตอน boot ด้วย · patch notes **2026-07-09l** (7 ข้อ th/en) · suite 2120→**2123**
+- [ ] **ค้าง**: deploy = web redeploy อย่างเดียว (ไม่มี db push/relay) · เจ้าของเช็คตอนเล่น: กลางคืนหลังจูน (ม็อบ/hp bar ชัด + mood ยังอยู่, peak นาที ~22.5–28 ของรอบ 30 นาที), จิ้มม็อบไกล/ใกล้กลางซูม, hp bar ย่อตามลึกรับได้ไหม, fps มือถือ, ฉายาโผล่เองหลัง reload
 
 ## M9 — Economy & Competition
 
