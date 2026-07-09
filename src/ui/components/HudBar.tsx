@@ -31,7 +31,8 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
-import { MaterialIcon } from "@/ui/components/icons";
+import { Coin, MaterialIcon } from "@/ui/components/icons";
+import { CurrencyChip } from "@/ui/components/primitives/CurrencyChip";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { useGameStore } from "@/ui/store/gameStore";
 import { WorldMapPanel } from "@/ui/world/WorldMapPanel";
@@ -81,32 +82,24 @@ export function HudBar() {
       </button>
       {fastTravelOpen && <FastTravelPicker onClose={() => setFastTravelOpen(false)} />}
       <div className="flex-1" />
-      <div className="flex items-center gap-2 rounded-(--ddp-radius-md) border border-ddp-gold/30 bg-ddp-gold/10 px-3 py-1.5">
-        {/* CSS-drawn coin: the 🪙 emoji (Unicode 13) has no glyph on Windows 10 */}
-        <span
-          aria-hidden
-          className="relative inline-block h-5 w-5 shrink-0 rounded-full border-2 border-amber-600 bg-amber-400 shadow-[inset_0_-2px_2px_rgba(0,0,0,0.25)]"
-        >
-          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black leading-none text-amber-700">
-            ฿
-          </span>
-        </span>
-        <span
-          className={`text-2xl font-extrabold text-ddp-gold tabular-nums ${goldPulse ? "animate-gold-pulse" : ""}`}
-        >
-          {gold.toLocaleString()}
-        </span>
-      </div>
-      {/* M7.6 ตีบวก: refine-material counter, secondary to gold (smaller, cooler
-          hue) so the hierarchy stays gold-first. */}
-      <div className="flex items-center gap-1.5 rounded-(--ddp-radius-md) border border-violet-400/25 bg-violet-400/10 px-2.5 py-1.5">
-        <MaterialIcon className="h-4 w-4" />
-        <span
-          className={`text-base font-bold text-violet-300 tabular-nums ${materialsPulse ? "animate-gold-pulse" : ""}`}
-        >
-          {materials.toLocaleString()}
-        </span>
-      </div>
+      {/* R2-W2: gold + material readouts migrated to the shared `CurrencyChip`
+          primitive (was bespoke inline markup) — same gold-first > violet-
+          secondary hierarchy, container-only pulse (never the digits), no
+          digit tween per the primitive's own contract. */}
+      <CurrencyChip
+        icon={<Coin className="h-5 w-5" />}
+        value={gold}
+        pulse={goldPulse}
+        variant="gold"
+        ariaLabel={t("goldAria")}
+      />
+      <CurrencyChip
+        icon={<MaterialIcon className="h-4 w-4" />}
+        value={materials}
+        pulse={materialsPulse}
+        variant="violet"
+        ariaLabel={t("materialsAria")}
+      />
     </div>
   );
 }

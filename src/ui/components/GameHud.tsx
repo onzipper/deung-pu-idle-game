@@ -17,11 +17,12 @@
  * speed selector was removed player-facing (M6.7) — `GameClient`'s loop always
  * drains 1 fixed sub-step per real frame now. EVERY automation sub-behavior
  * (autoCast/autoAllocate/autoReturn/autoAdvance/auto-potion/bot town-trips/
- * auto-dispose rules) is consolidated behind the single `BotMasterSwitch` in
- * `WalkControls` (owner UX consolidation, 2026-07-07 — "one mental model per
- * feature") — `SettingsButton`'s drawer now holds only sound/language/generic
- * prefs. `autoCast`'s per-skill "+ อัตโนมัติ" slot badges stay in
- * `SkillBar.tsx` as a shortcut (mirrors the same store state).
+ * auto-dispose rules) is consolidated behind the single `BotMasterSwitch`
+ * (owner UX consolidation, 2026-07-07 — "one mental model per feature";
+ * R2-W2 moved its mount point into `SkillBar.tsx`, still the ONE control) —
+ * `SettingsButton`'s drawer now holds only sound/language/generic prefs.
+ * `autoCast`'s per-skill "+ อัตโนมัติ" slot badges stay in `SkillBar.tsx` as a
+ * shortcut (mirrors the same store state).
  */
 
 import { forwardRef, type ReactNode } from "react";

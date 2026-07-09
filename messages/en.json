@@ -9,6 +9,8 @@
   },
   "hud": {
     "stageLabel": "Zone",
+    "goldAria": "Gold",
+    "materialsAria": "Enhancement Stones",
     "botMasterOn": "Bot: ON",
     "botMasterOff": "Bot: OFF",
     "botMasterAriaOn": "Turn the bot off (disables all automation)",
@@ -61,6 +63,9 @@
   },
   "panels": {
     "skillsLabel": "Skills",
+    "hpBarLabel": "HP",
+    "mpBarLabel": "MP",
+    "expBarLabel": "EXP",
     "heroDeadBadge": "Dead",
     "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (dead)} cooldown { (cooldown {seconds}s)} nomana { (no mana)} other {}}",
     "autoSkillToggle": "✨ Auto Skill: {state, select, on {ON} other {OFF}}",

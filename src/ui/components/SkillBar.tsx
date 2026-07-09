@@ -23,9 +23,11 @@ import type { HeroClass } from "@/engine";
 import { CONFIG, SKILLS } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
+import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { InfoTip } from "@/ui/components/InfoTip";
+import { StatBar } from "@/ui/components/primitives/StatBar";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
-import { SKILL_ICONS_BY_ID } from "@/ui/labels";
+import { HERO_ICONS, SKILL_ICONS_BY_ID } from "@/ui/labels";
 import { skillStatParts } from "@/ui/skillStats";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -55,7 +57,18 @@ const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
  * via `skillStatParts`). The class-change quest's accept/change-class controls
  * used to live in this file's `ClassQuestAffordance` — that's gone; the WHOLE
  * quest flow now lives in `GoalLadder.tsx`'s `ClassQuestCard` (audit #1). */
-function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }) {
+function SkillButton({
+  hero,
+  skill,
+  slotNumber,
+}: {
+  hero: HeroSummary;
+  skill: SkillSummary;
+  /** 1-based display position in the hero's learned-skill row (mockup's
+   * numbered hotbar slots, R2-W2) — purely a display ordinal, NOT the
+   * auto-cast slot index (`skill.autoSlot`, shown by the badge below). */
+  slotNumber: number;
+}) {
   const castSkill = useGameStore((s) => s.castSkill);
   const setAutoSlot = useGameStore((s) => s.setAutoSlot);
   const tContent = useTranslations("content");
@@ -165,6 +178,14 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
             ariaLabel={tPanels("skillInfoAria", { skillName })}
           />
         </div>
+        {/* Numbered hotbar badge (mockup "1-5 กำกับ") — pure display ordinal,
+            opposite corner from the ⓘ detail tip so the two never collide. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-ddp-border-soft bg-black/85 text-[10px] font-black tabular-nums text-ddp-ink-muted"
+        >
+          {slotNumber}
+        </span>
       </div>
       <button
         type="button"
@@ -203,17 +224,25 @@ function ManaPotionBadge() {
   );
 }
 
-/** A hero's full skill panel: header, HP/XP/mana bars, and the skill kit. */
+/**
+ * A hero's full skill panel: the mockup-style portrait block (class roundel +
+ * Lv/name + HP/MP/EXP `StatBar`s + power) plus the skill kit below (R2-W2
+ * reskin — was a centered header/bars stack; same data, same throttled
+ * snapshot fields, no new store reads). Reuses the vertical space the old
+ * bars already owned, so mobile HUD height is unchanged — this is NOT the
+ * separate "HUD overlays the arena" mockup row (`ui-reference-map.md`'s
+ * "จอเกมใหญ่ + HUD ซ้อน"), which is later/unscoped work.
+ */
 function HeroSkills({ hero }: { hero: HeroSummary }) {
   const tContent = useTranslations("content");
   const tCommon = useTranslations("common");
   const tPanels = useTranslations("panels");
+  const tStats = useTranslations("stats");
   const heroName = tContent(`classes.${hero.cls}.${classNameKeyForTier(hero.tier)}`);
   const leveledUpPulse = usePulseOnIncrease(hero.level, 320);
+  const accent = HERO_ACCENT[hero.cls];
 
-  const hpPct = hero.maxHp > 0 ? Math.max(0, (hero.hp / hero.maxHp) * 100) : 0;
   const xpPct = Math.max(0, Math.min(1, hero.xpProgress)) * 100;
-  const manaPct = hero.maxMana > 0 ? Math.max(0, (hero.mana / hero.maxMana) * 100) : 0;
 
   // Next locked auto-slot's unlock level (for the "more slots at Lv.X" hint).
   // The 4th slot (M7.9) is gated behind BOTH tier 3 AND Lv.40
@@ -230,72 +259,77 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
     CONFIG.autoSlots.tierRequired[nextSlotIdx] > hero.tier;
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      <div className="flex items-center gap-1.5">
-        <span
-          title={heroName}
-          className={`rounded-full border border-ddp-border-soft bg-black/60 px-2 py-0.5 text-xs font-bold tabular-nums ${
-            hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
-          } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
+    <div className="flex w-full flex-col items-center gap-2">
+      {/* Portrait block: class-colored roundel (glyph, no painted art — R1
+          "code-only art" gate) + Lv corner badge + name + power, HP/MP/EXP
+          stacked via the shared `StatBar` primitive. */}
+      <div className="flex w-full max-w-xs items-center gap-2.5 sm:max-w-sm">
+        <div
+          aria-hidden
+          className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 bg-black/50 shadow-(--ddp-shadow-btn)"
+          style={{ borderColor: accent.solid, boxShadow: `0 0 10px 2px ${accent.soft}` }}
         >
-          {hero.atLevelCap
-            ? tCommon("maxLabel")
-            : tCommon("levelBadge", { level: hero.level })}
-        </span>
-      </div>
-
-      {/* HP bar */}
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-black/50"
-        title={heroName}
-      >
-        <div
-          className={`h-full rounded-full transition-[width] duration-200 ${
-            hpPct > 35 ? "bg-emerald-400" : "bg-red-500"
-          }`}
-          style={{ width: `${hpPct}%` }}
-        />
-      </div>
-      {/* XP bar (gold = progress currency) */}
-      <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-black/50"
-        title={heroName}
-      >
-        <div
-          className="h-full rounded-full bg-ddp-gold transition-[width] duration-300"
-          style={{ width: `${hero.atLevelCap ? 100 : xpPct}%` }}
-        />
-      </div>
-      {/* Mana bar (blue = caster resource) + a visible n/max readout. M7.7:
-          mana is now the skill PACING GOVERNOR (skills spam-drain the pool;
-          potions refill it), so the bar got promoted — taller, low-pool
-          warning tint, and the held mana-potion count sits right beside it. */}
-      <div className="flex w-full items-center gap-1">
-        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-black/50">
-          <div
-            className={`h-full rounded-full transition-[width] duration-150 ${
-              manaPct < 25 ? "animate-pulse bg-rose-400" : "bg-sky-400"
-            }`}
-            style={{ width: `${manaPct}%` }}
+          <span className="text-xl leading-none">{HERO_ICONS[hero.cls]}</span>
+          <span
+            title={heroName}
+            className={`absolute -bottom-1.5 left-1/2 -translate-x-1/2 rounded-full border border-ddp-border-soft bg-black/90 px-1.5 py-0.5 text-[9px] leading-none font-black tabular-nums whitespace-nowrap ${
+              hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink"
+            } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
+          >
+            {hero.atLevelCap
+              ? tCommon("maxLabel")
+              : tCommon("levelBadge", { level: hero.level })}
+          </span>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="truncate text-xs font-bold text-ddp-ink" title={heroName}>
+              {heroName}
+            </span>
+            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-ddp-ink-muted">
+              {tStats("combatPower")}{" "}
+              <span className="text-ddp-gold-bright">{hero.combatPower.toLocaleString()}</span>
+            </span>
+          </div>
+          <StatBar
+            variant="hp"
+            value={hero.hp}
+            max={hero.maxHp}
+            height="sm"
+            label={tPanels("hpBarLabel")}
+            valueText={`${Math.ceil(hero.hp)}/${Math.ceil(hero.maxHp)}`}
+          />
+          {/* Mana bar keeps its promoted position + the held mana-potion
+              count beside it (M7.7 pacing-governor convention, unchanged). */}
+          <div className="flex w-full items-center gap-1">
+            <StatBar
+              variant="mp"
+              value={hero.mana}
+              max={hero.maxMana}
+              height="sm"
+              label={tPanels("mpBarLabel")}
+              valueText={`${Math.floor(hero.mana)}/${hero.maxMana}`}
+              className="flex-1"
+            />
+            <ManaPotionBadge />
+          </div>
+          <StatBar
+            variant="exp"
+            value={hero.atLevelCap ? 100 : xpPct}
+            max={100}
+            height="sm"
+            label={tPanels("expBarLabel")}
           />
         </div>
-        <span
-          className={`text-[11px] leading-none font-semibold tabular-nums ${
-            manaPct < 25 ? "text-rose-300" : "text-sky-300/90"
-          }`}
-        >
-          {Math.floor(hero.mana)}/{hero.maxMana}
-        </span>
-        <ManaPotionBadge />
       </div>
 
       {/* War Cry's ATK-buff chip moved into the consolidated Buff Badge Hub
           (owner ask — every buff in ONE HUD spot, see BuffBadgeHub.tsx). */}
 
       {/* The learned skill kit */}
-      <div className="mt-1 flex flex-wrap items-start justify-center gap-2">
-        {hero.skills.map((skill) => (
-          <SkillButton key={skill.id} hero={hero} skill={skill} />
+      <div className="flex flex-wrap items-start justify-center gap-2">
+        {hero.skills.map((skill, i) => (
+          <SkillButton key={skill.id} hero={hero} skill={skill} slotNumber={i + 1} />
         ))}
       </div>
       {nextLockedLevel !== null && (
@@ -318,15 +352,24 @@ export function SkillBar() {
   const t = useTranslations("panels");
 
   return (
-    <div data-onboarding-anchor="skill-bar" className="flex flex-wrap items-start gap-3">
+    <div data-onboarding-anchor="skill-bar" className="flex flex-col gap-3">
       <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("skillsLabel")}
       </span>
-      <div className="flex gap-4">{hero && <HeroSkills hero={hero} />}</div>
-      {/* The "Auto สกิล" master toggle moved into the consolidated bot-settings
-          modal (owner UX pass, 2026-07-07 — see `BotSettingsModal.tsx`); this
-          bar keeps only the per-skill "+ อัตโนมัติ" slot badges (an owner-
-          approved shortcut that mirrors the same store state). */}
+      {hero && <HeroSkills hero={hero} />}
+      {/* The "Auto สกิล" per-skill master toggle modal stays in
+          `BotSettingsModal.tsx` (owner UX pass, 2026-07-07) — this bar keeps
+          the per-skill "+ อัตโนมัติ" slot badges (mirrors the same store
+          state, unchanged). The bot MASTER pill (`BotMasterSwitch`) is now
+          mounted HERE instead of `WalkControls.tsx` (R2-W2 mockup: the
+          action-bar row reads skills + AUTO together, "1-5 + AUTO"). It's a
+          MOVE, not a duplicate — WalkControls no longer renders it, same
+          single `state.autoHunt` control, same `BotSettingsModal` behind it,
+          just restyled as the prominent pill the OFF-by-default bot now needs
+          (see that file's own doc for the "inviting, not alarming" restyle). */}
+      <div className="flex justify-center">
+        <BotMasterSwitch />
+      </div>
     </div>
   );
 }

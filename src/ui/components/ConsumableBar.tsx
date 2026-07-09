@@ -15,8 +15,14 @@
  * EXACT sweep technique — a linear-`height` CSS animation whose duration is the
  * potion's full cooldown (`shop.maxCds[item]`) and whose `animation-delay` is
  * negative by the already-elapsed amount, so it resumes at the right point from a
- * single throttled snapshot value, plus a bottom-right seconds-remaining badge. It
+ * single throttled snapshot value, plus a top-left seconds-remaining badge. It
  * only restarts (remounts via `key`) on a fresh use, via the same `useCastKey` hook.
+ *
+ * R2-W2 reskin: squared up into mockup-style quick-slot tiles (was a plain
+ * round icon button) — bigger tap target, gold "×N" qty pill top-right
+ * mirroring `ItemTile`'s own qty-badge convention (a full `ItemTile` doesn't
+ * fit here: potions have no rarity/tier to frame). Behavior/handlers
+ * untouched.
  */
 
 import { useTranslations } from "next-intl";
@@ -43,7 +49,7 @@ function PotionButton({ item, icon }: { item: "hpPotion" | "manaPotion"; icon: s
       onClick={() => use(item)}
       aria-label={t("useAria", { name, count })}
       title={name}
-      className={`relative flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border text-lg shadow-(--ddp-shadow-btn) transition-all active:scale-95 ${
+      className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border-2 text-xl shadow-(--ddp-shadow-btn) transition-all active:scale-95 ${
         ready
           ? "border-ddp-border-soft bg-ddp-panel-strong hover:brightness-110"
           : "cursor-not-allowed border-ddp-border bg-black/30"
@@ -67,13 +73,17 @@ function PotionButton({ item, icon }: { item: "hpPotion" | "manaPotion"; icon: s
           />
         )}
         {cd > 0 && (
-          <span className="pointer-events-none absolute top-0 left-0 rounded-full bg-black/60 px-1 text-[10px] font-bold text-ddp-ink tabular-nums">
+          <span className="pointer-events-none absolute top-0.5 left-0.5 rounded-full bg-black/60 px-1 text-[10px] font-bold text-ddp-ink tabular-nums">
             {cdSeconds}
           </span>
         )}
       </span>
-      <span className="absolute -right-1 -bottom-1 min-w-4 rounded-full bg-black/80 px-1 text-[10px] font-bold tabular-nums text-ddp-ink">
-        {count}
+      {/* Qty pill — gold, top-right, mirrors `ItemTile`'s "×N" convention. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute top-0.5 right-0.5 min-w-4 rounded-full bg-ddp-gold px-1 text-[9px] leading-none font-black tabular-nums text-[#241705]"
+      >
+        ×{count}
       </span>
     </button>
   );
@@ -101,15 +111,18 @@ export function ConsumableBar() {
         onClick={() => teleportToTown()}
         aria-label={t("returnScrollAria", { count: scrollCount })}
         title={inTown ? t("returnScrollInTown") : t("returnScrollTitle")}
-        className={`relative flex min-h-11 min-w-11 items-center justify-center rounded-(--ddp-radius-md) border text-lg shadow-(--ddp-shadow-btn) transition-all active:scale-95 ${
+        className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border-2 text-xl shadow-(--ddp-shadow-btn) transition-all active:scale-95 ${
           scrollEnabled
             ? "border-ddp-boss/60 bg-ddp-panel-strong hover:brightness-110"
             : "cursor-not-allowed border-ddp-border bg-black/30 grayscale"
         }`}
       >
         <span aria-hidden>📜</span>
-        <span className="absolute -right-1 -bottom-1 min-w-4 rounded-full bg-black/80 px-1 text-[10px] font-bold tabular-nums text-ddp-ink">
-          {scrollCount}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-0.5 right-0.5 min-w-4 rounded-full bg-ddp-gold px-1 text-[9px] leading-none font-black tabular-nums text-[#241705]"
+        >
+          ×{scrollCount}
         </span>
       </button>
     </div>

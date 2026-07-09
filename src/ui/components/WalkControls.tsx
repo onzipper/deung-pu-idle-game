@@ -14,6 +14,11 @@
  * this row moved to `HudBar.tsx` (beside the top-left zone label) — "warp = ONE
  * place, no satellites" (house rule), so it's gone from here, not duplicated.
  *
+ * R2-W2: the bot MASTER switch (`BotMasterSwitch`) that used to sit on this
+ * row's right side has MOVED into `SkillBar.tsx` (mockup's action-bar reads
+ * "skills + AUTO" together) — not duplicated, just remounted; see that
+ * component's doc. This row is now just the map/zone label.
+ *
  * The goal-ladder's core-loop card (`GoalLadder.tsx`, replaced `BossPanel`)
  * and its challenge/next-stage buttons still work alongside this (they also
  * resolve to walk intents in the engine).
@@ -22,7 +27,6 @@
 import { useTranslations } from "next-intl";
 import { ASURA_MAP_ID } from "@/engine";
 import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
-import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -53,7 +57,7 @@ export function WalkControls() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
+      <div className="flex items-center justify-center gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-2 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
         <div className="flex min-w-0 flex-1 flex-col items-center text-center">
           <span className="w-full truncate text-base font-bold text-emerald-300">
             {mapName}
@@ -61,9 +65,6 @@ export function WalkControls() {
           <span className="w-full truncate text-xs font-medium text-ddp-ink-muted">
             {zoneLabel}
           </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <BotMasterSwitch />
         </div>
       </div>
       {/* M7.8 Manual Play: only rendered while the hero has an active

@@ -9,6 +9,8 @@
   },
   "hud": {
     "stageLabel": "โซน",
+    "goldAria": "ทอง",
+    "materialsAria": "หินเสริมพลัง",
     "botMasterOn": "บอท: เปิด",
     "botMasterOff": "บอท: ปิด",
     "botMasterAriaOn": "ปิดสวิตช์บอท (ปิดระบบอัตโนมัติทั้งหมด)",
@@ -61,6 +63,9 @@
   },
   "panels": {
     "skillsLabel": "สกิล",
+    "hpBarLabel": "HP",
+    "mpBarLabel": "MP",
+    "expBarLabel": "EXP",
     "heroDeadBadge": "ตาย",
     "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (ตาย)} cooldown { (คูลดาวน์ {seconds} วิ)} nomana { (มานาไม่พอ)} other {}}",
     "autoSkillToggle": "✨ Auto สกิล: {state, select, on {เปิด} other {ปิด}}",
