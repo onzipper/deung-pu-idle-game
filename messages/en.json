@@ -1426,6 +1426,15 @@
           "worldMap": "🗺️ The World Map is here — tap the zone name chip (top-left) to see every map and zone, how many players are online where, where your friends are, today's hot zone, and warp to any unlocked zone",
           "botDefault": "🤖 The bot now starts OFF when you log in — flip on AUTO whenever you want it to play for you"
         }
+      },
+      "2026-07-09n": {
+        "items": {
+          "uiSweep": "🎨 Every panel got the new matching look — inventory, shop, enhance, skills, bot, rankings, all in the gold dark-fantasy frame",
+          "refinePercent": "⚒️ The enhance panel now tells you everything up front — success % and ATK before → after (the hammer suspense stays)",
+          "skillPane": "📖 New skill inspector — tap a skill for full details: damage, mana, cooldown, all in one pane",
+          "botPanel": "🤖 Bot settings got a home of their own — tap ⚙ beside AUTO: auto skills, potion thresholds, and movement, neatly grouped",
+          "bigScreen": "🖥️ Desktop gets a much bigger game view with an MMO-style quest card overlaid on the field — mobile keeps its familiar layout"
+        }
       }
     }
   },

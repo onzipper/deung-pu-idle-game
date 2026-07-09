@@ -372,6 +372,20 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09m.items.botDefault",
     ],
   },
+  // R2 UI sweep — every panel restyled to the dark-fantasy system (inventory/
+  // shop/enhance/skill/bot/HOF), refine success-% display, skill detail pane,
+  // dedicated bot panel, bigger desktop arena + quest tracker overlay.
+  {
+    id: "2026-07-09n",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09n.items.uiSweep",
+      "releases.2026-07-09n.items.refinePercent",
+      "releases.2026-07-09n.items.skillPane",
+      "releases.2026-07-09n.items.botPanel",
+      "releases.2026-07-09n.items.bigScreen",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
