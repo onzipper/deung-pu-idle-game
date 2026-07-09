@@ -195,7 +195,7 @@ Tests:
 - src/engine/__tests__/float-determinism-guard.test.ts
 Notes:
 - `step(state, dt, input)` is the ONE transition; deterministic, no wall-clock reads inside.
-- SAVE_VERSION currently 20 — bump + add a migrate() branch for any SaveData shape change.
+- Check `src/engine/state/version.ts` for current SAVE_VERSION; bump + add migrate() for any SaveData shape change.
 
 ## Party lockstep
 Docs:

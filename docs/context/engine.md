@@ -9,7 +9,7 @@ The single source of truth for game state. Pure TypeScript simulation core: `ste
 1. **No DOM/React/Pixi/Next/Zustand imports** in `engine/**` — importing any of `react`, `pixi.js`, `next`, `zustand` here fails lint. No wall-clock reads (`Date.now()`) except the one sanctioned read in the day/night draw path (render-side, not engine — engine itself never reads wall-clock).
 2. **Seeded RNG stream** (`core/rng.ts`, mulberry32) is reserved for **wave/spawn composition only**. Combat/skills/drops must never draw from it — they use `core/hash.ts`'s stateless splitmix32 hashing (`lootHash`/`lootFloat`) or fixed offset tables instead, so replay/lockstep never desyncs on draw order.
 3. All tunables live in `engine/config/` (`CONFIG` in `index.ts`, plus `items.ts`, `refine.ts`) — this is what the balance sim sweeps.
-4. Save shape changes go through `SAVE_VERSION` bump + a `migrate()` branch in `src/engine/state/version.ts`. Current `SAVE_VERSION = 20`.
+4. Save shape changes go through `SAVE_VERSION` bump + a `migrate()` branch in `src/engine/state/version.ts`. Check that file for the current value — never hardcode it in docs.
 5. Fixed-timestep loop in `core/loop.ts` — never step on a variable dt; "speed" = more sub-steps per frame, never a bigger dt.
 6. `state.events` (`src/engine/state/events.ts`) is per-step, transient, deterministic, and **cleared every step** — render/audio must collect events across ALL sub-steps of a frame before drawing, never rely on the accumulated-across-frames buffer.
 
