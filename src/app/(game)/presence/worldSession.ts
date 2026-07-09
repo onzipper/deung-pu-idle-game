@@ -159,6 +159,15 @@ export class WorldSession {
     this.sendRaw({ t: "p", v: 1, payload });
   }
 
+  /** Publish MY visual-action sample (R3 wave 3, `pa` — design §5 wave 3). Same one-way
+   *  contract as `publish` above (invariant #6): there is no echo/apply path for anything
+   *  sent here. Dropped silently under the same conditions (not connected / no zone /
+   *  presence disabled). */
+  publishAction(payload: unknown): void {
+    if (!this.presenceEnabled || this.ws?.readyState !== WebSocket.OPEN || !this.myZone) return;
+    this.sendRaw({ t: "pa", v: 1, payload });
+  }
+
   /** Wave 3 "chat UI": send one chat message. Server-side (`scripts/party-relay/server.js`)
    *  bounds it to 120 chars / 1-per-2s per connection and stamps `{name,charId}` FROM the
    *  ticket — this is a thin, trusting wrapper; a rejection comes back as a `c-rej` frame

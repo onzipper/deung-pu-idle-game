@@ -288,11 +288,11 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/app/(game)/cohortBadges.ts` — pure HOF seasonal social-badge (title/champion) map builder for the render seam.
 - `src/app/(game)/cohortNet.ts` — pure network-quality HUD chip math (RTT EMA, laggiest-member picker).
 - `src/app/(game)/presence/worldSession.ts` — the "world socket": one WebSocket for ghost-presence + global chat + ping, pub/sub, lossy, zero engine coupling.
-- `src/app/(game)/presence/presencePublish.ts` — pure sampling of MY hero into a presence wire snapshot (one-way read only).
+- `src/app/(game)/presence/presencePublish.ts` — pure sampling of MY hero into a presence `p` wire snapshot + R3 wave-3 `pa` visual-action sample (basic/skill/dash edges, facing, fps-valve beat rate) — one-way read only.
 - `src/app/(game)/presence/ghostStore.ts` — pure ghost-presence receive store: ingest `p` snapshots + R3 `pa` action frames → interpolated/faded/capped ghost list (action = pose/facing, never liveness) for render.
 - `src/app/(game)/presence/relayUrlCache.ts` — one-slot module cache of the last-minted presence-ticket relay URL.
 - `src/app/(game)/__tests__/` — lockstep/cohort/party pure-logic pins (catchUp, cohortBotTrip, cohortBadges, buildFrameInput, cohortNet, partyHandshake, partySession, cohortWallet, cohortProgress, cohortTurnEngine, soloFrameDrain); 11 files.
-- `src/app/(game)/presence/__tests__/` — ghost-presence/world-socket pins (ghostStore, ghostAction R3 stream, presencePublish, ghostGuard "presence never touches engine", worldSession); 5 files.
+- `src/app/(game)/presence/__tests__/` — ghost-presence/world-socket pins (ghostStore, ghostAction R3 stream, presencePublish `p` snapshot, presencePublishAction R3 `pa` publish-side, ghostGuard "presence never touches engine", worldSession); 6 files.
 
 ### src/app/ — root routes
 - `src/app/characterGate.ts` — read-only server-side "does this visitor have a resolvable active character" gate (cookie-read only, no writes).
