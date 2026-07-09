@@ -16,7 +16,7 @@ _Last updated: 2026-07-10 (post-R2.6, docs restructure #45, agent refresh #48)._
 
 - **R2.5 game screen** (M8.10): fullscreen canvas + all-overlay HUD both platforms; W0 input-drop root fix (rAF accumulator drained one-shot intents on 0-step frames — bot-off default + swallowed taps on 90Hz+); npcTrip replaces smithTrip; NPC walk-order buttons; minimap-lite.
 - **R2.6**: quest tracker + skill dock per ref, both collapsible (`0466f81`).
-- **#48 agent refresh** (branch `docs/issue-48-agent-refresh`, PR pending): `.claude` agents re-pointed to `AI.md` + context packs, pre-pivot framing removed, `.claude/README.md` routing guide added, +4 agents (ai-docs-context-architect, pixi-render-performance-specialist, liveops-release-manager, i18n-th-en-copywriter); asset-pipeline-art-director deferred to a future issue. Docs-only.
+- **#48 agent refresh** (PR #49, merged to `develop`): `.claude` agents re-pointed to `AI.md` + context packs, pre-pivot framing removed, `.claude/README.md` routing guide added, +4 agents (ai-docs-context-architect, pixi-render-performance-specialist, liveops-release-manager, i18n-th-en-copywriter); asset-pipeline-art-director deferred to a future issue. Docs-only.
 
 ## Blockers / owed
 
