@@ -127,6 +127,9 @@ describe("combat events", () => {
     if (kill.type === "kill") {
       expect(kill.goldGained).toBeGreaterThan(0);
       expect(["normal", "fast", "tank", "ranged"]).toContain(kill.kind);
+      // W4 "โลกมีมิติ": the kill event carries the killed enemy's entity id so
+      // render can anchor the kill pop on its depth/terrain foot-line.
+      expect(typeof kill.id).toBe("number");
     }
     // Sanity: strong save also produces hits.
     expect(typesOf(collectEvents(s, 600)).has("hit")).toBe(true);

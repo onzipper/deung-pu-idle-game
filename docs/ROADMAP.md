@@ -176,6 +176,20 @@
 - [x] **Live-feedback round 1 (2026-07-09, เจ้าของเล่นจริงหลัง deploy — แก้ครบ 6 + UX 3)**: ตั้งค่าบอทเป็น per-hero ทั้ง 6 ฟิลด์ (HeroConfig widen, intent ขี่ lane setHeroConfig — แก้ "ตั้งค่าบอทไม่ได้ในตี้" ที่ราก) · เกจ/ลูกศรปลดโซนบอกความจริงของตัวเอง (deriveUnlockedZones cascade — เคส A z38/B z31) · แก่น/ศิลา/กระดาษ/sigil บัญชีต่อคน (essence = mean split, sigil intent เคยหายจริง — อุดแล้ว, craft ตำนาน disable ในตี้) · **พับจอ/สลับแท็บ = lane-keepalive** เพื่อนไม่หยุด ฮีโร่ฟาร์มต่อ กลับมา burst ตามทัน + pagehide = shadow ทันที + relay heartbeat 15s→5s (ตายเงียบ ~35s→~10s) · แบนเนอร์เสี่ยจ๋องรู้จัก "ล้มแล้ว" + auto-claim คนที่ออกโซนไปก่อน · ป้าย 0ms → "✓ ตามทัน" · UX: ปุ่มตีบวกกดได้ทุกที่ (smith trip อัตโนมัติ), ปุ่มวาร์ปย้ายไปข้างป้ายโซนบนซ้าย + ด่าน→โซน, ปุ่มตีบวกเข้าชุดกระเป๋า — patch-notes 2026-07-09k
 - [ ] **ค้างตรวจ**: เทสมือ 2 แท็บ (ghost/chat/keepalive/ตั้งค่าบอทในตี้) + มือถือ (ชิป/แผงแชท/ปุ่มวาร์ปใหม่) + smith trip in-browser · เจ้าของเล่นจริงก่อน merge · **deploy: redeploy relay (จำเป็น — presence/chat/ping + heartbeat 5s) + web, ไม่มี db push**
 
+## ✅ M8.7 — โลกมีมิติ (World Depth) 🏞️ (เสร็จ+merge develop 2026-07-09, เจ้าของยืนยัน merge — เกิดใน /lab exp ⑨ เช้าวันเดียวกัน แล้ว promote เข้าเกมจริงทั้งชุด)
+
+> **ที่มา:** เจ้าของ: "การแสดงผลเป็น pattern เดิมซ้ำๆ น่าเบื่อ อยากได้มิติ เพราะเราจะไปแนว open world idle MMO" → brainstorm → เดโม /lab ⑨ (เปิด-ปิดรายฟีเจอร์ + ปุ่ม A/B แบบเดิมแบน) → เจ้าของเคาะ 4 ข้อ (วัน-คืนรอบเร่ง 30 นาที / กล้องซูมตาม 1.06 ถอย idle / ลงลึกทั้งม็อบ+ฮีโร่+ghost / เปิด ON ทุกคน) → promote 7 เวฟ
+
+- [x] **สนามลึก (depth band)**: ม็อบ/ฮีโร่/ghost กระจายตื้น-ลึก render-only (d จาก hash id/slot lane, engine ยัง 1D) — pivot ที่เท้า สเกลรอบเท้า, y-sort ทั้ง entities+ghosts, hp bar ย่อตามตัว ±20% (ยอมรับ v1, inverse-scale เป็น polish)
+- [x] **กล้องมีชีวิต**: cameraRoot (overlay บอสบาร์อยู่นอก) + mask เฉพาะตอนกล้องเปิด, ตาม pov hero + lookahead, สู้ค้าง 1.06 / idle ถอย 1.0 เต็มจอ (กลับด้านจาก lab เพราะโลก 900px ซูมต่ำกว่า 1 ไม่ได้), จิ้มม็อบ/NPC ผ่าน inverse ของ base+camera แม่นทุกซูม, shockwave filter รับ camera term
+- [x] **พื้นสูงต่ำ**: preset ต่อโซน deterministic (เมือง/ห้องบอส/หน้าประตู ±90px = แบนเป๊ะ), ground polygon + backing strip กัน sky sliver, props เกาะเนินผ่าน ParallaxLayer.conformY, crossfade 1s ตอนสลับ
+- [x] **โลกมีชีวิต**: วัน-คืนรอบ 30 นาที Date.now-anchored ทุก client ตรงกัน (tint เฉพาะ background/ghosts/entities — fx/เลขดาเมจไม่โดนย้อม), อากาศต่อโซน hash 20-นาที window (ฝน/หิมะ/เถ้า/ใบไม้ตามแมพ), นกกลางวัน/หิ่งห้อยกลางคืน, valve ลดความหนาแน่นอัตโนมัติขี่ ghost fps EMA
+- [x] **fx 33 จุดเกาะพื้น/ความลึก** (เลขดาเมจ/ศพ/ทอง/aggro/reticle/บอส slam/สกิลลงพื้น) — kill event เพิ่ม `id` (additive, transient, hash byte-identical = engine touch จุดเดียวของทั้งชุด) · pixelWeaponFx ยิง spark ลงเนินถูกตำแหน่ง
+- [x] **ตั้งค่า → โลกมีมิติ**: toggle 3 ตัว (สนามลึก+พื้น / กล้อง / บรรยากาศ) default ON, localStorage tier, ปิดทั้งหมด = ภาพเดิม pixel-identical (มี identity tests ปัก)
+- [x] แถมรอบเดียวกัน: **ประกาศเวลตันทุกคน** ครั้งเดียวต่อตัวละคร (singletonKey `cap:<charId>`) แทน "คนแรกของเซิร์ฟ" + copy ธีมเวลตัน th/en — ไม่ต้อง db push (comment-only schema)
+- [x] Suite 2004→**2120** (+116), tsc/eslint/next build clean — **deploy: web redeploy อย่างเดียว ไม่มี db push ไม่มี relay**
+- [ ] **ค้าง**: patch notes รอบ release · เจ้าของเช็คตอนเล่น: จิ้มม็อบไกล/ใกล้กลางซูม, อ่านเลขดาเมจกลางคืน, hp bar ย่อตามลึกรับได้ไหม, fps มือถือ
+
 ## M9 — Economy & Competition
 
 - [ ] ตลาดกลาง: ลงขาย/ซื้อด้วยเงินในเกม + atomic transaction + audit trail + anti-dupe

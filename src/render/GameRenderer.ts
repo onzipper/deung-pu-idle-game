@@ -34,6 +34,28 @@ import {
   WORLD_WIDTH,
   type WorldTransform,
 } from "@/render/layout";
+import { createAtmosphere, type Atmosphere } from "@/render/worldDepth/atmosphere";
+import {
+  createCamera,
+  updateCamera,
+  cameraTransform,
+  type CameraState,
+  type CameraTransform,
+} from "@/render/worldDepth/camera";
+import { depthOffsetY, depthZIndex } from "@/render/worldDepth/depthBand";
+import {
+  canvasToWorld,
+  enemyTapCenterY,
+  worldBossTapCenterY,
+  worldScale,
+  type CamView,
+  type WorldPoint,
+} from "@/render/worldDepth/hitTestMath";
+import {
+  createWorldFxContext,
+  DEPTH_NEUTRAL,
+  type WorldFxContext,
+} from "@/render/worldDepth/worldFxContext";
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
 import {
@@ -89,6 +111,17 @@ export type NpcHitResult = { kind: "npc"; id: TownNpcId } | null;
  * "≥24px half-extent on mobile" requirement. Converted to world units per-call
  * via the live `baseTransform.scale` (see `hitTestPointer()`). */
 const TOUCH_HALF_EXTENT_PX = 24;
+
+// ---------------------------------------------------------------------------
+// Living-camera knobs (promoted "โลกมีมิติ" layer, W2). The camera follows the
+// pov hero at `ZOOM_BASE` and eases back to `IDLE_ZOOM` when he stands still.
+// INVERTED vs the /lab default (idle-zoom-OUT): a 900px world cannot zoom below
+// 1.0 without revealing the letterbox void, so idle relaxes to the full view
+// (1.0) and play tightens to 1.06. Default OFF (see `worldFxFlags`) until the
+// settings wave flips it, so every existing screenshot stays pixel-identical.
+// ---------------------------------------------------------------------------
+const CAMERA_ZOOM_BASE = 1.06;
+const CAMERA_IDLE_ZOOM = 1.0;
 
 interface Layers {
   /** Static sky/ground/grid, drawn once. */
@@ -210,6 +243,61 @@ export class GameRenderer {
    */
   private povHeroIndex = 0;
 
+  /**
+   * THE shared "โลกมีมิติ" seam (W2): pure math owned here, handed to the
+   * `GhostLayer` (and, in later waves, `FxController`/hit-test) so every
+   * consumer resolves the SAME ground line + depth. Persistent (never
+   * recreated on destroy) so flags registered before `create()` survive, and
+   * so the ghost layer always holds a live reference. All flags default OFF =
+   * groundY≡GROUND_Y / footY≡GROUND_Y / depthScale≡1 = pixel-identical today.
+   */
+  private readonly worldFx: WorldFxContext = createWorldFxContext();
+  /** Current world-fx flag set (stored like `povHeroIndex` for defensive
+   * re-apply in `create()`). `camera`/`atmosphere` are tracked here too even
+   * though they aren't `worldFx` (ground/depth) concerns, so a single
+   * `setWorldFx()` drives all four. */
+  private worldFxFlags: {
+    depth: boolean;
+    terrain: boolean;
+    camera: boolean;
+    atmosphere: boolean;
+  } = {
+    depth: false,
+    terrain: false,
+    camera: false,
+    atmosphere: false,
+  };
+  /** W5 atmosphere runtime (day/night tint + weather + critters) — owns its
+   * own Pixi views hosted across `background`/`ghosts`/`entities`/
+   * `cameraRoot`/`world`. Built in `create()`, torn down in `destroy()`;
+   * `null` in between (same lifecycle convention as `environment`/
+   * `ghostLayer`). */
+  private atmosphere: Atmosphere | null = null;
+  /** `setAtmosphereDensity()`'s stored value (defensive re-apply convention,
+   * like `worldFxFlags`) — the perf valve GameClient drives from its
+   * ghost-fps EMA (W6): 1 full / 0.5 reduced / 0 hidden. Only matters once
+   * `setWorldFx({atmosphere: true, ...})` turns the feature on; default 1. */
+  private atmosphereDensity = 1;
+  /** Living-camera state (created in `create()`, reset per session). Null until
+   * then. */
+  private camera: CameraState | null = null;
+  /** Camera-driven world content rides this child of `world`; `overlay`
+   * (screen-anchored boss bars) does NOT, so HP bars never pan/zoom. */
+  private cameraRoot: Container | null = null;
+  /** World-local mask rect clipping `cameraRoot` so a >1.0 follow-zoom never
+   * spills content onto the letterbox bars. */
+  private cameraMask: Graphics | null = null;
+  /** Previous frame's camera target x (finite-difference velocity source);
+   * null = re-seed vx to 0 next frame (first frame / after a camera-off snap). */
+  private lastCamTargetX: number | null = null;
+  /** Reused out-params (zero per-frame alloc, same convention as the fx layer). */
+  private readonly camScratch: CameraTransform = { posX: 0, posY: 0, scale: 1 };
+  private readonly hitScratch: WorldPoint = { x: 0, y: 0 };
+  /** Per-frame `enemy id -> depth d` map, filled during the enemy pass and read
+   * by the projectile pass to lift a homing shot toward its target's depth row.
+   * Reused (cleared each frame) — zero alloc. */
+  private readonly enemyDepthScratch = new Map<number, number>();
+
   /** Set up the Pixi Application and scene layers. Client-only. */
   async create(canvasParent: HTMLElement): Promise<void> {
     // Idempotent: a stray double-mount (React StrictMode) tears down any prior
@@ -257,12 +345,50 @@ export class GameRenderer {
     const projectiles = new Container();
     const fx = new Container();
     const overlay = new Container();
+    // Living camera (W2): background/ghosts/entities/projectiles/fx ride a
+    // `cameraRoot` child of `world` that the camera pans/zooms; `overlay`
+    // (screen-anchored boss HP bars) stays DIRECTLY on `world` so it never
+    // moves. A world-local mask rect clips `cameraRoot` so a 1.06 follow-zoom
+    // never spills content onto the letterbox bars. With the camera OFF
+    // (default) `cameraRoot` is an identity transform, so this composition is
+    // pixel-identical to adding the five layers straight to `world`.
     // `ghosts` sits BETWEEN background and entities: other players' ghosts draw UNDER my
     // own hero/party (design §3.5 z-order) and, being outside `entities`, are invisible to
     // `hitTestPointer` (which only scans `state.enemies`/`worldBoss`) — invariant #5.
-    world.addChild(background, ghosts, entities, projectiles, fx, overlay);
+    const cameraRoot = new Container();
+    cameraRoot.addChild(background, ghosts, entities, projectiles, fx);
+    world.addChild(cameraRoot, overlay);
+    const cameraMask = new Graphics().rect(0, 0, WORLD_WIDTH, WORLD_HEIGHT).fill(0xffffff);
+    // The mask only engages while the camera is ON — a >1.0 follow-zoom is the
+    // only thing that can push content into the letterbox bars. With the camera
+    // OFF the mask is detached AND hidden (activated in `setWorldFx` /
+    // `snapCameraIdentity`), so the default OFF state clips NOTHING = pixel-
+    // identical to today (incl. any edge bloom/fx that spills into the bars).
+    cameraMask.visible = false;
+    world.addChild(cameraMask);
+    this.cameraRoot = cameraRoot;
+    this.cameraMask = cameraMask;
+    // Depth sort key layer: near entities draw OVER far ones when the depth
+    // flag is on; with it off every hero/enemy gets zIndex 0 (equal), so Pixi's
+    // stable sort preserves insertion order = today's paint order.
+    entities.sortableChildren = true;
     this.layers = { background, entities, projectiles, fx, overlay };
-    this.ghostLayer = new GhostLayer(ghosts);
+    this.ghostLayer = new GhostLayer(ghosts, { worldFx: this.worldFx });
+
+    // W5 atmosphere runtime: day/night tint + weather + critters, composed on
+    // top of the same five layers (see `atmosphere.ts`'s doc comment for the
+    // exact insertion points). Built AFTER `cameraRoot`/`overlay` are already
+    // children of `world` and `entities` is already a child of `cameraRoot`
+    // (both required for its internal `getChildIndex` placement math).
+    this.atmosphere = createAtmosphere({ world, cameraRoot, background, ghosts, entities });
+
+    // Living-camera state (reset per session). Knobs: follow-tight 1.06, relax
+    // to the full view 1.0 when idle.
+    this.camera = createCamera(WORLD_WIDTH, {
+      zoomBase: CAMERA_ZOOM_BASE,
+      idleZoom: CAMERA_IDLE_ZOOM,
+    });
+    this.lastCamTargetX = null;
 
     // Persistent, subtle bloom on the projectiles + fx layers ONLY (never the
     // whole stage) — one shared filter instance, see `createBloomFilter()`'s
@@ -292,8 +418,23 @@ export class GameRenderer {
     background.addChild(this.honorBoard.view);
     if (this.townChampions) this.honorBoard.setEntries(this.townChampions);
 
-    this.heroPool = new Pool(entities, createHeroView);
-    this.enemyPool = new Pool(entities, createEnemyView);
+    // Pivot the hero/enemy ROOTS at the foot line (y = GROUND_Y) so depth scale
+    // grows the rig around its feet and terrain lift plants the feet exactly on
+    // the ground. Done HERE (in the pool factory), never inside
+    // `createHeroView`/`createEnemyView`, so `rig.test.ts` — which calls those
+    // directly — stays byte-untouched. The paired per-frame `view.y = footY`
+    // (below, in `draw()`) cancels the pivot to GROUND_Y when flags are off, so
+    // the rendered result is identical to today's pivot-0 / y-0 rig.
+    this.heroPool = new Pool(entities, () => {
+      const v = createHeroView();
+      v.pivot.y = GROUND_Y;
+      return v;
+    });
+    this.enemyPool = new Pool(entities, () => {
+      const v = createEnemyView();
+      v.pivot.y = GROUND_Y;
+      return v;
+    });
     this.projectilePool = new Pool(projectiles, createProjectileView);
 
     this.bossHpBar = new Graphics();
@@ -335,6 +476,13 @@ export class GameRenderer {
     this.npcViews = new Map();
     for (const anchor of TOWN_NPCS) {
       const view = createNpcView(anchor.id);
+      // Same foot-pivot convention as the pooled hero/enemy rigs; NPCs take
+      // terrain lift only (never depth scale). `zIndex -500` keeps them behind
+      // the walking hero (today's paint order, now explicit under the sorted
+      // `entities` layer). Town is always flat terrain, so their `footY`
+      // resolves to GROUND_Y = pixel-identical to today.
+      view.pivot.y = GROUND_Y;
+      view.zIndex = -500;
       entities.addChild(view);
       this.npcViews.set(anchor.id, view);
     }
@@ -345,6 +493,10 @@ export class GameRenderer {
       world,
       (target, id) => this.getEntityView(target, id),
       (id) => this.heroPool?.peek(id) ?? null,
+      // W4 "โลกมีมิติ": host the pixel-weapon-fx layer on the camera-panned
+      // `cameraRoot` + hand the fx layer the shared ground/depth seam so its
+      // kill/impact/foot anchors ride terrain. Flags default OFF ⇒ identity.
+      { cameraRoot: this.cameraRoot, worldFx: this.worldFx },
     );
     // Apply whatever POV index was already registered (possibly before
     // `create()` resolved) — same "ordering doesn't matter" guarantee
@@ -352,6 +504,21 @@ export class GameRenderer {
     // in `draw()` since the fx controller owns the gating state itself.
     this.fx.setPovHeroIndex(this.povHeroIndex);
     this.fx.setHeroSocialBadges(this.heroSocialBadges);
+
+    // Defensive re-apply of any world-fx flags registered before `create()`
+    // resolved (same "call order doesn't matter" guarantee as
+    // `setPovHeroIndex()`). `worldFx` is persistent so its flags already hold;
+    // this re-syncs them and snaps the freshly-built `cameraRoot` to identity
+    // when the camera flag is off, so a fresh renderer starts pixel-identical.
+    this.worldFx.setFlags({
+      depth: this.worldFxFlags.depth,
+      terrain: this.worldFxFlags.terrain,
+    });
+    this.environment?.setTerrainEnabled(this.worldFxFlags.terrain);
+    if (this.worldFxFlags.camera) this.activateCameraMask();
+    else this.snapCameraIdentity();
+    this.atmosphere?.setEnabled(this.worldFxFlags.atmosphere);
+    this.atmosphere?.setDensity(this.atmosphereDensity);
 
     // Pixi's built-in `resizeTo` only reacts to `window` resize events; a
     // ResizeObserver on the actual mount element is what makes layout-driven
@@ -385,15 +552,25 @@ export class GameRenderer {
     const dt = Math.min(0.25, Math.max(0, (elapsedMs - this.lastDrawMs) / 1000));
     this.lastDrawMs = elapsedMs;
 
+    // Bind the current zone's terrain to the shared seam ONCE per frame (cached
+    // — same Zone → same Terrain instance, zero re-alloc). Must precede every
+    // placement below so `footY`/`groundY` resolve against the right ground.
+    // Captured once and reused by the atmosphere update at the bottom of this
+    // method (W5) instead of a second `zoneAt` call — same value either way.
+    const zone = zoneAt(state.location);
+    this.worldFx.setZone(zone);
+
     this.environment?.update(dt, state);
 
     const marching = this.lastAnchorX != null && state.anchorX > this.lastAnchorX + 1e-3;
     this.lastAnchorX = state.anchorX;
 
     const heroPool = this.heroPool;
+    const partySize = state.heroes.length;
     heroPool.beginFrame();
     state.heroes.forEach((h, slot) => {
-      updateHeroView(heroPool.get(h.id), h, {
+      const view = heroPool.get(h.id);
+      updateHeroView(view, h, {
         dt,
         slot,
         events: frameEvents,
@@ -401,6 +578,7 @@ export class GameRenderer {
         displayName: this.heroDisplayNames?.get(h.id) ?? null,
         socialBadge: this.heroSocialBadges?.get(String(h.id)) ?? null,
       });
+      this.placeActor(view, h.x, this.worldFx.depthOf("hero", h.id, slot, partySize));
     });
     heroPool.endFrame();
 
@@ -416,15 +594,25 @@ export class GameRenderer {
     // because it's only read once, at a view's first-sight `buildRig()` (an
     // enemy never changes map mid-life).
     const enemyMapId = zoneAt(state.location).mapId;
+    this.enemyDepthScratch.clear();
     this.enemyPool.beginFrame();
     for (const e of state.enemies) {
-      updateEnemyView(this.enemyPool.get(e.id), e, { dt, events: frameEvents, mapId: enemyMapId });
+      const view = this.enemyPool.get(e.id);
+      updateEnemyView(view, e, { dt, events: frameEvents, mapId: enemyMapId });
+      const d = this.worldFx.depthOf("enemy", e.id);
+      this.placeActor(view, e.x, d);
+      this.enemyDepthScratch.set(e.id, d);
     }
     this.enemyPool.endFrame();
 
     if (state.boss) {
       if (!this.bossView) {
         this.bossView = createBossView();
+        // Foot-pivot like every other rig; `zIndex +10000` keeps the stage boss
+        // drawn OVER the heroes (today's paint order — it is `addChild`'d after
+        // them). Terrain lift only, never depth scale (see `placeStaticActor`).
+        this.bossView.pivot.y = GROUND_Y;
+        this.bossView.zIndex = 10000;
         this.layers.entities.addChild(this.bossView);
       }
       // M7.9 "Grand Expansion": the boss entity itself is map-agnostic (see
@@ -434,6 +622,7 @@ export class GameRenderer {
       // map's boss room (see `engine/systems/world.ts`).
       const mapId = zoneAt(state.location).mapId;
       updateBossView(this.bossView, state.boss, { elapsedMs, dt, events: frameEvents, mapId });
+      this.placeStaticActor(this.bossView, state.boss.x);
       this.currentBossId = state.boss.id;
     } else if (this.bossView) {
       this.layers.entities.removeChild(this.bossView);
@@ -454,11 +643,16 @@ export class GameRenderer {
         // BEHIND every hero/enemy/boss view (Pixi draws in child order, and the
         // world boss spawns AFTER the pools exist, so a plain addChild painted the
         // ~2.5x tycoon OVER the heroes standing in front of him — owner report
-        // 2026-07-08 "hero โดนเสี่ยจ๋องบัง"). Index 0 = backmost of the entities
-        // layer; his nameplate/HP bar live on the overlay layer and are unaffected.
+        // 2026-07-08 "hero โดนเสี่ยจ๋องบัง"). `zIndex -10000` makes that explicit
+        // under the now-sorted `entities` layer; the `addChildAt(…,0)` stays as
+        // belt-and-braces. His nameplate/HP bar live on `overlay` (unaffected).
+        // Foot-pivot + terrain lift only (never depth scale), like the boss.
+        this.worldBossView.pivot.y = GROUND_Y;
+        this.worldBossView.zIndex = -10000;
         this.layers.entities.addChildAt(this.worldBossView, 0);
       }
       updateWorldBossView(this.worldBossView, wb.entity, { elapsedMs, dt, events: frameEvents });
+      this.placeStaticActor(this.worldBossView, wb.entity.x);
       this.currentWorldBossId = wb.entity.id;
     } else if (this.worldBossView) {
       this.layers.entities.removeChild(this.worldBossView);
@@ -496,6 +690,10 @@ export class GameRenderer {
                 ? smithHasTomeNotice
                 : false,
         });
+        // `updateNpcView` never touches the root position (set once at
+        // creation), so re-plant the feet each frame to cancel the GROUND_Y
+        // pivot. Town is flat → this resolves to GROUND_Y (pixel-identical).
+        this.placeStaticActor(view, view.x);
       }
     }
     this.npcSpeech?.update(dt);
@@ -504,7 +702,20 @@ export class GameRenderer {
 
     this.projectilePool.beginFrame();
     for (const p of state.projectiles) {
-      updateProjectileView(this.projectilePool.get(p.id), p, state);
+      const view = this.projectilePool.get(p.id);
+      updateProjectileView(view, p, state);
+      // Render-only lift so a shot rides the sloped ground / reaches a
+      // depth-lifted target. APPROXIMATION (documented): terrain lift is sampled
+      // at the projectile's OWN x (not the target's — projectileView owns the
+      // target lookup, we don't reach into it), and a homing shot additionally
+      // borrows its target ENEMY's depth offset from the pass above. Both terms
+      // are 0 when the matching flag is off → `view.y` stays `p.y` (identical).
+      let offset = this.worldFx.lift(p.x);
+      if (this.worldFxFlags.depth && p.targetId != null) {
+        const td = this.enemyDepthScratch.get(p.targetId);
+        if (td !== undefined) offset += depthOffsetY(td);
+      }
+      view.y += offset;
     }
     this.projectilePool.endFrame();
 
@@ -515,6 +726,18 @@ export class GameRenderer {
       this.fx.update(dt, state);
       this.applyWorldTransform();
     }
+
+    // Living camera: pan/zoom `cameraRoot` toward the pov hero. Runs last so it
+    // reads this frame's final hero x. No-op (early return) when the flag is
+    // off — `cameraRoot` was already snapped to identity. The existing
+    // `cameraPunch` on `world` stays the ONLY punch (no double-punch here).
+    this.updateCameraFrame(state, dt);
+
+    // Promoted "โลกมีมิติ" atmosphere (W5): day/night tint, weather, critters.
+    // `Date.now()` is the ONE sanctioned wall-clock read in the render layer —
+    // a shared accelerated cycle every client samples identically; the
+    // deterministic engine never reads it. No-op when disabled (the default).
+    this.atmosphere?.update(dt, Date.now(), zone);
   }
 
   /** Full teardown. Idempotent — safe to call multiple times / before create(). */
@@ -531,6 +754,9 @@ export class GameRenderer {
     this.heroPool = null;
     this.enemyPool = null;
     this.projectilePool = null;
+
+    this.atmosphere?.destroy();
+    this.atmosphere = null;
 
     this.fx?.destroy();
     this.fx = null;
@@ -570,6 +796,15 @@ export class GameRenderer {
     this.worldBossHpBar = null;
     this.worldBossPlate = null;
     this.worldBossLabel = null;
+    // Camera/mask Pixi objects are descendants of `world` (destroyed by
+    // `app.destroy({children:true})` below); just drop our references. The
+    // persistent `worldFx` seam + its stored flags are intentionally NOT reset
+    // (they survive a destroy/recreate, like `povHeroIndex`).
+    this.camera = null;
+    this.cameraRoot = null;
+    this.cameraMask = null;
+    this.lastCamTargetX = null;
+    this.enemyDepthScratch.clear();
     this.layers = null;
     this.world = null;
 
@@ -623,6 +858,101 @@ export class GameRenderer {
   }
 
   /**
+   * Foot-plant + depth-scale + depth-sort a hero/enemy ROOT view (both take the
+   * full depth treatment). The root pivot is `GROUND_Y` (set at pool-create
+   * time), so `view.y = footY` renders the feet exactly on the (possibly
+   * lifted) ground and the uniform scale grows the rig AROUND the feet. Only
+   * `view.y` is overwritten — never `view.x`, which `updateXView` already set
+   * to the entity's x + any render lunge. OFF-identity: `footY ≡ GROUND_Y`,
+   * `depthScaleOf ≡ 1`, `zIndex 0` (equal → stable sort keeps insertion order).
+   */
+  private placeActor(view: Container, x: number, d: number): void {
+    view.y = this.worldFx.footY(x, d);
+    view.scale.set(this.worldFx.depthScaleOf(d));
+    view.zIndex = this.worldFxFlags.depth ? depthZIndex(d) : 0;
+  }
+
+  /**
+   * Foot-plant a boss / world-boss / NPC root view with terrain lift ONLY (no
+   * depth scale, no depth zIndex — those get fixed sort keys at creation). Uses
+   * `DEPTH_NEUTRAL`, the depth d whose vertical offset is exactly 0, so
+   * `footY` collapses to `groundY(x)` whether or not the depth flag is on.
+   * OFF-identity: `groundY ≡ GROUND_Y` → `view.y = GROUND_Y`, cancelling the
+   * GROUND_Y pivot back to today's rig.
+   */
+  private placeStaticActor(view: Container, x: number): void {
+    view.y = this.worldFx.footY(x, DEPTH_NEUTRAL);
+  }
+
+  /** The `cameraRoot`'s live transform for hit-test un-projection (identity
+   * when the camera is off / before `create()`). */
+  private camView(): CamView {
+    const r = this.cameraRoot;
+    return r ? { x: r.x, y: r.y, scale: r.scale.x } : { x: 0, y: 0, scale: 1 };
+  }
+
+  /** Snap `cameraRoot` back to an identity transform AND detach/hide the clip
+   * mask (camera off). Called once on the on→off edge (not per frame), so an
+   * off camera costs nothing and clips nothing = pixel-identical to today. */
+  private snapCameraIdentity(): void {
+    const r = this.cameraRoot;
+    if (r) {
+      r.scale.set(1);
+      r.position.set(0, 0);
+      r.mask = null;
+    }
+    if (this.cameraMask) this.cameraMask.visible = false;
+    this.lastCamTargetX = null;
+  }
+
+  /** Engage the clip mask (camera on) so a >1.0 zoom can't spill content onto
+   * the letterbox bars. Idempotent. */
+  private activateCameraMask(): void {
+    if (this.cameraRoot && this.cameraMask) {
+      this.cameraMask.visible = true;
+      this.cameraRoot.mask = this.cameraMask;
+    }
+  }
+
+  /** Any engaged farm mob / live stage boss / world boss in MY zone = "in a
+   * fight" → the camera holds the tight follow-zoom instead of relaxing. */
+  private isCombatActive(state: GameState): boolean {
+    if (state.boss) return true;
+    for (const e of state.enemies) if (e.engaged) return true;
+    const wb = state.worldBoss;
+    return !!(
+      wb &&
+      wb.active &&
+      wb.entity &&
+      state.location.mapId === wb.mapId &&
+      state.location.zoneIdx === wb.zoneIdx
+    );
+  }
+
+  /** Per-frame camera step: follow the pov hero's x (finite-difference vx),
+   * hold zoom during combat, apply the transform to `cameraRoot`. No-op when
+   * the camera flag is off (identity already snapped). */
+  private updateCameraFrame(state: GameState, dt: number): void {
+    const cam = this.camera;
+    const root = this.cameraRoot;
+    if (!cam || !root || !this.worldFxFlags.camera) return;
+
+    const hero = state.heroes[this.povHeroIndex] ?? state.heroes[0] ?? null;
+    const x = hero ? hero.x : WORLD_WIDTH / 2;
+    // Clamp dt off zero so a paused/first frame can't explode the velocity.
+    const camDt = Math.max(1 / 240, dt);
+    const vx = this.lastCamTargetX == null ? 0 : (x - this.lastCamTargetX) / camDt;
+    this.lastCamTargetX = x;
+
+    // Reset the idle timer BEFORE stepping so combat never relaxes to idleZoom.
+    if (this.isCombatActive(state)) cam.idleT = 0;
+    updateCamera(cam, { x, vx }, dt);
+    cameraTransform(cam, this.camScratch);
+    root.scale.set(this.camScratch.scale);
+    root.position.set(this.camScratch.posX, this.camScratch.posY);
+  }
+
+  /**
    * Manual play (M7.8): convert a canvas-relative pointer position (CSS px —
    * e.g. `clientX/Y` minus the mount element's `getBoundingClientRect()`, see
    * `GameClient.tsx`'s tap handler) into a tap outcome. Monsters win over
@@ -636,19 +966,30 @@ export class GameRenderer {
    */
   hitTestPointer(canvasX: number, canvasY: number, state: GameState): PointerHitResult {
     if (!this.app) return null;
-    const t = this.baseTransform;
-    const wx = (canvasX - t.x) / t.scale;
-    const wy = (canvasY - t.y) / t.scale;
+    const cam = this.camView();
+    // Un-project through the letterbox `baseTransform` THEN the `cameraRoot`
+    // (camera inverse). With the camera off (cam = identity) this collapses to
+    // today's `(canvas − base.xy)/base.scale`, i.e. bit-identical tap math.
+    const w = canvasToWorld(canvasX, canvasY, this.baseTransform, cam, this.hitScratch);
+    const wx = w.x;
+    const wy = w.y;
     if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
 
-    const touchHalf = TOUCH_HALF_EXTENT_PX / t.scale;
+    // Touch half-extent shrinks by BOTH transforms' scale so the on-screen
+    // target stays ~24 CSS px regardless of letterbox fit or camera zoom.
+    const touchHalf = TOUCH_HALF_EXTENT_PX / worldScale(this.baseTransform, cam);
     let bestId: number | null = null;
     let bestDist = Infinity;
     for (const e of state.enemies) {
-      const rx = Math.max(touchHalf, 16 * e.size);
-      const ry = Math.max(touchHalf, 22 * e.size);
+      const d = this.worldFx.depthOf("enemy", e.id);
+      const scl = this.worldFx.depthScaleOf(d);
+      // Ellipse center rides the entity's lifted foot line + depth scale; radii
+      // scale with depth too. Flags off → GROUND_Y − 14·size, radii 16/22·size.
+      const cy = enemyTapCenterY(e.size, this.worldFx.footY(e.x, d), scl);
+      const rx = Math.max(touchHalf, 16 * e.size * scl);
+      const ry = Math.max(touchHalf, 22 * e.size * scl);
       const dx = (wx - e.x) / rx;
-      const dy = (wy - (GROUND_Y - 14 * e.size)) / ry;
+      const dy = (wy - cy) / ry;
       const dist = dx * dx + dy * dy;
       if (dist <= 1 && dist < bestDist) {
         bestDist = dist;
@@ -664,8 +1005,13 @@ export class GameRenderer {
     if (wb && wb.active && wb.entity) {
       const rx = Math.max(touchHalf, WORLD_BOSS_CORE_R * 0.9);
       const ry = Math.max(touchHalf, WORLD_BOSS_CORE_R * 0.9);
+      // Terrain lift only (its scale is untouched); flags off → WORLD_BOSS_CY.
+      const cy = worldBossTapCenterY(
+        WORLD_BOSS_CY,
+        this.worldFx.groundY(wb.entity.x) - GROUND_Y,
+      );
       const dx = (wx - wb.entity.x) / rx;
-      const dy = (wy - WORLD_BOSS_CY) / ry;
+      const dy = (wy - cy) / ry;
       const dist = dx * dx + dy * dy;
       if (dist <= 1 && dist < bestDist) {
         bestDist = dist;
@@ -688,9 +1034,12 @@ export class GameRenderer {
   hitTestNpc(canvasX: number, canvasY: number, state: GameState): NpcHitResult {
     if (!this.app) return null;
     if (zoneAt(state.location).kind !== "town") return null;
-    const t = this.baseTransform;
-    const wx = (canvasX - t.x) / t.scale;
-    const wy = (canvasY - t.y) / t.scale;
+    // Same camera-aware un-projection as `hitTestPointer` (identical when the
+    // camera is off). Town rides a flat camera pan too when the camera is on.
+    const cam = this.camView();
+    const w = canvasToWorld(canvasX, canvasY, this.baseTransform, cam, this.hitScratch);
+    const wx = w.x;
+    const wy = w.y;
     if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
 
     for (const anchor of TOWN_NPCS) {
@@ -786,6 +1135,45 @@ export class GameRenderer {
   setPovHeroIndex(index: number): void {
     this.povHeroIndex = index;
     this.fx?.setPovHeroIndex(index);
+  }
+
+  /**
+   * Promoted "โลกมีมิติ" master switch (settings wave, W6): toggles the depth
+   * band + terrain ground (incl. `Environment`'s polygon ground layer) +
+   * living camera + atmosphere (day/night tint + weather + critters). Stored
+   * (like `setPovHeroIndex`) so a call before `create()` resolves is
+   * re-applied to the freshly-built scene. ALL false (the default) = pixel-
+   * identical to today: flat ground, no depth, identity camera, no
+   * atmosphere, today's tap math. Safe to call any time.
+   */
+  setWorldFx(flags: {
+    depth: boolean;
+    terrain: boolean;
+    camera: boolean;
+    atmosphere: boolean;
+  }): void {
+    this.worldFxFlags = { ...flags };
+    this.worldFx.setFlags({ depth: flags.depth, terrain: flags.terrain });
+    this.environment?.setTerrainEnabled(flags.terrain);
+    // Camera on → engage the clip mask; off → snap `cameraRoot` to identity and
+    // detach the mask ONCE (the per-frame updater early-returns while off).
+    if (flags.camera) this.activateCameraMask();
+    else this.snapCameraIdentity();
+    this.atmosphere?.setEnabled(flags.atmosphere);
+  }
+
+  /**
+   * Promoted "โลกมีมิติ" atmosphere density (W5 runtime, driven by the
+   * ghost-fps valve in W6): 1 = full, 0.5 = reduced (weather dimmed, birds
+   * hidden), 0 = hidden (weather/critters/night-overlay off, and
+   * `atmosphere.update()` skips its whole per-frame body). Independent of
+   * `setWorldFx`'s `atmosphere` on/off flag — only matters once that flag is
+   * on. Stored for the same defensive re-apply reason as `worldFxFlags`.
+   * Safe to call any time.
+   */
+  setAtmosphereDensity(s: number): void {
+    this.atmosphereDensity = s;
+    this.atmosphere?.setDensity(s);
   }
 
   /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */

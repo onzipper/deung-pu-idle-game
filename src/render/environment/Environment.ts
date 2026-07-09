@@ -23,6 +23,7 @@ import type { GameState } from "@/engine/state";
 import { zoneAt } from "@/engine";
 import { biomeForZone, type ResolvedBiome } from "@/render/environment/biomes";
 import { BiomeScene } from "@/render/environment/BiomeScene";
+import { terrainForZone } from "@/render/worldDepth/terrainZone";
 
 /** Seconds for an old->new biome crossfade. */
 const TRANSITION_DURATION = 1.0;
@@ -47,8 +48,28 @@ export class Environment {
   private incoming: BiomeScene | null = null;
   private incomingKey: string | null = null;
   private transitionT = 0;
+  /** W3 "โลกมีมิติ" terrain ground layer — default OFF (today's flat look).
+   * `GameRenderer` flips this via its own `worldFx`-style setter (W5/W6
+   * wiring, not yet connected). `BiomeScene` itself still decides flat-vs-
+   * polygon PER ZONE (see its doc comment) — this only controls whether a
+   * `Terrain` is resolved and offered to it at all. */
+  private terrainEnabled = false;
 
   constructor(private readonly container: Container) {}
+
+  /** Turn the terrain ground layer on/off. A flag flip that actually changes
+   * the value busts `currentKey` so the NEXT `update()` spawns a fresh
+   * `incoming` scene (even though the zone key itself hasn't changed) and the
+   * existing 1s crossfade animates the on/off swap, the same way a zone
+   * change already does. (If a zone-change crossfade is already in flight
+   * when the flag flips, the bust is superseded by that transition's own
+   * completion — a rare interleaving that a following zone change or flag
+   * flip resolves; not worth a queue for a settings toggle.) */
+  setTerrainEnabled(on: boolean): void {
+    if (this.terrainEnabled === on) return;
+    this.terrainEnabled = on;
+    this.currentKey = null;
+  }
 
   /** Advance scenery by `dt` REAL seconds and react to the live `state`. */
   update(dt: number, state: GameState): void {
@@ -92,7 +113,8 @@ export class Environment {
   }
 
   private spawn(resolved: ResolvedBiome, zone: Zone, state: GameState): BiomeScene {
-    const scene = new BiomeScene(resolved, zone, state);
+    const terrain = this.terrainEnabled ? terrainForZone(zone) : undefined;
+    const scene = new BiomeScene(resolved, zone, state, { terrain });
     this.container.addChild(scene.view);
     return scene;
   }

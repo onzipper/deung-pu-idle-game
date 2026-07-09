@@ -149,11 +149,15 @@ export function mergeBossBest(
 }
 
 /**
- * Fire the SINGLETON "first non-suspect character to reach the level cap"
- * announcement. Exactly-once is enforced by the DB: `singletonKey="levelCap"` is
- * @unique, so a concurrent second-to-cap save collides on P2002 → swallowed. All
- * other errors are swallowed too (the feed is best-effort). Standalone insert (NOT
- * in the projection tx) so a collision never rolls the projection back.
+ * Fire the "เวลตัน" (level-cap reached) celebration for THIS character — owner
+ * call 2026-07-09: every capper gets announced, not just the server's first
+ * (the old global "levelCap" singleton read as "first player to Lv.90" and
+ * silenced everyone after). Exactly-once PER CHARACTER is enforced by the DB:
+ * `singletonKey="cap:<characterId>"` is @unique (same idiom as asura's
+ * "legendary:<cls>"), so the concurrent double-save race on a null `levelCapAt`
+ * collides on P2002 → swallowed. All other errors are swallowed too (the feed
+ * is best-effort). Standalone insert (NOT in the projection tx) so a collision
+ * never rolls the projection back. "cap:"+cuid ≤ 29 chars, fits VarChar(32).
  */
 async function emitLevelCapAnnouncement(
   characterId: string,
@@ -168,13 +172,13 @@ async function emitLevelCapAnnouncement(
         characterId,
         charName,
         refineLevel: capLevel, // carried into the client copy ("Lv.{level}")
-        singletonKey: "levelCap", // @unique → exactly-once globally
+        singletonKey: `cap:${characterId}`, // @unique → exactly-once per character
         createdAt: now,
       },
     });
     invalidateAnnouncementsCache();
   } catch {
-    // P2002 (singleton already claimed) or any feed error → ignore; best-effort.
+    // P2002 (this character already announced) or any feed error → best-effort.
   }
 }
 

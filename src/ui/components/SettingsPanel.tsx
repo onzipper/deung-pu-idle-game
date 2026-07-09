@@ -17,6 +17,7 @@ import { LocaleSwitch } from "@/ui/components/LocaleSwitch";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { SoundToggle } from "@/ui/components/SoundToggle";
 import { GhostToggle } from "@/ui/components/GhostToggle";
+import { WorldFxToggles } from "@/ui/components/WorldFxToggles";
 import { AccountSection } from "@/ui/components/settings/AccountSection";
 import { TitleSection } from "@/ui/components/settings/TitleSection";
 
@@ -64,6 +65,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </div>
             <GhostToggle />
           </section>
+
+          <WorldFxToggles />
 
           <TitleSection />
 

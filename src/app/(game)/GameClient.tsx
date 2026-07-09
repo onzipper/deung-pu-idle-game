@@ -1623,6 +1623,14 @@ export function GameClient() {
      * struggling device sheds ghost rigs first. Client-local, display-only. */
     let ghostFpsEmaMs = 1000 / 60;
     let ghostCap = GHOST_CAP_DEFAULT;
+    /** "โลกมีมิติ" atmosphere density valve (W6): the last value pushed through
+     *  `renderer.setAtmosphereDensity` — rides the SAME `ghostFpsEmaMs` sample
+     *  as the ghost cap above (no second timer). Accepted v1 coupling: this
+     *  only steps down while `ghostsFeatureOn` (the EMA only accumulates in
+     *  that branch below) — a device struggling enough to matter here is
+     *  struggling with ghosts on too; with ghosts off, the renderer's own
+     *  default (1, full) stands. */
+    let worldAtmosphereDensity = 1;
     /** Drives `worldSession.connect/disconnect`: on only while EITHER the ghosts flag is
      * set OR the chat panel is open, AND the tab is visible. Recomputed by
      * `syncWorldSessionActive()`. */
@@ -1643,6 +1651,23 @@ export function GameClient() {
         ghostStore.clear();
         renderer.setGhosts([]);
       }
+    }
+
+    /** "โลกมีมิติ" world-fx settings (W6, promoted lab experiment ⑨): reads the
+     *  CURRENT store values (never a stale closure copy — this is called both
+     *  once at renderer-ready and again on every Settings toggle change, see
+     *  the subscription below) and pushes them through the renderer's single
+     *  `setWorldFx` seam. `worldDepthOn` intentionally drives BOTH `depth` and
+     *  `terrain` (one switch, one visual concept — see `WorldFxToggles.tsx`).
+     *  Purely cosmetic/render; never touches the sim. */
+    function applyWorldFx(): void {
+      const s = useGameStore.getState();
+      renderer.setWorldFx({
+        depth: s.worldDepthOn,
+        terrain: s.worldDepthOn,
+        camera: s.worldCameraOn,
+        atmosphere: s.worldAtmosphereOn,
+      });
     }
 
     let rafId = 0;
@@ -1700,6 +1725,10 @@ export function GameClient() {
     // subscription (see the settings title-picker call site below) — the
     // nameplate/aura seam otherwise only refreshes on the next `townArrived`.
     let unsubscribeSocialBadge: (() => void) | undefined;
+    // "โลกมีมิติ" world-fx settings (W6, promoted lab experiment ⑨): unsubscribe
+    // handle for the worldDepthOn/worldCameraOn/worldAtmosphereOn store
+    // subscription (see `applyWorldFx`'s call site below).
+    let unsubscribeWorldFx: (() => void) | undefined;
     // A non-React DOM node we may append to the (React-owned) arena div to show
     // a fatal init error; tracked so cleanup can remove it before a remount.
     let errorEl: HTMLElement | null = null;
@@ -2375,6 +2404,15 @@ export function GameClient() {
         if (wantCap !== ghostCap) {
           ghostCap = wantCap;
           ghostStore.setCap(ghostCap);
+        }
+        // "โลกมีมิติ" atmosphere density (W6): rides this SAME EMA sample (no
+        // second timer, see `worldAtmosphereDensity`'s doc) — 1 full / 0.5
+        // reduced (weather dimmed, birds hidden) / 0 off, stepped alongside the
+        // ghost cap above.
+        const wantAtmosphereDensity = ghostFpsEmaMs > 33 ? 0 : ghostFpsEmaMs > 22 ? 0.5 : 1;
+        if (wantAtmosphereDensity !== worldAtmosphereDensity) {
+          worldAtmosphereDensity = wantAtmosphereDensity;
+          renderer.setAtmosphereDensity(worldAtmosphereDensity);
         }
         // Dedupe: never render my OWN ghost, nor a cohort peer (already a fully-simulated
         // real hero in my field). Peers key on displayName — the party wire carries no
@@ -3355,6 +3393,22 @@ export function GameClient() {
       unsubscribeChatSend = onSendChatRequest((text) => worldSession.sendChat(text));
       syncWorldSessionActive();
 
+      // "โลกมีมิติ" world-fx settings (W6, promoted lab experiment ⑨): apply the
+      // CURRENT persisted values now that the renderer exists (a hydrate may
+      // have landed before this subscription attaches — same "feed current +
+      // subscribe" idiom as ghosts/party above), then react to Settings toggle
+      // changes for as long as this effect lives.
+      applyWorldFx();
+      unsubscribeWorldFx = useGameStore.subscribe((next, prev) => {
+        if (
+          next.worldDepthOn !== prev.worldDepthOn ||
+          next.worldCameraOn !== prev.worldCameraOn ||
+          next.worldAtmosphereOn !== prev.worldAtmosphereOn
+        ) {
+          applyWorldFx();
+        }
+      });
+
       // HOF seasonal rewards: the Settings title picker (`TitleSection.tsx`)
       // writes a fresh `mySocialBadge` straight into the store the instant
       // `POST /api/hof/title` succeeds — this subscription is the ONLY thing
@@ -3390,6 +3444,7 @@ export function GameClient() {
       unsubscribeSocialBadge?.();
       unsubscribeGhosts?.();
       unsubscribeChatOpen?.();
+      unsubscribeWorldFx?.();
       unsubscribeChatSend?.();
       partySession.teardown();
       worldSession.disconnect();

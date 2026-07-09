@@ -29,6 +29,10 @@ import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import {
+  createWorldFxContext,
+  type WorldFxContext,
+} from "@/render/worldDepth/worldFxContext";
+import {
   BOSS_COLORS,
   HERO_COLORS,
   MAX_PARTY_SIZE,
@@ -1148,12 +1152,22 @@ export class FxController {
   /** Rolling average hit magnitude, used to scale damage-number font size. */
   private avgHit = 20;
 
+  /** W4 "โลกมีมิติ" ground/depth seam (see `worldFxContext.ts`) — every kill/
+   * impact/foot anchor below resolves its on-screen ground line through this so
+   * one flag flip turns the world flat. Defaults to a fresh flags-OFF context
+   * when a caller omits `opts.worldFx` (headless fx tests / legacy 4-arg call),
+   * where groundY≡GROUND_Y / footY≡GROUND_Y / lift≡0 ⇒ every anchor is a +0
+   * delta = pixel-identical to pre-W4. */
+  private readonly wf: WorldFxContext;
+
   constructor(
     fxContainer: Container,
     world: Container,
     private readonly lookupView: EntityViewLookup,
     private readonly lookupHeroView: HeroViewLookup,
+    opts?: { cameraRoot?: Container | null; worldFx?: WorldFxContext },
   ) {
+    this.wf = opts?.worldFx ?? createWorldFxContext();
     // Sub-layers in z-order: corpse echoes (bottom, "the body collapsing" +
     // ground scorch marks + spawn portals + tank armor shards — all
     // ground/body-adjacent decals) -> weapon trail + projectile tracers ->
@@ -1184,11 +1198,17 @@ export class FxController {
     // every top-level layer sits at origin, so `getWeaponAnchorPos`'s
     // entities-space output lands identically). Headless tests hand in a
     // DETACHED fxContainer; z-order is irrelevant there, plain addChild.
+    // W4: host on the camera-panned `cameraRoot` when present (the weapon fx
+    // anchor to hero views that ride it, and it's inside the camera clip mask) —
+    // else the top-level `world` (headless tests / camera-off legacy). Same
+    // "just ABOVE the same-parent fx container so the bloom filter never smears
+    // the crisp pixels" (footgun 10) placement, generalized past `world`.
+    const fxHost = opts?.cameraRoot ?? world;
     this.pixelWeaponFxLayer = new PixiContainer();
-    if (fxContainer.parent === world) {
-      world.addChildAt(this.pixelWeaponFxLayer, world.getChildIndex(fxContainer) + 1);
+    if (fxContainer.parent === fxHost) {
+      fxHost.addChildAt(this.pixelWeaponFxLayer, fxHost.getChildIndex(fxContainer) + 1);
     } else {
-      world.addChild(this.pixelWeaponFxLayer);
+      fxHost.addChild(this.pixelWeaponFxLayer);
     }
 
     this.corpseEcho = new CorpseEchoPool(this.corpseLayer);
@@ -1247,7 +1267,7 @@ export class FxController {
     this.meteorSky = new MeteorSkyFlash(WORLD_WIDTH);
     this.skyDarken = new SkyDarkenOverlay(WORLD_WIDTH, WORLD_HEIGHT);
     this.hazardBand = new HazardBandOverlay(WORLD_WIDTH, WORLD_HEIGHT);
-    this.impactFilters = new ImpactFilterController(world);
+    this.impactFilters = new ImpactFilterController(world, opts?.cameraRoot ?? null);
     fxContainer.addChild(
       this.bossEcho.view,
       this.meteorSky.view,
@@ -1339,7 +1359,7 @@ export class FxController {
           this.onHeroDown(ev, state);
           break;
         case "heroRevived":
-          this.onHeroRevived(ev);
+          this.onHeroRevived(ev, state);
           break;
         case "skillCast":
           this.onSkillCast(ev, state);
@@ -1359,7 +1379,9 @@ export class FxController {
           // helper's doc comment).
           this.rings.spawn({
             x: ev.x,
-            y: this.bossCy(state),
+            // W4: the boss rides terrain only (no depth band); lift its telegraph
+            // ring with the ground under it (0 in flat stage-boss rooms).
+            y: this.bossCy(state) + this.wf.lift(ev.x),
             r0: 30,
             r1: 100,
             duration: 0.5,
@@ -1367,25 +1389,28 @@ export class FxController {
             color: PALETTE.warn,
           });
           break;
-        case "bossSlamLand":
+        case "bossSlamLand": {
           this.shake.trigger(8); // strong
           this.punch.trigger("bossSlamLand", ev.x);
-          this.impactFilters.triggerShockwave(ev.x, GROUND_Y);
+          // W4: land the shockwave + ground ring/dust on the terrain under him.
+          const gy = this.wf.groundY(ev.x);
+          this.impactFilters.triggerShockwave(ev.x, gy);
           this.rings.spawn({
             x: ev.x,
-            y: GROUND_Y,
+            y: gy,
             r0: 20,
             r1: 150,
             duration: 0.4,
             width: 5,
             color: PALETTE.warn,
           });
-          burst(this.particles, ev.x, GROUND_Y - 10, 14, PALETTE.warn, {
+          burst(this.particles, ev.x, gy - 10, 14, PALETTE.warn, {
             speed: 150,
             life: 0.35,
             radius: 3,
           });
           break;
+        }
         case "bossEnraged":
           this.flash.trigger(PALETTE.enrageAura, 0.28);
           break;
@@ -1416,7 +1441,7 @@ export class FxController {
         case "worldBossDefeated":
           this.onWorldBossDefeated(state);
           break;
-        case "mobAggroed":
+        case "mobAggroed": {
           // M6 "สนามล่ามอน" follow-up (open hunting field): an aggressive mob just
           // aggroed onto the hero — a small "alert" beat at the mob: a brief,
           // localized flash-ring (NOT the full-arena `flash` — this can fire
@@ -1424,14 +1449,16 @@ export class FxController {
           // upward "!" spark (reuses the same pooled text the damage numbers/
           // kill-gold use) on top of the original puff, all kept subtle/short
           // per the render brief. Aggro's growl SFX lives in `audio/sfxMap.ts`.
-          burst(this.particles, ev.x, GROUND_Y - 18, 5, PALETTE.enrageAura, {
+          // W4: lift onto the mob's foot-line (the event already carries its id).
+          const df = this.enemyLift(ev.x, ev.id);
+          burst(this.particles, ev.x, GROUND_Y - 18 + df, 5, PALETTE.enrageAura, {
             speed: 55,
             life: 0.28,
             radius: 2,
           });
           this.rings.spawn({
             x: ev.x,
-            y: GROUND_Y - 18,
+            y: GROUND_Y - 18 + df,
             r0: 3,
             r1: 16,
             duration: 0.22,
@@ -1440,7 +1467,7 @@ export class FxController {
           });
           this.eventText.spawn({
             x: ev.x,
-            y: GROUND_Y - 30,
+            y: GROUND_Y - 30 + df,
             label: "!",
             color: PALETTE.warn,
             fontSize: 15,
@@ -1449,6 +1476,7 @@ export class FxController {
             driftX: 0,
           });
           break;
+        }
         case "stageAdvanced":
           this.flash.trigger(PALETTE.gold, 0.22);
           break;
@@ -1729,6 +1757,11 @@ export class FxController {
       fx.setDensity(1);
       this.weaponFx[slot] = fx;
     }
+    // W4: ride THIS hero's placed foot-line so ground sparks land on the slope
+    // under it. `view.y` is `GameRenderer.placeActor`'s `footY(x, depth)` and is
+    // exactly GROUND_Y when the world-fx flags are off ⇒ pre-W4 behavior. Per
+    // hero, per frame (the hero walks across varying terrain).
+    fx.setGroundY(view!.y);
     fx.setRecipe(recipe);
 
     // Direction = anchor − weaponArm pivot (both resolved into `view.parent`-
@@ -1818,10 +1851,12 @@ export class FxController {
    * the default `povHeroIndex` 0 — pixel-identical. */
   private onMoveOrdered(x: number, heroIdx: number): void {
     if (heroIdx !== this.povHeroIndex) return;
+    // W4: drop the sonar-ping marker onto the terrain at the tapped x.
+    const gy = this.wf.groundY(x);
     for (const r of MOVE_MARKER_RINGS) {
       this.rings.spawn({
         x,
-        y: GROUND_Y,
+        y: gy,
         r0: r.r0,
         r1: r.r1,
         duration: r.duration,
@@ -1845,7 +1880,8 @@ export class FxController {
     if (!enemy) return;
     this.rings.spawn({
       x: enemy.x,
-      y: TARGET_LOCK_Y,
+      // W4: sit the lock-on pulse on the target's depth+terrain foot-line.
+      y: TARGET_LOCK_Y + this.enemyLift(enemy.x, id),
       r0: TARGET_LOCK_PULSE_R0,
       r1: TARGET_LOCK_PULSE_R1,
       duration: TARGET_LOCK_PULSE_DURATION,
@@ -1866,7 +1902,10 @@ export class FxController {
       cmd?.kind === "attack"
         ? state.enemies.find((e) => e.id === cmd.targetId)
         : undefined;
-    this.targetLock.update(dt, enemy ? { x: enemy.x, y: TARGET_LOCK_Y } : null);
+    this.targetLock.update(
+      dt,
+      enemy ? { x: enemy.x, y: TARGET_LOCK_Y + this.enemyLift(enemy.x, enemy.id) } : null,
+    );
   }
 
   /** Continuous (not event-driven) per-frame read of `state.heroes` +
@@ -1963,7 +2002,12 @@ export class FxController {
    * soul wisp / armor shards / corpse echo stay tinted to ITS OWN species. */
   private onKill(ev: Extract<GameEvent, { type: "kill" }>, state: GameState): void {
     const size = ENEMY_TYPES[ev.kind]?.size ?? 1;
-    const y = GROUND_Y - 20 - 8 * size;
+    // W4: anchor the whole death beat on this enemy's depth-band + terrain
+    // foot-line. The engine removes it from `state.enemies` this same step (its
+    // pooled view is already gone), so the kill event's own `id` — not a view —
+    // resolves the depth. `df` ≡ 0 when the world-fx flags are off.
+    const df = this.enemyLift(ev.x, ev.id);
+    const y = GROUND_Y - 20 - 8 * size + df;
     const kindColor = enemyColorFor(zoneAt(state.location).mapId, ev.kind);
 
     burst(this.particles, ev.x, y, 10, PALETTE.killGold, {
@@ -1994,7 +2038,7 @@ export class FxController {
     // `enemyView.ts`'s pooled view is already gone — this brief crumple
     // echo (kept subtle; the burst above already covers the "impact") is
     // the render-side stand-in for a death animation.
-    this.corpseEcho.spawn(ev.x, GROUND_Y - 4, kindColor, size);
+    this.corpseEcho.spawn(ev.x, GROUND_Y - 4 + df, kindColor, size);
 
     this.soulWisps.trySpawn({
       x: ev.x,
@@ -2034,7 +2078,9 @@ export class FxController {
    * `enemyView.ts`'s job (continuous, reads `enemy.elite` every frame). */
   private onEliteSpawned(ev: Extract<GameEvent, { type: "eliteSpawned" }>): void {
     const size = ENEMY_TYPES[ev.kind]?.size ?? 1;
-    const y = GROUND_Y - 20 - 8 * size;
+    // W4: lift the whole telegraph onto the elite's depth+terrain foot-line
+    // (the event carries its entity id).
+    const y = GROUND_Y - 20 - 8 * size + this.enemyLift(ev.x, ev.id);
     this.rings.spawn({
       x: ev.x,
       y,
@@ -2078,7 +2124,9 @@ export class FxController {
    * no Thai/English unit text is hardcoded here). Ground-anchored (see
    * `ELITE_KILL_POP_Y`'s doc comment — the event carries no `kind`/size). */
   private onEliteKilled(ev: Extract<GameEvent, { type: "eliteKilled" }>): void {
-    const y = ELITE_KILL_POP_Y;
+    // W4: lift the essence pop onto the terrain (the eliteKilled event carries no
+    // id, so terrain-only — its co-fired `kill` event handles the depth band).
+    const y = ELITE_KILL_POP_Y + this.wf.lift(ev.x);
     this.shake.trigger(ELITE_KILL_SHAKE);
     this.rings.spawn({
       x: ev.x,
@@ -2120,9 +2168,11 @@ export class FxController {
     state: GameState,
   ): void {
     const colors = HERO_COLORS[ev.cls];
+    // W4: lift the wisp + death ring onto the hero's depth+terrain foot-line.
+    const df = this.heroLift(ev.id, state);
     this.soulWisps.spawn({
       x: ev.x,
-      y: HERO_TOP_Y,
+      y: HERO_TOP_Y + df,
       color: colors.light,
       radius: SOUL_WISP_HERO_RADIUS,
       rise: SOUL_WISP_HERO_RISE,
@@ -2130,7 +2180,7 @@ export class FxController {
     });
     this.rings.spawn({
       x: ev.x,
-      y: HERO_MID_Y,
+      y: HERO_MID_Y + df,
       r0: HERO_DEATH_RING_R0,
       r1: HERO_DEATH_RING_R1,
       duration: HERO_DEATH_RING_DURATION,
@@ -2166,23 +2216,30 @@ export class FxController {
    * `ColorMatrixFilter` flash — same "punch to white" read as a landed hit,
    * here standing in for "life snapping back in") — alongside the existing
    * spring-bounce in `heroView.ts` (untouched). */
-  private onHeroRevived(ev: Extract<GameEvent, { type: "heroRevived" }>): void {
+  private onHeroRevived(
+    ev: Extract<GameEvent, { type: "heroRevived" }>,
+    state: GameState,
+  ): void {
     const colors = HERO_COLORS[ev.cls];
+    // W4: lift the revive sparkle + pillar onto the hero's foot-line. The pillar
+    // KEEPS its head-to-ground span (`+ df` on both topY and height) so it lands
+    // on the lifted ground without stretching; df ≡ 0 when the flags are off.
+    const df = this.heroLift(ev.id, state);
 
     const view = this.lookupView("hero", ev.id);
     if (view) this.hitFlash.trigger(view);
 
-    burst(this.particles, ev.x, HERO_TOP_Y, REVIVE_SPARKLE_COUNT, colors.light, {
+    burst(this.particles, ev.x, HERO_TOP_Y + df, REVIVE_SPARKLE_COUNT, colors.light, {
       speed: REVIVE_SPARKLE_SPEED,
       life: REVIVE_SPARKLE_LIFE,
       radius: 2.5,
     });
 
-    const topY = HERO_TOP_Y - REVIVE_PILLAR_HEAD_MARGIN;
+    const topY = HERO_TOP_Y - REVIVE_PILLAR_HEAD_MARGIN + df;
     this.lightPillars.spawn({
       x: ev.x,
       topY,
-      height: GROUND_Y - topY,
+      height: GROUND_Y - topY + df,
       color: colors.light,
       duration: REVIVE_PILLAR_DURATION,
       width: REVIVE_PILLAR_WIDTH,
@@ -2705,9 +2762,11 @@ export class FxController {
 
     // Whirlwind afterimages + a dust-ring kick-up at the feet.
     this.ghostBlades.triggerSpin(x, HERO_MID_Y, color);
+    // W4: the ground dust-ring + crack sit on the terrain under the caster.
+    const wgy = this.wf.groundY(x);
     this.rings.spawn({
       x,
-      y: GROUND_Y - 2,
+      y: wgy - 2,
       r0: 6,
       r1: 34,
       duration: 0.35,
@@ -2718,7 +2777,7 @@ export class FxController {
     // (`SKILL_TYPES.swordsman` IS the learned `sword_whirl` def).
     this.groundCracks.spawn({
       x,
-      y: GROUND_Y,
+      y: wgy,
       radius: WHIRL_CRACK_RADIUS,
       life: WHIRL_CRACK_LIFE,
       darkColor: PALETTE.swordCrackDark,
@@ -2789,17 +2848,20 @@ export class FxController {
    * projectile), so every beat here fires at cast time — there is no
    * separate "impact" moment to wait for. */
   private onSwordQuakeCast(x: number, pov: boolean): void {
+    // W4: the whole ground beat (shockwave/ring/crack/dust) sits on the terrain
+    // under the caster's feet.
+    const gy = this.wf.groundY(x);
     // M8 party P6: SCREEN-level only for the POV hero's own cast; the ground
     // crack/ring/dust/scatter below stays world-anchored for everyone.
     if (pov) {
       this.punch.trigger("swordQuake", x);
       this.shake.trigger(QUAKE_SHAKE);
-      this.impactFilters.triggerShockwave(x, GROUND_Y);
+      this.impactFilters.triggerShockwave(x, gy);
     }
 
     this.rings.spawn({
       x,
-      y: GROUND_Y,
+      y: gy,
       r0: 20,
       r1: QUAKE_RING_R1,
       duration: QUAKE_RING_DURATION,
@@ -2808,14 +2870,14 @@ export class FxController {
     });
     this.groundCracks.spawn({
       x,
-      y: GROUND_Y,
+      y: gy,
       radius: QUAKE_CRACK_SCATTER_RADIUS,
       spokes: 8,
       life: 0.7,
       darkColor: PALETTE.swordCrackDark,
       glowColor: PALETTE.swordEmber,
     });
-    burst(this.particles, x, GROUND_Y - 6, QUAKE_DUST_PARTICLE_COUNT, PALETTE.muted, {
+    burst(this.particles, x, gy - 6, QUAKE_DUST_PARTICLE_COUNT, PALETTE.muted, {
       speed: 120,
       life: 0.45,
       radius: 3.5,
@@ -2847,16 +2909,18 @@ export class FxController {
    * `skillCast` event) that quake never had, selling "clearly bigger than
    * quake" per the owner's out-spectacle spec. */
   private onSwordSkyfallCast(x: number, pov: boolean): void {
+    // W4: caster-feet ground beat sits on the terrain under him.
+    const gy = this.wf.groundY(x);
     // M8 party P6: SCREEN-level only for the POV hero's own cast.
     if (pov) {
       this.punch.trigger("swordSkyfall", x);
       this.shake.trigger(SKYFALL_SHAKE);
-      this.impactFilters.triggerShockwave(x, GROUND_Y);
+      this.impactFilters.triggerShockwave(x, gy);
     }
 
     this.rings.spawn({
       x,
-      y: GROUND_Y,
+      y: gy,
       r0: 30,
       r1: SKYFALL_RING_R1,
       duration: SKYFALL_RING_DURATION,
@@ -2865,14 +2929,14 @@ export class FxController {
     });
     this.groundCracks.spawn({
       x,
-      y: GROUND_Y,
+      y: gy,
       radius: SKYFALL_CRACK_RADIUS,
       spokes: 10,
       life: 0.8,
       darkColor: PALETTE.swordCrackDark,
       glowColor: PALETTE.swordLightningGlow,
     });
-    burst(this.particles, x, GROUND_Y - 6, QUAKE_DUST_PARTICLE_COUNT + 4, PALETTE.muted, {
+    burst(this.particles, x, gy - 6, QUAKE_DUST_PARTICLE_COUNT + 4, PALETTE.muted, {
       speed: 140,
       life: 0.5,
       radius: 4,
@@ -2884,12 +2948,14 @@ export class FxController {
     for (let i = 0; i < SKYFALL_BOLT_COUNT; i++) {
       const frac = SKYFALL_BOLT_COUNT <= 1 ? 0 : i / (SKYFALL_BOLT_COUNT - 1) - 0.5;
       const bx = clamp(x + frac * SKYFALL_BOLT_SPAN * 2, 0, WORLD_WIDTH);
-      const topY = GROUND_Y - SKYFALL_BOLT_HEIGHT;
+      // W4: each bolt strikes the terrain surface at its own scattered x.
+      const bgy = this.wf.groundY(bx);
+      const topY = bgy - SKYFALL_BOLT_HEIGHT;
       this.flashLines.spawn({
         x1: bx,
         y1: topY,
         x2: bx + (Math.random() - 0.5) * 14,
-        y2: GROUND_Y,
+        y2: bgy,
         color: PALETTE.swordLightningGlow,
         width: 5,
         life: 0.22,
@@ -2899,7 +2965,7 @@ export class FxController {
         x1: bx,
         y1: topY,
         x2: bx + (Math.random() - 0.5) * 6,
-        y2: GROUND_Y,
+        y2: bgy,
         color: PALETTE.swordLightningCore,
         width: 2,
         life: 0.18,
@@ -2937,9 +3003,11 @@ export class FxController {
       if (entry.t <= 0) {
         const bigMult = entry.big ? 1.4 : 1;
         const glow = entry.big ? PALETTE.swordLightningGlow : PALETTE.swordEmber;
+        // W4: each scattered shockwave beat lands on the terrain at its own x.
+        const gy = this.wf.groundY(entry.x);
         this.groundCracks.spawn({
           x: entry.x,
-          y: GROUND_Y,
+          y: gy,
           radius: QUAKE_CRACK_SCATTER_RADIUS * 0.8 * bigMult,
           spokes: entry.big ? 7 : 5,
           life: entry.big ? 0.65 : 0.5,
@@ -2949,7 +3017,7 @@ export class FxController {
         burst(
           this.particles,
           entry.x,
-          GROUND_Y - 6,
+          gy - 6,
           Math.round(QUAKE_DUST_PARTICLE_COUNT * bigMult),
           PALETTE.muted,
           {
@@ -2960,7 +3028,7 @@ export class FxController {
         );
         this.rings.spawn({
           x: entry.x,
-          y: GROUND_Y,
+          y: gy,
           r0: 8,
           r1: entry.big ? 90 : 60,
           duration: entry.big ? 0.45 : 0.35,
@@ -3255,9 +3323,12 @@ export class FxController {
       this.shake.trigger(STORM_FINALE_SHAKE);
     }
     this.stormFinalePov = false;
+    // W4: drop the storm-finale ring + glint burst onto the terrain at the
+    // centroid (parity with the sword/mage ultimate ground beats).
+    const sgy = this.wf.groundY(cx);
     this.rings.spawn({
       x: cx,
-      y: GROUND_Y - 20,
+      y: sgy - 20,
       r0: 40,
       r1: STORM_FINALE_RING_R1,
       duration: STORM_FINALE_RING_DURATION,
@@ -3267,7 +3338,7 @@ export class FxController {
     burst(
       this.particles,
       cx,
-      GROUND_Y - 20,
+      sgy - 20,
       STORM_FINALE_PARTICLE_COUNT,
       PALETTE.archerGoldGlint,
       {
@@ -3353,7 +3424,8 @@ export class FxController {
     const fallTime = estimateMeteorFallTime();
     this.runeGlyphs.spawn({
       x: tx,
-      y: GROUND_Y,
+      // W4: the ground telegraph rune sits on the terrain at the target x.
+      y: this.wf.groundY(tx),
       radius: isUltimate ? METEOR_RUNE_RADIUS * 1.6 : METEOR_RUNE_RADIUS,
       ticks: isUltimate ? METEOR_RUNE_TICKS + 4 : METEOR_RUNE_TICKS,
       color: isUltimate ? PALETTE.mageAzure : color,
@@ -3417,7 +3489,7 @@ export class FxController {
       if (this.pendingMeteors.length >= MAX_PENDING_METEORS) break;
       this.runeGlyphs.spawn({
         x: m.tx,
-        y: GROUND_Y,
+        y: this.wf.groundY(m.tx),
         radius: APOCALYPSE_RUNE_RADIUS,
         ticks: METEOR_RUNE_TICKS + 2,
         color: PALETTE.mageAzure,
@@ -3455,10 +3527,13 @@ export class FxController {
     // M8 party P6: SCREEN-level only if the caster who scheduled this drop
     // was the POV hero at cast time (`entry.pov`); the scorch scatter/ring/
     // ember burst below stays world-anchored, unconditional.
+    // W4: land the impact ring/embers/shockwave on the terrain at the target x;
+    // each scattered scorch sits on the terrain at its OWN x.
+    const gy = this.wf.groundY(tx);
     if (pov) {
       this.punch.trigger("mageCataclysm", tx);
       this.shake.trigger(CATACLYSM_SHAKE);
-      this.impactFilters.triggerShockwave(tx, GROUND_Y);
+      this.impactFilters.triggerShockwave(tx, gy);
     }
 
     const scatterXs = [
@@ -3467,26 +3542,27 @@ export class FxController {
       tx + CATACLYSM_SCATTER_SCORCH_SPAN,
     ];
     for (const sx of scatterXs) {
-      this.scorches.spawn(clamp(sx, 0, WORLD_WIDTH), GROUND_Y, PALETTE.mageAzure);
+      const csx = clamp(sx, 0, WORLD_WIDTH);
+      this.scorches.spawn(csx, this.wf.groundY(csx), PALETTE.mageAzure);
     }
 
     this.rings.spawn({
       x: tx,
-      y: GROUND_Y,
+      y: gy,
       r0: 24,
       r1: CATACLYSM_RING_R1,
       duration: 0.55,
       width: 6,
       color: PALETTE.mageAzure,
     });
-    burst(this.particles, tx, GROUND_Y - 10, 20, HERO_COLORS.mage.light, {
+    burst(this.particles, tx, gy - 10, 20, HERO_COLORS.mage.light, {
       speed: 190,
       life: 0.45,
       radius: 4,
     });
     // Lingering embers — a slow upward drift over a longer life than any
     // other burst in the fx toolkit, reading as "the aftermath hangs a beat".
-    burst(this.particles, tx, GROUND_Y - 10, CATACLYSM_EMBER_COUNT, PALETTE.mageAzure, {
+    burst(this.particles, tx, gy - 10, CATACLYSM_EMBER_COUNT, PALETTE.mageAzure, {
       speed: 40,
       life: CATACLYSM_EMBER_LIFE,
       radius: 2.5,
@@ -3504,21 +3580,23 @@ export class FxController {
   private onApocalypseMeteorImpact(tx: number, pov: boolean): void {
     // M8 party P6: SCREEN-level only for the POV hero's own cast (`entry.pov`);
     // the scorch/ring/burst below stays world-anchored, unconditional.
+    // W4: land the per-meteor impact on the terrain at the target x.
+    const gy = this.wf.groundY(tx);
     if (pov) {
       this.shake.trigger(APOCALYPSE_IMPACT_SHAKE);
-      this.impactFilters.triggerShockwave(tx, GROUND_Y);
+      this.impactFilters.triggerShockwave(tx, gy);
     }
-    this.scorches.spawn(clamp(tx, 0, WORLD_WIDTH), GROUND_Y, PALETTE.mageAzure);
+    this.scorches.spawn(clamp(tx, 0, WORLD_WIDTH), gy, PALETTE.mageAzure);
     this.rings.spawn({
       x: tx,
-      y: GROUND_Y,
+      y: gy,
       r0: 14,
       r1: APOCALYPSE_RING_R1,
       duration: 0.4,
       width: 4,
       color: PALETTE.mageAzure,
     });
-    burst(this.particles, tx, GROUND_Y - 8, 12, HERO_COLORS.mage.light, {
+    burst(this.particles, tx, gy - 8, 12, HERO_COLORS.mage.light, {
       speed: 150,
       life: 0.35,
       radius: 3,
@@ -3769,7 +3847,9 @@ export class FxController {
   private onItemDrop(ev: Extract<GameEvent, { type: "itemDrop" }>): void {
     const rarity: ItemRarity = ITEM_TEMPLATES[ev.templateId]?.rarity ?? "common";
     const color = itemDropAccentColor(rarity);
-    const y = ITEM_DROP_POP_Y;
+    // W4: land the loot glimmer on the dropping mob's depth+terrain foot-line
+    // (the event carries its `mobId`).
+    const y = ITEM_DROP_POP_Y + this.enemyLift(ev.x, ev.mobId);
 
     this.rings.spawn({
       x: ev.x,
@@ -3794,7 +3874,8 @@ export class FxController {
    * as `onItemDrop` above (kill chance is high on deeper maps, so this stays
    * even smaller than the common-gear pop). */
   private onStoneDrop(ev: Extract<GameEvent, { type: "stoneDrop" }>): void {
-    const y = STONE_DROP_POP_Y;
+    // W4: land the stone pop on the dropping mob's depth+terrain foot-line.
+    const y = STONE_DROP_POP_Y + this.enemyLift(ev.x, ev.mobId);
     this.rings.spawn({
       x: ev.x,
       y,
@@ -3990,7 +4071,7 @@ export class FxController {
         } else if (entry.isUltimate) {
           this.onCataclysmImpact(entry.tx, entry.pov);
         } else {
-          this.scorches.spawn(entry.tx, GROUND_Y, HERO_COLORS.mage.light);
+          this.scorches.spawn(entry.tx, this.wf.groundY(entry.tx), HERO_COLORS.mage.light);
         }
         this.pendingMeteors.splice(i, 1);
       }
@@ -4095,7 +4176,13 @@ export class FxController {
       this.frameEnemyIdScratch.add(e.id);
       if (!this.seenEnemyIds.has(e.id)) {
         this.seenEnemyIds.add(e.id);
-        this.portals.spawn(e.x, GROUND_Y, enemyColorFor(mapId, e.kind), e.size);
+        // W4: the spawn portal sits under the enemy on its depth+terrain foot-line.
+        this.portals.spawn(
+          e.x,
+          GROUND_Y + this.enemyLift(e.x, e.id),
+          enemyColorFor(mapId, e.kind),
+          e.size,
+        );
       }
     }
     for (const id of this.seenEnemyIds) {
@@ -4174,7 +4261,8 @@ export class FxController {
    * `GROUND_Y`, not the boss's own `y`, same convention `bossSlamLand`
    * already uses). */
   private onBossEntrance(x: number): void {
-    burst(this.particles, x, GROUND_Y - 4, BOSS_ENTRANCE_DUST_COUNT, PALETTE.muted, {
+    // W4: terrain lift under the boss (0 in flat stage-boss rooms).
+    burst(this.particles, x, this.wf.groundY(x) - 4, BOSS_ENTRANCE_DUST_COUNT, PALETTE.muted, {
       speed: BOSS_ENTRANCE_DUST_SPEED,
       life: BOSS_ENTRANCE_DUST_LIFE,
       radius: 3.5,
@@ -4255,7 +4343,9 @@ export class FxController {
     const wb = state.worldBoss;
     if (!wb || !wb.entity) return;
     const x = wb.entity.x;
-    burst(this.particles, x, GROUND_Y - 4, WORLD_BOSS_SPAWN_DUST_COUNT, PALETTE.muted, {
+    // W4: the world boss stands in a FARM zone that can slope — land its dust on
+    // the terrain under it.
+    burst(this.particles, x, this.wf.groundY(x) - 4, WORLD_BOSS_SPAWN_DUST_COUNT, PALETTE.muted, {
       speed: WORLD_BOSS_SPAWN_DUST_SPEED,
       life: WORLD_BOSS_SPAWN_DUST_LIFE,
       radius: 4,
@@ -4274,10 +4364,12 @@ export class FxController {
     const pos = this.worldBossLastPos;
     if (!wb || !pos) return;
     if (!this.isLocalInWorldBossZone(state, wb.mapId, wb.zoneIdx)) return;
+    // W4: terrain lift under the world boss's last-known farm-zone position.
+    const gy = this.wf.groundY(pos.x);
     burst(
       this.particles,
       pos.x,
-      GROUND_Y - 10,
+      gy - 10,
       WORLD_BOSS_DESPAWN_SMOKE_COUNT,
       PALETTE.muted,
       {
@@ -4290,7 +4382,7 @@ export class FxController {
     );
     this.rings.spawn({
       x: pos.x,
-      y: GROUND_Y - 10,
+      y: gy - 10,
       r0: WORLD_BOSS_DESPAWN_RING_R0,
       r1: WORLD_BOSS_DESPAWN_RING_R1,
       duration: WORLD_BOSS_DESPAWN_RING_DURATION,
@@ -4321,7 +4413,7 @@ export class FxController {
       this.particles,
       pos.x,
       WORLD_BOSS_DEFEAT_SHOWER_WIDTH,
-      GROUND_Y - 140,
+      this.wf.groundY(pos.x) - 140,
       WORLD_BOSS_DEFEAT_SHOWER_COUNT,
       PALETTE.worldBossGold,
     );
@@ -4344,11 +4436,13 @@ export class FxController {
     const windup = state.worldBoss?.active
       ? CONFIG.worldBoss.bossBehavior.charge.telegraph
       : CONFIG.bossBehavior.charge.telegraph;
+    // W4: the low ground streak tracks the terrain under each end; the windup
+    // ring rides the terrain-lifted boss body (no depth band for bosses).
     this.flashLines.spawn({
       x1: ev.x,
-      y1: CHARGE_STREAK_Y,
+      y1: CHARGE_STREAK_Y + this.wf.lift(ev.x),
       x2: ev.targetX,
-      y2: CHARGE_STREAK_Y,
+      y2: CHARGE_STREAK_Y + this.wf.lift(ev.targetX),
       color: PALETTE.warn,
       width: CHARGE_STREAK_WIDTH,
       life: windup,
@@ -4356,7 +4450,7 @@ export class FxController {
     });
     this.rings.spawn({
       x: ev.x,
-      y: this.bossCy(state),
+      y: this.bossCy(state) + this.wf.lift(ev.x),
       r0: CHARGE_WINDUP_RING_R0,
       r1: CHARGE_WINDUP_RING_R1,
       duration: windup,
@@ -4373,10 +4467,12 @@ export class FxController {
       ev.connected ? CHARGE_HIT_SHAKE_CONNECTED : CHARGE_HIT_SHAKE_WHIFF,
     );
     this.punch.trigger("bossSlamLand", ev.x);
-    this.impactFilters.triggerShockwave(ev.x, GROUND_Y);
+    // W4: land the dash impact on the terrain under the landing point.
+    const gy = this.wf.groundY(ev.x);
+    this.impactFilters.triggerShockwave(ev.x, gy);
     this.rings.spawn({
       x: ev.x,
-      y: GROUND_Y,
+      y: gy,
       r0: 14,
       r1: ev.connected ? CHARGE_HIT_RING_R1_CONNECTED : CHARGE_HIT_RING_R1_WHIFF,
       duration: 0.35,
@@ -4386,7 +4482,7 @@ export class FxController {
     burst(
       this.particles,
       ev.x,
-      GROUND_Y - 8,
+      gy - 8,
       ev.connected
         ? CHARGE_HIT_PARTICLE_COUNT_CONNECTED
         : CHARGE_HIT_PARTICLE_COUNT_WHIFF,
@@ -4410,7 +4506,8 @@ export class FxController {
   ): void {
     this.runeGlyphs.spawn({
       x: ev.x,
-      y: BOSS_CY,
+      // W4: the "calling forth" glyph rides the terrain-lifted boss body.
+      y: BOSS_CY + this.wf.lift(ev.x),
       radius: SUMMON_GLYPH_RADIUS,
       color: this.resolveBossTint(state),
       life: SUMMON_GLYPH_LIFE,
@@ -4419,7 +4516,8 @@ export class FxController {
     const spacing = CONFIG.bossBehavior.summon.spawnSpacing;
     for (let i = 0; i < ev.count; i++) {
       const x = ev.x - (i + 1) * spacing;
-      burst(this.particles, x, GROUND_Y - 4, SUMMON_PUFF_PARTICLE_COUNT, PALETTE.muted, {
+      // W4: each add's arrival puff sits on the terrain at its own x.
+      burst(this.particles, x, this.wf.groundY(x) - 4, SUMMON_PUFF_PARTICLE_COUNT, PALETTE.muted, {
         speed: 60,
         life: 0.35,
         radius: 3,
@@ -4446,7 +4544,9 @@ export class FxController {
     this.hazardBand.trigger(PALETTE.warn, HAZARD_WARN_PEAK_ALPHA, telegraph);
     this.rings.spawn({
       x: ev.x,
-      y: this.bossCy(state),
+      // W4: the echo ring rides the terrain-lifted boss body (the band overlay
+      // above stays a full-arena screen band — unchanged).
+      y: this.bossCy(state) + this.wf.lift(ev.x),
       r0: 20,
       r1: 90,
       duration: telegraph,
@@ -4465,7 +4565,7 @@ export class FxController {
     burst(
       this.particles,
       ev.x,
-      GROUND_Y - 10,
+      this.wf.groundY(ev.x) - 10,
       HAZARD_STRIKE_PARTICLE_COUNT,
       PALETTE.warn,
       {
@@ -4481,11 +4581,36 @@ export class FxController {
    * see heroView/enemyView/bossView, which all ignore entity.y the same way).
    * WORLD BOSS "เสี่ยจ๋อง": `bossCy()` swaps in the much-taller rig's own
    * anchor so damage numbers land above ITS head, not the stage boss's. */
+  /** W4: vertical lift (screen px, + = down) that moves an ENEMY-anchored fx from
+   * the flat GROUND_Y baseline onto that enemy's depth-band + terrain foot-line.
+   * 0 when the world-fx flags are off (footY ≡ GROUND_Y). Cheap: two pure calls,
+   * no view lookup / allocation. */
+  private enemyLift(x: number, id: number): number {
+    return this.wf.footY(x, this.wf.depthOf("enemy", id)) - GROUND_Y;
+  }
+
+  /** W4: same lift for a HERO-anchored fx — needs the party slot to pick the
+   * hero's depth band. 0 when off / hero not found. */
+  private heroLift(id: number, state: GameState): number {
+    const slot = state.heroes.findIndex((h) => h.id === id);
+    if (slot < 0) return 0;
+    const hero = state.heroes[slot];
+    return (
+      this.wf.footY(hero.x, this.wf.depthOf("hero", id, slot, state.heroes.length)) - GROUND_Y
+    );
+  }
+
   private hitY(target: HitTargetKind, id: number, state: GameState): number {
-    if (target === "hero") return HERO_TOP_Y;
-    if (target === "boss") return this.bossCy(state) - 44;
+    // W4: lift the damage number onto the victim's foot-line — enemies/heroes by
+    // depth band, bosses by terrain only (no band; flat in stage boss rooms, may
+    // slope for the world boss in its farm zone).
+    if (target === "hero") return HERO_TOP_Y + this.heroLift(id, state);
+    if (target === "boss") {
+      const bx = state.boss?.x ?? state.worldBoss?.entity?.x ?? WORLD_WIDTH / 2;
+      return this.bossCy(state) - 44 + this.wf.lift(bx);
+    }
     const enemy = state.enemies.find((e) => e.id === id);
     const size = enemy?.size ?? 1;
-    return GROUND_Y - 42 - 8 * size - 10;
+    return GROUND_Y - 42 - 8 * size - 10 + (enemy ? this.enemyLift(enemy.x, id) : 0);
   }
 }
