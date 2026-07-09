@@ -1851,5 +1851,9 @@
         "continueButton": "เข้าไปที่ตู้ตีบวก"
       }
     }
+  },
+  "ghostProfile": {
+    "title": "โปรไฟล์ผู้เล่น",
+    "closeButton": "ปิด"
   }
 }

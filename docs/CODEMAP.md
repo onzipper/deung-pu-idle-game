@@ -270,7 +270,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/audio/sfxMap.ts` — `GameEvent`→synth recipe palette data (`SFX_PARAMS`) + per-event `play*` functions.
 
 ### src/render/__tests__/
-- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math; 2 files.
+- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`); 3 files.
 ## Zone C — src/ui/**, src/app/(game)/**, src/app root, src/i18n/**, src/lab/**
 
 ### src/app/(game)/ — game-loop host + party/presence transport (LOAD-BEARING HUB)
@@ -389,7 +389,8 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/SkillDock.tsx` — R2.6 Wave 2 bottom-center dock wrapper: one row of `SkillBar` tiles + `BotMasterSwitch` + `ConsumableBar` quick-slots + a persisted whole-dock collapse-to-thin-strip (mirrors `GoalLadder.tsx`'s Wave-1 collapse idiom; bot master stays visible/tappable while collapsed).
 - `src/ui/components/GoalLadderOverlaySlot.tsx` — portal target mounting the ONE `GoalLadder` onto the arena's left-mid overlay slot, viewport-independent (R2.6: dropped the old `compact`/`useMediaQuery` branch).
 - `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock (`SkillDock.tsx`), bottom-edge EXP/clock strip; documents the z-index ladder.
-- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`), issue #55 Wave A `InventoryPanel` "all" tab default/both-slots RTL smoke (`inventoryAllTab.test.tsx`), `RefinePanel` owned/required cost-chip fraction+red-tint RTL smoke (`refinePanelCostChips.test.tsx`), and issue #58 item 1 `BotSettingsModal`'s `SkillAutoSlotPicker` icon-tile reskin RTL smoke — slot-number badges + `setAutoSlot` toggle wiring unchanged (`botSettingsSkillPicker.test.tsx`); 6 files.
+- `src/ui/components/GhostProfileCard.tsx` — issue #50 Wave 5 "tap profile": view-only ghost-presence profile card (name/class/tier, no actions), own `ModalPortal`; mounted by `GameClient.tsx` off the `ghostProfileCid` store field + a tap-time identity snapshot ref.
+- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`), issue #55 Wave A `InventoryPanel` "all" tab default/both-slots RTL smoke (`inventoryAllTab.test.tsx`), `RefinePanel` owned/required cost-chip fraction+red-tint RTL smoke (`refinePanelCostChips.test.tsx`), issue #58 item 1 `BotSettingsModal`'s `SkillAutoSlotPicker` icon-tile reskin RTL smoke (`botSettingsSkillPicker.test.tsx`), and issue #50 Wave 5 `GhostProfileCard` name/class-tier/close-button RTL smoke (`ghostProfileCard.test.tsx`); 7 files.
 
 ### src/ui/components/icons/ — issue #60 codegen game-icon set (filled silhouette + metallic/glass gradient + soft family glow; NOT the thin gold-line chrome of `../icons.tsx`)
 - `src/ui/components/icons/iconBase.tsx` — shared seam: `IconSvg` (24-viewBox, className-driven size) + `useIconIds` (per-instance-unique gradient ids off `useId`) + `IconProps`; no `<filter>`/`<image>`/raster.
@@ -522,7 +523,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 
 ### src/ui/store/ — the engine↔React bridge (LOAD-BEARING HUB)
 - `src/ui/store/gameStore.ts` — **the Zustand store**: throttled (~10Hz) engine snapshot for React reads, plus the player→engine `pendingInput` intent queue and UI-owned automation/preference flags (autoCast/autoAllocate/soundMuted/questTrackerCollapsed/etc).
-- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions, questTrackerCollapsed localStorage round-trip); 4 files.
+- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions, questTrackerCollapsed localStorage round-trip, issue #50 Wave 5 `ghostProfileActions` — open/close never touches `pendingInput`); 5 files.
 
 ### src/ui/quest/
 - `src/ui/quest/dailyClaimFlow.ts` — POST-first daily-quest claim flow, then queues the engine `claimDaily` intent.

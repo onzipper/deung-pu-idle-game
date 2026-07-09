@@ -1353,6 +1353,14 @@ export interface HudState {
    * `GateTripTarget`'s doc. */
   gateTripTarget: GateTripTarget | null;
 
+  // ---- R3 "tap profile" (issue #50 Wave 5): view-only ghost-presence card ----
+  /** The `cid` of the ghost whose read-only profile card is open, or `null`.
+   * Set by `GameClient.tsx`'s pointer handler on `hitTestGhost()` — the tap is
+   * FULLY consumed there (no `moveTo`/`pendingInput` write, see that file's
+   * doc). UI-tier only, session-only, never part of `SaveData` (same shape as
+   * `activeTownPanel`). */
+  ghostProfileCid: string | null;
+
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
    * `docs/persistence-m7.md`), seeded from the `/api/save` boot payload's
@@ -1791,6 +1799,13 @@ export interface HudState {
    * auto-close-on-walk-away watch). No-op if already `null`. */
   closeTownPanel: () => void;
 
+  // ---- R3 "tap profile" (issue #50 Wave 5) ----
+  /** Open the read-only profile card for ghost `cid` (last-wins). */
+  openGhostProfile: (cid: string) => void;
+  /** Close the ghost profile card (✕ button / backdrop tap). No-op if
+   * already `null`. */
+  closeGhostProfile: () => void;
+
   // ---- M7 Gear & Drops: inventory slice + drop-feed juice (network-driven,
   // NOT part of the throttled engine snapshot — see `inventory`/`dropFeed` docs
   // above) ----
@@ -1974,6 +1989,7 @@ export const useGameStore = create<HudState>((set, get) => ({
   npcTripTarget: null,
   gateTrip: "idle",
   gateTripTarget: null,
+  ghostProfileCid: null,
 
   inventory: [],
   dropFeed: [],
@@ -2335,6 +2351,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   openTownPanel: (panel) => set({ activeTownPanel: panel }),
   closeTownPanel: () => set({ activeTownPanel: null }),
+
+  openGhostProfile: (cid) => set({ ghostProfileCid: cid }),
+  closeGhostProfile: () => set({ ghostProfileCid: null }),
 
   // ---- Owner UX round (2026-07-09): ปุ่มตีบวก works from anywhere ----
   // Generalized R2.5-W3 to any of the three town NPCs (was smith-only).

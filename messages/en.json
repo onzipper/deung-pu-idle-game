@@ -1851,5 +1851,9 @@
         "continueButton": "Enter the refine station"
       }
     }
+  },
+  "ghostProfile": {
+    "title": "Player profile",
+    "closeButton": "Close"
   }
 }

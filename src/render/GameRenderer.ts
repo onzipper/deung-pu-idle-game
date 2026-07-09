@@ -121,6 +121,21 @@ export type NpcHitResult = { kind: "npc"; id: TownNpcId } | null;
  */
 export type GateHitResult = { kind: "gate"; side: "left" | "right" } | null;
 
+/**
+ * Ghost-presence "tap profile" outcome (R3 issue #50 Wave 5) — see
+ * `hitTestGhost()`. VIEW-ONLY, same separation-of-concerns as
+ * `NpcHitResult`/`GateHitResult` above: this never produces a command intent,
+ * it only reports which peer's cosmetic identity was tapped (`GameClient.tsx`
+ * opens a read-only profile card and fully consumes the tap — no `moveTo`).
+ */
+export type GhostHitResult = {
+  kind: "ghost";
+  cid: string;
+  name: string;
+  cls: GhostDrawItem["cls"];
+  tier: GhostDrawItem["tier"];
+} | null;
+
 /** Minimum on-screen touch half-extent (CSS px, NOT world units) a monster
  * hit-test guarantees regardless of the current letterbox scale — the task's
  * "≥24px half-extent on mobile" requirement. Converted to world units per-call
@@ -1125,6 +1140,49 @@ export class GameRenderer {
 
     const side = gateTapSide(wx, wy, GROUND_Y, zone.mapId, zone.kind);
     return side ? { kind: "gate", side } : null;
+  }
+
+  /**
+   * Ghost-presence "tap profile" (R3 issue #50 Wave 5): same camera-aware
+   * canvas->world un-projection as `hitTestPointer`/`hitTestNpc`/`hitTestGate`
+   * above, scanned against THIS FRAME'S ghost render list (`this.ghostList`,
+   * fed by `draw()` from `GhostStore.list()` — see `ghostLayer.ts`'s doc for
+   * why presence data never reaches the engine). Reuses `enemyTapCenterY`'s
+   * ellipse math with a fixed size of 1 (a ghost rig is human-sized, same as
+   * a default-size enemy) so the touch target matches the drawn rig instead
+   * of inventing a second geometry. Takes NO `GameState` (unlike the sibling
+   * hit-tests): ghost identity lives entirely in `this.ghostList`, which
+   * `draw()` already fed from `GhostStore.list()` — presence data never
+   * flows through the engine (THE ONE RULE). VIEW-ONLY: never mutates
+   * anything, never produces a command — see `GhostHitResult`'s doc.
+   */
+  hitTestGhost(canvasX: number, canvasY: number): GhostHitResult {
+    if (!this.app) return null;
+    const cam = this.camView();
+    const w = canvasToWorld(canvasX, canvasY, this.baseTransform, cam, this.hitScratch);
+    const wx = w.x;
+    const wy = w.y;
+    if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
+
+    const touchHalf = TOUCH_HALF_EXTENT_PX / worldScale(this.baseTransform, cam);
+    let best: GhostDrawItem | null = null;
+    let bestDist = Infinity;
+    for (const g of this.ghostList) {
+      const d = this.worldFx.depthOf("ghost", g.cid);
+      const scl = this.worldFx.depthScaleOf(d);
+      const cy = enemyTapCenterY(1, this.worldFx.footY(g.x, d), scl);
+      const rx = Math.max(touchHalf, 16 * scl);
+      const ry = Math.max(touchHalf, 22 * scl);
+      const dx = (wx - g.x) / rx;
+      const dy = (wy - cy) / ry;
+      const dist = dx * dx + dy * dy;
+      if (dist <= 1 && dist < bestDist) {
+        bestDist = dist;
+        best = g;
+      }
+    }
+    if (!best) return null;
+    return { kind: "ghost", cid: best.cid, name: best.name, cls: best.cls, tier: best.tier };
   }
 
   /**

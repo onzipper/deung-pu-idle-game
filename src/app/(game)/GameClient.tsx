@@ -109,6 +109,7 @@ import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
+import { GhostProfileCard } from "@/ui/components/GhostProfileCard";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { AsuraTomeAssembledModal } from "@/ui/asura/AsuraTomeAssembledModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
@@ -855,6 +856,21 @@ export function GameClient() {
   const tContentItems = useTranslations("content.items");
   const tContentItemsRef = useRef(tContentItems);
   tContentItemsRef.current = tContentItems;
+
+  // R3 "tap profile" (issue #50 Wave 5): the store's `ghostProfileCid` is
+  // (deliberately) just an id — see `gameStore.ts`'s doc. The cosmetic
+  // identity (name/class/tier) a tap resolved is stashed here, in the SAME
+  // synchronous tick as the `openGhostProfile(cid)` dispatch below (inside
+  // `onArenaClick`, captured once by the mount-only effect) — a ref instead
+  // of a second store field because it's a point-in-time display snapshot,
+  // never re-derived per frame, and never a command/intent. The subscription
+  // below re-renders this component exactly when the card should show/hide.
+  const ghostProfileSnapshotRef = useRef<{
+    name: string;
+    cls: HeroClass;
+    tier: 1 | 2 | 3;
+  } | null>(null);
+  const ghostProfileCid = useGameStore((s) => s.ghostProfileCid);
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -3309,6 +3325,23 @@ export function GameClient() {
         return;
       }
 
+      // R3 "tap profile" (issue #50 Wave 5): checked AFTER combat/npc/gate (all of
+      // those win over a ghost on overlap) but BEFORE the ground-move fallback — a
+      // tap that lands on a ghost opens its read-only profile card and is FULLY
+      // consumed here: no `moveTo`, no `pendingInput` write of any kind. View-only,
+      // mirrors `hitTestNpc`/`hitTestGate`'s "separate method, separate outcome"
+      // shape (see `GhostHitResult`'s doc in `GameRenderer.ts`).
+      const ghostHit = renderer.hitTestGhost(canvasX, canvasY);
+      if (ghostHit) {
+        ghostProfileSnapshotRef.current = {
+          name: ghostHit.name,
+          cls: ghostHit.cls,
+          tier: ghostHit.tier,
+        };
+        useGameStore.getState().openGhostProfile(ghostHit.cid);
+        return;
+      }
+
       if (hit) useGameStore.getState().queueMoveTo(hit.x);
     }
     arenaEl.addEventListener("click", onArenaClick);
@@ -3664,6 +3697,18 @@ export function GameClient() {
       {/* "ตำราตำนาน" secret-quest reveal — mount only; the store's `tomeAssembledCelebration`
           flag (flipped off the `tomeAssembled` engine event above) drives visibility. */}
       <AsuraTomeAssembledModal />
+      {/* R3 "tap profile" (issue #50 Wave 5) — view-only ghost-presence profile card.
+          `ghostProfileCid` drives visibility; the cosmetic identity it needs comes from
+          `ghostProfileSnapshotRef` (see that ref's doc above), stashed in the SAME tick
+          the tap opened it. */}
+      {ghostProfileCid && ghostProfileSnapshotRef.current && (
+        <GhostProfileCard
+          name={ghostProfileSnapshotRef.current.name}
+          cls={ghostProfileSnapshotRef.current.cls}
+          tier={ghostProfileSnapshotRef.current.tier}
+          onClose={() => useGameStore.getState().closeGhostProfile()}
+        />
+      )}
     </>
   );
 }
