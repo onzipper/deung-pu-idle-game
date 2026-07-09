@@ -1507,6 +1507,12 @@
           "itemIconsNew": "🎨 5 item icons (sword, bow, armor, strong stone) get a new silhouette + glow style, hand-coded; more batches coming",
           "skillIconsNew": "✨ 4 skill icons (blade spin, meteor, ice, arrow rain) redrawn in their skill family colors"
         }
+      },
+      "2026-07-10e": {
+        "items": {
+          "liveGhosts": "👻 Other players in your zone now feel alive — you can see them turn, attack, and cast in real time (previously walk/idle only)",
+          "tapProfile": "🎭 Tap another player to view their profile card (view-only)"
+        }
       }
     }
   },

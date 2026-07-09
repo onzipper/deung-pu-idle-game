@@ -227,11 +227,14 @@ Notes:
 Docs:
 - docs/context/world.md
 - docs/ghost-presence-design.md
+- docs/party-relay-protocol.md (§12 `pa` action-stream opcode)
 Source:
 - src/app/(game)/presence/worldSession.ts
 - src/app/(game)/presence/presencePublish.ts
 - src/app/(game)/presence/ghostStore.ts
 - src/render/views/ghostLayer.ts
+- src/render/views/heroView.ts (playHeroPosePulse — additive-only pose)
+- src/ui/components/GhostProfileCard.tsx (R3: tap-ghost view-only profile)
 - src/ui/chat/ChatPanel.tsx
 - src/ui/chat/chatMessages.ts
 Tests:
@@ -241,8 +244,8 @@ Tests:
 - src/ui/chat/__tests__/chatMessages.test.ts
 - src/server/__tests__/party-relay-world.test.ts
 Notes:
-- `ghostGuard.test.ts` pins the load-bearing rule: presence/chat have ZERO code paths into engine state.
-- Ghosts render walk/idle poses ONLY — no attack animation (owner cut it to avoid "hitting air" reads).
+- `ghostGuard.test.ts` pins the load-bearing rule: presence/chat have ZERO code paths into engine state — extended for R3 to also inject `pa` action traffic + ghost taps and assert hash-equality unchanged.
+- Ghosts render walk/idle poses via the `p` opcode; R3 (issue #50) adds edge-triggered `basic`/`skill1-4`/`dash` POSES via a separate `pa` opcode (~8Hz, shares the ghost fps valve) — still no attack fx/projectiles/camera/audio, and tapping a ghost opens a view-only profile card with zero `pendingInput` writes.
 
 ## World boss
 Docs:
