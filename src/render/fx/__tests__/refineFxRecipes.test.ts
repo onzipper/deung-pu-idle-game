@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { resolveRefineFxRecipe } from "@/render/fx/refineFxRecipes";
-import type { ItemRarity } from "@/engine/config/items";
+import {
+  LEGENDARY_TEMPLATES,
+  isLegendaryTemplate,
+  lookupTemplate,
+  type ItemRarity,
+} from "@/engine/config/items";
 
 function totalRate(rarity: ItemRarity, refine: number, legendary: boolean): number {
   const recipe = resolveRefineFxRecipe(rarity, refine, legendary);
   return recipe.layers.reduce((sum, l) => sum + l.rate, 0);
 }
+
+describe("legendary templates resolve through the SUPERSET lookup (FxController contract)", () => {
+  // Regression guard (owner recheck 2026-07-09): FxController resolves weapon
+  // rarity via `lookupTemplate` — the gear-only ITEM_TEMPLATES map does NOT
+  // contain legendaries, and using it returned `undefined` rarity, silently
+  // nulling the recipe = legendaries rendered ZERO weapon fx in-game while
+  // the lab (reading LEGENDARY_TEMPLATES directly) looked fine.
+  it("every legendary id has a lookupTemplate-resolvable rarity and isLegendaryTemplate=true", () => {
+    const ids = Object.keys(LEGENDARY_TEMPLATES);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(lookupTemplate(id)?.rarity, id).toBeDefined();
+      expect(isLegendaryTemplate(id), id).toBe(true);
+    }
+  });
+});
 
 describe("resolveRefineFxRecipe — common/rare start clean", () => {
   it("common has zero layers below +3", () => {

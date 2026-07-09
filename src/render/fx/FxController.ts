@@ -18,7 +18,13 @@ import { Container as PixiContainer } from "pixi.js";
 import type { Container } from "pixi.js";
 import { zoneAt } from "@/engine";
 import { CONFIG, ENEMY_TYPES, SKILL_TYPES } from "@/engine/config";
-import { ITEM_TEMPLATES, isLegendaryTemplate, refineOf, type ItemRarity } from "@/engine/config/items";
+import {
+  ITEM_TEMPLATES,
+  isLegendaryTemplate,
+  lookupTemplate,
+  refineOf,
+  type ItemRarity,
+} from "@/engine/config/items";
 import type { Hero, Projectile } from "@/engine/entities";
 import type { GameEvent, GameState, HitTargetKind } from "@/engine/state";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
@@ -425,11 +431,18 @@ const REFINE_PRESTIGE_BOOST_THRESHOLD = 8;
  * lazy, so bumping this constant costs nothing until a slot actually equips
  * a recipe-worthy weapon. */
 const WEAPON_FX_MAX_SLOTS = MAX_PARTY_SIZE;
-const WEAPON_FX_POOL_SIZE = 140;
+/** Estimated worst-case concurrent particles ≈ 110 (legendary +5 / epic +10:
+ * dual layers + molten + chargeBurst + ambient, ×1.8 during a swing-kick
+ * spike) — 140 starved the pool exactly at the payoff moments (owner recheck
+ * vs the lab's dev-tool 340). 240 = headroom without lab excess; instances
+ * stay lazy so low-gear sessions still allocate nothing. */
+const WEAPON_FX_POOL_SIZE = 240;
 /** Constant local origin, reused (never mutated) as the `toLocal` input that
  * resolves `view.weaponArm`'s own pivot point — zero per-frame allocation. */
 const WEAPON_FX_ORIGIN = { x: 0, y: 0 };
-const WEAPON_FX_PIXEL_SIZE = 2;
+/** 3 = the owner-approved /lab refineLadder look — the port initially shipped
+ * 2, which read 33% smaller/finer than what was approved. */
+const WEAPON_FX_PIXEL_SIZE = 3;
 
 // ---- M7.8 "Manual Play" command feedback (tap-to-move / tap-to-attack) ----
 // Ground click-marker (`moveOrdered`): 3 concentric fading rings via the
@@ -956,6 +969,11 @@ export class FxController {
   private readonly weaponFx: (PixelWeaponFx | null)[] = new Array(WEAPON_FX_MAX_SLOTS).fill(
     null,
   );
+  /** Home container for the pixel weapon fx — a top-level layer OUTSIDE the
+   * bloom-filtered fx container (see the constructor's placement comment);
+   * owned (and destroyed) by this controller since it lives outside
+   * `fxContainer`'s own teardown. */
+  private readonly pixelWeaponFxLayer: PixiContainer;
   /** Rising-edge swing detect per weapon-fx slot (same convention as
    * `legendaryFx.ts`'s old `isHeroAttackSwinging()` sampling) — `notifySwing()`
    * fires once per NEW swing window, not every frame one is active. */
@@ -1157,6 +1175,21 @@ export class FxController {
       this.particlesLayer,
       this.textLayer,
     );
+
+    // Pixel-art weapon fx are deliberately crisp flat-blend squares (footgun
+    // 10) — the fx container's whole-layer bloom filter (`RENDER_FX.bloom`,
+    // see GameRenderer's layer setup) would smear them, and the owner-approved
+    // /lab reference look has no bloom. So they get their OWN top-level layer
+    // inserted just ABOVE the fx container (same world coordinate space —
+    // every top-level layer sits at origin, so `getWeaponAnchorPos`'s
+    // entities-space output lands identically). Headless tests hand in a
+    // DETACHED fxContainer; z-order is irrelevant there, plain addChild.
+    this.pixelWeaponFxLayer = new PixiContainer();
+    if (fxContainer.parent === world) {
+      world.addChildAt(this.pixelWeaponFxLayer, world.getChildIndex(fxContainer) + 1);
+    } else {
+      world.addChild(this.pixelWeaponFxLayer);
+    }
 
     this.corpseEcho = new CorpseEchoPool(this.corpseLayer);
     // Bumped 6->12 (M7.9): APOCALYPSE's 8-meteor volley + a concurrent
@@ -1569,6 +1602,9 @@ export class FxController {
     this.castAura.destroy();
     this.gearSparkle.destroy();
     for (const fx of this.weaponFx) fx?.destroy();
+    // Lives OUTSIDE fxContainer (see constructor) — must tear itself down.
+    this.pixelWeaponFxLayer.parent?.removeChild(this.pixelWeaponFxLayer);
+    this.pixelWeaponFxLayer.destroy({ children: true });
     this.championAura.destroy();
     this.warCryAura.destroy();
     this.arrowSwarm.destroy();
@@ -1610,8 +1646,14 @@ export class FxController {
   private updateGearFx(dt: number, state: GameState): void {
     state.heroes.forEach((h, slot) => {
       const view = h.dead ? null : this.lookupHeroView(h.id);
+      // `lookupTemplate` (NOT the gear-only `ITEM_TEMPLATES` map): legendary
+      // templateIds live in their own `LEGENDARY_TEMPLATES` table — the
+      // gear-only lookup returned `undefined` rarity for them, which nulled
+      // the recipe and left legendaries with ZERO weapon fx (owner recheck,
+      // 2026-07-09 — same superset-scan bug class as the shipped ninja-dagger
+      // claim fix).
       const weaponRarity: ItemRarity | undefined = h.equipped.weapon
-        ? ITEM_TEMPLATES[h.equipped.weapon]?.rarity
+        ? lookupTemplate(h.equipped.weapon)?.rarity
         : undefined;
       const armorTier = h.equipped.armor
         ? (ITEM_TEMPLATES[h.equipped.armor]?.tier ?? 0)
@@ -1676,7 +1718,7 @@ export class FxController {
 
     let fx = this.weaponFx[slot];
     if (!fx) {
-      fx = createPixelWeaponFx(this.heroFxLayer, { poolSize: WEAPON_FX_POOL_SIZE });
+      fx = createPixelWeaponFx(this.pixelWeaponFxLayer, { poolSize: WEAPON_FX_POOL_SIZE });
       fx.setGroundY(GROUND_Y);
       fx.setPixelSize(WEAPON_FX_PIXEL_SIZE);
       // Owner eye-verdict: the sim runs SMOOTH 60fps in-game — the module's
