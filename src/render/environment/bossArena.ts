@@ -19,6 +19,7 @@
 
 import { Graphics } from "pixi.js";
 import type { BiomeDef } from "@/render/environment/biomes";
+import { GROUND_BLEED, SKY_BLEED } from "@/render/layout";
 import { safeRadius } from "@/render/theme";
 
 const PILLAR_WIDTH = 26;
@@ -26,11 +27,19 @@ const PILLAR_INSET = 18; // px from each screen edge
 const VIGNETTE_STEPS = 4;
 const VIGNETTE_MAX_ALPHA = 0.35;
 const VIGNETTE_WIDTH = 110;
+/** Below-ground burial so the pillar base never shows a gap against the
+ * (opaque) ground fill — small and fixed, unlike the sky-side extension
+ * below (a pillar doesn't need to reach all the way down GROUND_BLEED, the
+ * ground itself is already solid past its own top edge). */
+const PILLAR_GROUND_BURY = 20;
 
 function buildPillar(x: number, groundY: number, worldHeight: number, biome: BiomeDef): Graphics {
   const g = new Graphics();
-  const top = -20;
-  const height = groundY - top + 20;
+  // R2.5 "Game Screen" W1: extends all the way up to -SKY_BLEED (was a fixed
+  // -20) so a fullscreen tall screen's sky headroom never peeks out above the
+  // pillar's top — a boss room must never show raw sky above its own frame.
+  const top = -SKY_BLEED;
+  const height = groundY - top + PILLAR_GROUND_BURY;
   const accent = biome.far.glowRim ?? biome.ground.accent;
 
   // Shaft.
@@ -67,15 +76,22 @@ function buildLintel(worldWidth: number, biome: BiomeDef): Graphics {
 
 /** Stepped-alpha edge darkening (left/right strips) — a cheap, gradient-free
  * vignette that frames the arena without touching the readable center where
- * combat happens. */
+ * combat happens. R2.5 "Game Screen" W1: extends -SKY_BLEED..worldHeight+
+ * GROUND_BLEED (was a fixed -20..worldHeight+40) so the vignette's dark edge
+ * strips reach the SAME extents as `BiomeScene`'s widened sky/ground bleed —
+ * a fullscreen screen's decorative bleed still reads as "framed", not a
+ * separate unframed band above/below the old fixed box. */
 function buildVignette(worldWidth: number, worldHeight: number): Graphics {
   const g = new Graphics();
   const stepW = VIGNETTE_WIDTH / VIGNETTE_STEPS;
+  const top = -SKY_BLEED;
+  const bottom = worldHeight + GROUND_BLEED;
+  const h = safeRadius(bottom - top);
   for (let i = 0; i < VIGNETTE_STEPS; i++) {
     const alpha = (VIGNETTE_MAX_ALPHA * (VIGNETTE_STEPS - i)) / VIGNETTE_STEPS;
     const w = safeRadius(stepW);
-    g.rect(i * stepW, -20, w, worldHeight + 40).fill({ color: 0x000000, alpha });
-    g.rect(worldWidth - (i + 1) * stepW, -20, w, worldHeight + 40).fill({
+    g.rect(i * stepW, top, w, h).fill({ color: 0x000000, alpha });
+    g.rect(worldWidth - (i + 1) * stepW, top, w, h).fill({
       color: 0x000000,
       alpha,
     });

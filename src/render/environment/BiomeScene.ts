@@ -15,7 +15,7 @@ import type { Zone } from "@/engine";
 import type { GameState } from "@/engine/state";
 import { CONFIG } from "@/engine/config";
 import type { ResolvedBiome } from "@/render/environment/biomes";
-import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
+import { BLEED_X, GROUND_BLEED, GROUND_Y, SKY_BLEED, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { AmbientField } from "@/render/environment/ambientParticles";
 import { buildBossArenaFraming } from "@/render/environment/bossArena";
 import {
@@ -32,13 +32,24 @@ import { buildZoneGateProps, type ZoneGateProps } from "@/render/environment/zon
 import type { Terrain } from "@/render/worldDepth/terrain";
 import { terrainPresetForZone } from "@/render/worldDepth/terrainZone";
 
-/** Exported (W3): the ground-layer tests build `buildGroundPolygon`/
- * `buildGroundBackingStrip` at the SAME span this class uses internally,
- * without duplicating the magic numbers. */
+/** Small off-screen padding for the far/near PARALLAX layers (silhouettes,
+ * ground-prop clumps) and ambient particles — separate from, and much
+ * smaller than, the sky/ground BASE FILL's own `BLEED_X` bleed (R2.5 "Game
+ * Screen" W1): a fullscreen ultra-wide/portrait screen reveals a wide flat
+ * sky/ground band far past the zone's own 900-wide edges, but tiling
+ * silhouette/prop scenery all the way out there would blow up per-biome
+ * chunk counts for content nobody's eye lingers on out there — a plain sky/
+ * ground band reads fine at the far bleed edges. Exported (W3): the ground-
+ * layer tests build `buildGroundPolygon`/`buildGroundBackingStrip` at the
+ * SAME span this class uses internally, without duplicating the magic
+ * numbers. */
 export const MARGIN = 60;
 const FAR_CHUNK_W = 180;
 const NEAR_CHUNK_W = 110;
-export const GROUND_DEPTH = WORLD_HEIGHT - GROUND_Y + MARGIN;
+/** Sky/ground BASE FILL depth — extends `GROUND_BLEED` below the playfield
+ * (R2.5 W1) so a tall portrait screen's footroom never runs out of ground.
+ * Exported for the SAME test-parity reason as `MARGIN` above. */
+export const GROUND_DEPTH = WORLD_HEIGHT - GROUND_Y + GROUND_BLEED;
 /** Ground-polygon/backing-strip sample spacing (px) — mirrors `/lab`
  * experiment ⑨'s `GROUND_POLY_STEP`. */
 const GROUND_POLY_STEP = 24;
@@ -93,15 +104,19 @@ export class BiomeScene {
     state: GameState,
     opts?: { terrain?: Terrain },
   ) {
+    // Sky base fill spans -SKY_BLEED..GROUND_Y (R2.5 W1) — much taller than
+    // the far/near parallax's own small MARGIN buffer, so a fullscreen tall
+    // screen's sky headroom never runs out before the Pixi `Application`'s
+    // own flat backgroundColor would show through.
     const sky = buildSkyBands(
       biome.sky.top,
       biome.sky.bottom,
-      -MARGIN,
-      -MARGIN,
-      WORLD_WIDTH + MARGIN * 2,
-      GROUND_Y + MARGIN,
+      -BLEED_X,
+      -SKY_BLEED,
+      WORLD_WIDTH + BLEED_X * 2,
+      GROUND_Y + SKY_BLEED,
     );
-    const horizonGlow = buildHorizonGlow(biome.sky.horizon, -MARGIN, WORLD_WIDTH + MARGIN * 2, GROUND_Y);
+    const horizonGlow = buildHorizonGlow(biome.sky.horizon, -BLEED_X, WORLD_WIDTH + BLEED_X * 2, GROUND_Y);
     this.view.addChild(sky, horizonGlow);
 
     this.clouds = new CloudField(biome.sky.horizon, WORLD_WIDTH, GROUND_Y);
@@ -119,8 +134,13 @@ export class BiomeScene {
     this.far.view.position.x = -MARGIN;
     this.view.addChild(this.far.view);
 
-    const groundX = -MARGIN;
-    const groundWidth = WORLD_WIDTH + MARGIN * 2;
+    // Ground base fill widens by BLEED_X on each side (R2.5 W1) — the near
+    // ground-props layer below stays at the smaller MARGIN buffer (see that
+    // constant's own doc comment); `terrain.groundY` clamps internally to the
+    // zone's own width, so sampling this far past it just extends the
+    // nearest edge height flatly (`groundBand.ts`'s doc comment).
+    const groundX = -BLEED_X;
+    const groundWidth = WORLD_WIDTH + BLEED_X * 2;
     const terrain = opts?.terrain;
     const terrainActive = terrain !== undefined && terrainPresetForZone(zone) !== "flat";
 
@@ -151,13 +171,16 @@ export class BiomeScene {
     this.view.addChild(this.near.view);
 
     if (biome.weatherTint) {
+      // Matches the widened sky/ground span above (R2.5 W1) — otherwise the
+      // weather tint would visibly stop short of the bleed edges on a
+      // fullscreen wide/tall screen, seaming against the untinted sky/ground.
       const tint = buildSkyBands(
         biome.weatherTint.color,
         biome.weatherTint.color,
-        -MARGIN,
-        -MARGIN,
-        WORLD_WIDTH + MARGIN * 2,
-        WORLD_HEIGHT + MARGIN * 2,
+        -BLEED_X,
+        -SKY_BLEED,
+        WORLD_WIDTH + BLEED_X * 2,
+        SKY_BLEED + WORLD_HEIGHT + GROUND_BLEED,
       );
       tint.alpha = biome.weatherTint.alpha;
       this.view.addChild(tint);

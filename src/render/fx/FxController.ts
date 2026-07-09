@@ -1316,6 +1316,13 @@ export class FxController {
     this.heroSocialBadges = badges;
   }
 
+  /** R2.5 "Game Screen" W1 passthrough — see
+   * `ImpactFilterController.setFilterOrigin()`'s doc comment. Called by
+   * `GameRenderer.handleResize()` every resize. */
+  setFilterOrigin(x: number, y: number): void {
+    this.impactFilters.setFilterOrigin(x, y);
+  }
+
   /** React to this frame's (already-collected, cross-sub-step) events. */
   consumeEvents(events: GameEvent[], state: GameState): void {
     // Per-frame de-dupe for AOE skill impacts: several targets hit by the same

@@ -9,7 +9,11 @@
 import { Graphics } from "pixi.js";
 import { lerpColor } from "@/render/environment/colorUtils";
 
-const SKY_BANDS = 7;
+// R2.5 "Game Screen" W1: `BiomeScene` now builds sky/tint fills as tall as
+// GROUND_Y + SKY_BLEED (~1100+ world px on a fullscreen portrait screen),
+// well beyond the old ~280px span this count was tuned for — bumped 7->16 so
+// each lerped band stays thin enough not to read as visible stripes.
+const SKY_BANDS = 16;
 
 /** Layered-rect sky fill from `top` to `bottom`, spanning the given rect. */
 export function buildSkyBands(

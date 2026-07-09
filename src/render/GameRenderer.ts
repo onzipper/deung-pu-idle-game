@@ -28,10 +28,12 @@ import { FxController } from "@/render/fx/FxController";
 import { RENDER_FX } from "@/render/fxConfig";
 import { createBloomFilter } from "@/render/fx/impactFilters";
 import {
-  computeWorldTransform,
+  computeFullscreenTransform,
+  computeVisibleWorldRect,
   GROUND_Y,
   WORLD_HEIGHT,
   WORLD_WIDTH,
+  type VisibleWorldRect,
   type WorldTransform,
 } from "@/render/layout";
 import { createAtmosphere, type Atmosphere } from "@/render/worldDepth/atmosphere";
@@ -39,6 +41,7 @@ import {
   createCamera,
   updateCamera,
   cameraTransform,
+  setViewW,
   type CameraState,
   type CameraTransform,
 } from "@/render/worldDepth/camera";
@@ -342,11 +345,12 @@ export class GameRenderer {
     canvasParent.appendChild(app.canvas);
 
     const world = new Container();
-    // Pin the filter-coordinate space to `world`'s own local (logical) origin
-    // — see `fx/impactFilters.ts`'s doc comment for exactly why this makes
-    // the shockwave filter's world-coord -> filter-space mapping a plain
-    // multiply-by-scale instead of manual bounds/toGlobal bookkeeping, and
-    // why it stays correct across resizes with zero extra work here.
+    // Placeholder rect — `handleResize()` (called at the end of `create()`,
+    // and on every subsequent resize) immediately overwrites this to cover
+    // the FULL visible extent (letterbox band + decorative bleed, R2.5 "Game
+    // Screen" W1) and tells `fx/impactFilters.ts`'s controller where its
+    // origin now sits; see that file's doc comment for exactly why the
+    // shockwave filter's world-coord -> filter-space mapping needs that.
     world.filterArea = new Rectangle(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     app.stage.addChild(world);
     this.world = world;
@@ -370,7 +374,12 @@ export class GameRenderer {
     const cameraRoot = new Container();
     cameraRoot.addChild(background, ghosts, entities, projectiles, fx);
     world.addChild(cameraRoot, overlay);
-    const cameraMask = new Graphics().rect(0, 0, WORLD_WIDTH, WORLD_HEIGHT).fill(0xffffff);
+    // Built empty here — `handleResize()` (called at the end of `create()`,
+    // and on every subsequent resize) draws the real rect via
+    // `redrawCameraMask()`, sized to cover the FULL visible extent (letterbox
+    // band + decorative sky/ground bleed, R2.5 "Game Screen" W1), never just
+    // the fixed WORLD_WIDTH x WORLD_HEIGHT box.
+    const cameraMask = new Graphics();
     // The mask only engages while the camera is ON — a >1.0 follow-zoom is the
     // only thing that can push content into the letterbox bars. With the camera
     // OFF the mask is detached AND hidden (activated in `setWorldFx` /
@@ -839,14 +848,51 @@ export class GameRenderer {
     if (w > 0 && h > 0) {
       this.app.renderer.resize(w, h);
     }
-    this.baseTransform = computeWorldTransform(
-      this.app.screen.width,
-      this.app.screen.height,
-    );
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
+    // R2.5 "Game Screen" W1: fullscreen (any-aspect) fit — `scale`/`x` are
+    // identical to the old `computeWorldTransform`, `y` anchors via
+    // `BAND_BIAS` instead of dead-center. `world`'s own local coordinate
+    // system (entities, hit-tests, GROUND_Y) is completely unaffected.
+    const fs = computeFullscreenTransform(screenW, screenH);
+    this.baseTransform = { scale: fs.scale, x: fs.x, y: fs.y };
+
+    // Living-camera view width: on a screen wider than the world's own 3:1
+    // aspect, more than WORLD_WIDTH world-units are already visible at once
+    // (decorative bleed either side) — feed the camera's clamp math the LIVE
+    // value so it never restricts panning as if the screen were still
+    // exactly 900 units wide. No-op before `create()`'s camera exists.
+    if (this.camera) setViewW(this.camera, fs.viewWorldW);
+
+    // `world.filterArea` (impact filters — shockwave/RGB-split) and the
+    // living-camera's clip mask must cover every world-space pixel now
+    // visibly on screen (letterbox band PLUS decorative bleed), or a filter
+    // trigger / a >1 camera zoom would clip the newly-visible bleed content
+    // for that beat. Redrawn every resize (cheap: Rectangle alloc + one
+    // Graphics rebuild).
+    const rect = computeVisibleWorldRect(screenW, screenH);
+    this.world.filterArea = new Rectangle(rect.x, rect.y, rect.width, rect.height);
+    this.redrawCameraMask(rect);
+    // Tell the impact-filter controller where `filterArea`'s origin now sits
+    // (in world-local units) so its shockwave `center` math — calibrated
+    // against a filterArea pinned at world's own local origin — stays
+    // correct now that the origin can sit at a negative offset (bleed).
+    this.fx?.setFilterOrigin(rect.x, rect.y);
+
     // Scale is fully owned by `applyWorldTransform()` (base * camera-punch),
     // so it's the single source of truth for `world.scale` — called right
     // below, no separate `scale.set()` needed here.
     this.applyWorldTransform();
+  }
+
+  /** Redraws `cameraMask` to `rect` (world-local units) — see
+   * `handleResize()`. Idempotent no-op before `create()` builds it. */
+  private redrawCameraMask(rect: VisibleWorldRect): void {
+    if (!this.cameraMask) return;
+    this.cameraMask
+      .clear()
+      .rect(rect.x, rect.y, safeRadius(rect.width), safeRadius(rect.height))
+      .fill(0xffffff);
   }
 
   /**
