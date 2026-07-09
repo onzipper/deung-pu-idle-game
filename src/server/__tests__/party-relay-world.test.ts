@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createRequire } from "node:module";
 import net from "node:net";
+import http from "node:http";
 import crypto from "node:crypto";
 import type { AddressInfo } from "node:net";
 
@@ -172,6 +173,21 @@ function partyTicket(partyId: string, userId: string, slot: number, ttl = 60_000
 }
 
 const only = (msgs: Record<string, unknown>[], t: string) => msgs.filter((m) => m.t === t);
+
+/** Plain HTTP GET against the relay's public routes (e.g. /presence/counts). */
+function httpGet(p: number, path: string): Promise<{ status: number; body: unknown; headers: http.IncomingHttpHeaders }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port: p, path, method: "GET" }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () =>
+        resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : null, headers: res.headers }),
+      );
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 // --- suite ---
 
@@ -387,5 +403,82 @@ describe("relay world layer — ping + cross-kind", () => {
     a.send({ t: "pjoin", v: 1, ticket: partyTicket("pX", "uA", 0), zone: "z9" });
     await a.waitFor(() => a.closeCode !== null);
     expect(a.closeCode).toBe(4001);
+  });
+});
+
+describe("relay world layer — GET /presence/counts", () => {
+  it("reports joined-member counts per zoneKey; empty rooms omitted", async () => {
+    const a = await connect(port);
+    const b = await connect(port);
+    const c = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "map1:3" });
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "map1:3" });
+    c.send({ t: "pjoin", v: 1, ticket: presenceTicket("uC", "cC", "C"), zone: "map2:0" });
+    await a.waitFor(() => relay.presenceRooms.get("map1:3")?.members.size === 2);
+    await c.waitFor(() => relay.presenceRooms.get("map2:0")?.members.size === 1);
+
+    const res = await httpGet(port, "/presence/counts");
+    expect(res.status).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+    expect(res.body).toEqual({ v: 1, counts: { "map1:3": 2, "map2:0": 1 } });
+  });
+
+  it("does not count a socket that connected but never pjoined", async () => {
+    const a = await connect(port);
+    await connect(port); // connected, never pjoins → in no room
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "map1:5" });
+    await a.waitFor(() => relay.presenceRooms.get("map1:5")?.members.size === 1);
+
+    const res = await httpGet(port, "/presence/counts");
+    expect(res.body).toEqual({ v: 1, counts: { "map1:5": 1 } });
+  });
+
+  it("decrements on pleave and omits the room once empty", async () => {
+    const a = await connect(port);
+    const b = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "map3:2" });
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "map3:2" });
+    await a.waitFor(() => relay.presenceRooms.get("map3:2")?.members.size === 2);
+    expect((await httpGet(port, "/presence/counts")).body).toEqual({ v: 1, counts: { "map3:2": 2 } });
+
+    b.send({ t: "pleave", v: 1 });
+    await a.waitFor(() => relay.presenceRooms.get("map3:2")?.members.size === 1);
+    expect((await httpGet(port, "/presence/counts")).body).toEqual({ v: 1, counts: { "map3:2": 1 } });
+
+    a.end();
+    await a.waitFor(() => !relay.presenceRooms.has("map3:2"));
+    expect((await httpGet(port, "/presence/counts")).body).toEqual({ v: 1, counts: {} });
+  });
+
+  it("answers a CORS preflight with 204 + wildcard ACAO", async () => {
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, path: "/presence/counts", method: "OPTIONS" },
+        (res) => {
+          expect(res.headers["access-control-allow-origin"]).toBe("*");
+          res.resume();
+          res.on("end", () => resolve(res.statusCode ?? 0));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(204);
+  });
+});
+
+describe("client relayUrl cache seam", () => {
+  it("returns null until set, then last-write-wins", async () => {
+    const mod = await import("../../app/(game)/presence/relayUrlCache");
+    // Fresh module state may be shared across the suite; assert relative behavior.
+    mod.setCachedRelayUrl(null);
+    expect(mod.getCachedRelayUrl()).toBe(null);
+    mod.setCachedRelayUrl("wss://relay.example/ws");
+    expect(mod.getCachedRelayUrl()).toBe("wss://relay.example/ws");
+    mod.setCachedRelayUrl("wss://relay2.example/ws");
+    expect(mod.getCachedRelayUrl()).toBe("wss://relay2.example/ws");
+    mod.setCachedRelayUrl(null);
+    expect(mod.getCachedRelayUrl()).toBe(null);
   });
 });
