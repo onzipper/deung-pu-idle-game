@@ -86,6 +86,18 @@ export interface CameraState {
   worldW: number;
   /** Punch impulse ∈ [0,1]: 1 right after punchZoom(), exp-decays to 0. */
   punch: number;
+  /**
+   * World px of the visible VIEW at zoom 1 (R2.5 "Game Screen" W1) — defaults
+   * to `WORLD_WIDTH` (900), matching every existing caller (`/lab` + the
+   * game before this task) byte-identically. The game feeds its LIVE
+   * `viewWorldW` (`layout.ts`'s `computeFullscreenTransform`) via
+   * `setViewW()` on resize: on a screen wider than the world's own 3:1
+   * aspect, more than 900 world-units are already visible at once (decorative
+   * bleed either side — see `render/environment/`), so `clampX`'s "is the
+   * whole world already in view" check must widen with it, or a fullscreen
+   * wide screen would keep panning as if it were still letterboxed.
+   */
+  viewW: number;
 }
 
 /**
@@ -95,12 +107,13 @@ export interface CameraState {
  */
 export function createCamera(
   worldW: number,
-  opts?: { zoomBase?: number; idleZoom?: number },
+  opts?: { zoomBase?: number; idleZoom?: number; viewW?: number },
 ): CameraState {
   const zoomBase = opts?.zoomBase ?? 1;
   const idleZoom = opts?.idleZoom ?? IDLE_ZOOM;
+  const viewW = opts?.viewW ?? WORLD_WIDTH;
   return {
-    x: clampX(worldW / 2, worldW, zoomBase),
+    x: clampX(worldW / 2, worldW, zoomBase, viewW),
     zoom: zoomBase,
     zoomBase,
     idleZoom,
@@ -108,6 +121,7 @@ export function createCamera(
     idleT: 0,
     worldW,
     punch: 0,
+    viewW,
   };
 }
 
@@ -125,9 +139,13 @@ function effectiveZoom(cam: CameraState): number {
   return cam.zoom + (PUNCH_ZOOM - cam.zoom) * cam.punch;
 }
 
-/** Clamp a center-x so the half-view never crosses a world edge. */
-function clampX(x: number, worldW: number, zoom: number): number {
-  const halfView = WORLD_WIDTH / (2 * zoom);
+/** Clamp a center-x so the half-view never crosses a world edge. `viewW`
+ * generalizes the "screen width" reference (world px at zoom 1) — see
+ * `CameraState.viewW`'s doc comment; every pre-existing call site passes
+ * `WORLD_WIDTH` via a default `viewW`, byte-identical to before this param
+ * existed. */
+function clampX(x: number, worldW: number, zoom: number, viewW: number): number {
+  const halfView = viewW / (2 * zoom);
   if (worldW <= halfView * 2) return worldW / 2;
   return Math.min(worldW - halfView, Math.max(halfView, x));
 }
@@ -160,7 +178,20 @@ export function updateCamera(cam: CameraState, target: CameraTarget, dt: number)
   if (cam.punch < PUNCH_EPS) cam.punch = 0;
 
   // Never show past the world's edges at the zoom we'll render with.
-  cam.x = clampX(cam.x, cam.worldW, effectiveZoom(cam));
+  cam.x = clampX(cam.x, cam.worldW, effectiveZoom(cam), cam.viewW);
+}
+
+/**
+ * R2.5 "Game Screen" W1: update the live view width (world px at zoom 1) and
+ * re-clamp immediately so a resize can't leave `cam.x` stale past an edge for
+ * even one frame. `GameRenderer` calls this every resize with the fullscreen
+ * `viewWorldW` (`layout.ts`'s `computeFullscreenTransform`); `/lab` never
+ * calls it, so its camera stays at the `WORLD_WIDTH` default forever
+ * (byte-identical to before this function existed).
+ */
+export function setViewW(cam: CameraState, v: number): void {
+  cam.viewW = v;
+  cam.x = clampX(cam.x, cam.worldW, effectiveZoom(cam), cam.viewW);
 }
 
 export interface CameraTransform {
@@ -174,6 +205,18 @@ export interface CameraTransform {
  *   root.scale = scale; root.position = (posX, posY)
  * posX centers cam.x on screen; posY anchors the zoom around CAMERA_PIVOT_Y
  * (screen-y = worldY*scale + pivotY*(1-scale) keeps the pivot line fixed).
+ *
+ * DELIBERATELY still `WORLD_WIDTH / 2` here (NOT `cam.viewW / 2`), even
+ * though `viewW` now varies with the fullscreen aspect (R2.5 W1): `cameraRoot`
+ * is a CHILD of `world`, and `world`'s own base transform independently
+ * centers its fixed 900-wide local space on the physical screen for every
+ * aspect ratio (`layout.ts`'s `computeFullscreenTransform` keeps that exact
+ * `x` formula) — world-local `WORLD_WIDTH/2` (450) is provably the ONE value
+ * that lands on physical screen-center at any scale. Swapping in `cam.viewW`
+ * here would shift the followed target off-center by `(viewW-900)/2` world
+ * units on any screen wider than the world's own 3:1 aspect (`viewW` only
+ * generalizes `clampX`'s "does the whole world already fit in view" check
+ * above, not this centering term).
  *
  * Pass `out` from per-frame callers — it is mutated and returned, so the
  * render loop allocates nothing (same out-param convention as heroView's

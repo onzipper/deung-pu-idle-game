@@ -372,6 +372,47 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09m.items.botDefault",
     ],
   },
+  // R2 UI sweep — every panel restyled to the dark-fantasy system (inventory/
+  // shop/enhance/skill/bot/HOF), refine success-% display, skill detail pane,
+  // dedicated bot panel, bigger desktop arena + quest tracker overlay.
+  {
+    id: "2026-07-09n",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09n.items.uiSweep",
+      "releases.2026-07-09n.items.refinePercent",
+      "releases.2026-07-09n.items.skillPane",
+      "releases.2026-07-09n.items.botPanel",
+      "releases.2026-07-09n.items.bigScreen",
+    ],
+  },
+  // R2.5 Game Screen — fullscreen canvas + all-overlay HUD per the owner's
+  // MMO reference, icon menu row, NPC walk-order buttons, minimap-lite,
+  // and the zero-step-frame input-drop fix (bot-off default + swallowed taps).
+  {
+    id: "2026-07-09o",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09o.items.fullScreen",
+      "releases.2026-07-09o.items.menuRow",
+      "releases.2026-07-09o.items.npcButtons",
+      "releases.2026-07-09o.items.minimap",
+      "releases.2026-07-09o.items.tapFix",
+    ],
+  },
+  // R2.6 quest tracker + skill dock per the owner's MMO reference — tabbed
+  // [เควส|ปาร์ตี้] tracker with [หลัก]/[รอง]/[รายวัน] tag groups, and BOTH
+  // overlays now collapse (chip / thin AUTO strip) so they never block the view.
+  {
+    id: "2026-07-10",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10.items.questTracker",
+      "releases.2026-07-10.items.partyTab",
+      "releases.2026-07-10.items.skillDock",
+      "releases.2026-07-10.items.collapse",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

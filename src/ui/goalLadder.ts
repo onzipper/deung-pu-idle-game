@@ -7,11 +7,14 @@
  * `onboarding/steps.ts`'s `OnboardingSnapshot`) so the rung-selection rule is
  * a headlessly-testable pure function — see `__tests__/goalLadder.test.ts`.
  *
- * `GoalLadder.tsx` renders TWO independent pieces off this module:
- *  - the BREADCRUMB (`buildGoalLadder().rungs`): all 4 rungs always visible,
- *    the current one highlighted, everything before it "done", everything
- *    after "upcoming" — `hallOfFame` is always a dimmed/LOCKED tail rung (M9
- *    doesn't exist yet, per the task brief).
+ * `GoalLadder.tsx` renders TWO independent pieces off this module (R2.6 Wave 1:
+ * the old always-visible 4-rung BREADCRUMB UI is gone — see that file's doc —
+ * but `buildGoalLadder().rungs`' `current` id still drives the collapsed
+ * chip's icon/label, and `hallOfFame`'s own panel entrance moved to the
+ * top-right icon menu row):
+ *  - `current` (`buildGoalLadder().current`): which rung is narratively
+ *    active right now — `hallOfFame` is the terminal id once every earlier
+ *    rung is "done" (M9 doesn't exist yet, per the task brief).
  *  - the "core loop" card (`selectZoneBossDetail`) — the direct BossPanel
  *    replacement (challenge-boss CTA / victory-> next-stage / zone-unlock
  *    kill progress). This is driven PURELY by `phase`/`bossReady`, entirely

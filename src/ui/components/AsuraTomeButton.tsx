@@ -12,6 +12,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { IconTileButton } from "@/ui/components/primitives/IconTileButton";
 import { AsuraTomePanel } from "@/ui/asura/AsuraTomePanel";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -24,13 +25,13 @@ export function AsuraTomeButton() {
 
   return (
     <>
-      <button
-        type="button"
+      <IconTileButton
+        icon={<span aria-hidden>⚒️</span>}
+        accent="fuchsia"
         onClick={() => setOpen(true)}
-        className="flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border border-fuchsia-400/50 bg-fuchsia-400/10 px-3 text-xs font-bold text-fuchsia-200 shadow-(--ddp-shadow-btn) transition-all duration-100 hover:border-fuchsia-400 hover:bg-fuchsia-400/20 active:translate-y-0.5 active:scale-[0.95]"
-      >
-        <span aria-hidden>⚒️</span> {t("openButton")}
-      </button>
+        aria-label={t("openButton")}
+        title={t("openButton")}
+      />
       {open && <AsuraTomePanel onClose={() => setOpen(false)} />}
     </>
   );

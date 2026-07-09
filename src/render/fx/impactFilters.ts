@@ -14,20 +14,22 @@
  * exception: it's requested as a PERSISTENT filter on `projectiles`/`fx`, so
  * its kill-switch is `RENDER_FX.bloom` (see `fxConfig.ts`), not a timer.
  *
- * Coordinate mapping: `GameRenderer.create()` sets `world.filterArea` once to
- * the fixed WORLD-space rect `(0, 0, WORLD_WIDTH, WORLD_HEIGHT)`. Pixi's
- * filter system computes a display object's filter region as
- * `filterArea` transformed by that object's OWN worldTransform (see
+ * Coordinate mapping: `GameRenderer.handleResize()` sets `world.filterArea`
+ * on every resize to the FULL visible world-space rect (letterbox band +
+ * decorative bleed, R2.5 "Game Screen" W1 — `layout.ts`'s
+ * `computeVisibleWorldRect`), which can now sit at a negative world-local
+ * origin (bleed to the left/above `world`'s own local (0,0)). Pixi's filter
+ * system computes a display object's filter region as `filterArea`
+ * transformed by that object's OWN worldTransform (see
  * `getFastGlobalBoundsMixin`/`FilterSystem._calculateFilterArea` — it treats
  * `filterArea` as local-space and applies the container's full transform to
- * get the global filter-texture bounds). Pinning it to `world`'s own local
- * origin means the filter-space origin always lands exactly on `world`'s
- * letterboxed top-left, so a WORLD-space impact point maps to filter-space
- * with nothing more than a multiply by the live letterbox scale
- * (`world.scale.x` — translation cancels out because both share the same
- * origin by construction). No manual `toGlobal`/bounds bookkeeping needed,
- * and it stays correct across resizes automatically since scale is read
- * fresh at each trigger.
+ * get the global filter-texture bounds), and expresses filter uniforms like
+ * `ShockwaveFilter.center` in PIXELS RELATIVE TO `filterArea`'s OWN origin —
+ * so `triggerShockwave()` below subtracts that origin (`setFilterOrigin()`,
+ * kept in sync by `GameRenderer` every resize) before the letterbox-scale
+ * multiply. Before R2.5, `filterArea` was pinned exactly at `world`'s own
+ * local origin (0,0), so that subtraction was always a no-op — the origin
+ * tracking here is what keeps that math correct now that it can move.
  *
  * W4 "โลกมีมิติ" living camera: impact points arrive in `cameraRoot`-LOCAL space
  * (entities/fx ride the `cameraRoot` the camera pans+zooms — see
@@ -68,6 +70,11 @@ export class ImpactFilterController {
   private shockwaveT = 0;
   private rgbSplitActive = false;
   private rgbSplitT = 0;
+  /** `world.filterArea`'s current world-local origin (R2.5 "Game Screen" W1 —
+   * see `setFilterOrigin()`). 0,0 by default = today's pre-fullscreen math,
+   * byte-identical. */
+  private originX = 0;
+  private originY = 0;
   /** Set whenever the ACTIVE SET (not the per-frame uniform values) changes —
    * `world.filters` is only reassigned then, never every frame. */
   private dirty = false;
@@ -80,6 +87,22 @@ export class ImpactFilterController {
     private readonly cameraRoot: Container | null = null,
   ) {}
 
+  /**
+   * R2.5 "Game Screen" W1: `GameRenderer` widens `world.filterArea` past the
+   * fixed `(0,0,WORLD_WIDTH,WORLD_HEIGHT)` box on every resize (to cover the
+   * new fullscreen decorative bleed — see its `handleResize()`), which shifts
+   * the filter texture's own origin off `world`'s local (0,0). Pixi's
+   * `ShockwaveFilter.center` is expressed in pixels RELATIVE TO THAT ORIGIN
+   * (`uCenter / uInputSize` in its fragment shader), so `triggerShockwave()`
+   * must subtract it before scaling. Call on every resize; default 0,0
+   * (pre-fullscreen filterArea's own origin) keeps every call site
+   * byte-identical until the first resize ever calls this.
+   */
+  setFilterOrigin(x: number, y: number): void {
+    this.originX = x;
+    this.originY = y;
+  }
+
   /** Fire the shockwave centered on a `cameraRoot`-local impact point (world/
    * engine coords). See this file's header for the world→filter mapping; the
    * camera term is an instantaneous read that collapses to the pre-W4 math when
@@ -91,11 +114,12 @@ export class ImpactFilterController {
     const camPosX = cam ? cam.position.x : 0;
     const camPosY = cam ? cam.position.y : 0;
     // Spatial size composes both zooms (letterbox × camera); center maps through
-    // the camera (scale+pan) then the letterbox scale.
+    // the camera (scale+pan) then the letterbox scale, THEN offsets by
+    // `filterArea`'s own world-local origin (see `setFilterOrigin()`).
     const spatial = scale * camScale;
     this.shockwave.center = {
-      x: (worldX * camScale + camPosX) * scale,
-      y: (worldY * camScale + camPosY) * scale,
+      x: (worldX * camScale + camPosX - this.originX) * scale,
+      y: (worldY * camScale + camPosY - this.originY) * scale,
     };
     this.shockwave.radius = SHOCKWAVE_RADIUS_WORLD * spatial;
     this.shockwave.wavelength = SHOCKWAVE_WAVELENGTH_WORLD * spatial;

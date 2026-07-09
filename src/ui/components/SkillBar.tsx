@@ -15,47 +15,58 @@
  * the skill's max cooldown and whose `animation-delay` is negative by the
  * ALREADY-elapsed amount, so it visually resumes at the right point from a single
  * throttled snapshot value. It only restarts (remounts via `key`) on a fresh cast.
+ *
+ * R2-W4: the old per-skill ⓘ `InfoTip` (a small text popover) now opens the
+ * full `SkillDetailModal` list+detail pane instead (`docs/ui-reference-map.md`'s
+ * SKILL UI row) — the modal instance is lifted to `HeroSkills` (one mount for
+ * the whole kit, not one per button) and `SkillButton` just reports which
+ * skill id to open via `onOpenDetail`.
+ *
+ * R2-W2 "fullscreen HUD": the mockup-style portrait block (class roundel +
+ * Lv/name + HP/MP/EXP bars + power) that used to sit ABOVE the skill kit here
+ * moved OUT into its own top-left overlay card (`HeroPortraitCard.tsx`,
+ * verbatim extraction, zero behavior change) — this file now renders ONLY the
+ * skill kit, for the bottom-center skill dock.
+ *
+ * R2.6 Wave 2 "skill dock reskin": `BotMasterSwitch` MOVED OUT of this file
+ * into `SkillDock.tsx` (the new dock wrapper that also owns the whole-dock
+ * collapse) — it must render exactly ONCE, so don't re-add it here (grep
+ * `data-onboarding-anchor="bot-master"` if this file is touched again).
  */
 
 import { useTranslations } from "next-intl";
-import type { CSSProperties } from "react";
-import type { HeroClass } from "@/engine";
-import { CONFIG, SKILLS } from "@/engine";
+import { useState, type CSSProperties } from "react";
+import { CONFIG } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
-import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
-import { InfoTip } from "@/ui/components/InfoTip";
+import { SkillDetailModal } from "@/ui/components/SkillDetailModal";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
-import { SKILL_ICONS_BY_ID } from "@/ui/labels";
-import { skillStatParts } from "@/ui/skillStats";
+import { HERO_ACCENT, SKILL_ICONS_BY_ID } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
-/** The `content.classes.<cls>.<key>` i18n key for hero.tier's display name:
- * tier 1 = base name, tier 2 = `evolvedName`, tier 3 = `tier3Name` (M7.9
- * grand-expansion final form). */
-function classNameKeyForTier(tier: 1 | 2 | 3): "name" | "evolvedName" | "tier3Name" {
-  if (tier === 2) return "evolvedName";
-  if (tier === 3) return "tier3Name";
-  return "name";
-}
-
-/** Presentational-only per-class accent (mirrors src/render/theme.ts
- * HERO_COLORS). `soft` is a pre-mixed rgba so button classes never need a
- * Tailwind opacity-modifier on an arbitrary CSS-var color. */
-const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
-  swordsman: { solid: "#35d0c0", soft: "rgba(53, 208, 192, 0.55)" },
-  archer: { solid: "#b8e04a", soft: "rgba(184, 224, 74, 0.55)" },
-  mage: { solid: "#c77dff", soft: "rgba(199, 125, 255, 0.55)" },
-  // matches `HERO_COLORS.ninja.body` in render/theme.ts (slate/graphite rig tone)
-  ninja: { solid: "#6c7a99", soft: "rgba(108, 122, 153, 0.55)" },
-};
 
 /** One learned skill: a cast button + an AUTO-slot toggle badge + a tap-to-open
- * ⓘ detail popover (owner ask, UX-fix wave: "every skill button gets a
- * tap-to-open detail" — desc line + live numbers from `CONFIG.skills`, reused
- * via `skillStatParts`). The class-change quest's accept/change-class controls
- * used to live in this file's `ClassQuestAffordance` — that's gone; the WHOLE
- * quest flow now lives in `GoalLadder.tsx`'s `ClassQuestCard` (audit #1). */
-function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }) {
+ * detail trigger (owner ask, UX-fix wave: "every skill button gets a
+ * tap-to-open detail" — R2-W4 evolved this from a small `InfoTip` text
+ * popover into the full `SkillDetailModal` list+detail pane, see that file's
+ * doc). The class-change quest's accept/change-class controls used to live in
+ * this file's `ClassQuestAffordance` — that's gone; the WHOLE quest flow now
+ * lives in `GoalLadder.tsx`'s `ClassQuestCard` (audit #1). */
+function SkillButton({
+  hero,
+  skill,
+  slotNumber,
+  onOpenDetail,
+}: {
+  hero: HeroSummary;
+  skill: SkillSummary;
+  /** 1-based display position in the hero's learned-skill row (mockup's
+   * numbered hotbar slots, R2-W2) — purely a display ordinal, NOT the
+   * auto-cast slot index (`skill.autoSlot`, shown by the badge below). */
+  slotNumber: number;
+  /** Opens `SkillDetailModal` on this skill (lifted to `HeroSkills` so the
+   * whole kit shares ONE modal instance instead of one per button). */
+  onOpenDetail: (skillId: string) => void;
+}) {
   const castSkill = useGameStore((s) => s.castSkill);
   const setAutoSlot = useGameStore((s) => s.setAutoSlot);
   const tContent = useTranslations("content");
@@ -64,11 +75,6 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
   const icon = SKILL_ICONS_BY_ID[skill.id] ?? "✦";
   const accent = HERO_ACCENT[hero.cls];
   const castKey = useCastKey(skill.cd);
-  const skillDef = SKILLS[skill.id];
-  const statsLine = skillStatParts(skillDef)
-    .map((p) => tPanels(`skillStat.${p.key}`, p.values))
-    .join(" · ");
-  const detailText = `${tContent(`skills.${skill.id}.desc`)} · ${statsLine}`;
 
   const ready = skill.ready;
   const delay = -(skill.maxCd - skill.cd);
@@ -154,17 +160,26 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
           </span>
         </button>
         {/* Owner ask (UX-fix wave): every skill button gets a tap-to-open
-            detail — desc line + live numbers (mana/cooldown/damage/etc. off
-            `CONFIG.skills` via `skillStatParts`). Sits OUTSIDE the cast
-            `<button>` (siblings, not nested — nested buttons are invalid
-            HTML) at its top-left corner; `InfoTip` already carries its own
-            ≥44px hit-zone trick. */}
-        <div className="absolute -top-1.5 -left-1.5 z-10">
-          <InfoTip
-            text={detailText}
-            ariaLabel={tPanels("skillInfoAria", { skillName })}
-          />
-        </div>
+            detail — R2-W4 opens the full `SkillDetailModal` list+detail pane
+            instead of a small text popover. Sits OUTSIDE the cast `<button>`
+            (siblings, not nested — nested buttons are invalid HTML) at its
+            top-left corner, same ≥44px hit-zone trick `InfoTip` used. */}
+        <button
+          type="button"
+          onClick={() => onOpenDetail(skill.id)}
+          aria-label={tPanels("skillInfoAria", { skillName })}
+          className="absolute -top-1.5 -left-1.5 z-10 grid h-5 w-5 place-items-center rounded-full border border-ddp-border-soft bg-black/30 text-[10px] leading-none font-bold text-ddp-ink-muted before:absolute before:-inset-3 before:content-[''] hover:text-ddp-ink active:scale-90"
+        >
+          <span aria-hidden>ⓘ</span>
+        </button>
+        {/* Numbered hotbar badge (mockup "1-5 กำกับ") — pure display ordinal,
+            opposite corner from the ⓘ detail tip so the two never collide. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-ddp-border-soft bg-black/85 text-[10px] font-black tabular-nums text-ddp-ink-muted"
+        >
+          {slotNumber}
+        </span>
       </div>
       <button
         type="button"
@@ -188,32 +203,14 @@ function SkillButton({ hero, skill }: { hero: HeroSummary; skill: SkillSummary }
   );
 }
 
-/** Held mana-potion count pinned to the mana bar (M7.7 — potions are the
- * pool's refill loop now; surface the stock where the player watches drain). */
-function ManaPotionBadge() {
-  const count = useGameStore((s) => s.shop.counts.manaPotion ?? 0);
-  return (
-    <span
-      className={`rounded px-1 text-[10px] leading-4 font-bold tabular-nums ${
-        count === 0 ? "bg-rose-950/70 text-rose-300" : "bg-sky-950/70 text-sky-200"
-      }`}
-    >
-      💧{count}
-    </span>
-  );
-}
-
-/** A hero's full skill panel: header, HP/XP/mana bars, and the skill kit. */
+/**
+ * A hero's skill kit (R2-W2: the portrait block that used to sit above this
+ * moved OUT into `HeroPortraitCard.tsx` — see this file's doc). Same
+ * throttled snapshot fields, no new store reads.
+ */
 function HeroSkills({ hero }: { hero: HeroSummary }) {
-  const tContent = useTranslations("content");
-  const tCommon = useTranslations("common");
   const tPanels = useTranslations("panels");
-  const heroName = tContent(`classes.${hero.cls}.${classNameKeyForTier(hero.tier)}`);
-  const leveledUpPulse = usePulseOnIncrease(hero.level, 320);
-
-  const hpPct = hero.maxHp > 0 ? Math.max(0, (hero.hp / hero.maxHp) * 100) : 0;
-  const xpPct = Math.max(0, Math.min(1, hero.xpProgress)) * 100;
-  const manaPct = hero.maxMana > 0 ? Math.max(0, (hero.mana / hero.maxMana) * 100) : 0;
+  const [detailSkillId, setDetailSkillId] = useState<string | null>(null);
 
   // Next locked auto-slot's unlock level (for the "more slots at Lv.X" hint).
   // The 4th slot (M7.9) is gated behind BOTH tier 3 AND Lv.40
@@ -230,72 +227,20 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
     CONFIG.autoSlots.tierRequired[nextSlotIdx] > hero.tier;
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      <div className="flex items-center gap-1.5">
-        <span
-          title={heroName}
-          className={`rounded-full border border-ddp-border-soft bg-black/60 px-2 py-0.5 text-xs font-bold tabular-nums ${
-            hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
-          } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
-        >
-          {hero.atLevelCap
-            ? tCommon("maxLabel")
-            : tCommon("levelBadge", { level: hero.level })}
-        </span>
-      </div>
-
-      {/* HP bar */}
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-black/50"
-        title={heroName}
-      >
-        <div
-          className={`h-full rounded-full transition-[width] duration-200 ${
-            hpPct > 35 ? "bg-emerald-400" : "bg-red-500"
-          }`}
-          style={{ width: `${hpPct}%` }}
-        />
-      </div>
-      {/* XP bar (gold = progress currency) */}
-      <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-black/50"
-        title={heroName}
-      >
-        <div
-          className="h-full rounded-full bg-ddp-gold transition-[width] duration-300"
-          style={{ width: `${hero.atLevelCap ? 100 : xpPct}%` }}
-        />
-      </div>
-      {/* Mana bar (blue = caster resource) + a visible n/max readout. M7.7:
-          mana is now the skill PACING GOVERNOR (skills spam-drain the pool;
-          potions refill it), so the bar got promoted — taller, low-pool
-          warning tint, and the held mana-potion count sits right beside it. */}
-      <div className="flex w-full items-center gap-1">
-        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-black/50">
-          <div
-            className={`h-full rounded-full transition-[width] duration-150 ${
-              manaPct < 25 ? "animate-pulse bg-rose-400" : "bg-sky-400"
-            }`}
-            style={{ width: `${manaPct}%` }}
-          />
-        </div>
-        <span
-          className={`text-[11px] leading-none font-semibold tabular-nums ${
-            manaPct < 25 ? "text-rose-300" : "text-sky-300/90"
-          }`}
-        >
-          {Math.floor(hero.mana)}/{hero.maxMana}
-        </span>
-        <ManaPotionBadge />
-      </div>
-
+    <div className="flex w-full flex-col items-center gap-2">
       {/* War Cry's ATK-buff chip moved into the consolidated Buff Badge Hub
           (owner ask — every buff in ONE HUD spot, see BuffBadgeHub.tsx). */}
 
       {/* The learned skill kit */}
-      <div className="mt-1 flex flex-wrap items-start justify-center gap-2">
-        {hero.skills.map((skill) => (
-          <SkillButton key={skill.id} hero={hero} skill={skill} />
+      <div className="flex flex-wrap items-start justify-center gap-2">
+        {hero.skills.map((skill, i) => (
+          <SkillButton
+            key={skill.id}
+            hero={hero}
+            skill={skill}
+            slotNumber={i + 1}
+            onOpenDetail={setDetailSkillId}
+          />
         ))}
       </div>
       {nextLockedLevel !== null && (
@@ -304,6 +249,15 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
             ? tPanels("autoSlotNextUnlockTier3", { level: nextLockedLevel })
             : tPanels("autoSlotNextUnlock", { level: nextLockedLevel })}
         </span>
+      )}
+      {/* ONE `SkillDetailModal` instance for the whole kit (R2-W4) — every
+          `SkillButton`'s ⓘ trigger just sets which skill id to show. */}
+      {detailSkillId && (
+        <SkillDetailModal
+          hero={hero}
+          initialId={detailSkillId}
+          onClose={() => setDetailSkillId(null)}
+        />
       )}
     </div>
   );
@@ -318,15 +272,16 @@ export function SkillBar() {
   const t = useTranslations("panels");
 
   return (
-    <div data-onboarding-anchor="skill-bar" className="flex flex-wrap items-start gap-3">
+    <div data-onboarding-anchor="skill-bar" className="flex flex-col gap-3">
       <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("skillsLabel")}
       </span>
-      <div className="flex gap-4">{hero && <HeroSkills hero={hero} />}</div>
-      {/* The "Auto สกิล" master toggle moved into the consolidated bot-settings
-          modal (owner UX pass, 2026-07-07 — see `BotSettingsModal.tsx`); this
-          bar keeps only the per-skill "+ อัตโนมัติ" slot badges (an owner-
-          approved shortcut that mirrors the same store state). */}
+      {hero && <HeroSkills hero={hero} />}
+      {/* The "Auto สกิล" per-skill master toggle modal stays in
+          `BotSettingsModal.tsx` (owner UX pass, 2026-07-07) — this bar keeps
+          the per-skill "+ อัตโนมัติ" slot badges (mirrors the same store
+          state, unchanged). The bot MASTER pill (`BotMasterSwitch`) is owned
+          by `SkillDock.tsx` now (R2.6 Wave 2) — see this file's module doc. */}
     </div>
   );
 }

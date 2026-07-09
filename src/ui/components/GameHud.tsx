@@ -1,55 +1,102 @@
 "use client";
 
 /**
- * Layout composition: HUD bar, arena/canvas slot, skill bar, goal ladder,
- * console dock. The canvas itself is NOT owned here — Pixi mounting is the
- * render-integration seam's job. Callers either:
- *  - pass the canvas element (or a render-owning client component) as
- *    `children`, which is rendered inside the arena slot, or
- *  - forward a ref to grab the arena container `div` and mount imperatively
- *    (`app.canvas` appended in a `useEffect`) from outside `ui/`.
+ * R2-W2 "fullscreen HUD" (docs/ui-reference-map.md's "จอเกมใหญ่ + HUD ซ้อน" row,
+ * mockup-driven): the game screen is now a FULLSCREEN canvas with every HUD
+ * element as an absolute overlay on top of it — no more boxed `aspect-900/300`
+ * arena + separate in-flow console dock below it. This is a full rewrite of
+ * the old framed-arena layout (W5/M6-era `HudBar`/`WalkControls` scaffolding
+ * is GONE — see the dissolution notes below); the canvas mount contract
+ * `GameClient.tsx` depends on is preserved byte-for-byte (see next paragraph).
  *
- * HUD hierarchy (task 86d3jv7m3 readability pass, goal-ladder pass M6): PRIMARY
- * (top `HudBar` — zone/stage, gold) > SECONDARY (skill kit's level/XP/mana rows
- * + `GoalLadder` — the "what do I do next" element, which absorbed the old
- * `BossPanel`'s raw-stat row AND `HudBar`'s zone-unlock bar, see
- * `GoalLadder.tsx`) > TERTIARY (stat panel, settings drawer). The 1x/2x/3x
- * speed selector was removed player-facing (M6.7) — `GameClient`'s loop always
- * drains 1 fixed sub-step per real frame now. EVERY automation sub-behavior
- * (autoCast/autoAllocate/autoReturn/autoAdvance/auto-potion/bot town-trips/
- * auto-dispose rules) is consolidated behind the single `BotMasterSwitch` in
- * `WalkControls` (owner UX consolidation, 2026-07-07 — "one mental model per
- * feature") — `SettingsButton`'s drawer now holds only sound/language/generic
- * prefs. `autoCast`'s per-skill "+ อัตโนมัติ" slot badges stay in
- * `SkillBar.tsx` as a shortcut (mirrors the same store state).
+ * Canvas mount seam (UNCHANGED — do not break): `GameClient.tsx` holds a ref
+ * (`arenaRef`) forwarded here as `canvasSlotRef`; it calls
+ * `waitForNonZeroSize(arenaEl)` then `renderer.create(arenaEl)` on that same
+ * element, uses it as the `ResizeObserver` target, and reads
+ * `arenaEl.getBoundingClientRect()` for pointer hit-testing. The div below
+ * carrying `ref={canvasSlotRef}` IS that element — it must stay a plain,
+ * unstyled-by-anything-that-affects-layout `absolute inset-0` box so
+ * `GameRenderer`'s own any-aspect fill (W1) has a full-viewport target with
+ * nothing else competing for space.
+ *
+ * Z-INDEX LADDER (documented once here — every new overlay picks a rung):
+ *   z-0   canvas mount (Pixi appends its own `<canvas>` here)
+ *   z-5   decorative screen-edge vignette (cosmetic, pointer-events-none)
+ *   z-10  the HUD overlay layer: top-left portrait+buffs, top-right
+ *         currency+menu+party-signal, left-mid quest tracker, bottom-center
+ *         skill dock, bottom-edge EXP/clock strip, DropFeedCorner (matches
+ *         the arena-chip z-10 convention every sub-component already used)
+ *   z-20  chip/button tooltips+popovers nested inside z-10 elements (owned by
+ *         those components themselves, e.g. `BuffBadgeHub`/`PartySignalChip`)
+ *   z-40  `ChatButton`'s floating trigger (owned by that component)
+ *   z-60  `DropFeed` (epic-drop top-center toast) — unchanged
+ *   z-70  every modal panel via `ModalPortal` (unchanged, portals to
+ *         `document.body` so this ladder doesn't even apply structurally)
+ *   z-74  `UpdateBanner` / z-75 `AnnouncementBanner` — unchanged, both
+ *         deliberately paint OVER the top-left portrait during their ~5s
+ *         slide animation (owner-approved "more prominent" requirement)
+ *
+ * Dissolved components (owner UX consolidation, this wave):
+ *  - `HudBar.tsx` — zone-chip's world-map trigger became `WorldMapButton.tsx`,
+ *    the 🌀 warp trigger became `WarpButton.tsx`, the gold/material chips
+ *    became `CurrencyChipsRow.tsx`. File deleted (nothing left in it).
+ *  - `WalkControls.tsx` — the zone/map text label is dropped (W3's minimap
+ *    card is the next place a live zone readout belongs); `CancelCommandChip`
+ *    and `FastTravelChannelBar` relocated to float above the skill dock.
+ *    File deleted (nothing left in it).
+ *  - The old inline "settings row" (`StatPanel`/`EquippedLoadout`/
+ *    `SwitchCharacterLink`) moved into the NEW `CharacterPanel.tsx` behind
+ *    `CharacterButton.tsx` in the icon menu row — nothing became unreachable.
+ *  - `RefineButton.tsx` is NOT in the new icon menu row — `NpcTripButtons.tsx`
+ *    (below) absorbs its dock-shortcut role (ตีบวก tile → `startNpcTrip
+ *    ("npc:lungdueng")`). `RefineButton.tsx`'s file is left in place (unused,
+ *    already rewired onto `startNpcTrip`) — a judgment call flagged for owner
+ *    confirm, not an explicit deletion instruction.
+ *
+ * R2.5-W3, ร้านค้า/ตีบวก/ภารกิจ HUD tiles: `docs/ui-reference-map.md`'s
+ * ORIGINAL locked row ("ปุ่มร้านค้า/ภารกิจบน HUD ไม่เอา") read as a blanket ban
+ * on any NPC-triggering HUD button. The owner issued a NEWER, more specific
+ * เคาะ this same R2.5 planning round (that doc's row is amended, not
+ * re-litigated here): these tiles ARE allowed PROVIDED they only ever issue
+ * `startNpcTrip(npcId)` — a walk-to-npc command routed through the exact same
+ * tap-to-talk seam (`TownNpcPanelHost.tsx`) a manual walk-up uses — never a
+ * remote panel open. See `NpcTripButtons.tsx`'s doc for the full guard/pulse
+ * behavior.
+ *
+ * W3 minimap slot: the top-right column's `data-hud-slot="w3-npc-minimap"`
+ * marker now wraps `MiniMapCard` — a compact zone-summary that taps through
+ * to the existing `WorldMapPanel`, not a second minimap system.
  */
 
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, useRef, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/ui/components/AnnouncementBanner";
 import { AsuraHotZoneBanner } from "@/ui/components/AsuraHotZoneBanner";
 import { AsuraTomeButton } from "@/ui/components/AsuraTomeButton";
 import { BuffBadgeHub } from "@/ui/components/BuffBadgeHub";
+import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
+import { CharacterButton } from "@/ui/components/CharacterButton";
 import { CodexButton } from "@/ui/components/CodexButton";
-import { ConsumableBar } from "@/ui/components/ConsumableBar";
+import { CurrencyChipsRow } from "@/ui/components/CurrencyChipsRow";
 import { DropFeed, DropFeedCorner } from "@/ui/components/DropFeed";
-import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
+import { ExpClockStrip } from "@/ui/components/ExpClockStrip";
+import { FastTravelChannelBar } from "@/ui/components/FastTravelChannelBar";
 import { FriendsButton } from "@/ui/components/FriendsButton";
-import { GoalLadder } from "@/ui/components/GoalLadder";
-import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
-import { HudBar } from "@/ui/components/HudBar";
 import { GateTripWatcher } from "@/ui/components/GateTripWatcher";
+import { GoalLadderOverlaySlot } from "@/ui/components/GoalLadderOverlaySlot";
+import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
+import { HeroPortraitCard } from "@/ui/components/HeroPortraitCard";
 import { InventoryButton } from "@/ui/components/InventoryButton";
+import { MiniMapCard } from "@/ui/components/MiniMapCard";
 import { NoticeToast } from "@/ui/components/NoticeToast";
-import { RefineButton } from "@/ui/components/RefineButton";
+import { NpcTripButtons } from "@/ui/components/NpcTripButtons";
+import { NpcTripWatcher } from "@/ui/components/NpcTripWatcher";
 import { SettingsButton } from "@/ui/components/SettingsButton";
-import { SkillBar } from "@/ui/components/SkillBar";
-import { SmithTripWatcher } from "@/ui/components/SmithTripWatcher";
-import { StatPanel } from "@/ui/components/StatPanel";
-import { SwitchCharacterLink } from "@/ui/components/SwitchCharacterLink";
+import { SkillDock } from "@/ui/components/SkillDock";
 import { TownNpcPanelHost } from "@/ui/components/TownNpcPanelHost";
 import { UpdateBanner } from "@/ui/components/UpdateBanner";
-import { WalkControls } from "@/ui/components/WalkControls";
+import { WarpButton } from "@/ui/components/WarpButton";
 import { WorldBossBanner } from "@/ui/components/WorldBossBanner";
+import { WorldMapButton } from "@/ui/components/WorldMapButton";
 import { ContextualTipOverlay } from "@/ui/onboarding/ContextualTipOverlay";
 import { OnboardingOverlay } from "@/ui/onboarding/OnboardingOverlay";
 import { PartySignalChip } from "@/ui/party/PartySignalChip";
@@ -64,12 +111,30 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
   { children },
   canvasSlotRef,
 ) {
+  // Portal target for `GoalLadderOverlaySlot` — the slot div below, rendered
+  // INSIDE the same fullscreen stack so the quest tracker overlays the arena
+  // on every viewport now (see that component's doc for why it's a portal).
+  const questOverlayRef = useRef<HTMLDivElement | null>(null);
+
   return (
-    // Mobile-portrait-first shell: arena is the hero and always comes first;
-    // the console dock (skills / potions / stats / settings) follows as one
-    // coherent bottom panel rather than scattered floating boxes. Bottom
-    // safe-area padding covers the phone home-indicator inset.
-    <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
+    <div className="relative h-full w-full overflow-hidden bg-[#0b0e1a]">
+      {/* Fullscreen Pixi mount — see the module doc's "canvas mount seam"
+          paragraph. Nothing else may affect this element's box model.
+          `children` (unused by the real call site today — `GameClient.tsx`
+          appends its canvas imperatively — but kept for the documented
+          prop contract) renders inside it, same as before this rewrite. */}
+      <div ref={canvasSlotRef} className="absolute inset-0 z-0">
+        {children}
+      </div>
+
+      {/* Decorative screen-edge vignette — cosmetic only, pointer-events-none
+          so it never intercepts the canvas's own pointerdown (audio-resume)
+          listener or hit-testing. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-5 shadow-[inset_0_0_60px_16px_rgba(0,0,0,0.45)]"
+      />
+
       {/* FTUE overlay (M4.8): fixed/viewport-anchored, reads its own store
           slice + `data-onboarding-anchor` DOM targets below — see
           src/ui/onboarding/. Renders null once onboarding isn't active.
@@ -83,114 +148,128 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       <ChatButton />
       {/* M7.9: server-wide high-refine announcements — a full-width slide-down
           strip at the very top of the viewport (z-75), deliberately ABOVE
-          the modal panels (z-70) and the DropFeed/NoticeToast toasts (z-60)
-          per the owner's "more prominent/special" directive. Never overlaps
-          the goal card / console dock below (it lives in the page's top
-          safe-area strip, not inside the HUD flow). */}
+          every other overlay rung (see the z-ladder doc above). */}
       <AnnouncementBanner />
       {/* Mid-session "new patch deployed" banner — same top strip as
           `AnnouncementBanner` above, mutually exclusive with it (see
           `UpdateBanner.tsx`'s doc: announcements play first). */}
       <UpdateBanner />
-      {/* M7 Gear & Drops: EPIC-only drop-notification toast, store-driven off
-          claim results — sits above the arena, below the modal panels
-          (z-70). Commons/rares/stones moved into the arena's bottom-right
-          corner (`DropFeedCorner` below) in Wave 3 "จัดระเบียบ DropFeed". */}
+      {/* M7 Gear & Drops: EPIC-only drop-notification toast, top-center,
+          above the HUD overlay layer (z-60) — see DropFeed.tsx's doc. */}
       <DropFeed />
-      <NoticeToast />
-      {/* World boss "เสี่ยจ๋อง": hourly countdown/found-it banner — renders nothing
-          outside the pre-announce/active windows, see WorldBossBanner.tsx. */}
-      <WorldBossBanner />
-      {/* ดินแดนอสูร (endgame v1): today's hot zone — renders nothing outside
-          asura, see AsuraHotZoneBanner.tsx. */}
-      <AsuraHotZoneBanner />
-      <HudBar />
 
+      {/* ---- THE HUD OVERLAY LAYER (z-10) — one fullscreen pointer-events-none
+          grid; every region below restores pointer-events-auto for its own
+          content so taps pass through to the canvas everywhere else. ---- */}
       <div
-        ref={canvasSlotRef}
-        // Aspect matches the engine's logical arena (src/render/layout.ts
-        // WORLD_WIDTH=900/WORLD_HEIGHT=300) so GameRenderer's letterboxing
-        // has nothing to pad — the frame IS the world, no dead bars.
-        className="relative aspect-900/300 w-full overflow-hidden rounded-(--ddp-radius-lg) border border-ddp-border bg-[#151a30] shadow-(--ddp-shadow-panel)"
+        className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between gap-2 p-2 sm:p-3"
+        style={{
+          paddingTop: "max(0.5rem, env(safe-area-inset-top))",
+          paddingLeft: "max(0.5rem, env(safe-area-inset-left))",
+          paddingRight: "max(0.5rem, env(safe-area-inset-right))",
+        }}
       >
-        {children}
-        {/* Decorative inner frame (thin rim + soft vignette) drawn ON TOP of
-            wherever GameRenderer imperatively appends its <canvas> — purely
-            cosmetic, pointer-events-none so it never intercepts the arena's
-            own pointerdown (audio-resume) listener. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-5 rounded-(--ddp-radius-lg) shadow-[inset_0_0_0_1px_rgba(143,151,201,0.18),inset_0_0_46px_12px_rgba(0,0,0,0.35)]"
-        />
-        {/* Buff Badge Hub (owner ask, "ห้ามดันจอ"): every active buff (party XP,
-            war cry, future sources) as a floating icon overlay pinned to the
-            arena's top-left corner — ZERO layout participation, never pushes
-            the arena/console dock down. Renders nothing with no active
-            buffs, see BuffBadgeHub.tsx. */}
-        <BuffBadgeHub />
-        {/* M8 party Wave 3 "ตัวบอกสถานะปาร์ตี้": network signal chip, mirrors
-            BuffBadgeHub's top-[14%] placement on the OPPOSITE corner (right-2) —
-            renders nothing solo, see PartySignalChip.tsx. */}
-        <PartySignalChip />
-        {/* Wave 3 "จัดระเบียบ DropFeed" (owner: "ไม่รก แต่รู้ว่าได้ของ"): common/rare
-            item + stone pickup pills, coalesced max-3, bottom-right corner —
-            mirrors BuffBadgeHub's top-left placement, ZERO layout
-            participation. Epic keeps the top-center DropFeed beat above. */}
-        <DropFeedCorner />
+        {/* TOP: portrait+buffs (left) / currency+menu+party-signal (right),
+            plus the in-flow world-boss/hot-zone banner strip beneath both. */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-start justify-between gap-2">
+            {/* Top-left: hero portrait card + active-buff chips stacked
+                directly below it (both used to hand-tune a `top-[14%]`
+                offset to avoid colliding — now they're just flow siblings). */}
+            <div className="pointer-events-auto flex flex-col items-start gap-1.5">
+              <HeroPortraitCard />
+              <BuffBadgeHub />
+            </div>
+            {/* Top-right: gold/material chips, the icon menu row (R2.5-W3
+                adds the 3 `NpcTripButtons` tiles into it), then the party
+                signal chip — W3's minimap card appends after that, see the
+                module doc. */}
+            <div className="pointer-events-auto flex flex-col items-end gap-1.5">
+              <CurrencyChipsRow />
+              <div
+                data-onboarding-anchor="menu-row"
+                className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:justify-end"
+              >
+                <CharacterButton />
+                <InventoryButton />
+                {/* R2.5-W3: ร้านค้า/ตีบวก/ภารกิจ — each a `startNpcTrip(npcId)`
+                    walk-order, never a remote panel open. See the module
+                    doc's amended-ruling paragraph + NpcTripButtons.tsx. */}
+                <NpcTripButtons />
+                <HallOfFameButton />
+                <FriendsButton />
+                <CodexButton />
+                <AsuraTomeButton />
+                <WorldMapButton />
+                <WarpButton />
+                <SettingsButton />
+              </div>
+              <PartySignalChip />
+              {/* W3: compact minimap/zone-summary card, tap → WorldMapPanel.
+                  See MiniMapCard.tsx's doc — this is NOT the R4/R5 corner
+                  minimap proper (that waits on true x,y world geometry per
+                  docs/ui-reference-map.md), just a compact reader on the
+                  existing R1 WorldMapPanel surface. */}
+              <div data-hud-slot="w3-npc-minimap">
+                <MiniMapCard />
+              </div>
+            </div>
+          </div>
+          {/* World boss / ดินแดนอสูร hot-zone: plain in-flow strips (unchanged
+              components — see their own docs), centered below the top row so
+              they never collide with either corner. */}
+          <div className="pointer-events-auto mx-auto flex w-full max-w-md flex-col gap-1">
+            <WorldBossBanner />
+            <AsuraHotZoneBanner />
+          </div>
+        </div>
+
+        {/* MID: quest/goal tracker, left-anchored, filling the remaining
+            vertical space between the top row and the bottom dock (no
+            hand-tuned `top-N%` — the flex-1 region's own box IS the
+            available space, so it structurally can't collide with either
+            neighbor). */}
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={questOverlayRef}
+            className="pointer-events-none absolute top-0 left-0 z-10 max-h-full w-64 max-w-[78vw] overflow-y-auto sm:w-72"
+          />
+        </div>
+
+        {/* BOTTOM: gate/smith-trip cancel chip + fast-travel channel bar +
+            notices float just above the skill dock; the dock itself (skills
+            + AUTO + potions, collapsible to a thin strip — R2.6 Wave 2, see
+            `SkillDock.tsx`); the full-width EXP/clock strip pins the true
+            bottom edge and stays ALWAYS visible regardless of dock state. */}
+        <div className="pointer-events-auto flex w-full flex-col items-center gap-2">
+          <div className="flex flex-col items-center gap-1.5 px-2">
+            <NoticeToast />
+            <CancelCommandChip />
+            <FastTravelChannelBar />
+          </div>
+          <SkillDock />
+          <ExpClockStrip />
+        </div>
       </div>
 
-      {/* M6 "World & Town": zone/map label + walk arrows (functional; theming
-          polish is a later task). */}
-      <WalkControls />
+      {/* Drops corner (commons/rares/stones) — its own fixed offset clearing
+          the bottom dock, see DropFeed.tsx's doc. */}
+      <DropFeedCorner />
+
+      <GoalLadderOverlaySlot overlayRef={questOverlayRef} />
 
       {/* Town NPCs phase 3 (final): pahpu's shop / lungdueng's refine dialog —
           tap-again-to-talk gated (see `TownNpcPanelHost.tsx`), not an always-on
-          panel anymore. */}
+          panel. Each portals its own `ModalPortal` (z-70). */}
       <TownNpcPanelHost />
-      {/* Owner UX round (2026-07-09): drives the ปุ่มตีบวก "smith trip" state
-          machine to completion — renders nothing, see SmithTripWatcher.tsx. */}
-      <SmithTripWatcher />
+      {/* Owner UX round (2026-07-09), generalized R2.5-W3 to any town NPC:
+          drives the ปุ่มตีบวก-style "npc trip" state machine to completion —
+          renders nothing, see NpcTripWatcher.tsx. */}
+      <NpcTripWatcher />
       {/* Owner UX round (2026-07-09): drives the "walk to the gate first"
           state machine to completion — renders nothing, see
           GateTripWatcher.tsx. */}
       <GateTripWatcher />
-
-      <GoalLadder />
-
-      <div className="flex flex-col gap-3.5 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3.5 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
-        <SkillBar />
-        {/* Quick-use potions stay near the hero's HP/mana rows above (owner ask:
-            "potions near HP/mana") — the auto-use ON/OFF + thresholds are a
-            tuning concern, not an in-the-moment action, so they moved into the
-            settings drawer (M6 settings-panel task) instead of living here. */}
-        <ConsumableBar />
-        <div className="h-px bg-ddp-border-soft" />
-        <StatPanel />
-        {/* M7 Gear & Drops: equipped weapon/armor summary, right by the stat
-            panel per the task brief. */}
-        <EquippedLoadout />
-        <div className="h-px bg-ddp-border-soft" />
-        {/* Settings row (tertiary tier): account/help on the left, the settings
-            drawer (auto-behavior + audio/language, M6 settings-panel task) on
-            the right — no longer split around a speed selector (removed, M6.7). */}
-        <div
-          data-onboarding-anchor="settings-row"
-          className="flex flex-wrap items-center justify-between gap-2.5"
-        >
-          <SwitchCharacterLink />
-          <div className="flex flex-wrap items-center gap-2">
-            <InventoryButton />
-            <RefineButton />
-            <HallOfFameButton />
-            <FriendsButton />
-            <CodexButton />
-            {/* "ตำราตำนาน" — a NEW, standalone menu entry (endgame v1.2/v1.3 owner spec),
-                invisible until `tomeUnlocked` (see AsuraTomeButton.tsx's own doc). */}
-            <AsuraTomeButton />
-            <SettingsButton />
-          </div>
-        </div>
-      </div>
     </div>
   );
 });

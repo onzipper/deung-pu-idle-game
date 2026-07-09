@@ -10,6 +10,10 @@
  * push `cohortStatus` (chip visibility/pulsing) and `cohortNet` (RTT + per-member lag,
  * ~1Hz) into the store. Renders NOTHING while `cohortStatus.kind === "solo"` (not in a
  * party, or alone in my zone) — the overwhelming common case, zero HUD footprint.
+ *
+ * R2-W2 "fullscreen HUD": no longer positions ITSELF (`absolute top-[14%]
+ * right-2`) — `GameHud.tsx` stacks it as a normal flow child in the top-right
+ * overlay column, below the icon menu row.
  */
 
 import { useTranslations } from "next-intl";
@@ -78,7 +82,7 @@ export function PartySignalChip() {
       : null;
 
   return (
-    <div ref={rootRef} className="pointer-events-auto absolute top-[14%] right-2 z-10">
+    <div ref={rootRef} className="pointer-events-auto relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

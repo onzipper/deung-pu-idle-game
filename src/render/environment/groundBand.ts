@@ -4,6 +4,14 @@
  * biome activation — texture is static; scrolling foreground detail lives in
  * the near `ParallaxLayer` (`groundProps.ts`), not here.
  *
+ * R2.5 "Game Screen" W1: both builders below also layer a few progressively
+ * darker flat-alpha bands over the fill as it sinks deeper (see
+ * `addDepthShading()`) — a plain single-color rect reads fine at the old
+ * ~80px depth, but the fullscreen ground bleed can now run to ~1000 world px
+ * on a tall portrait screen, and a THAT tall flat color reads as an obvious
+ * seam against the horizon. Still flat-alpha layered rects, never a gradient
+ * (the POC-bug rule) — every radius/height stays `safeRadius()`-clamped.
+ *
  * W3 "โลกมีมิติ" ground-layer promotion adds two terrain-tracking siblings,
  * used ONLY when `BiomeScene` decides a zone's resolved terrain is genuinely
  * non-flat (see that file's doc comment) — `buildGroundBand` above stays the
@@ -26,6 +34,25 @@ import type { BiomeDef } from "@/render/environment/biomes";
 import { adjustLightness } from "@/render/environment/colorUtils";
 import type { Terrain } from "@/render/worldDepth/terrain";
 import { safeRadius } from "@/render/theme";
+
+/** R2.5 "Game Screen" W1: a handful of progressively darker flat-alpha bands
+ * layered over the fill as it sinks deeper — reads as gentle depth/shadow on
+ * a tall fullscreen bleed instead of one flat color running for ~1000 world
+ * px. Still layered flat-alpha rects (never a gradient); every height is
+ * `safeRadius()`-clamped. Cheap no-op for the old shallow (~80px) depth. */
+function addDepthShading(g: Graphics, baseColor: number, x: number, top: number, width: number, depth: number): void {
+  const BANDS = 5;
+  const shadeDepth = depth - 10; // skip past the top highlight strip
+  if (shadeDepth <= 0) return;
+  const bandH = shadeDepth / BANDS;
+  for (let i = 1; i <= BANDS; i++) {
+    const frac = i / BANDS;
+    g.rect(x, top + 10 + bandH * (i - 1), width, safeRadius(bandH + 1)).fill({
+      color: adjustLightness(baseColor, -0.08 * frac),
+      alpha: 0.3 * frac,
+    });
+  }
+}
 
 export function buildGroundBand(
   biome: BiomeDef,
@@ -57,6 +84,8 @@ export function buildGroundBand(
     });
   }
 
+  addDepthShading(g, biome.ground.base, x, groundY, width, bandDepth);
+
   return g;
 }
 
@@ -64,9 +93,9 @@ export function buildGroundBand(
  * `[x, x+width]` every `step` px, ALWAYS including the exact right edge (same
  * end-inclusive contract as `Terrain.polyline`) — pure, no Pixi, so it's
  * cheaply unit-testable against `terrain.groundY` directly. `terrain.groundY`
- * clamps internally to its own zone width, so sampling past it (the -MARGIN/
- * +MARGIN letterbox buffer `BiomeScene` draws into) simply extends the
- * nearest edge height flatly — the same over-draw the flat band already does. */
+ * clamps internally to its own zone width, so sampling past it (the
+ * letterbox/bleed buffer `BiomeScene` draws into) simply extends the nearest
+ * edge height flatly — the same over-draw the flat band already does. */
 export function sampleGroundLine(terrain: Terrain, x: number, width: number, step: number): number[] {
   const s = Math.max(1, step);
   const right = x + width;
@@ -125,6 +154,11 @@ export function buildGroundPolygon(
       alpha: 0.25 + Math.random() * 0.25,
     });
   }
+
+  // Flat `groundY` reference (not per-x terrain height) — a background depth
+  // cue this far below the surface doesn't need to hug the slope, and reusing
+  // the same helper as `buildGroundBand` keeps the two visually consistent.
+  addDepthShading(g, biome.ground.base, x, groundY, width, bandDepth);
 
   return g;
 }

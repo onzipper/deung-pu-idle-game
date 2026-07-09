@@ -114,7 +114,7 @@ export const CONTEXTUAL_TIPS: readonly ContextualTipDef[] = [
   },
   {
     id: "statPointsPiling",
-    anchor: "stat-panel",
+    anchor: "character-menu",
     mood: "warning",
     trigger: (_prev, next) =>
       !next.autoAllocate && next.heroes.some((h) => h.statPoints > 9),

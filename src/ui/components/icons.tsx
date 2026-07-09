@@ -124,6 +124,19 @@ export function BossIcon({ className }: LineIconProps) {
   );
 }
 
+/** Refine — a smith's hammer (R2.5-W3 menu-row "ตีบวก" tile, absorbing
+ * `RefineButton.tsx`'s old 🔨-emoji glyph into the gold-line icon set the
+ * rest of the icon row already uses). */
+export function RefineIcon({ className }: LineIconProps) {
+  return (
+    <LineIcon className={className}>
+      <path d="M14.5 3.5l6 6-2.5 2.5-6-6z" />
+      <path d="M13 6l-9 9v4h4l9-9" />
+      <path d="M4.5 18.5l1 1" />
+    </LineIcon>
+  );
+}
+
 /** Settings — a gear. */
 export function SettingsIcon({ className }: LineIconProps) {
   return (
@@ -152,6 +165,17 @@ export function MapIcon({ className }: LineIconProps) {
     <LineIcon className={className}>
       <path d="M9 4 4 6v14l5-2 6 2 5-2V4l-5 2-6-2z" />
       <path d="M9 4v14M15 6v14" />
+    </LineIcon>
+  );
+}
+
+/** Character — a single person (R2-W2 icon menu row: the NEW "ตัวละคร" panel
+ * trigger, distinct from `FriendsIcon`'s two-person glyph). */
+export function CharacterIcon({ className }: LineIconProps) {
+  return (
+    <LineIcon className={className}>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
     </LineIcon>
   );
 }

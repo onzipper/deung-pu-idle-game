@@ -2,7 +2,7 @@
  * Owner UX round (2026-07-09) "เดินไปที่ประตูก่อน แล้วค่อยวาป" — store-level wiring
  * tests for `startGateTrip`/`cancelGateTrip`/`advanceGateTrip` and every OTHER
  * store action that must cancel an in-flight gate trip as a side effect
- * (mirrors `smithTrip`'s own cancel wiring, which has no dedicated store-level
+ * (mirrors `npcTrip`'s own cancel wiring, which has no dedicated store-level
  * test file — this one exists because the brief calls out "each cancel
  * reason" as something to pin). The pure arrival/timeout/death/zone-change
  * decision itself is covered headlessly in `ui/world/__tests__/gateTrip.test.ts`;
@@ -73,7 +73,8 @@ describe("gate trip store wiring", () => {
       world: WORLD_FARM,
       gateTrip: "idle",
       gateTripTarget: null,
-      smithTrip: "idle",
+      npcTrip: "idle",
+      npcTripTarget: null,
       heroes: heroAt(400),
     });
   });
@@ -91,16 +92,18 @@ describe("gate trip store wiring", () => {
     expect(s.pendingInput.walkToZone).toBeNull();
   });
 
-  it("startGateTrip cancels an in-flight smith trip (mutual exclusion)", () => {
-    useGameStore.setState({ smithTrip: "walking" });
+  it("startGateTrip cancels an in-flight npc trip (mutual exclusion)", () => {
+    useGameStore.setState({ npcTrip: "walking", npcTripTarget: "npc:lungdueng" });
     useGameStore.getState().startGateTrip(876, { mapId: "map1", zoneIdx: 3 });
-    expect(useGameStore.getState().smithTrip).toBe("idle");
+    expect(useGameStore.getState().npcTrip).toBe("idle");
+    expect(useGameStore.getState().npcTripTarget).toBeNull();
   });
 
-  it("startSmithTrip cancels an in-flight gate trip (mutual exclusion, the other direction)", () => {
+  it("startNpcTrip cancels an in-flight gate trip (mutual exclusion, the other direction)", () => {
     useGameStore.getState().startGateTrip(876, { mapId: "map1", zoneIdx: 3 });
     expect(useGameStore.getState().gateTrip).toBe("walking");
-    useGameStore.getState().startSmithTrip(); // world is farm -> takes the "traveling" branch
+    // world is farm -> takes the "traveling" branch
+    useGameStore.getState().startNpcTrip("npc:lungdueng");
     expect(useGameStore.getState().gateTrip).toBe("idle");
     expect(useGameStore.getState().gateTripTarget).toBeNull();
   });

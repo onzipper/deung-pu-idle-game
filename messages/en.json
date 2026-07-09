@@ -9,6 +9,8 @@
   },
   "hud": {
     "stageLabel": "Zone",
+    "goldAria": "Gold",
+    "materialsAria": "Enhancement Stones",
     "botMasterOn": "Bot: ON",
     "botMasterOff": "Bot: OFF",
     "botMasterAriaOn": "Turn the bot off (disables all automation)",
@@ -28,7 +30,10 @@
     "bossReadyNo": "⚠ Power may not be enough",
     "challengeBossButton": "⚔ Challenge Boss",
     "challengeBossAriaReady": "Challenge Boss",
-    "challengeBossAriaNotReady": "Challenge Boss (not available yet)"
+    "challengeBossAriaNotReady": "Challenge Boss (not available yet)",
+    "characterMenuAria": "Character",
+    "characterPanelTitle": "Character",
+    "characterPanelCloseAria": "Close character panel"
   },
   "ladder": {
     "rungs": {
@@ -57,10 +62,34 @@
     },
     "powerRatioLabel": "Power {pct}%",
     "bossStatsLabel": "Boss HP {hp} · ATK {atk}",
-    "mapNumberLabel": "Map {n}"
+    "mapNumberLabel": "Map {n}",
+    "tabs": {
+      "quest": "Quests",
+      "party": "Party"
+    },
+    "tags": {
+      "main": "Main",
+      "side": "Side",
+      "daily": "Daily"
+    },
+    "dailyClaimHint": "Claim at the Village Chief",
+    "collapseAria": "Collapse quest tracker",
+    "expandAria": "Expand quest tracker",
+    "party": {
+      "empty": "No party yet",
+      "emptyHint": "Invite friends to hunt together",
+      "manageButton": "Manage party",
+      "onlineLabel": "Online",
+      "offlineLabel": "Offline"
+    }
   },
   "panels": {
     "skillsLabel": "Skills",
+    "dockCollapseAria": "Collapse skill dock",
+    "dockExpandAria": "Expand skill dock",
+    "hpBarLabel": "HP",
+    "mpBarLabel": "MP",
+    "expBarLabel": "EXP",
     "heroDeadBadge": "Dead",
     "skillAriaLabel": "{heroName}: {skillName}{status, select, dead { (dead)} cooldown { (cooldown {seconds}s)} nomana { (no mana)} other {}}",
     "autoSkillToggle": "✨ Auto Skill: {state, select, on {ON} other {OFF}}",
@@ -110,6 +139,15 @@
       "buff": "+{percent}% ATK for {seconds}s",
       "mana": "Mana {cost}",
       "cooldown": "CD {cd}s"
+    },
+    "skillDetail": {
+      "title": "Skills",
+      "closeButton": "Close",
+      "listAria": "Skill list",
+      "statusReady": "Ready",
+      "statusCooldown": "Cooldown {seconds}s",
+      "statusNoMana": "Not enough mana",
+      "statusDead": "Hero is down"
     }
   },
   "stats": {
@@ -159,21 +197,26 @@
       "atmosphereLabel": "Day-night atmosphere"
     },
     "botModal": {
-      "title": "Bot settings",
+      "title": "Bot",
       "closeButton": "Close",
       "masterOffHint": "The bot switch is off — you can still adjust these settings, but they won't run until you turn the bot switch back on.",
+      "skillGroup": "Auto skills",
+      "skillGroupHint": "Tap a skill's icon to put it into / take it out of an auto-cast slot — the hero casts it on its own once this switch is on.",
       "combatGroup": "Combat",
       "combatGroupHint": "Let the hero cast skills and allocate stat points on its own.",
+      "generalGroup": "Auto settings",
+      "generalGroupHint": "Potion-use thresholds, town buy/sell trips, and auto-equipping the best gear.",
       "potionGroup": "Potions",
       "potionGroupHint": "Auto-use HP/mana potions once a pool drops below its threshold.",
       "townGroup": "Town trips",
       "townGroupHint": "The bot warps to town to buy potions / sell / equip its best gear on its own.",
       "dropGroup": "Drops",
       "dropGroupHint": "Rules for what the bot sells/keeps per drop rarity on its town trips.",
-      "walkGroup": "Walking",
+      "walkGroup": "Walking / area",
       "walkGroupHint": "Behavior after your hero dies, and auto-advancing to the next zone.",
       "autoReturnHint": "After your hero respawns in town, walk back to farming automatically.",
-      "autoAdvanceHint": "Once a zone's quota is cleared, walk into the next unlocked zone automatically (never a boss room)."
+      "autoAdvanceHint": "Once a zone's quota is cleared, walk into the next unlocked zone automatically (never a boss room).",
+      "instantApplyNote": "Every setting here applies instantly — nothing to save."
     },
     "bot": {
       "title": "Helper bots",
@@ -191,7 +234,9 @@
       "masterOffDisabledHint": "Turn the main bot switch on first to enable this.",
       "autoSlotsTitle": "Auto-cast slots",
       "autoSlotEmpty": "Empty",
-      "autoSlotClearAria": "Remove {skill} from its auto-cast slot"
+      "autoSlotClearAria": "Remove {skill} from its auto-cast slot",
+      "autoSlotPickerAria": "{skill}: tap to add to / remove from an auto-cast slot",
+      "autoSlotPickerFull": "All auto-cast slots are full"
     },
     "autoSell": {
       "title": "Auto-dispose drops",
@@ -221,7 +266,7 @@
       },
       "allocateStats": {
         "title": "Spend stat points on level-up",
-        "body": "Every level-up grants 3 stat points to allocate yourself (STR/DEX/INT/VIT). Tap the + button on a stat here to spend one, or flip on \"Auto Stat\" to let the system allocate for you."
+        "body": "Every level-up grants 3 stat points to allocate yourself (STR/DEX/INT/VIT). Tap this icon to open the \"Character\" panel, then tap the + button on a stat to spend one — or flip on \"Auto Stat\" to let the system allocate for you."
       },
       "castSkill": {
         "title": "Cast a skill yourself",
@@ -241,7 +286,7 @@
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Tap \"⚙ Settings\" to mute/unmute sound or switch languages, and tap \"📖 Guide\" to reopen the game guide anytime from this row. All automation now lives under the 🤖 Bot switch up top instead."
+        "body": "Tap the ⚙ gear icon to mute/unmute sound or switch languages, and the 📖 book icon to reopen the game guide anytime from this top-right corner. All automation lives under the 🤖 Bot switch down in the skill dock instead."
       },
       "outro": {
         "title": "You're ready!",
@@ -931,6 +976,7 @@
     "populationTooltip": "Players currently here (approximate)"
   },
   "shop": {
+    "menuAria": "Walk to Auntie Pu (Shop)",
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
     "tabBuy": "Buy",
@@ -1051,6 +1097,10 @@
     "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
     "smithTripTraveling": "🔨 Heading to Uncle Dueng…",
+    "npcTripWalkPahpu": "Walk over to Auntie Pu first",
+    "npcTripTravelingPahpu": "🧭 Heading to Auntie Pu…",
+    "npcTripWalkElder": "Walk over to the village head first",
+    "npcTripTravelingElder": "🚩 Heading to the village head…",
     "questRewardClaimed": "🎁 Quest reward: {summary}",
     "rewardGold": "+{amount} gold",
     "rewardMaterials": "+{amount} materials",
@@ -1102,6 +1152,7 @@
   },
   "refine": {
     "openButton": "🔨 Refine",
+    "menuAria": "Walk to Uncle Dueng (Refine)",
     "title": "Refine Station",
     "emptyHint": "Nothing to refine in this slot",
     "townOnlyHint": "Refining only works in town",
@@ -1405,6 +1456,32 @@
           "worldMap": "🗺️ The World Map is here — tap the zone name chip (top-left) to see every map and zone, how many players are online where, where your friends are, today's hot zone, and warp to any unlocked zone",
           "botDefault": "🤖 The bot now starts OFF when you log in — flip on AUTO whenever you want it to play for you"
         }
+      },
+      "2026-07-09n": {
+        "items": {
+          "uiSweep": "🎨 Every panel got the new matching look — inventory, shop, enhance, skills, bot, rankings, all in the gold dark-fantasy frame",
+          "refinePercent": "⚒️ The enhance panel now tells you everything up front — success % and ATK before → after (the hammer suspense stays)",
+          "skillPane": "📖 New skill inspector — tap a skill for full details: damage, mana, cooldown, all in one pane",
+          "botPanel": "🤖 Bot settings got a home of their own — tap ⚙ beside AUTO: auto skills, potion thresholds, and movement, neatly grouped",
+          "bigScreen": "🖥️ Desktop gets a much bigger game view with an MMO-style quest card overlaid on the field — mobile keeps its familiar layout"
+        }
+      },
+      "2026-07-09o": {
+        "items": {
+          "fullScreen": "🖥️ The game now fills your whole screen on every device — wider sky, deeper ground, and a fully overlaid MMO-style HUD",
+          "menuRow": "📱 Icon menu in the top-right corner — bag, character, rankings, friends, world map, settings, all one tap away",
+          "npcButtons": "🚶 New shop/enhance/quest buttons — tap one and your character walks to the NPC and starts the conversation on arrival",
+          "minimap": "🧭 A mini map sits in the top-right corner — your position, zone gates, and how many players share your zone; tap it to open the World Map",
+          "tapFix": "🎯 Fixed 'tap did nothing' on 120Hz displays — every command now reliably reaches the game (bot-off-at-login now truly works)"
+        }
+      },
+      "2026-07-10": {
+        "items": {
+          "questTracker": "📜 The quest tracker got a makeover! [Main]/[Goal]/[Daily] groups in one place — see daily quest progress from any zone (still claim at the Village Chief)",
+          "partyTab": "👥 A Party tab right on the quest tracker — see who's online and their class/level without opening a menu",
+          "skillDock": "⚔️ New MMO-style skill bar — numbered skills + AUTO + quick potions, all in one row",
+          "collapse": "👁️ Blocking your view? Collapse it! The quest tracker folds to a small chip and the skill bar to a thin strip (AUTO stays tappable) — your choice is remembered"
+        }
       }
     }
   },
@@ -1592,6 +1669,7 @@
     "defeated": "🌟 Sia Jong is down! Collecting your reward…"
   },
   "questBoard": {
+    "menuAria": "Walk to the Village Head (Quests)",
     "title": "Quest Board",
     "closeButton": "Close",
     "dailySectionTitle": "Today's Dailies",

@@ -24,6 +24,7 @@ import { useTranslations } from "next-intl";
 import { ITEM_TEMPLATES } from "@/engine";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import type { InventoryItem } from "@/ui/gear/types";
+import { Button } from "@/ui/components/primitives/Button";
 import { classTintClass, GEAR_SLOT_ICONS, prestigeNameClass, RARITY_COLORS, weaponGlyph } from "@/ui/labels";
 
 export interface SellRowProps {
@@ -123,14 +124,14 @@ export function SellRow({
     <div className="flex items-center gap-2 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 py-1.5">
       {nameBlock}
       <div className="flex shrink-0 gap-1.5">
-        <button
-          type="button"
+        <Button
+          variant="danger"
           disabled={busy}
           onClick={() => sellGuard.trigger(needsConfirm, () => onSell(item))}
-          className="min-h-11 rounded-(--ddp-radius-md) border border-amber-400/60 bg-amber-400/10 px-2.5 text-[11px] font-bold text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
+          className="px-2.5 text-[11px]"
         >
           {sellGuard.confirming ? t("confirmSell") : t("sellButton")}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -168,9 +168,12 @@ function CornerPill({
 }
 
 /** Arena-corner coalesced pill stack for common/rare item drops + stones —
- * MUST be mounted INSIDE the arena `div` (`GameHud.tsx`), mirroring
- * `BuffBadgeHub`'s `absolute top-[14%] left-2 z-10` on the opposite corner.
- * Renders nothing once the stack is empty. */
+ * mounted as a fullscreen-overlay sibling in `GameHud.tsx` (R2-W2:
+ * previously an arena-relative box; the arena IS the fullscreen canvas now).
+ * `bottom` is a generous fixed offset clearing the bottom-center skill dock +
+ * EXP/clock strip (NEEDS PLAYTEST: exact clearance vs. real dock height
+ * across viewports — same honest caveat this file's R2-W5 quest-overlay
+ * sibling already carried). Renders nothing once the stack is empty. */
 export function DropFeedCorner() {
   const dropFeed = useGameStore((s) => s.dropFeed);
   const stoneFeed = useGameStore((s) => s.stoneFeed);
@@ -178,7 +181,7 @@ export function DropFeedCorner() {
   if (visible.length === 0) return null;
 
   return (
-    <div className="pointer-events-none absolute bottom-2 right-2 z-10 flex flex-col items-end gap-1">
+    <div className="pointer-events-none absolute right-2 bottom-28 z-10 flex flex-col items-end gap-1 sm:bottom-32">
       {visible.map((entry, i) => (
         <CornerPill
           key={entry.id}

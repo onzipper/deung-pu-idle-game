@@ -11,7 +11,7 @@
 | ฟอนต์ | เปลี่ยน Chakra Petch → **Kanit 600/800** (display/เลข/ปุ่ม) + **Prompt 400** (เนื้อความ) — 3 น้ำหนักเท่านั้น |
 | สี epic | **คงทอง** (ผู้เล่นถูก train แล้ว) — ม่วง = สี chrome/UI (หัวแผง/active tab/ปุ่มรอง) ไม่ใช่สีของดรอป |
 | Joystick เสมือน | **ไม่เอา** — tap-to-move + AUTO ครอบคลุม; ทบทวนใหม่ได้ตอนโลกแกน x,y (R4) |
-| ปุ่มร้านค้า/ภารกิจบน HUD | **ไม่เอา — คงกติกา NPC**: ร้านค้า/ตีบวก/กระดานเควสเปิดจากเดินไปคุย NPC เท่านั้น (เข้าทาง open world) · ปุ่ม HUD มีเฉพาะของไม่ผูกโลก: กระเป๋า สกิล จัดอันดับ เพื่อน ตั้งค่า แผนที่โลก |
+| ปุ่มร้านค้า/ภารกิจบน HUD | ~~ไม่เอา — คงกติกา NPC~~ **แก้ไข (2026-07-09 R2.5, เคาะทับของเดิม): ครบชุด + ปุ่ม NPC = สั่งเดินไปหา** — ปุ่ม ร้านค้า/ตีบวก/ภารกิจ ขึ้น HUD ได้ โดยมีเงื่อนไขเดียว: ปุ่มต้อง**สั่งเดินไปหา NPC เท่านั้น** (`startNpcTrip`, fast-travel+walk ผ่าน seam tap-to-talk เดิม) **ห้ามเปิดแผงทางไกล** — กติกา "โลกคือสถานที่จริง" ยังอยู่ครบ แค่สั่งเดินได้เร็วขึ้นจากเมนู (`NpcTripButtons.tsx`, R2.5-W3) |
 | แผงตีบวก | **โชว์โอกาสสำเร็จ %** ตาม mockup + **คง suspense** เฉลยผลตอนตีค้อนจังหวะสุดท้าย (สองอย่างไม่ขัดกัน) |
 | ทอง = ตัวเลข/ขอบ/CTA เท่านั้น | เนื้อความเป็น `--ddp-ink` เสมอ (กันอ่านยาก) · font ≥11px |
 
@@ -34,10 +34,10 @@
 | ENHANCE การ์ด +10→+11 + ATK 70→77 + **โอกาสสำเร็จ 65%** + วัสดุ chips + ราคา | RefinePanel (ลุงดึ๋ง) | reskin + **เพิ่มบรรทัด %** (เคาะแล้ว) — ระวัง state machine reveal-on-final-strike ห้ามพัง (migrate ท้ายสุดของ R2) |
 | SKILL UI รายการสกิล + detail pane (ภาพใหญ่ คำอธิบาย MP คูลดาวน์) | skill ⓘ inspector (skillStats.ts) | ยกเป็น detail pane เต็มตาม mockup — **ไม่มีเลเวลสกิล** (นั่นคือ backlog ระบบใหม่) |
 | BOT UI แผงจริงจัง (สกิลออโต้ติ๊กเลือก + เกณฑ์ยา HP/MP + โหมดเดิน + โซนที่กำหนด) | ตัวเลือกมี**ครบแล้ว**ใน Settings (บอท per-hero M8.6) | ยกออกมาเป็นแผง Bot ของตัวเอง จัดหน้าตาม mockup |
-| Quest tracker ซ้อนซ้ายบน ([หลัก]/[รอง]/[รายวัน] + progress) | quest card / GoalLadder | ทำเป็น overlay panel บนจอเกม (desktop ก่อน) |
+| Quest tracker ซ้อนซ้ายบน ([หลัก]/[รอง]/[รายวัน] + progress) | quest card / GoalLadder | **ทำแล้ว R2.6**: แท็บ [เควส\|ปาร์ตี้] (เคาะ 2 แท็บ) + tag [หลัก]/[รอง]/[รายวัน] ([รายวัน] อ่านอย่างเดียว — รับรางวัลที่ผู้ใหญ่บ้านเหมือนเดิม) + **หุบได้ทุกจอ เหลือชิปเล็ก** (เคาะ 2026-07-10, localStorage per-device) — breadcrumb rung เดิมถูกตัด (HoF เปิดจาก menu row) |
 | Portrait + Lv + HP/MP/EXP + พลังต่อสู้ มุมซ้ายบน | HUD มีข้อมูลครบ | StatBar primitive + จัดเป็นบล็อค portrait ตาม mockup |
 | แถบเงิน/เพชรขวาบน | ทอง + หินเสริมพลัง | CurrencyChip primitive |
-| Skill bar เลขกำกับ 1-5 + AUTO + ยาด่วน x99 | SkillBar + auto-potion | reskin + ช่องยาด่วนแบบ mockup |
+| Skill bar เลขกำกับ 1-5 + AUTO + ยาด่วน x99 | SkillBar + auto-potion | **ทำแล้ว R2.6**: SkillDock แถวเดียวตาม ref (tile สกิลเลขกำกับ + AUTO + ยาด่วน badge จำนวน) + **หุบเหลือแถบบาง AUTO ค้างไว้ + ลูกศรกลาง** (เคาะ 2026-07-10, localStorage per-device); ExpClockStrip โชว์ตลอด |
 | จอเกมใหญ่ + HUD ซ้อน | จอเกม 900×300 กรอบ | **desktop/แนวนอน**: จอสูงขึ้น ~16:9 + HUD overlay (มี scrim มืดรอง — กันจมบน biome สว่าง) · **มือถือแนวตั้ง: คงกรอบเดิม** (overlay บังเกม) |
 | Toast/notification + popup ยืนยัน + tab | NoticeToast / useConfirmGuard / tab strips | Toast/ConfirmPopup/Tab primitives |
 

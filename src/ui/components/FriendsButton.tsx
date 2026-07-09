@@ -10,9 +10,12 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { FriendsIcon } from "@/ui/components/icons";
+import { IconTileButton } from "@/ui/components/primitives/IconTileButton";
 import { FriendsPanel } from "@/ui/friends/FriendsPanel";
 import { useFriendsPoll, type FriendToast } from "@/ui/friends/useFriendsPoll";
+import { onOpenFriendsPanelRequest } from "@/ui/openFriendsSignal";
 
 function PingToast({
   toast,
@@ -55,23 +58,29 @@ export function FriendsButton() {
   const t = useTranslations("friends");
   const poll = useFriendsPoll(open);
 
+  // R2.6 quest-tracker: the party tab's "จัดการปาร์ตี้" button opens this panel
+  // via `openFriendsSignal.ts` (same idiom as `openSettingsSignal.ts`) instead
+  // of lifting `open` state up through `GameHud.tsx`.
+  useEffect(() => onOpenFriendsPanelRequest(() => setOpen(true)), []);
+
   return (
     <>
-      <button
-        type="button"
+      <IconTileButton
+        icon={<FriendsIcon className="h-5 w-5" />}
         onClick={() => setOpen(true)}
-        className="relative flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong px-3 text-xs font-bold text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-[0.95]"
-      >
-        <span aria-hidden>{"\u{1F465}"}</span> {t("openButton")}
-        {poll.status === "ready" && poll.pendingCount > 0 && (
-          <span
-            aria-hidden
-            className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ddp-bad px-1 text-[10px] font-black text-white"
-          >
-            {poll.pendingCount > 9 ? "9+" : poll.pendingCount}
-          </span>
-        )}
-      </button>
+        aria-label={t("openButton")}
+        title={t("openButton")}
+        badge={
+          poll.status === "ready" && poll.pendingCount > 0 ? (
+            <span
+              aria-hidden
+              className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ddp-bad px-1 text-[10px] font-black text-white"
+            >
+              {poll.pendingCount > 9 ? "9+" : poll.pendingCount}
+            </span>
+          ) : undefined
+        }
+      />
 
       {poll.toasts.length > 0 && (
         <div className="pointer-events-none fixed top-14 left-1/2 z-60 flex -translate-x-1/2 flex-col items-center gap-1.5">

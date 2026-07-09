@@ -44,6 +44,7 @@ import {
   lookupTemplate,
   type GearSlot,
   type HeroClass,
+  type StatKey,
 } from "@/engine";
 import { executeAwakenLegendary } from "@/ui/asura/awakenFlow";
 import { awakenGate } from "@/ui/asura/awakenView";
@@ -58,24 +59,58 @@ import { EquipmentDoll } from "@/ui/components/EquipmentDoll";
 import { BagIcon, MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { Button } from "@/ui/components/primitives/Button";
+import { ItemTile } from "@/ui/components/primitives/ItemTile";
 import { Panel } from "@/ui/components/primitives/Panel";
 import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
-import {
-  classTintClass,
-  GEAR_SLOT_ICONS,
-  gearNameClass,
-  HERO_ICONS,
-  RARITY_COLORS,
-  RARITY_GLOW,
-  TIER_BORDER_COLORS,
-  weaponGlyph,
-} from "@/ui/labels";
-import { useGameStore } from "@/ui/store/gameStore";
+import { TabRow } from "@/ui/components/primitives/TabRow";
+import { classTintClass, GEAR_SLOT_ICONS, gearNameClass, HERO_ICONS, RARITY_COLORS, weaponGlyph } from "@/ui/labels";
+import { useGameStore, type HeroSummary } from "@/ui/store/gameStore";
 
 const SLOT_ORDER: readonly GearSlot[] = ["weapon", "armor"];
 
-function tierBorder(tier: number): string {
-  return TIER_BORDER_COLORS[tier] ?? TIER_BORDER_COLORS[6];
+/** Fixed display order (matches `StatPanel.tsx`'s `STAT_ORDER` — the engine
+ * only has these 4 allocatable axes, no 5th "AGI" axis exists to show). */
+const STAT_ORDER: readonly StatKey[] = ["str", "dex", "int", "vit"];
+
+/**
+ * R2-W3 "sweep แผงตาม mockup" — the EQUIPMENT panel's read-only stat column
+ * (mockup: STR/DEX/INT/VIT + พลังต่อสู้ beside the paper-doll). Presentational
+ * only, off the same throttled `HeroSummary` snapshot `StatPanel.tsx` reads —
+ * this is NOT a second stat-allocation surface (no +buttons here; allocating
+ * still lives exclusively in `StatPanel.tsx`, avoiding two places that "spend
+ * a point" per the one-mental-model-per-feature rule).
+ */
+function EquipStatBlock({ hero, className = "" }: { hero: HeroSummary; className?: string }) {
+  const t = useTranslations("stats");
+  return (
+    <div
+      className={`flex shrink-0 flex-col gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 p-2.5 ${className}`}
+    >
+      <span className="text-center text-[10px] font-bold tracking-wide text-ddp-ink-muted uppercase">
+        {t("title")}
+      </span>
+      <div className="flex flex-row flex-wrap gap-x-3 gap-y-1 md:flex-col md:flex-nowrap md:gap-y-1.5">
+        {STAT_ORDER.map((stat) => (
+          <div key={stat} className="flex min-h-4 items-center justify-between gap-2 text-xs">
+            <span
+              className={`font-semibold ${
+                hero.primaryStat === stat ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
+              }`}
+            >
+              {t(`names.${stat}`)}
+            </span>
+            <span className="font-bold tabular-nums text-ddp-ink">{hero.stats[stat]}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-0.5 flex items-center justify-between gap-2 border-t border-ddp-border-soft/60 pt-1.5 text-xs">
+        <span className="font-semibold text-ddp-ink-muted">{t("combatPower")}</span>
+        <span className="font-black tabular-nums text-ddp-gold-bright">
+          {hero.combatPower.toLocaleString()}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function GridCell({
@@ -94,8 +129,6 @@ function GridCell({
   const t = useTranslations("inventory");
   if (!template) return null; // stale/retired template — defensively skip
 
-  const colors = RARITY_COLORS[template.rarity];
-  const glow = RARITY_GLOW[template.rarity];
   const equipped = item.equippedSlot !== null;
   // "ตำราตำนาน" legendary (endgame v1.3): a distinct violet border/glow overrides the
   // ordinary tier-6 fallback (its tier, 11, is above every TIER_BORDER_COLORS band).
@@ -106,74 +139,38 @@ function GridCell({
   // when `classReq` isn't null — universal armor stays untinted).
   const glyph = template.slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor;
   const tint = classTintClass(template.classReq);
-  // EQUIPPED must be unmistakable (owner ask): bright border, wins over the
-  // tier/legendary border hierarchy — plus an on-tile "ใส่อยู่" label (not a
-  // corner dot). `selected`'s gold ring still layers independently on top.
-  const borderCls = equipped
-    ? "border-emerald-300"
-    : legendary
-      ? "border-fuchsia-400/80"
-      : tierBorder(template.tier);
-  const glowCls = equipped
-    ? "shadow-[0_0_16px_4px_rgba(52,211,153,0.55)]"
-    : legendary
-      ? "shadow-[0_0_16px_4px_rgba(217,70,239,0.45)]"
-      : glow;
 
   return (
-    <button
-      type="button"
+    <ItemTile
+      rarity={template.rarity}
+      tier={template.tier}
+      equipped={equipped}
+      legendary={legendary}
+      selected={selected}
       onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={tContent(`${item.templateId}.name`)}
-      className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 ${borderCls} ${glowCls} ${
-        selected ? "ring-2 ring-ddp-gold-bright" : ""
-      }`}
-    >
-      {equipped && (
-        <span
-          aria-hidden
-          className="absolute inset-x-0 top-0 rounded-t-(--ddp-radius-sm) bg-emerald-400 px-0.5 py-0.5 text-center text-[8px] leading-none font-black text-emerald-950"
-        >
-          {t("equippedBadge")}
-        </span>
-      )}
-      <span aria-hidden className={`text-xl leading-none ${equipped ? "mt-2.5" : ""} ${tint}`}>
-        {glyph}
-      </span>
-      <span className="text-[9px] font-bold text-ddp-ink-muted">
-        {t("tierShort", { tier: template.tier })}
-        {item.refineLevel > 0 && (
-          <span className="text-emerald-400"> {t("refinePlus", { level: item.refineLevel })}</span>
-        )}
-      </span>
-      {/* Armor's main glyph stays generic 🛡 (owner ask), so a class-locked
-          armor piece still gets this small required-class corner marker —
-          weapons already carry their class in the big glyph above now, so
-          this would just duplicate it there. */}
-      {template.slot === "armor" && template.classReq && (
-        <span
-          aria-hidden
-          className="absolute bottom-0.5 left-0.5 text-[10px] leading-none"
-          title={t("classNames." + template.classReq)}
-        >
-          {HERO_ICONS[template.classReq]}
-        </span>
-      )}
-      {colors.icon && (
-        <span
-          aria-hidden
-          className="absolute bottom-0.5 right-0.5 text-[10px] leading-none"
-        >
-          {colors.icon}
-        </span>
-      )}
-      {isNew && !equipped && (
-        <span className="absolute top-0.5 left-0.5 rounded-sm bg-rose-500 px-1 text-[8px] font-black text-white uppercase">
-          {t("newBadge")}
-        </span>
-      )}
-    </button>
+      ariaLabel={tContent(`${item.templateId}.name`)}
+      glyph={glyph}
+      glyphClassName={tint}
+      subLabel={t("tierShort", { tier: template.tier })}
+      refineBadge={item.refineLevel > 0 ? t("refinePlus", { level: item.refineLevel }) : undefined}
+      // EQUIPPED must be unmistakable (owner ask): on-tile "ใส่อยู่" ribbon (not a corner dot).
+      topRibbon={equipped ? t("equippedBadge") : undefined}
+      // Armor's main glyph stays generic 🛡 (owner ask), so a class-locked armor piece
+      // still gets this small required-class corner marker — weapons already carry
+      // their class in the big glyph above now, so this would just duplicate it there.
+      cornerBottomLeft={
+        template.slot === "armor" && template.classReq ? (
+          <span title={t("classNames." + template.classReq)}>{HERO_ICONS[template.classReq]}</span>
+        ) : undefined
+      }
+      cornerTopLeft={
+        isNew && !equipped ? (
+          <span className="rounded-sm bg-rose-500 px-1 text-[8px] font-black text-white uppercase">
+            {t("newBadge")}
+          </span>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -429,7 +426,8 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   // (the real "⚒️ ตำราตำนาน" main-menu entry takes over from there).
   const tomePagesFound = useGameStore((s) => s.tomePagesFound);
   const tomeUnlocked = useGameStore((s) => s.tomeUnlocked);
-  const heroCls = useGameStore((s) => s.heroes[0]?.cls);
+  const hero = useGameStore((s) => s.heroes[0]);
+  const heroCls = hero?.cls;
   const inTown = useGameStore((s) => s.world.kind === "town");
   const sessionKnownTemplateIds = useGameStore((s) => s.sessionKnownTemplateIds);
   const setInventory = useGameStore((s) => s.setInventory);
@@ -526,7 +524,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     setSelectedInstanceId(instanceId);
   }
 
-  if (!heroCls) return null;
+  if (!hero || !heroCls) return null;
 
   return (
     <ModalPortal>
@@ -569,12 +567,17 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             row's height so the bag's `min-h-0`/`overflow-y-auto` chain has
             something bounded to clip against. */}
         <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:gap-4">
-        <EquipmentDoll
-          inventory={inventory}
-          activeTab={activeTab}
-          onSelectReal={handleSelectRealSlot}
-          className="md:w-45"
-        />
+        <div className="flex shrink-0 flex-col items-center gap-3 md:flex-row md:items-start">
+          <EquipmentDoll
+            inventory={inventory}
+            activeTab={activeTab}
+            onSelectReal={handleSelectRealSlot}
+            heroCls={heroCls}
+            heroLevel={hero.level}
+            className="md:w-52"
+          />
+          <EquipStatBlock hero={hero} className="w-full max-w-60 md:w-28" />
+        </div>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
 
         {/* Capacity bar + materials readout (M7.6 ตีบวก) */}
@@ -637,26 +640,18 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         )}
 
         {/* Tabs */}
-        <div className="flex items-center gap-1.5">
-          {SLOT_ORDER.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              onClick={() => {
-                setActiveTab(slot);
-                setSelectedInstanceId(null);
-              }}
-              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
-                activeTab === slot
-                  ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
-                  : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-              }`}
-            >
-              <span aria-hidden>{GEAR_SLOT_ICONS[slot]}</span>
-              {t(`slot.${slot}`)}
-            </button>
-          ))}
-        </div>
+        <TabRow
+          tabs={SLOT_ORDER.map((slot) => ({
+            id: slot,
+            label: t(`slot.${slot}`),
+            icon: GEAR_SLOT_ICONS[slot],
+          }))}
+          active={activeTab}
+          onChange={(slot) => {
+            setActiveTab(slot);
+            setSelectedInstanceId(null);
+          }}
+        />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
@@ -683,10 +678,15 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          {/* R2-W3: pinned at 4 columns (was `sm:grid-cols-5`) — the paper-doll
+              grew a character portrait + stat column beside it this wave, and
+              the modal's own width is capped (`md:max-w-2xl`) regardless of
+              viewport, so 5 columns' 64px-tile minimum no longer leaves enough
+              room; 4 keeps every tile a real, un-squeezed touch target. */}
           {items.length === 0 ? (
             <p className="text-[11px] text-ddp-ink-muted/70">{t("emptySlotHint")}</p>
           ) : (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+            <div className="grid grid-cols-4 gap-2">
               {items.map((it) => (
                 <GridCell
                   key={it.instanceId}

@@ -21,16 +21,38 @@
  * active disabling while the master is off (see `BotSettingsSection`'s
  * `masterOn` prop + `gameStore.ts`'s `toggleBotMaster` doc) — every other
  * toggle here is a plain per-frame-gated UI preference, safe to edit anytime.
+ *
+ * R2-W4 "promote to a dedicated บอท panel" (`docs/ui-reference-map.md`'s BOT
+ * UI row): visual/layout pass only — same single entry point (the ⚙ beside
+ * `BotMasterSwitch` in `SkillBar.tsx`, unchanged, "one mental model per
+ * feature"), same modal, same store wiring. Regrouped into the 3 clusters the
+ * mockup names (สกิลอัตโนมัติ / ตั้งค่าอัตโนมัติ / การเดิน · พื้นที่) via a
+ * boxed-`<section>` reskin using the R1/R2 token system; the old
+ * potion/town/drop sub-labels are kept as smaller inline captions nested
+ * inside the merged "ตั้งค่าอัตโนมัติ" box (`BotSettingsSection`/
+ * `AutoSellRulesSection` already self-header, so only `AutoPotionToggles`
+ * needed a caption added). The read-only auto-slot OVERVIEW (chips + ✕) is
+ * replaced by `SkillAutoSlotPicker` — a tap-to-toggle ICON grid per the
+ * mockup's "สกิลออโต้ติ๊กเลือก" ask, wired through the exact same
+ * `setAutoSlot` action `SkillBar.tsx`'s per-skill badge already uses (no new
+ * store/engine surface). No save button was added — every control here
+ * already applies instantly (see the module doc above); a small caption
+ * communicates that instead of a fake "บันทึก" affordance.
  */
 
 import { useTranslations } from "next-intl";
+import type { CSSProperties } from "react";
 import { AutoAdvanceToggle, AutoReturnToggle } from "@/ui/components/AutoReturnToggle";
 import { AutoPotionToggles } from "@/ui/components/AutoPotionToggles";
 import { AutoSellRulesSection } from "@/ui/components/AutoSellRulesSection";
 import { BotSettingsSection } from "@/ui/components/BotSettingsSection";
 import { InfoTip } from "@/ui/components/InfoTip";
 import { ModalPortal } from "@/ui/components/ModalPortal";
-import { useGameStore } from "@/ui/store/gameStore";
+import { Button } from "@/ui/components/primitives/Button";
+import { Panel } from "@/ui/components/primitives/Panel";
+import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
+import { HERO_ACCENT, SKILL_ICONS_BY_ID } from "@/ui/labels";
+import { useGameStore, type HeroSummary, type SkillSummary } from "@/ui/store/gameStore";
 
 function AutoAllocateToggleRow() {
   const autoAllocate = useGameStore((s) => s.autoAllocate);
@@ -82,44 +104,97 @@ function AutoCastToggleRow() {
   );
 }
 
-/** Read-only auto-cast SLOT overview: the assignment itself still happens via
- * the "+ อัตโนมัติ" badges under each skill in `SkillBar.tsx` (an owner-approved
- * shortcut — they mirror the same store state, see the task brief), but this
- * lets the player see/clear the whole loadout from the same consolidated
- * modal without hunting through the skill bar. */
-function AutoSlotsOverview() {
-  const hero = useGameStore((s) => s.heroes[0]);
+/** One tappable icon tile in the auto-cast slot picker (mockup: "สกิลออโต้
+ * ติ๊กเลือก") — checked = currently occupying an auto-cast slot. Tapping
+ * toggles it into the first free unlocked slot (or clears its current one),
+ * the EXACT toggle logic `SkillBar.tsx`'s `SkillButton` already uses against
+ * the same `setAutoSlot` action — this is a second entry point into the same
+ * state, not a new capability. */
+function SkillAutoSlotItem({
+  hero,
+  skill,
+  t,
+  tContent,
+}: {
+  hero: HeroSummary;
+  skill: SkillSummary;
+  t: ReturnType<typeof useTranslations>;
+  tContent: ReturnType<typeof useTranslations>;
+}) {
   const setAutoSlot = useGameStore((s) => s.setAutoSlot);
+  const inSlot = skill.autoSlot !== null;
+  const firstFreeSlot = hero.autoSlots.findIndex(
+    (id, i) => i < hero.unlockedSlots && id === null,
+  );
+  const canToggle = inSlot || firstFreeSlot >= 0;
+  const accent = HERO_ACCENT[hero.cls];
+  const icon = SKILL_ICONS_BY_ID[skill.id] ?? "✦";
+  const name = tContent(`skills.${skill.id}.name`);
+
+  function toggle(): void {
+    if (inSlot) setAutoSlot(skill.autoSlot!, null);
+    else if (firstFreeSlot >= 0) setAutoSlot(firstFreeSlot, skill.id);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={!canToggle}
+      aria-pressed={inSlot}
+      title={canToggle ? undefined : t("autoSlotPickerFull")}
+      aria-label={t("autoSlotPickerAria", { skill: name })}
+      style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
+      className={`flex min-h-11 items-center gap-2 rounded-(--ddp-radius-md) border px-2.5 py-2 text-left transition-colors duration-100 active:scale-[0.98] ${
+        inSlot
+          ? "border-emerald-400 bg-emerald-400/15"
+          : canToggle
+            ? "border-ddp-border-soft bg-black/25 hover:border-(--accent-soft)"
+            : "cursor-not-allowed border-ddp-border-soft/40 bg-black/10 opacity-50"
+      }`}
+    >
+      <span
+        aria-hidden
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-black/40 text-base leading-none"
+        style={{
+          borderColor: accent.solid,
+          boxShadow: inSlot ? `0 0 8px 1px ${accent.soft}` : undefined,
+        }}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">{name}</span>
+      <span
+        aria-hidden
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-(--ddp-radius-sm) border text-[11px] leading-none font-black ${
+          inSlot
+            ? "border-emerald-400 bg-emerald-400 text-emerald-950"
+            : "border-ddp-border-soft text-transparent"
+        }`}
+      >
+        ✓
+      </span>
+    </button>
+  );
+}
+
+/** The full picker: every LEARNED skill (current tier chain, same set
+ * `SkillBar.tsx` renders) as a checkable icon tile. Replaces the old
+ * read-only chip-list `AutoSlotsOverview` — same underlying state, denser
+ * and closer to the mockup's tick-select grid. */
+function SkillAutoSlotPicker() {
+  const hero = useGameStore((s) => s.heroes[0]);
   const t = useTranslations("settings.bot");
   const tContent = useTranslations("content");
 
-  if (!hero) return null;
-  const slots = hero.autoSlots.slice(0, hero.unlockedSlots);
-  if (slots.length === 0) return null;
+  if (!hero || hero.skills.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       <span className="text-[11px] text-ddp-ink-muted/80">{t("autoSlotsTitle")}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {slots.map((skillId, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center gap-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 py-1 text-[11px] font-semibold text-ddp-ink"
-          >
-            {skillId ? tContent(`skills.${skillId}.name`) : t("autoSlotEmpty")}
-            {skillId && (
-              <button
-                type="button"
-                onClick={() => setAutoSlot(i, null)}
-                aria-label={t("autoSlotClearAria", {
-                  skill: tContent(`skills.${skillId}.name`),
-                })}
-                className="text-ddp-ink-muted hover:text-ddp-ink"
-              >
-                ✕
-              </button>
-            )}
-          </span>
+      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {hero.skills.map((skill) => (
+          <SkillAutoSlotItem key={skill.id} hero={hero} skill={skill} t={t} tContent={tContent} />
         ))}
       </div>
     </div>
@@ -158,17 +233,19 @@ export function BotSettingsModal({ onClose }: BotSettingsModalProps) {
           onClick={onClose}
           className="absolute inset-0 bg-black/70"
         />
-        <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-4 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-            >
-              ✕ {t("closeButton")}
-            </button>
-          </div>
+        <Panel
+          variant="gold"
+          className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-hidden"
+        >
+          <PanelHeader
+            title={t("title")}
+            icon={<span aria-hidden>🤖</span>}
+            actions={
+              <Button variant="secondary" className="px-2.5 py-1.5 text-[11px]" onClick={onClose}>
+                ✕ {t("closeButton")}
+              </Button>
+            }
+          />
 
           <p className="text-[11px] text-ddp-ink-muted/80">{tHud("botMasterHint")}</p>
 
@@ -178,40 +255,38 @@ export function BotSettingsModal({ onClose }: BotSettingsModalProps) {
             </p>
           )}
 
-          <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-            <section className="flex flex-col gap-2.5">
-              <GroupHeader label={t("combatGroup")} hint={t("combatGroupHint")} />
-              <div className="flex flex-wrap gap-2">
-                <AutoCastToggleRow />
-                <AutoAllocateToggleRow />
+          <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+            {/* สกิลอัตโนมัติ — the master on/off + the tick-select icon grid. */}
+            <section className="flex flex-col gap-2.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/15 p-3">
+              <GroupHeader label={t("skillGroup")} hint={t("skillGroupHint")} />
+              <AutoCastToggleRow />
+              <SkillAutoSlotPicker />
+            </section>
+
+            {/* ตั้งค่าอัตโนมัติ — potion thresholds + town restock/sell-trip/
+                auto-equip + drop rules + auto-stat, merged into one box (each
+                sub-cluster keeps its own smaller caption/self-header). */}
+            <section className="flex flex-col gap-3 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/15 p-3">
+              <GroupHeader label={t("generalGroup")} hint={t("generalGroupHint")} />
+              <AutoAllocateToggleRow />
+
+              <div className="h-px bg-ddp-border-soft/60" />
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-semibold tracking-wider text-ddp-ink-muted/70 uppercase">
+                  {t("potionGroup")}
+                </span>
+                <AutoPotionToggles />
               </div>
-              <AutoSlotsOverview />
-            </section>
 
-            <div className="h-px bg-ddp-border-soft" />
-
-            <section className="flex flex-col gap-2.5">
-              <GroupHeader label={t("potionGroup")} hint={t("potionGroupHint")} />
-              <AutoPotionToggles />
-            </section>
-
-            <div className="h-px bg-ddp-border-soft" />
-
-            <section className="flex flex-col gap-2.5">
-              <GroupHeader label={t("townGroup")} hint={t("townGroupHint")} />
+              <div className="h-px bg-ddp-border-soft/60" />
               <BotSettingsSection masterOn={botMasterOn} />
-            </section>
 
-            <div className="h-px bg-ddp-border-soft" />
-
-            <section className="flex flex-col gap-2.5">
-              <GroupHeader label={t("dropGroup")} hint={t("dropGroupHint")} />
+              <div className="h-px bg-ddp-border-soft/60" />
               <AutoSellRulesSection />
             </section>
 
-            <div className="h-px bg-ddp-border-soft" />
-
-            <section className="flex flex-col gap-2.5">
+            {/* การเดิน / พื้นที่ */}
+            <section className="flex flex-col gap-2.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/15 p-3">
               <GroupHeader label={t("walkGroup")} hint={t("walkGroupHint")} />
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5">
@@ -225,7 +300,13 @@ export function BotSettingsModal({ onClose }: BotSettingsModalProps) {
               </div>
             </section>
           </div>
-        </div>
+
+          {/* บันทึก — every control above applies instantly (see the module
+              doc); this is a status caption, not a save action. */}
+          <p className="shrink-0 text-center text-[10px] text-ddp-ink-muted/60">
+            ✓ {t("instantApplyNote")}
+          </p>
+        </Panel>
       </div>
     </ModalPortal>
   );

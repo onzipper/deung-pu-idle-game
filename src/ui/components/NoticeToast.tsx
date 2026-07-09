@@ -3,12 +3,17 @@
 /**
  * M7.5 generic notice toasts — same store-driven, capped, oldest-first shape
  * as `DropFeed.tsx` but for plain i18n-keyed one-liners (fast-travel blocked
- * reasons, auto-sell trip results) rather than an item mint. Stacks BELOW the
- * drop-feed toasts (both are fixed/top, non-interactive).
+ * reasons, auto-sell trip results) rather than an item mint.
+ *
+ * R2-W2 "fullscreen HUD": moved from a fixed top-of-viewport stack to the
+ * bottom overlay, just above the skill dock (`GameHud.tsx`'s bottom region) —
+ * the mockup keeps transient status text near the action bar the player's
+ * thumb/eyes are already on, not up by the epic-drop `DropFeed` toasts.
  */
 
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
+import { Toast } from "@/ui/components/primitives/Toast";
 import { useGameStore, type NoticeEntry } from "@/ui/store/gameStore";
 
 const DISPLAY_MS = 3200;
@@ -24,9 +29,9 @@ function Notice({ entry }: { entry: NoticeEntry }) {
   }, []);
 
   return (
-    <div className="animate-buy-pulse pointer-events-none rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/80 px-3 py-1.5 text-xs font-bold text-ddp-ink shadow-(--ddp-shadow-btn)">
+    <Toast variant="info" onDismiss={() => dismiss(entry.id)}>
       {t(entry.messageKey, entry.params)}
-    </div>
+    </Toast>
   );
 }
 
@@ -35,7 +40,7 @@ export function NoticeToast() {
   if (notices.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed top-14 left-1/2 z-60 flex -translate-x-1/2 flex-col items-center gap-1.5">
+    <div className="flex flex-col items-center gap-1.5">
       {notices.map((entry) => (
         <Notice key={entry.id} entry={entry} />
       ))}

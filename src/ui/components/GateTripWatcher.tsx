@@ -5,7 +5,7 @@
  * nothing; drives the `gateTrip` state machine (`gameStore.ts` +
  * `ui/world/gateTrip.ts`'s pure transition function) off the throttled
  * snapshot — same "subscribe + side-effecting useEffect" idiom as
- * `SmithTripWatcher.tsx`. Lives as its OWN component (rather than folded into
+ * `NpcTripWatcher.tsx`. Lives as its OWN component (rather than folded into
  * the gate-tap handler) so the trip keeps advancing (walk to the gate ->
  * transition on arrival) even across whatever else is rendering that tick.
  */

@@ -17,9 +17,9 @@
 import { describe, expect, it } from "vitest";
 import { Container } from "pixi.js";
 import { initGameState, type Zone } from "@/engine";
-import { GROUND_Y, WORLD_WIDTH } from "@/render/layout";
+import { BLEED_X, GROUND_Y, WORLD_WIDTH } from "@/render/layout";
 import { biomeForZone } from "@/render/environment/biomes";
-import { BiomeScene, GROUND_DEPTH, MARGIN } from "@/render/environment/BiomeScene";
+import { BiomeScene, GROUND_DEPTH } from "@/render/environment/BiomeScene";
 import {
   buildGroundBackingStrip,
   buildGroundPolygon,
@@ -29,8 +29,10 @@ import { Environment } from "@/render/environment/Environment";
 import { createTerrain, type TerrainPresetId } from "@/render/worldDepth/terrain";
 import { terrainForZone, terrainPresetForZone } from "@/render/worldDepth/terrainZone";
 
-const GROUND_X = -MARGIN;
-const GROUND_WIDTH = WORLD_WIDTH + MARGIN * 2;
+// Mirrors `BiomeScene`'s own ground-fill span (R2.5 "Game Screen" W1: the
+// ground base fill widens by BLEED_X, not the far/near parallax's MARGIN).
+const GROUND_X = -BLEED_X;
+const GROUND_WIDTH = WORLD_WIDTH + BLEED_X * 2;
 const STEP = 24;
 
 /** Find the first farm zoneIdx (1..maxZoneIdx) on `mapId` whose hash-picked

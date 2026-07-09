@@ -6,8 +6,9 @@
  * `QuestBoardPanel` for elder) off the store's single `activeTownPanel` field
  * (see `gameStore.ts`'s `TownPanelId` doc). No panel auto-renders on town
  * arrival — a panel opens ONLY via the tap-to-talk pointer flow
- * (`GameClient.tsx`'s `talkToNpc`) or the refine dock shortcut
- * (`RefineButton.tsx`), i.e. "tap-again-to-talk" (owner-approved).
+ * (`GameClient.tsx`'s `talkToNpc`) or an in-flight `npcTrip`
+ * (`gameStore.ts`'s `startNpcTrip`, e.g. `RefineButton.tsx`'s dock shortcut),
+ * i.e. "tap-again-to-talk" (owner-approved).
  *
  * Auto-close-on-walk-away: watches the THROTTLED snapshot's `npcInRange` (and
  * `world.kind`) every render and clears `activeTownPanel` the instant the
