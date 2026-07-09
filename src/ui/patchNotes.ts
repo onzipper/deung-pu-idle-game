@@ -386,6 +386,20 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09n.items.bigScreen",
     ],
   },
+  // R2.5 Game Screen — fullscreen canvas + all-overlay HUD per the owner's
+  // MMO reference, icon menu row, NPC walk-order buttons, minimap-lite,
+  // and the zero-step-frame input-drop fix (bot-off default + swallowed taps).
+  {
+    id: "2026-07-09o",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09o.items.fullScreen",
+      "releases.2026-07-09o.items.menuRow",
+      "releases.2026-07-09o.items.npcButtons",
+      "releases.2026-07-09o.items.minimap",
+      "releases.2026-07-09o.items.tapFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

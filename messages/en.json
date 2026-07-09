@@ -1444,6 +1444,15 @@
           "botPanel": "🤖 Bot settings got a home of their own — tap ⚙ beside AUTO: auto skills, potion thresholds, and movement, neatly grouped",
           "bigScreen": "🖥️ Desktop gets a much bigger game view with an MMO-style quest card overlaid on the field — mobile keeps its familiar layout"
         }
+      },
+      "2026-07-09o": {
+        "items": {
+          "fullScreen": "🖥️ The game now fills your whole screen on every device — wider sky, deeper ground, and a fully overlaid MMO-style HUD",
+          "menuRow": "📱 Icon menu in the top-right corner — bag, character, rankings, friends, world map, settings, all one tap away",
+          "npcButtons": "🚶 New shop/enhance/quest buttons — tap one and your character walks to the NPC and starts the conversation on arrival",
+          "minimap": "🧭 A mini map sits in the top-right corner — your position, zone gates, and how many players share your zone; tap it to open the World Map",
+          "tapFix": "🎯 Fixed 'tap did nothing' on 120Hz displays — every command now reliably reaches the game (bot-off-at-login now truly works)"
+        }
       }
     }
   },
