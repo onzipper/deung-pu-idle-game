@@ -47,8 +47,15 @@ export function ExpClockStrip() {
     : Math.max(0, Math.min(1, hero.xpProgress)) * 100;
 
   return (
+    // Issue #58 wave B fix: the two label spans below are `absolute … bottom-1`
+    // INSIDE this box, but the box's own in-flow content used to be only the
+    // 4px progress bar — so the ~11px text rendered mostly ABOVE this box's
+    // top edge, into the 8px flex gap the dock above sits behind (a real, if
+    // subtle, visual collision on every viewport, worse on short landscape
+    // screens where every px is already tight). `pt-3.5` gives the box enough
+    // height to fully contain the floating text above the bar.
     <div
-      className="relative w-full"
+      className="relative w-full pt-3.5"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div

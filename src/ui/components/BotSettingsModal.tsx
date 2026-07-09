@@ -104,20 +104,29 @@ function AutoCastToggleRow() {
   );
 }
 
-/** One tappable icon tile in the auto-cast slot picker (mockup: "สกิลออโต้
- * ติ๊กเลือก") — checked = currently occupying an auto-cast slot. Tapping
- * toggles it into the first free unlocked slot (or clears its current one),
- * the EXACT toggle logic `SkillBar.tsx`'s `SkillButton` already uses against
- * the same `setAutoSlot` action — this is a second entry point into the same
- * state, not a new capability. */
+/** One tappable icon TILE in the auto-cast slot picker (issue #58 item 1,
+ * #54 audit reskin) — visually matches `SkillBar.tsx`'s `SkillButton` tile
+ * language (icon + name centered, a numbered ordinal badge in the same
+ * top-right corner spot as its "numbered hotbar slots"), just smaller since
+ * this lives in a settings panel. Checked/ringed = currently occupying an
+ * auto-cast slot. Tapping toggles it into the first free unlocked slot (or
+ * clears its current one) — the EXACT toggle logic `SkillButton` already
+ * uses against the same `setAutoSlot` action; this is a second entry point
+ * into the same state, not a new capability. */
 function SkillAutoSlotItem({
   hero,
   skill,
+  slotNumber,
   t,
   tContent,
 }: {
   hero: HeroSummary;
   skill: SkillSummary;
+  /** 1-based display ordinal within the hero's learned-skill row — same
+   * "numbered hotbar slot" concept `SkillBar.tsx`'s `slotNumber` prop carries,
+   * NOT the auto-cast slot index (`skill.autoSlot`, shown via the ring/✓
+   * badge instead). */
+  slotNumber: number;
   t: ReturnType<typeof useTranslations>;
   tContent: ReturnType<typeof useTranslations>;
 }) {
@@ -145,43 +154,48 @@ function SkillAutoSlotItem({
       title={canToggle ? undefined : t("autoSlotPickerFull")}
       aria-label={t("autoSlotPickerAria", { skill: name })}
       style={{ "--accent": accent.solid, "--accent-soft": accent.soft } as CSSProperties}
-      className={`flex min-h-11 items-center gap-2 rounded-(--ddp-radius-md) border px-2.5 py-2 text-left transition-colors duration-100 active:scale-[0.98] ${
+      className={`relative flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border bg-ddp-panel-strong px-1 py-1 shadow-(--ddp-shadow-btn) transition-transform duration-100 active:translate-y-0.5 active:scale-[0.96] ${
         inSlot
-          ? "border-emerald-400 bg-emerald-400/15"
+          ? "border-emerald-400 shadow-[0_0_10px_1px_rgba(52,211,153,0.5)]"
           : canToggle
-            ? "border-ddp-border-soft bg-black/25 hover:border-(--accent-soft)"
-            : "cursor-not-allowed border-ddp-border-soft/40 bg-black/10 opacity-50"
+            ? "border-ddp-border-soft hover:border-(--accent-soft)"
+            : "cursor-not-allowed border-ddp-border-soft/40 opacity-40 grayscale"
       }`}
     >
-      <span
-        aria-hidden
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-black/40 text-base leading-none"
-        style={{
-          borderColor: accent.solid,
-          boxShadow: inSlot ? `0 0 8px 1px ${accent.soft}` : undefined,
-        }}
-      >
+      <span aria-hidden className="text-xl leading-none">
         {icon}
       </span>
-      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">{name}</span>
+      <span className="line-clamp-1 w-full px-0.5 text-center text-[9px] leading-tight text-ddp-ink-muted">
+        {name}
+      </span>
+      {/* Numbered ordinal badge — top-right corner, same spot/style
+          `SkillBar.tsx`'s numbered hotbar badge uses. */}
       <span
         aria-hidden
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-(--ddp-radius-sm) border text-[11px] leading-none font-black ${
-          inSlot
-            ? "border-emerald-400 bg-emerald-400 text-emerald-950"
-            : "border-ddp-border-soft text-transparent"
-        }`}
+        className="pointer-events-none absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-ddp-border-soft bg-black/85 text-[9px] leading-none font-black tabular-nums text-ddp-ink-muted"
       >
-        ✓
+        {slotNumber}
       </span>
+      {/* Auto-enabled ✓ badge — top-left corner, only while slotted (the
+          emerald ring already signals it; this badge makes it unmissable at
+          a glance, matching the old checklist's ✓ column). */}
+      {inSlot && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -top-1.5 -left-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400 bg-emerald-400 text-[9px] leading-none font-black text-emerald-950"
+        >
+          ✓
+        </span>
+      )}
     </button>
   );
 }
 
 /** The full picker: every LEARNED skill (current tier chain, same set
- * `SkillBar.tsx` renders) as a checkable icon tile. Replaces the old
- * read-only chip-list `AutoSlotsOverview` — same underlying state, denser
- * and closer to the mockup's tick-select grid. */
+ * `SkillBar.tsx` renders) as a checkable icon TILE in a single compact row
+ * (wraps on narrow screens) — reskin per the #54 audit ("match the on-screen
+ * SkillDock"), same underlying `setAutoSlot` state as before, presentation
+ * only. */
 function SkillAutoSlotPicker() {
   const hero = useGameStore((s) => s.heroes[0]);
   const t = useTranslations("settings.bot");
@@ -192,9 +206,16 @@ function SkillAutoSlotPicker() {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[11px] text-ddp-ink-muted/80">{t("autoSlotsTitle")}</span>
-      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {hero.skills.map((skill) => (
-          <SkillAutoSlotItem key={skill.id} hero={hero} skill={skill} t={t} tContent={tContent} />
+      <div className="flex flex-wrap justify-center gap-2">
+        {hero.skills.map((skill, i) => (
+          <SkillAutoSlotItem
+            key={skill.id}
+            hero={hero}
+            skill={skill}
+            slotNumber={i + 1}
+            t={t}
+            tContent={tContent}
+          />
         ))}
       </div>
     </div>

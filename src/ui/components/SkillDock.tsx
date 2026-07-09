@@ -50,8 +50,12 @@ export function SkillDock() {
   const expanded = !skillDockCollapsed || onboardingActive;
 
   return (
-    <div className="mx-2 w-full max-w-xl rounded-(--ddp-radius-lg) border border-ddp-border bg-black/45 px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
-      <div className="flex flex-wrap items-center justify-center gap-3">
+    // Issue #58 wave B: mobile padding tightened (`py-2`, was `py-3`) to
+    // reclaim ~8px of vertical room on short landscape viewports (e.g.
+    // 640x360) — `sm:py-3` restores the original desktop chrome exactly, so
+    // desktop doesn't regress.
+    <div className="mx-2 w-full max-w-xl rounded-(--ddp-radius-lg) border border-ddp-border bg-black/45 px-3 py-2 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:py-3">
+      <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
         {/* Skill tiles — stays MOUNTED (hidden-classed) while collapsed so the
             `skill-bar` FTUE anchor nested inside always resolves. */}
         <div className={expanded ? "contents" : "hidden"}>
@@ -72,7 +76,7 @@ export function SkillDock() {
           onClick={toggleSkillDockCollapsed}
           aria-expanded={expanded}
           aria-label={expanded ? t("dockCollapseAria") : t("dockExpandAria")}
-          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-ddp-border-soft bg-black/30 text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-95"
+          className="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-full border border-ddp-border-soft bg-black/30 text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-95 sm:min-h-11 sm:min-w-11"
         >
           <span aria-hidden className="text-sm leading-none">
             {expanded ? "▾" : "▴"}

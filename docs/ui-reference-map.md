@@ -50,6 +50,11 @@
 - INVENTORY tab "ทั้งหมด" (default, รวม weapon+armor; "ใช้/อื่นๆ" ติด economy — ยังไม่ทำ)
 - gap ที่เหลือจาก audit #54: Wave B (menu-row/action rail/chat) รอ owner เคาะ · Wave C ตาม R3/R4-R5 · Wave D รอ asset pipeline
 
+### ✅ R2.8 Wave B ชุด safe (2026-07-10, issue #58)
+- BOT auto-skill picker → tile row เลขกำกับสไตล์ SkillBar (64px, ✓ emerald ตาม convention ใน modal; semantics automation เดิมทุกอย่าง)
+- Mobile HUD tuning: menu-row มือถือ 3→2 แถว (grid-cols-5 + tile 40px ต่ำกว่า sm) · SkillDock/quest-slot รัดแนวตั้งบนจอเตี้ย · แก้ bug กล่อง ExpClockStrip เตี้ยกว่าข้อความ (text ล้นชน dock)
+- ค้างจาก Wave B ชุดเคาะ (owner-decision ใน #54): menu-row regroup · action rail · chat overlay — ไม่อยู่ใน #58 โดยตั้งใจ
+
 ### R3 — Presence คนจริง
 - ฉาก gameplay ของ mockup ที่คนเยอะๆ ออร่า/เลขดาเมจของคนอื่น = ghost action stream (8Hz combat + snapshot-on-join + tap ดูโปรไฟล์)
 
