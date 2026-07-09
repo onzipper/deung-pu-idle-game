@@ -29,6 +29,18 @@
  * The `boss-panel` data-onboarding-anchor moves here (was on `BossPanel`'s
  * two branches) onto the always-rendered core-loop card, so the FTUE
  * `bossChallenge` step keeps resolving it exactly like before.
+ *
+ * R2-W2 "fullscreen HUD": `compact` (desktop passes `false`, mobile passes
+ * `true` — see `GoalLadderOverlaySlot.tsx`) adds a mobile-only collapsed
+ * single-line summary chip (current rung icon + label) ABOVE the full card
+ * content; tapping it toggles `expandedMobile`. The full content — including
+ * the `kill-progress`/`boss-panel` FTUE anchors nested inside `CoreLoopCard`
+ * — is FORCE-expanded whenever the FTUE sequence is actively running
+ * (`onboardingStepIndex >= 0`), so the guided tour never spotlights a
+ * collapsed/hidden target. Outside FTUE, a not-yet-expanded mobile player
+ * simply won't see a `CoreLoopCard`-anchored contextual tip's spotlight ring
+ * (the tip bubble text itself still shows) — an accepted, honest degrade
+ * (needs an in-browser pass to judge how often that actually happens).
  */
 
 import { useTranslations } from "next-intl";
@@ -697,11 +709,14 @@ function MainChapterLine() {
   );
 }
 
-export function GoalLadder() {
+export function GoalLadder({ compact = false }: { compact?: boolean }) {
   const hero = useGameStore((s) => s.heroes[0]);
   const phase = useGameStore((s) => s.phase);
   const bossReady = useGameStore((s) => s.bossReady);
+  const onboardingActive = useGameStore((s) => s.onboardingStepIndex >= 0);
   const [hofOpen, setHofOpen] = useState(false);
+  const [expandedMobile, setExpandedMobile] = useState(false);
+  const t = useTranslations("ladder");
 
   const { current, rungs } = buildGoalLadder({
     hero: hero
@@ -716,24 +731,51 @@ export function GoalLadder() {
     bossReady,
   });
 
+  // FTUE must never spotlight a collapsed target — see the module doc.
+  const expanded = !compact || expandedMobile || onboardingActive;
+  const currentRung = rungs.find((r) => r.id === current) ?? rungs[0];
+
   return (
     <div
       data-onboarding-anchor="goal-ladder"
       className="flex flex-col gap-2.5 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)"
     >
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-        {rungs.map((rung) => (
-          <RungPill
-            key={rung.id}
-            rung={rung}
-            onClick={rung.id === "hallOfFame" ? () => setHofOpen(true) : undefined}
-          />
-        ))}
-      </div>
-      <MainChapterLine />
-      <MilestoneCard current={current} />
-      <div data-onboarding-anchor="boss-panel">
-        <CoreLoopCard />
+      {compact && (
+        <button
+          type="button"
+          onClick={() => setExpandedMobile((e) => !e)}
+          aria-expanded={expanded}
+          className="flex items-center justify-between gap-2"
+        >
+          <span className="flex min-w-0 items-center gap-1.5 truncate text-xs font-bold text-ddp-ink">
+            {currentRung && (
+              <span aria-hidden>{RUNG_ICON[currentRung.id]}</span>
+            )}
+            {currentRung ? t(`rungs.${currentRung.id}`) : ""}
+          </span>
+          <span
+            aria-hidden
+            className={`shrink-0 text-ddp-ink-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+          >
+            ▾
+          </span>
+        </button>
+      )}
+      <div className={expanded ? "flex flex-col gap-2.5" : "hidden"}>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          {rungs.map((rung) => (
+            <RungPill
+              key={rung.id}
+              rung={rung}
+              onClick={rung.id === "hallOfFame" ? () => setHofOpen(true) : undefined}
+            />
+          ))}
+        </div>
+        <MainChapterLine />
+        <MilestoneCard current={current} />
+        <div data-onboarding-anchor="boss-panel">
+          <CoreLoopCard />
+        </div>
       </div>
       {hofOpen && <HallOfFamePanel onClose={() => setHofOpen(false)} />}
     </div>

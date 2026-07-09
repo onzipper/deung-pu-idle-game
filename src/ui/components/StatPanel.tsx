@@ -195,10 +195,11 @@ export function StatPanel() {
   const displayedPoints = Math.max(0, hero.statPoints - pendingSpend);
 
   return (
-    <div
-      data-onboarding-anchor="stat-panel"
-      className="flex flex-wrap items-center gap-2"
-    >
+    // R2-W2 "fullscreen HUD": `stat-panel` moved to `CharacterButton.tsx`'s
+    // `character-menu` trigger — this panel now lives inside a modal
+    // (`CharacterPanel.tsx`), not the always-visible HUD flow, so it no
+    // longer carries an onboarding anchor of its own.
+    <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-semibold tracking-wider text-ddp-ink-muted uppercase">
         {t("title")}
       </span>

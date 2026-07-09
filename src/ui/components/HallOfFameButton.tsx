@@ -14,6 +14,8 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { BossIcon } from "@/ui/components/icons";
+import { IconTileButton } from "@/ui/components/primitives/IconTileButton";
 import { HallOfFamePanel } from "@/ui/hof/HallOfFamePanel";
 
 export function HallOfFameButton() {
@@ -22,13 +24,13 @@ export function HallOfFameButton() {
 
   return (
     <>
-      <button
-        type="button"
+      <IconTileButton
+        icon={<BossIcon className="h-5 w-5" />}
+        accent="gold"
         onClick={() => setOpen(true)}
-        className="flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-gold/50 bg-ddp-gold/10 px-3 text-xs font-bold text-ddp-gold-bright shadow-(--ddp-shadow-btn) transition-all duration-100 hover:border-ddp-gold hover:bg-ddp-gold/20 active:translate-y-0.5 active:scale-[0.95]"
-      >
-        {t("openButton")}
-      </button>
+        aria-label={t("openButton")}
+        title={t("openButton")}
+      />
       {open && <HallOfFamePanel onClose={() => setOpen(false)} />}
     </>
   );

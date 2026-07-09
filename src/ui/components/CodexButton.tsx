@@ -13,6 +13,8 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { QuestIcon } from "@/ui/components/icons";
+import { IconTileButton } from "@/ui/components/primitives/IconTileButton";
 import { CodexPanel } from "@/ui/codex/CodexPanel";
 
 export function CodexButton() {
@@ -21,13 +23,12 @@ export function CodexButton() {
 
   return (
     <>
-      <button
-        type="button"
+      <IconTileButton
+        icon={<QuestIcon className="h-5 w-5" />}
         onClick={() => setOpen(true)}
-        className="flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong px-3 text-xs font-bold text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-[0.95]"
-      >
-        {t("openButton")}
-      </button>
+        aria-label={t("openButton")}
+        title={t("openButton")}
+      />
       {open && <CodexPanel onClose={() => setOpen(false)} />}
     </>
   );

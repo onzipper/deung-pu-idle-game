@@ -33,6 +33,12 @@
  * Chip cap (`activeBuffs.ts#capBuffBadges`, unchanged) still holds the row at
  * N total slots (2 mobile / 3 `sm:`+) with a "+N" overflow chip past that —
  * see `OverflowChip`. Renders nothing (zero DOM) with no active buffs.
+ *
+ * R2-W2 "fullscreen HUD": the hub no longer positions ITSELF (`absolute
+ * top-[14%] left-2`) — `GameHud.tsx` now stacks it as a normal flow child
+ * directly below `HeroPortraitCard` in the top-left overlay column, so the
+ * two never need hand-tuned percentage offsets to avoid colliding. This
+ * component only renders the row(s) of chips now.
  */
 
 import { useTranslations } from "next-intl";
@@ -276,15 +282,10 @@ export function BuffBadgeHub() {
   const badges = buildActiveBuffBadges({ heroesLength, atkBuffMult, atkBuffTimer });
   if (badges.length === 0) return null;
 
-  // Absolute overlay, top-left of the arena — see the file doc's v3 note.
-  // `pointer-events-none` here so this never blocks the arena's own
-  // pointerdown listener; each chip restores `pointer-events-auto` itself.
-  // top-[14%]: the boss/world-boss HP bar + gold nameplate own the arena's top
-  // band (world y -4..32 of WORLD_HEIGHT 300 = 0..10.7% at ANY canvas scale —
-  // bar and canvas scale together), so 14% clears them with margin on every
-  // screen size (owner recheck 2026-07-08: "จะบังเกจเลือดบอสไหม").
+  // `pointer-events-none` on the row itself so this never blocks the arena's
+  // own pointerdown listener; each chip restores `pointer-events-auto` itself.
   return (
-    <div role="status" className="pointer-events-none absolute top-[14%] left-2 z-10">
+    <div role="status" className="pointer-events-none">
       <BuffBadgeRow badges={badges} maxSlots={MOBILE_MAX_SLOTS} className="flex sm:hidden" />
       <BuffBadgeRow badges={badges} maxSlots={DESKTOP_MAX_SLOTS} className="hidden sm:flex" />
     </div>

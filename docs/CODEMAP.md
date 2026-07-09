@@ -332,7 +332,14 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/SwitchCharacterLink.tsx` — settings-row link navigating to `/characters`.
 - `src/ui/components/LocaleSwitch.tsx` — ไทย/EN switch writing the locale cookie + `router.refresh()`.
 - `src/ui/components/AutoPotionToggles.tsx` — HP/mana auto-use on/off + threshold steppers (UI-owned, mirrored onto engine state each frame).
-- `src/ui/components/InventoryButton.tsx` — console-dock trigger opening `InventoryPanel`.
+- `src/ui/components/InventoryButton.tsx` — icon-tile trigger (top-right menu row) opening `InventoryPanel`.
+- `src/ui/components/CharacterButton.tsx` — icon-tile trigger opening the new `CharacterPanel` (stats/loadout/switch-character); carries the `character-menu` FTUE anchor.
+- `src/ui/components/CharacterPanel.tsx` — modal housing `StatPanel`/`EquippedLoadout`/`SwitchCharacterLink`, moved off the old in-flow settings row.
+- `src/ui/components/CurrencyChipsRow.tsx` — gold + material `CurrencyChip` row, relocated off dissolved `HudBar.tsx` into the top-right overlay column.
+- `src/ui/components/ExpClockStrip.tsx` — bottom-edge full-width thin EXP bar + local-time clock corner readout.
+- `src/ui/components/HeroPortraitCard.tsx` — top-left overlay portrait card (roundel/Lv/name/power + HP/MP/EXP bars), extracted out of `SkillBar.tsx`.
+- `src/ui/components/WarpButton.tsx` — icon-tile trigger opening `FastTravelPicker`, relocated off dissolved `HudBar.tsx`.
+- `src/ui/components/WorldMapButton.tsx` — icon-tile trigger opening `WorldMapPanel`, relocated off dissolved `HudBar.tsx`'s zone chip.
 - `src/ui/components/FastTravelChannelBar.tsx` — fast-travel channel progress fill, store-driven off `fastTravelChannel`.
 - `src/ui/components/AutoReturnToggle.tsx` — death-behavior toggle (auto-return-to-farm vs wait in town).
 - `src/ui/components/PatchNotesModal.tsx` — one-time "what's new" modal, no backdrop-dismiss, mounted at top level.
@@ -366,20 +373,18 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/AsuraTomeButton.tsx` — "ตำราตำนาน" main-menu entry, invisible until `tomeUnlocked` (never spoils the secret quest).
 - `src/ui/components/BuffBadgeHub.tsx` — arena-overlay active-buff badges (zero layout shift); badge set from pure `ui/buffs/activeBuffs.ts`.
 - `src/ui/components/EquippedLoadout.tsx` — compact equipped weapon/armor summary off `HeroSummary.equipped` (sim-applied loadout, never DB inventory).
-- `src/ui/components/GoalLadder.tsx` — "what do I do next" breadcrumb + core-loop card off pure `ui/goalLadder.ts`; portaled onto the arena on md+.
+- `src/ui/components/GoalLadder.tsx` — "what do I do next" breadcrumb + core-loop card off pure `ui/goalLadder.ts`; always portaled onto the arena, `compact` prop adds a mobile collapsed-summary/tap-to-expand presentation.
 - `src/ui/components/SellRow.tsx` — one sellable inventory row (shop sell tab), tap-again-to-confirm guard, optional multi-select mode.
-- `src/ui/components/HudBar.tsx` — top HUD strip: zone badge + warp button + gold.
 - `src/ui/components/BotMasterSwitch.tsx` — the ONE bot master ON/OFF switch (`state.autoHunt`) + ⚙ opening `BotSettingsModal`.
-- `src/ui/components/WalkControls.tsx` — current map/zone label row + bot master switch (walk arrows removed, gates are tappable now).
 - `src/ui/components/ConsumableBar.tsx` — potion quick-use bar (HP/mana/return-scroll) with cooldown sweep.
 - `src/ui/components/EquipmentDoll.tsx` — equipment paper-doll (real weapon/armor slots + teaser slots), pinned beside the inventory bag.
 - `src/ui/components/InventoryPanel.tsx` — RO-style per-instance inventory grid (equip/sell), best→worst sort, no stacking at tile level.
 - `src/ui/components/RefinePanel.tsx` — town refine station (ตีบวก): reveal-on-final-strike suspense sequence, server-authoritative roll.
 - `src/ui/components/BotSettingsModal.tsx` — consolidated automation settings modal (combat/potions/town-trips/drops/walking), the ONE home for auto-* config.
 - `src/ui/components/SkillDetailModal.tsx` — skill list+detail pane (icon/desc/live stat lines), read-only (never casts, no leveling UI).
-- `src/ui/components/SkillBar.tsx` — per-hero skill kit: mana bar, cast buttons w/ cooldown sweep, ⓘ popovers, auto-slot assignment.
-- `src/ui/components/GoalLadderOverlaySlot.tsx` — desktop-only portal target moving `GoalLadder` onto the arena as an overlay card (mobile untouched).
-- `src/ui/components/GameHud.tsx` — top-level layout composition: HUD bar, arena slot, skill bar, goal ladder, console dock.
+- `src/ui/components/SkillBar.tsx` — per-hero skill KIT ONLY (portrait card extracted to `HeroPortraitCard.tsx`): cast buttons w/ cooldown sweep, ⓘ popovers, auto-slot assignment, bot master switch.
+- `src/ui/components/GoalLadderOverlaySlot.tsx` — portal target mounting `GoalLadder` onto the arena's left-mid overlay slot on every viewport (mobile gets `compact` mode).
+- `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock, bottom-edge EXP/clock strip; documents the z-index ladder.
 - `src/ui/components/__tests__/` — pin for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic; 1 file.
 
 ### src/ui/components/primitives/ — R2 design-system primitives (presentational only, no store reads)
@@ -392,6 +397,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/primitives/StatBar.tsx` — labeled HP/MP/EXP/generic progress bar, non-tweened value text.
 - `src/ui/components/primitives/ItemTile.tsx` — square gear tile (rarity frame/glow, qty/refine badges, selected ring).
 - `src/ui/components/primitives/Toast.tsx` — single toast line skin (icon + text + optional dismiss), no timer/positioning.
+- `src/ui/components/primitives/IconTileButton.tsx` — ~44px icon-only menu-row tile skin (R2-W2), every panel-opening HUD trigger renders through it.
 - `src/ui/components/primitives/ConfirmPopup.tsx` — modal confirm dialog (ยกเลิก/ยืนยัน, danger variant), via `ModalPortal`.
 
 ### src/ui/components/characters/

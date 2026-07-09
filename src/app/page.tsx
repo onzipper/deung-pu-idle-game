@@ -17,11 +17,12 @@ export default async function Home() {
   }
 
   return (
-    // Top-aligned (not vertically centered): on a short mobile-portrait
-    // viewport the dock can legitimately run past the fold — this lets the
-    // page scroll vertically instead of squeezing/cropping the arena.
-    // Horizontal scroll is still disallowed (see globals.css body overflow-x).
-    <main className="flex flex-1 flex-col items-center">
+    // R2-W2 "fullscreen HUD": the game screen is now a fullscreen canvas with
+    // every HUD element as an absolute overlay on top of it (see
+    // `GameHud.tsx`'s doc) — no more boxed arena + scrollable in-flow dock
+    // below it, so the page itself never scrolls (`h-dvh` = the dynamic
+    // viewport height, correct on mobile browsers whose chrome show/hides).
+    <main className="h-dvh overflow-hidden">
       <GameClient />
     </main>
   );

@@ -1,29 +1,21 @@
 "use client";
 
 /**
- * R2-W5 "จอเกมใหญ่ + HUD ซ้อน" (docs/ui-reference-map.md): on desktop (md+)
- * the quest/goal tracker (`GoalLadder`) moves from in-flow HUD chrome onto
- * the arena as a top-left overlay card; on mobile portrait it stays exactly
- * where it always has — in normal document flow below
- * `WalkControls`/`TownNpcPanelHost` (unchanged DOM position, zero layout
- * diff). `GoalLadder.tsx`'s own logic/markup is untouched — this component
- * only decides WHERE it mounts.
- *
- * Exactly ONE `<GoalLadder />` is ever mounted at a time — never a CSS-only
- * show-one-hide-other duplicate. The onboarding overlay's `useAnchorRect.ts`
- * does a plain `document.querySelector('[data-onboarding-anchor="goal-ladder"]')`,
- * which returns whichever match is FIRST in DOM order regardless of CSS
- * visibility; two simultaneous copies (one `hidden`) would risk the FTUE
- * spotlight measuring a zero-size hidden element. So this portals the SAME
- * element into a different DOM parent depending on the LIVE viewport width
- * (`useMediaQuery`, a JS read — not a `md:` class), which actually unmounts
- * the inline copy before mounting the overlay copy (and vice versa) when the
- * breakpoint flips.
+ * R2-W5 "จอเกมใหญ่ + HUD ซ้อน" originally gated this to desktop only. R2-W2
+ * "fullscreen HUD" removes that gate — the arena is now the ENTIRE screen on
+ * every viewport (there's no separate "in-flow HUD chrome" left below a
+ * boxed canvas to fall back to), so the quest/goal tracker (`GoalLadder`)
+ * always portals into the arena's left-mid overlay slot `GameHud.tsx`
+ * renders. `isDesktop` is still read (via `useMediaQuery`) and passed down as
+ * `GoalLadder`'s `compact` prop, which now drives a MOBILE-ONLY
+ * collapsed-summary/tap-to-expand presentation INSIDE `GoalLadder` itself
+ * (see that file's doc) rather than choosing between two different mount
+ * points — so exactly ONE `<GoalLadder />` is ever mounted, full stop, no
+ * portal-target branching needed anymore.
  *
  * `overlayRef` targets the small absolutely-positioned slot `GameHud.tsx`
  * renders inside the arena container (see its comment for placement/scrim
- * reasoning) — always present in the DOM (so the ref resolves), but only
- * ever a portal target once `isDesktop` flips true.
+ * reasoning) — always present in the DOM (so the ref resolves) once mounted.
  */
 
 import { createPortal } from "react-dom";
@@ -40,15 +32,13 @@ export function GoalLadderOverlaySlot({
 }) {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // `overlayRef.current` is already attached by the time this runs (GameHud
-  // renders the slot div unconditionally) — re-read on mount / whenever the
-  // desktop flag flips, same "wait for the client DOM to exist" idiom as
-  // `ModalPortal.tsx`.
+  // renders the slot div unconditionally) — re-read on mount, same "wait for
+  // the client DOM to exist" idiom as `ModalPortal.tsx`.
   const [portalTarget, setPortalTarget] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     setPortalTarget(overlayRef.current);
-  }, [overlayRef, isDesktop]);
+  }, [overlayRef]);
 
-  if (!isDesktop) return <GoalLadder />;
   if (!portalTarget) return null;
   // The overlay slot div itself is `pointer-events-none` (never blocks the
   // arena's own tap/hit-testing) — restore `pointer-events-auto` for the
@@ -56,7 +46,7 @@ export function GoalLadderOverlaySlot({
   // per-chip restore.
   return createPortal(
     <div className="pointer-events-auto">
-      <GoalLadder />
+      <GoalLadder compact={!isDesktop} />
     </div>,
     portalTarget,
   );

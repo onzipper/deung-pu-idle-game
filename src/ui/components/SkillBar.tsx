@@ -21,28 +21,23 @@
  * SKILL UI row) — the modal instance is lifted to `HeroSkills` (one mount for
  * the whole kit, not one per button) and `SkillButton` just reports which
  * skill id to open via `onOpenDetail`.
+ *
+ * R2-W2 "fullscreen HUD": the mockup-style portrait block (class roundel +
+ * Lv/name + HP/MP/EXP bars + power) that used to sit ABOVE the skill kit here
+ * moved OUT into its own top-left overlay card (`HeroPortraitCard.tsx`,
+ * verbatim extraction, zero behavior change) — this file now renders ONLY the
+ * skill kit + bot switch, for the bottom-center skill dock.
  */
 
 import { useTranslations } from "next-intl";
 import { useState, type CSSProperties } from "react";
 import { CONFIG } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
-import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { SkillDetailModal } from "@/ui/components/SkillDetailModal";
-import { StatBar } from "@/ui/components/primitives/StatBar";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
-import { HERO_ACCENT, HERO_ICONS, SKILL_ICONS_BY_ID } from "@/ui/labels";
+import { HERO_ACCENT, SKILL_ICONS_BY_ID } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
-
-/** The `content.classes.<cls>.<key>` i18n key for hero.tier's display name:
- * tier 1 = base name, tier 2 = `evolvedName`, tier 3 = `tier3Name` (M7.9
- * grand-expansion final form). */
-function classNameKeyForTier(tier: 1 | 2 | 3): "name" | "evolvedName" | "tier3Name" {
-  if (tier === 2) return "evolvedName";
-  if (tier === 3) return "tier3Name";
-  return "name";
-}
 
 
 /** One learned skill: a cast button + an AUTO-slot toggle badge + a tap-to-open
@@ -204,41 +199,14 @@ function SkillButton({
   );
 }
 
-/** Held mana-potion count pinned to the mana bar (M7.7 — potions are the
- * pool's refill loop now; surface the stock where the player watches drain). */
-function ManaPotionBadge() {
-  const count = useGameStore((s) => s.shop.counts.manaPotion ?? 0);
-  return (
-    <span
-      className={`rounded px-1 text-[10px] leading-4 font-bold tabular-nums ${
-        count === 0 ? "bg-rose-950/70 text-rose-300" : "bg-sky-950/70 text-sky-200"
-      }`}
-    >
-      💧{count}
-    </span>
-  );
-}
-
 /**
- * A hero's full skill panel: the mockup-style portrait block (class roundel +
- * Lv/name + HP/MP/EXP `StatBar`s + power) plus the skill kit below (R2-W2
- * reskin — was a centered header/bars stack; same data, same throttled
- * snapshot fields, no new store reads). Reuses the vertical space the old
- * bars already owned, so mobile HUD height is unchanged — this is NOT the
- * separate "HUD overlays the arena" mockup row (`ui-reference-map.md`'s
- * "จอเกมใหญ่ + HUD ซ้อน"), which is later/unscoped work.
+ * A hero's skill kit (R2-W2: the portrait block that used to sit above this
+ * moved OUT into `HeroPortraitCard.tsx` — see this file's doc). Same
+ * throttled snapshot fields, no new store reads.
  */
 function HeroSkills({ hero }: { hero: HeroSummary }) {
-  const tContent = useTranslations("content");
-  const tCommon = useTranslations("common");
   const tPanels = useTranslations("panels");
-  const tStats = useTranslations("stats");
-  const heroName = tContent(`classes.${hero.cls}.${classNameKeyForTier(hero.tier)}`);
-  const leveledUpPulse = usePulseOnIncrease(hero.level, 320);
-  const accent = HERO_ACCENT[hero.cls];
   const [detailSkillId, setDetailSkillId] = useState<string | null>(null);
-
-  const xpPct = Math.max(0, Math.min(1, hero.xpProgress)) * 100;
 
   // Next locked auto-slot's unlock level (for the "more slots at Lv.X" hint).
   // The 4th slot (M7.9) is gated behind BOTH tier 3 AND Lv.40
@@ -256,69 +224,6 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
 
   return (
     <div className="flex w-full flex-col items-center gap-2">
-      {/* Portrait block: class-colored roundel (glyph, no painted art — R1
-          "code-only art" gate) + Lv corner badge + name + power, HP/MP/EXP
-          stacked via the shared `StatBar` primitive. */}
-      <div className="flex w-full max-w-xs items-center gap-2.5 sm:max-w-sm">
-        <div
-          aria-hidden
-          className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 bg-black/50 shadow-(--ddp-shadow-btn)"
-          style={{ borderColor: accent.solid, boxShadow: `0 0 10px 2px ${accent.soft}` }}
-        >
-          <span className="text-xl leading-none">{HERO_ICONS[hero.cls]}</span>
-          <span
-            title={heroName}
-            className={`absolute -bottom-1.5 left-1/2 -translate-x-1/2 rounded-full border border-ddp-border-soft bg-black/90 px-1.5 py-0.5 text-[9px] leading-none font-black tabular-nums whitespace-nowrap ${
-              hero.atLevelCap ? "text-ddp-gold-bright" : "text-ddp-ink"
-            } ${leveledUpPulse ? "animate-buy-pulse" : ""}`}
-          >
-            {hero.atLevelCap
-              ? tCommon("maxLabel")
-              : tCommon("levelBadge", { level: hero.level })}
-          </span>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-xs font-bold text-ddp-ink" title={heroName}>
-              {heroName}
-            </span>
-            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-ddp-ink-muted">
-              {tStats("combatPower")}{" "}
-              <span className="text-ddp-gold-bright">{hero.combatPower.toLocaleString()}</span>
-            </span>
-          </div>
-          <StatBar
-            variant="hp"
-            value={hero.hp}
-            max={hero.maxHp}
-            height="sm"
-            label={tPanels("hpBarLabel")}
-            valueText={`${Math.ceil(hero.hp)}/${Math.ceil(hero.maxHp)}`}
-          />
-          {/* Mana bar keeps its promoted position + the held mana-potion
-              count beside it (M7.7 pacing-governor convention, unchanged). */}
-          <div className="flex w-full items-center gap-1">
-            <StatBar
-              variant="mp"
-              value={hero.mana}
-              max={hero.maxMana}
-              height="sm"
-              label={tPanels("mpBarLabel")}
-              valueText={`${Math.floor(hero.mana)}/${hero.maxMana}`}
-              className="flex-1"
-            />
-            <ManaPotionBadge />
-          </div>
-          <StatBar
-            variant="exp"
-            value={hero.atLevelCap ? 100 : xpPct}
-            max={100}
-            height="sm"
-            label={tPanels("expBarLabel")}
-          />
-        </div>
-      </div>
-
       {/* War Cry's ATK-buff chip moved into the consolidated Buff Badge Hub
           (owner ask — every buff in ONE HUD spot, see BuffBadgeHub.tsx). */}
 

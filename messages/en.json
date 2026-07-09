@@ -30,7 +30,10 @@
     "bossReadyNo": "⚠ Power may not be enough",
     "challengeBossButton": "⚔ Challenge Boss",
     "challengeBossAriaReady": "Challenge Boss",
-    "challengeBossAriaNotReady": "Challenge Boss (not available yet)"
+    "challengeBossAriaNotReady": "Challenge Boss (not available yet)",
+    "characterMenuAria": "Character",
+    "characterPanelTitle": "Character",
+    "characterPanelCloseAria": "Close character panel"
   },
   "ladder": {
     "rungs": {
@@ -242,7 +245,7 @@
       },
       "allocateStats": {
         "title": "Spend stat points on level-up",
-        "body": "Every level-up grants 3 stat points to allocate yourself (STR/DEX/INT/VIT). Tap the + button on a stat here to spend one, or flip on \"Auto Stat\" to let the system allocate for you."
+        "body": "Every level-up grants 3 stat points to allocate yourself (STR/DEX/INT/VIT). Tap this icon to open the \"Character\" panel, then tap the + button on a stat to spend one — or flip on \"Auto Stat\" to let the system allocate for you."
       },
       "castSkill": {
         "title": "Cast a skill yourself",
@@ -262,7 +265,7 @@
       },
       "settingsTour": {
         "title": "Tune your play here",
-        "body": "Tap \"⚙ Settings\" to mute/unmute sound or switch languages, and tap \"📖 Guide\" to reopen the game guide anytime from this row. All automation now lives under the 🤖 Bot switch up top instead."
+        "body": "Tap the ⚙ gear icon to mute/unmute sound or switch languages, and the 📖 book icon to reopen the game guide anytime from this top-right corner. All automation lives under the 🤖 Bot switch down in the skill dock instead."
       },
       "outro": {
         "title": "You're ready!",

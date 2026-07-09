@@ -136,10 +136,18 @@ export function toOnboardingSnapshot(s: {
  * Omitted for steps that aren't anchored to a control (welcome/outro). */
 export type OnboardingAnchor =
   | "kill-progress"
-  | "stat-panel"
+  /** R2-W2 "fullscreen HUD": the top-right icon-menu-row trigger that opens
+   * the "ตัวละคร" `CharacterPanel` (stat points + equipped loadout + switch
+   * character) — was `stat-panel`, spotlighting `StatPanel.tsx` directly
+   * in-flow, before that panel moved behind this trigger
+   * (`CharacterButton.tsx`). */
+  | "character-menu"
   | "skill-bar"
   | "boss-panel"
-  | "settings-row"
+  /** R2-W2 "fullscreen HUD": the top-right icon menu row itself (settings +
+   * codex/guide + …) — was `settings-row`, the old in-flow console-dock row
+   * those buttons used to share. */
+  | "menu-row"
   /** The bot MASTER switch (`BotMasterSwitch.tsx`, owner UX consolidation
    * 2026-07-07) — see the `botSwitchIntro` step below. */
   | "bot-master"
@@ -191,9 +199,12 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
   },
   {
     // Level-ups grant 3 base-stat points to allocate (M5 "Base stats") — the
-    // hero's own power growth now that upgrade lines are gone.
+    // hero's own power growth now that upgrade lines are gone. R2-W2: points
+    // spend from inside the "ตัวละคร" panel now, so this spotlights its
+    // top-right menu-row trigger instead of the (now-hidden-behind-a-modal)
+    // stat panel directly.
     id: "allocateStats",
-    anchor: "stat-panel",
+    anchor: "character-menu",
     advance: { kind: "action", action: "allocateStat" },
   },
   {
@@ -226,7 +237,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
     advance: { kind: "action", action: "challengeBoss" },
     mood: "warning",
   },
-  { id: "settingsTour", anchor: "settings-row", advance: { kind: "next" } },
+  { id: "settingsTour", anchor: "menu-row", advance: { kind: "next" } },
   { id: "outro", advance: { kind: "next" }, mood: "excited" },
 ];
 
