@@ -45,6 +45,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import {
+  ALL_ITEM_TEMPLATES,
   CONFIG,
   FIXED_DT,
   ITEM_TEMPLATES,
@@ -652,7 +653,13 @@ async function performAutoEquip(): Promise<void> {
   // doubles as the master's on/off value — see `gameStore.ts`'s
   // `toggleBotMaster` doc. OFF must mean zero auto-equip too.
   if (!store.autoHunt || !store.autoEquip) return;
-  const picks = selectAutoEquip(store.inventory, ITEM_TEMPLATES, store.heroes[0]?.cls);
+  // ALL_ITEM_TEMPLATES (superset), NOT the gear-only ITEM_TEMPLATES: a worn
+  // LEGENDARY's templateId is absent from the gear-only map, which made the
+  // picker treat the weapon slot as EMPTY and swap ordinary drops over the
+  // legendary (owner report 2026-07-09). Auto-sell below deliberately keeps
+  // the gear-only map — template absence is (incidentally but load-bearing)
+  // what keeps legendaries/fortifiers out of the sell scorer.
+  const picks = selectAutoEquip(store.inventory, ALL_ITEM_TEMPLATES, store.heroes[0]?.cls);
   if (picks.length === 0) return;
   autoEquipInFlight = true;
   try {

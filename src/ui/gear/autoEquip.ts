@@ -44,10 +44,20 @@ export function selectAutoEquip(
   heroClass?: HeroClass,
 ): AutoEquipPick[] {
   const wornSum: Partial<Record<GearSlot, number>> = {};
+  // Worn item whose templateId the record doesn't know (future template kinds,
+  // stale caller maps) — same conservatism as the unknown-class rule in
+  // `equippableBy`: an unknown worn item can never be judged "worse", so its
+  // slot is UNSWAPPABLE. Without this, an unknown worn item made the slot read
+  // as EMPTY and the bot swapped ordinary drops over a worn LEGENDARY (whose
+  // id lives outside the gear-only ITEM_TEMPLATES map — owner report
+  // 2026-07-09; the caller now passes ALL_ITEM_TEMPLATES, this guard is the
+  // belt-and-braces half).
+  const wornUnknown: Partial<Record<GearSlot, boolean>> = {};
   for (const item of items) {
     if (!item.equippedSlot) continue;
     const t = templates[item.templateId];
     if (t) wornSum[item.equippedSlot] = statSum(t.stats);
+    else wornUnknown[item.equippedSlot] = true;
   }
 
   const best: Partial<Record<GearSlot, { item: InventoryItem; t: SellableTemplate }>> = {};
@@ -69,6 +79,7 @@ export function selectAutoEquip(
   for (const slot of ["weapon", "armor"] as const) {
     const cand = best[slot];
     if (!cand) continue;
+    if (wornUnknown[slot]) continue; // unknown worn item — never swap it out
     const worn = wornSum[slot];
     if (worn !== undefined && statSum(cand.t.stats) <= worn) continue; // strict only
     picks.push({

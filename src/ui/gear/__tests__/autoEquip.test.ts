@@ -15,6 +15,10 @@ const TEMPLATES: Record<string, SellableTemplate> = {
   },
   common_armor: { rarity: "common", slot: "armor", stats: { def: 1, hp: 20 }, tier: 1 },
   rare_armor: { rarity: "rare", slot: "armor", stats: { def: 4, hp: 55 }, tier: 3 },
+  // Mirrors a real LEGENDARY entry as seen through ALL_ITEM_TEMPLATES
+  // (w_legend_sword_emberfall: atk 126 = t10's 70 × 1.8, tier 11).
+  legend_sword: { rarity: "epic", slot: "weapon", stats: { atk: 126 }, tier: 11 },
+  t10_sword: { rarity: "epic", slot: "weapon", stats: { atk: 70 }, tier: 10 },
 };
 
 function item(over: Partial<InventoryItem>): InventoryItem {
@@ -99,6 +103,43 @@ describe("selectAutoEquip", () => {
     ];
     expect(selectAutoEquip(items, TEMPLATES, "swordsman")).toEqual([
       { instanceId: "w1", templateId: "common_sword", slot: "weapon" },
+    ]);
+  });
+
+  // ---- worn-LEGENDARY protection (owner report 2026-07-09: the bot swapped
+  // ordinary drops over an equipped legendary because the gear-only template
+  // map didn't know its id → the slot read as EMPTY) --------------------------
+
+  it("never swaps a worn legendary out for ordinary gear (legendary resolvable in the record)", () => {
+    const items = [
+      item({ instanceId: "legend", templateId: "legend_sword", equippedSlot: "weapon" }),
+      item({ instanceId: "t10", templateId: "t10_sword" }),
+      item({ instanceId: "r", templateId: "rare_sword" }),
+    ];
+    expect(selectAutoEquip(items, TEMPLATES, "swordsman")).toEqual([]);
+  });
+
+  it("a worn item with an UNKNOWN template makes its slot UNSWAPPABLE (belt-and-braces guard)", () => {
+    // Even if a caller ever regresses to a map that lacks the worn item's id,
+    // an unknown worn item can never be judged "worse" — the bot must not
+    // replace it. Armor slot stays independently functional.
+    const items = [
+      item({ instanceId: "mystery", templateId: "not_in_this_map", equippedSlot: "weapon" }),
+      item({ instanceId: "t10", templateId: "t10_sword" }),
+      item({ instanceId: "a1", templateId: "common_armor", slot: "armor" }),
+    ];
+    expect(selectAutoEquip(items, TEMPLATES, "swordsman")).toEqual([
+      { instanceId: "a1", templateId: "common_armor", slot: "armor" },
+    ]);
+  });
+
+  it("an UNEQUIPPED legendary in the bag wins the weapon pick over a worn t10", () => {
+    const items = [
+      item({ instanceId: "worn10", templateId: "t10_sword", equippedSlot: "weapon" }),
+      item({ instanceId: "legend", templateId: "legend_sword" }),
+    ];
+    expect(selectAutoEquip(items, TEMPLATES, "swordsman")).toEqual([
+      { instanceId: "legend", templateId: "legend_sword", slot: "weapon" },
     ]);
   });
 });
