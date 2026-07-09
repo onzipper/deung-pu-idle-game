@@ -79,6 +79,7 @@ import {
   type ProjectileView,
 } from "@/render/views/projectileView";
 import { NpcSpeechBubble } from "@/render/fx/npcSpeechBubble";
+import { gateTapSide } from "@/render/environment/zoneGates";
 import { TOWN_NPCS, type TownNpcId } from "@/render/townNpcs";
 import { createTownLlamaActor, type TownLlamaActor } from "@/render/environment/townLlama";
 import {
@@ -105,6 +106,17 @@ export type PointerHitResult = { kind: "monster"; id: number } | { kind: "ground
  * first while in town, since the town zone never has live enemies).
  */
 export type NpcHitResult = { kind: "npc"; id: TownNpcId } | null;
+
+/**
+ * Zone-edge gate tap outcome (R1 W2 "tappable gates" — replaces the ◀ ▶ walk
+ * arrows) — see `hitTestGate()`. Purely geometric ("which side was tapped"),
+ * same separation-of-concerns as `NpcHitResult` above: this method never
+ * decides whether the neighbor is unlocked/exists — `GameClient.tsx`'s
+ * `onArenaClick` reads `worldNav(state)` for that (via the pure
+ * `resolveGateTap()`, `@/ui/world/gateTap.ts`), the exact same read
+ * `WalkControls.tsx`'s old arrows used.
+ */
+export type GateHitResult = { kind: "gate"; side: "left" | "right" } | null;
 
 /** Minimum on-screen touch half-extent (CSS px, NOT world units) a monster
  * hit-test guarantees regardless of the current letterbox scale — the task's
@@ -1046,6 +1058,27 @@ export class GameRenderer {
       if (Math.abs(wx - anchor.x) <= anchor.radius) return { kind: "npc", id: anchor.id };
     }
     return null;
+  }
+
+  /**
+   * Zone-edge gate tap (R1 W2 "tappable gates"): same camera-aware
+   * canvas->world un-projection as `hitTestPointer`/`hitTestNpc` above,
+   * delegated to the pure `gateTapSide()` (`@/render/environment/zoneGates`,
+   * headlessly tested) for the actual geometry — a generous rect (≥48
+   * world-unit-wide, full arch height) centered on each side's `gateX`.
+   * Purely geometric; never reads unlock state (see `GateHitResult`'s doc).
+   */
+  hitTestGate(canvasX: number, canvasY: number, state: GameState): GateHitResult {
+    if (!this.app) return null;
+    const zone = zoneAt(state.location);
+    const cam = this.camView();
+    const w = canvasToWorld(canvasX, canvasY, this.baseTransform, cam, this.hitScratch);
+    const wx = w.x;
+    const wy = w.y;
+    if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
+
+    const side = gateTapSide(wx, wy, GROUND_Y, zone.mapId, zone.kind);
+    return side ? { kind: "gate", side } : null;
   }
 
   /**

@@ -175,6 +175,7 @@ import {
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { emaRtt, pickWaitingSlot } from "./cohortNet";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
+import { resolveGateTap } from "@/ui/world/gateTap";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
 import {
@@ -3120,6 +3121,21 @@ export function GameClient() {
     // lands in-range while mid-walk toward them) -> talk. The range check
     // reads LIVE off the closure's `state` (not the throttled store snapshot)
     // so it's never a frame stale.
+    // R1 W2 "tappable gates" (owner: "อยากให้เป็นการคลิกที่ตัวเกม เช่นการคลิก
+    // ที่ประตู") — replaces the old ◀ ▶ `WalkArrow` buttons entirely. Checked
+    // AFTER `hitTestPointer`'s monster branch (combat taps always win) but
+    // BEFORE its ground/move-to fallback (a tap landing on a gate reads as
+    // "use the gate", not "walk toward it"). `resolveGateTap` fires the exact
+    // SAME `walkToZone` intent the arrows used — see its own doc comment.
+    function onGateTap(side: "left" | "right"): void {
+      const nav = worldNav(state);
+      const action = resolveGateTap(nav, side, state.kills, CONFIG.killGoal(nav.current.stage));
+      if (action.kind === "walk") useGameStore.getState().walkToZone(action.target);
+      else if (action.kind === "locked") {
+        useGameStore.getState().pushNotice("gateLocked", { need: action.need });
+      }
+    }
+
     function onArenaClick(e: MouseEvent): void {
       if (!arenaEl) return;
       const rect = arenaEl.getBoundingClientRect();
@@ -3137,9 +3153,18 @@ export function GameClient() {
       }
 
       const hit = renderer.hitTestPointer(canvasX, canvasY, state);
-      if (!hit) return;
-      if (hit.kind === "monster") useGameStore.getState().queueAttackTarget(hit.id);
-      else useGameStore.getState().queueMoveTo(hit.x);
+      if (hit?.kind === "monster") {
+        useGameStore.getState().queueAttackTarget(hit.id);
+        return;
+      }
+
+      const gateHit = renderer.hitTestGate(canvasX, canvasY, state);
+      if (gateHit) {
+        onGateTap(gateHit.side);
+        return;
+      }
+
+      if (hit) useGameStore.getState().queueMoveTo(hit.x);
     }
     arenaEl.addEventListener("click", onArenaClick);
 

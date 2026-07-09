@@ -24,6 +24,12 @@ const POST_HEIGHT = 66;
 const POST_GAP = 46; // clear space between the two posts (the "walk-through" width)
 const LINTEL_HEIGHT = 14;
 
+/** Local (negative-y, above ground) y of the lintel's top edge — the anchor
+ * `gateLockOverlay.ts` hangs its padlock/progress-bar readout from (R1 W2
+ * "tappable gates"), and `zoneGates.ts`'s `gateTapSide()` generous tap-rect
+ * height is sized off the same `POST_HEIGHT` this derives from. */
+export const ARCH_TOP = -(POST_HEIGHT + LINTEL_HEIGHT);
+
 /** Build ONE themed archway `Container`, already positioned at `(x, groundY)`
  * in the biome scene's local space (y=0 at ground, negative = up) — caller
  * just `addChild()`s it once. `family` picks the prop vocabulary; `biome`

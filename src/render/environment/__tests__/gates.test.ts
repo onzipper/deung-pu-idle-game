@@ -95,7 +95,10 @@ describe("buildZoneGateProps — routes the grand door only to a map's last farm
 
     const props = buildZoneGateProps(zone, biome, GROUND_Y, container, state);
     expect(props.bossDoor).toBeNull();
-    expect(container.children.length).toBe(2); // left arch + right arch
+    // left arch + left GateLockOverlay + right arch + right GateLockOverlay
+    // (R1 W2 "tappable gates" — see `zoneLockOverlay.test.ts` for the
+    // overlay's own locked/open behavior).
+    expect(container.children.length).toBe(4);
 
     props.update(1 / 60); // no-op, must not throw
     props.destroy();
@@ -114,6 +117,70 @@ describe("buildZoneGateProps — routes the grand door only to a map's last farm
 
     props.update(1 / 60);
     props.refreshLock(state);
+    props.destroy();
+    container.destroy({ children: true });
+  });
+});
+
+describe("buildZoneGateProps — R1 W2 lock-overlay state derivation", () => {
+  it("an ordinary farm zone: right overlay LOCKED until the next zone is unlocked, then OPEN", () => {
+    const zone: Zone = { mapId: "map1", zoneIdx: 2, kind: "farm", stage: 2 };
+    const biome = biomeForZone(zone);
+    const container = new Container();
+    const state = initGameState(1);
+    state.unlockedZones.map1 = 3; // zone 2 itself unlocked, zone 3 (next) is NOT
+    state.kills = 5;
+
+    const props = buildZoneGateProps(zone, biome, GROUND_Y, container, state);
+    props.refreshLock(state);
+    props.update(1 / 60);
+    expect(props.rightLock).not.toBeNull();
+    expect(props.rightLock!.isLocked()).toBe(true);
+    // Left overlay is always OPEN — the way back is never locked.
+    expect(props.leftLock).not.toBeNull();
+    expect(props.leftLock!.isLocked()).toBe(false);
+
+    state.unlockedZones.map1 = 4; // next zone (3) now unlocked
+    props.refreshLock(state);
+    props.update(1 / 60);
+    expect(props.rightLock!.isLocked()).toBe(false);
+
+    props.destroy();
+    container.destroy({ children: true });
+  });
+
+  it("town: the right overlay reads OPEN (farm zone 1 is unlocked from the start)", () => {
+    const zone: Zone = { mapId: "map1", zoneIdx: 0, kind: "town", stage: 1 };
+    const biome = biomeForZone(zone);
+    const container = new Container();
+    const state = initGameState(1);
+
+    const props = buildZoneGateProps(zone, biome, GROUND_Y, container, state);
+    expect(props.leftLock).toBeNull(); // no left gate in town
+    props.refreshLock(state);
+    expect(props.rightLock).not.toBeNull();
+    expect(props.rightLock!.isLocked()).toBe(false);
+
+    props.destroy();
+    container.destroy({ children: true });
+  });
+
+  it("a map's last farm zone (boss gate): the right overlay mirrors the boss door's own lock", () => {
+    const zone: Zone = { mapId: "map1", zoneIdx: 5, kind: "farm", stage: 5 };
+    const biome = biomeForZone(zone);
+    const container = new Container();
+    const state = initGameState(1);
+    state.unlockedZones.map1 = 5; // boss room (zoneIdx 6) still locked
+
+    const props = buildZoneGateProps(zone, biome, GROUND_Y, container, state);
+    props.refreshLock(state);
+    expect(props.rightLock!.isLocked()).toBe(true);
+
+    state.unlockedZones.map1 = 7; // boss room (zoneIdx 6) now unlocked (loc.zoneIdx < count)
+    props.refreshLock(state);
+    expect(props.rightLock!.isLocked()).toBe(false);
+    expect(props.bossDoor).not.toBeNull();
+
     props.destroy();
     container.destroy({ children: true });
   });
