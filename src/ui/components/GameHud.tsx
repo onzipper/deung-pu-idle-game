@@ -47,18 +47,25 @@
  *  - The old inline "settings row" (`StatPanel`/`EquippedLoadout`/
  *    `SwitchCharacterLink`) moved into the NEW `CharacterPanel.tsx` behind
  *    `CharacterButton.tsx` in the icon menu row — nothing became unreachable.
- *  - `RefineButton.tsx` is NOT in the new icon menu row: per the LOCKED owner
- *    ruling in `docs/ui-reference-map.md` ("ปุ่มร้านค้า/ภารกิจบน HUD ไม่เอา —
- *    คงกติกา NPC"), shop/refine/quest-board stay NPC-walk-up-only; the HUD's
- *    icon row is scoped to non-world-bound entries only (bag/character/skill
- *    detail/ranking/friends/settings/world map), matching this wave's task
- *    brief which deliberately omits it. `RefineButton.tsx`'s file is left
- *    in place (unused) — this is a judgment call flagged for owner confirm,
- *    not an explicit deletion instruction.
+ *  - `RefineButton.tsx` is NOT in the new icon menu row — `NpcTripButtons.tsx`
+ *    (below) absorbs its dock-shortcut role (ตีบวก tile → `startNpcTrip
+ *    ("npc:lungdueng")`). `RefineButton.tsx`'s file is left in place (unused,
+ *    already rewired onto `startNpcTrip`) — a judgment call flagged for owner
+ *    confirm, not an explicit deletion instruction.
  *
- * W3 (minimap + 3 NPC buttons) slot: the top-right column is structured so
- * W3 can simply add more children after `PartySignalChip` — see the
- * `data-hud-slot="w3-npc-minimap"` marker (zero-size, purely structural).
+ * R2.5-W3, ร้านค้า/ตีบวก/ภารกิจ HUD tiles: `docs/ui-reference-map.md`'s
+ * ORIGINAL locked row ("ปุ่มร้านค้า/ภารกิจบน HUD ไม่เอา") read as a blanket ban
+ * on any NPC-triggering HUD button. The owner issued a NEWER, more specific
+ * เคาะ this same R2.5 planning round (that doc's row is amended, not
+ * re-litigated here): these tiles ARE allowed PROVIDED they only ever issue
+ * `startNpcTrip(npcId)` — a walk-to-npc command routed through the exact same
+ * tap-to-talk seam (`TownNpcPanelHost.tsx`) a manual walk-up uses — never a
+ * remote panel open. See `NpcTripButtons.tsx`'s doc for the full guard/pulse
+ * behavior.
+ *
+ * W3 minimap slot: the top-right column's `data-hud-slot="w3-npc-minimap"`
+ * marker now wraps `MiniMapCard` — a compact zone-summary that taps through
+ * to the existing `WorldMapPanel`, not a second minimap system.
  */
 
 import { forwardRef, useRef, type ReactNode } from "react";
@@ -80,10 +87,12 @@ import { GoalLadderOverlaySlot } from "@/ui/components/GoalLadderOverlaySlot";
 import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
 import { HeroPortraitCard } from "@/ui/components/HeroPortraitCard";
 import { InventoryButton } from "@/ui/components/InventoryButton";
+import { MiniMapCard } from "@/ui/components/MiniMapCard";
 import { NoticeToast } from "@/ui/components/NoticeToast";
+import { NpcTripButtons } from "@/ui/components/NpcTripButtons";
+import { NpcTripWatcher } from "@/ui/components/NpcTripWatcher";
 import { SettingsButton } from "@/ui/components/SettingsButton";
 import { SkillBar } from "@/ui/components/SkillBar";
-import { SmithTripWatcher } from "@/ui/components/SmithTripWatcher";
 import { TownNpcPanelHost } from "@/ui/components/TownNpcPanelHost";
 import { UpdateBanner } from "@/ui/components/UpdateBanner";
 import { WarpButton } from "@/ui/components/WarpButton";
@@ -172,9 +181,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
               <HeroPortraitCard />
               <BuffBadgeHub />
             </div>
-            {/* Top-right: gold/material chips, the icon menu row, then the
-                party signal chip — W3 (minimap + 3 NPC buttons) appends
-                after that, see the module doc. */}
+            {/* Top-right: gold/material chips, the icon menu row (R2.5-W3
+                adds the 3 `NpcTripButtons` tiles into it), then the party
+                signal chip — W3's minimap card appends after that, see the
+                module doc. */}
             <div className="pointer-events-auto flex flex-col items-end gap-1.5">
               <CurrencyChipsRow />
               <div
@@ -183,6 +193,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
               >
                 <CharacterButton />
                 <InventoryButton />
+                {/* R2.5-W3: ร้านค้า/ตีบวก/ภารกิจ — each a `startNpcTrip(npcId)`
+                    walk-order, never a remote panel open. See the module
+                    doc's amended-ruling paragraph + NpcTripButtons.tsx. */}
+                <NpcTripButtons />
                 <HallOfFameButton />
                 <FriendsButton />
                 <CodexButton />
@@ -192,8 +206,14 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
                 <SettingsButton />
               </div>
               <PartySignalChip />
-              {/* W3 structural marker — no visual footprint. */}
-              <div data-hud-slot="w3-npc-minimap" aria-hidden />
+              {/* W3: compact minimap/zone-summary card, tap → WorldMapPanel.
+                  See MiniMapCard.tsx's doc — this is NOT the R4/R5 corner
+                  minimap proper (that waits on true x,y world geometry per
+                  docs/ui-reference-map.md), just a compact reader on the
+                  existing R1 WorldMapPanel surface. */}
+              <div data-hud-slot="w3-npc-minimap">
+                <MiniMapCard />
+              </div>
             </div>
           </div>
           {/* World boss / ดินแดนอสูร hot-zone: plain in-flow strips (unchanged
@@ -246,9 +266,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           tap-again-to-talk gated (see `TownNpcPanelHost.tsx`), not an always-on
           panel. Each portals its own `ModalPortal` (z-70). */}
       <TownNpcPanelHost />
-      {/* Owner UX round (2026-07-09): drives the ปุ่มตีบวก "smith trip" state
-          machine to completion — renders nothing, see SmithTripWatcher.tsx. */}
-      <SmithTripWatcher />
+      {/* Owner UX round (2026-07-09), generalized R2.5-W3 to any town NPC:
+          drives the ปุ่มตีบวก-style "npc trip" state machine to completion —
+          renders nothing, see NpcTripWatcher.tsx. */}
+      <NpcTripWatcher />
       {/* Owner UX round (2026-07-09): drives the "walk to the gate first"
           state machine to completion — renders nothing, see
           GateTripWatcher.tsx. */}

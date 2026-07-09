@@ -229,7 +229,7 @@ export function WorldMapPanel({ onClose }: WorldMapPanelProps) {
   // See the module doc — a deliberate second poller, bounded to this panel's
   // lifetime, per the R1 W4 brief's "lightest correct wiring" call.
   const friendsPoll = useFriendsPoll(true);
-  const counts = useZoneCounts(true);
+  const counts = useZoneCounts({ open: true });
 
   const myZoneKey = zoneKeyOf(world);
   const asuraUnlocked = isZoneUnlockedUi({ mapId: ASURA_MAP_ID, zoneIdx: 0 }, unlockedZones);

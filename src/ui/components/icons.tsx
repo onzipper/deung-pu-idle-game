@@ -124,6 +124,19 @@ export function BossIcon({ className }: LineIconProps) {
   );
 }
 
+/** Refine — a smith's hammer (R2.5-W3 menu-row "ตีบวก" tile, absorbing
+ * `RefineButton.tsx`'s old 🔨-emoji glyph into the gold-line icon set the
+ * rest of the icon row already uses). */
+export function RefineIcon({ className }: LineIconProps) {
+  return (
+    <LineIcon className={className}>
+      <path d="M14.5 3.5l6 6-2.5 2.5-6-6z" />
+      <path d="M13 6l-9 9v4h4l9-9" />
+      <path d="M4.5 18.5l1 1" />
+    </LineIcon>
+  );
+}
+
 /** Settings — a gear. */
 export function SettingsIcon({ className }: LineIconProps) {
   return (

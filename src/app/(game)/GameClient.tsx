@@ -2563,11 +2563,11 @@ export function GameClient() {
         } else if (ev.type === "fastTravelBlocked") {
           useGameStore.getState().clearFastTravelChannel();
           useGameStore.getState().pushNotice(`fastTravelBlocked.${ev.reason}`);
-          // Owner UX round (2026-07-09): a blocked ปุ่มตีบวก trip (boss phase
+          // Owner UX round (2026-07-09): a blocked npc-trip (boss phase
           // locked, etc.) already surfaces via the notice above — cancel the
-          // smith trip too so it doesn't linger waiting for a town arrival
-          // that was never actually queued.
-          useGameStore.getState().cancelSmithTrip();
+          // trip too so it doesn't linger waiting for a town arrival that
+          // was never actually queued.
+          useGameStore.getState().cancelNpcTrip();
         } else if (ev.type === "npcTrade") {
           // Town NPCs phase 3 (final): flavor-only — the bot's transaction
           // itself is already engine-side (systems/bots.ts); this NEVER opens
@@ -3112,11 +3112,14 @@ export function GameClient() {
     // (`npcGreetingIndex` above) so repeat taps don't feel canned.
     function talkToNpc(id: TownNpcId): void {
       // Talking to an NPC is a manual command too (owner UX round
-      // 2026-07-09) — cancels an in-flight gate trip, mirroring the
-      // move/attack cancel wiring in `queueMoveTo`/`queueAttackTarget`
-      // (this branch never calls those, since talking doesn't move the
-      // hero, so the cancel has to happen explicitly here).
+      // 2026-07-09, npc-trip cancel added R2.5-W3) — cancels an in-flight
+      // gate trip AND npc trip, mirroring the move/attack cancel wiring in
+      // `queueMoveTo`/`queueAttackTarget` (this branch never calls those,
+      // since talking doesn't move the hero, so the cancel has to happen
+      // explicitly here). Prevents a stale in-flight trip to a DIFFERENT npc
+      // from later overwriting `activeTownPanel` back once it arrives.
       useGameStore.getState().cancelGateTrip();
+      useGameStore.getState().cancelNpcTrip();
       useGameStore.getState().openTownPanel(townPanelOf(id));
       const key = npcI18nKey(id);
       const idx = npcGreetingIndex[id];

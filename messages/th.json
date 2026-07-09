@@ -955,6 +955,7 @@
     "populationTooltip": "มีคนอยู่ในโซนนี้ตอนนี้ (โดยประมาณ)"
   },
   "shop": {
+    "menuAria": "ไปหาป้าปุ๊ (ร้านค้า)",
     "title": "ร้านค้าในเมือง",
     "subtitle": "ซื้อของตุนก่อนออกไปลุย",
     "tabBuy": "ซื้อของ",
@@ -1075,6 +1076,10 @@
     "guideGatedTier3Frontier": "พาไปหน้าด่านของคุณ — ปลดโซนต่อไปเรื่อย ๆ จนถึงประตูบอสแมพ 3",
     "walkToLungdueng": "เดินไปหาลุงดึ๋งก่อนนะ",
     "smithTripTraveling": "🔨 กำลังเดินทางไปหาลุงดึ๋ง…",
+    "npcTripWalkPahpu": "เดินไปหาป้าปุ๊ก่อนนะ",
+    "npcTripTravelingPahpu": "🧭 กำลังเดินทางไปหาป้าปุ๊…",
+    "npcTripWalkElder": "เดินไปหาผู้ใหญ่บ้านก่อนนะ",
+    "npcTripTravelingElder": "🚩 กำลังเดินทางไปหาผู้ใหญ่บ้าน…",
     "questRewardClaimed": "🎁 ได้รางวัลเควส: {summary}",
     "rewardGold": "+{amount} ทอง",
     "rewardMaterials": "+{amount} วัสดุ",
@@ -1126,6 +1131,7 @@
   },
   "refine": {
     "openButton": "🔨 ตีบวก",
+    "menuAria": "ไปหาลุงดึ๋ง (ตีบวก)",
     "title": "ตู้ตีบวก",
     "emptyHint": "ช่องนี้ไม่มีของให้ตีบวก",
     "townOnlyHint": "ตีบวกได้เฉพาะในเมือง",
@@ -1625,6 +1631,7 @@
     "defeated": "🌟 เสี่ยจ๋องล้มแล้ว! กำลังรับรางวัล…"
   },
   "questBoard": {
+    "menuAria": "ไปหาผู้ใหญ่บ้าน (เควส)",
     "title": "กระดานเควส",
     "closeButton": "ปิด",
     "dailySectionTitle": "เดลี่วันนี้",

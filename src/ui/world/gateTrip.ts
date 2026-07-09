@@ -1,7 +1,7 @@
 /**
  * Owner UX round (2026-07-09) — "เดินไปที่ประตูก่อน แล้วค่อยวาป" (walk to the
  * gate first, THEN transition). Pure state-machine helper mirroring
- * `smithTrip.ts`'s idiom exactly: a gate tap (`resolveGateTap`'s "walk"
+ * `npcTrip.ts`'s idiom exactly: a gate tap (`resolveGateTap`'s "walk"
  * action) no longer fires `walkToZone` immediately — it issues the SAME
  * manual `moveTo` intent a ground tap uses (targeting the gate's own anchor
  * x), arms this trip, and a per-tick watcher (`GateTripWatcher.tsx`) fires
@@ -13,13 +13,13 @@
  * first two invoked off `GameClient.tsx`'s `onGateTap` and the throttled
  * snapshot (`GateTripWatcher.tsx`) respectively.
  *
- * Unlike `smithTrip` (which has a `"traveling"` phase for the fast-travel
+ * Unlike `npcTrip` (which has a `"traveling"` phase for the fast-travel
  * leg into town), a gate is always in the CURRENT zone — there is only one
  * active phase, `"walking"`. Four independent cancel conditions are baked
  * into the pure decision below (death, timeout, and an external zone
  * change); the FIFTH — "the player issued a different manual command" — is
  * handled by `gameStore.ts` resetting the field directly (mirrors
- * `smithTrip`'s own `queueMoveTo`/`queueAttackTarget` bypass), since that's
+ * `npcTrip`'s own `queueMoveTo`/`queueAttackTarget` bypass), since that's
  * an edge on OTHER store actions, not a property of this tick's context.
  */
 
@@ -51,7 +51,7 @@ export interface GateTripContext {
    * given the generous `GATE_TRIP_ARRIVE_RADIUS`). */
   heroX: number;
   /** The solo hero is dead — cancels the trip silently (owner rule, mirrors
-   * `smithTrip`'s death cancel). */
+   * `npcTrip`'s death cancel). */
   dead: boolean;
   /** The CURRENT world location — compared against `target.originZone`. */
   currentZone: WorldLocation;
@@ -81,7 +81,7 @@ export const GATE_TRIP_TIMEOUT_MS = 20_000;
  * started by `gameStore.ts`'s `startGateTrip`, which arms the FIRST
  * `"walking"` phase synchronously, on the tap itself.
  *
- * Order matters: death is checked first (mirrors `smithTrip`), then an
+ * Order matters: death is checked first (mirrors `npcTrip`), then an
  * external zone change (the trip's own transition never reaches this
  * check — it fires from `originZone`, never after), then the timeout, then
  * arrival. Firing `"transition"` is the ONLY way out of this function that

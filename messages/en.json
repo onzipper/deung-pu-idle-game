@@ -955,6 +955,7 @@
     "populationTooltip": "Players currently here (approximate)"
   },
   "shop": {
+    "menuAria": "Walk to Auntie Pu (Shop)",
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
     "tabBuy": "Buy",
@@ -1075,6 +1076,10 @@
     "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
     "smithTripTraveling": "🔨 Heading to Uncle Dueng…",
+    "npcTripWalkPahpu": "Walk over to Auntie Pu first",
+    "npcTripTravelingPahpu": "🧭 Heading to Auntie Pu…",
+    "npcTripWalkElder": "Walk over to the village head first",
+    "npcTripTravelingElder": "🚩 Heading to the village head…",
     "questRewardClaimed": "🎁 Quest reward: {summary}",
     "rewardGold": "+{amount} gold",
     "rewardMaterials": "+{amount} materials",
@@ -1126,6 +1131,7 @@
   },
   "refine": {
     "openButton": "🔨 Refine",
+    "menuAria": "Walk to Uncle Dueng (Refine)",
     "title": "Refine Station",
     "emptyHint": "Nothing to refine in this slot",
     "townOnlyHint": "Refining only works in town",
@@ -1625,6 +1631,7 @@
     "defeated": "🌟 Sia Jong is down! Collecting your reward…"
   },
   "questBoard": {
+    "menuAria": "Walk to the Village Head (Quests)",
     "title": "Quest Board",
     "closeButton": "Close",
     "dailySectionTitle": "Today's Dailies",

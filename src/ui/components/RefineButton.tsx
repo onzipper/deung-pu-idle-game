@@ -8,8 +8,8 @@
  *
  * Owner UX round (2026-07-09, "ถ้ากดแล้วให้วิ่งมาหา npc... ถ้า disabled แบบนี้
  * user งง"): ALWAYS enabled, from anywhere — a press kicks off the "smith
- * trip" state machine (`gameStore.ts`'s `startSmithTrip`/`smithTrip`, driven
- * to completion by `SmithTripWatcher.tsx` off the throttled snapshot):
+ * trip" state machine (`gameStore.ts`'s generalized `startNpcTrip`/`npcTrip`,
+ * driven to completion by `NpcTripWatcher.tsx` off the throttled snapshot):
  *  - in town, already within ลุงดึ๋ง's talk radius: opens the dialog directly
  *    (`openTownPanel("lungdueng")`) — equivalent to having just talked to him.
  *  - in town, out of range: queues the same walk-to-NPC `moveTo` intent the
@@ -29,12 +29,12 @@ import { useGameStore } from "@/ui/store/gameStore";
 
 export function RefineButton() {
   const t = useTranslations("refine");
-  const startSmithTrip = useGameStore((s) => s.startSmithTrip);
+  const startNpcTrip = useGameStore((s) => s.startNpcTrip);
 
   return (
     <button
       type="button"
-      onClick={startSmithTrip}
+      onClick={() => startNpcTrip("npc:lungdueng")}
       className="flex min-h-11 items-center gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border bg-ddp-panel-strong px-3 text-xs font-bold text-ddp-ink-muted shadow-(--ddp-shadow-btn) transition-all duration-100 hover:text-ddp-ink active:translate-y-0.5 active:scale-[0.95]"
     >
       {t("openButton")}

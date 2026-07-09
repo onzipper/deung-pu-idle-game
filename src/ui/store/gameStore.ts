@@ -60,7 +60,7 @@ import {
   type RawChatEntry,
 } from "@/ui/chat/chatMessages";
 import type { PartyWire } from "@/ui/friends/types";
-import { nextSmithTripStep, type SmithTripPhase } from "@/ui/world/smithTrip";
+import { nextNpcTripStep, type NpcTripPhase } from "@/ui/world/npcTrip";
 import {
   nextGateTripStep,
   type GateTripPhase,
@@ -302,8 +302,8 @@ export interface ShopSummary {
  * `null`. Deliberately a single-panel field (only one NPC dialog can be open
  * at once — "one mental model per feature") owned by the store so BOTH the
  * tap-to-talk pointer handler (`GameClient.tsx`, has no React state of its
- * own) and the refine dock shortcut (`RefineButton.tsx`) can open it, and
- * `TownNpcPanelHost.tsx` can auto-close it the instant the live snapshot's
+ * own) and any in-flight `npcTrip` (`startNpcTrip`/`advanceNpcTrip`) can open
+ * it, and `TownNpcPanelHost.tsx` can auto-close it the instant the live snapshot's
  * `npcInRange` says the hero has walked out of range. */
 export type TownPanelId = "pahpu" | "lungdueng" | "board";
 
@@ -1096,6 +1096,29 @@ export interface NoticeEntry {
 const MAX_NOTICES = 3;
 let noticeSeq = 0;
 
+/** `npcTrip` glue (R2.5-W3, generalized off the M7.6 smith-only version) — the
+ * pure `ui/world/npcTrip.ts` machine is npc-agnostic, so the NPC-specific
+ * bits (which panel opens, which notice copy plays) live here as small
+ * `TownNpcId`-keyed lookup tables, mirrored 1:1 with `TownNpcPanelHost.tsx`'s
+ * own `NPC_ID_BY_PANEL` (the reverse direction). The lungdueng notice keys
+ * are the ORIGINAL M7.6 keys (`walkToLungdueng`/`smithTripTraveling`) kept
+ * unrenamed — same copy, same behavior, no regression for the smith case. */
+const TOWN_PANEL_BY_NPC: Record<TownNpcId, TownPanelId> = {
+  "npc:pahpu": "pahpu",
+  "npc:lungdueng": "lungdueng",
+  "npc:elder": "board",
+};
+const NPC_TRIP_WALK_NOTICE: Record<TownNpcId, string> = {
+  "npc:pahpu": "npcTripWalkPahpu",
+  "npc:lungdueng": "walkToLungdueng",
+  "npc:elder": "npcTripWalkElder",
+};
+const NPC_TRIP_TRAVELING_NOTICE: Record<TownNpcId, string> = {
+  "npc:pahpu": "npcTripTravelingPahpu",
+  "npc:lungdueng": "smithTripTraveling",
+  "npc:elder": "npcTripTravelingElder",
+};
+
 /** Wave 3 "global chat" — a plain incrementing id for the React key (the relay never
  *  hands us one; `${charId}:${t}` could collide within the same ms). Module-level like
  *  `noticeSeq`/`dropFeedSeq` above. */
@@ -1250,16 +1273,22 @@ export interface HudState {
   activeTownPanel: TownPanelId | null;
 
   /**
-   * Owner UX round (2026-07-09) — "ปุ่มตีบวก works from anywhere": the
-   * in-flight "smith trip" `RefineButton.tsx` kicks off when pressed away
-   * from ลุงดึ๋ง's talk range. `"idle"` = no trip in flight (the common
-   * case). `"traveling"` = a fast-travel-to-town channel was queued (button
-   * pressed outside town); `"walking"` = standing in town, walking toward
-   * his anchor. `SmithTripWatcher.tsx` advances this off the throttled
-   * snapshot via `advanceSmithTrip` — see `ui/world/smithTrip.ts`'s pure
-   * transition function for the actual logic. Session-only (does NOT need
-   * to survive a reload, per the task brief) — never part of `SaveData`. */
-  smithTrip: SmithTripPhase;
+   * Owner UX round (2026-07-09) — "ปุ่มตีบวก works from anywhere", generalized
+   * R2.5-W3 to any of the three town NPCs: the in-flight "npc trip"
+   * `startNpcTrip(npcId)` kicks off when triggered away from that npc's talk
+   * range. `"idle"` = no trip in flight (the common case). `"traveling"` = a
+   * fast-travel-to-town channel was queued (triggered outside town);
+   * `"walking"` = standing in town, walking toward `npcTripTarget`'s anchor.
+   * `NpcTripWatcher.tsx` advances this off the throttled snapshot via
+   * `advanceNpcTrip` — see `ui/world/npcTrip.ts`'s pure transition function
+   * for the actual logic. Session-only (does NOT need to survive a reload,
+   * per the task brief) — never part of `SaveData`. */
+  npcTrip: NpcTripPhase;
+  /** WHICH npc the in-flight trip is walking toward — `null` while
+   * `npcTrip === "idle"`. Set once by `startNpcTrip`, read by
+   * `advanceNpcTrip`/`NpcTripWatcher.tsx` to resolve the anchor/range/panel
+   * for the target npc (the pure `npcTrip.ts` machine itself is npc-agnostic). */
+  npcTripTarget: TownNpcId | null;
 
   /**
    * Owner UX round (2026-07-09) — "เดินไปที่ประตูก่อน แล้วค่อยวาป": an open-gate
@@ -1268,7 +1297,7 @@ export interface HudState {
    * flight; `"walking"` = a `moveTo` toward the gate's own anchor x is in
    * flight, `GateTripWatcher.tsx` advancing it off the throttled snapshot via
    * `advanceGateTrip`. Session-only, never part of `SaveData` (same as
-   * `smithTrip`). Mutually exclusive with `smithTrip` (starting one cancels
+   * `npcTrip`). Mutually exclusive with `npcTrip` (starting one cancels
    * the other — a player can only be walking toward one destination). */
   gateTrip: GateTripPhase;
   /** The armed trip's remembered gate x / destination zone / origin zone /
@@ -1622,25 +1651,26 @@ export interface HudState {
   queueCancelCommand: () => void;
 
   // ---- Owner UX round (2026-07-09): ปุ่มตีบวก works from anywhere ----
-  /** `RefineButton.tsx`-only: start (or instantly resolve) a "smith trip" —
-   * see `smithTrip`'s doc for the full decision. Reads `world`/`npcInRange`
-   * synchronously off the current store state at press-time. */
-  startSmithTrip: () => void;
+  // Generalized R2.5-W3 to any town NPC (was smith-only).
+  /** Start (or instantly resolve) a trip to `npcId` — see `npcTrip.ts`'s doc
+   * for the full decision. Reads `world`/`npcInRange` synchronously off the
+   * current store state at trigger-time. */
+  startNpcTrip: (npcId: TownNpcId) => void;
   /** Cancel any in-flight trip, silently (no notice) — called on death or a
-   * conflicting manual move/attack (see `queueMoveTo`/`queueAttackTarget`).
-   * A no-op while already `"idle"`. */
-  cancelSmithTrip: () => void;
-  /** `SmithTripWatcher.tsx`-only: advance an in-flight trip by one throttled-
+   * conflicting manual move/attack/talk (see `queueMoveTo`/`queueAttackTarget`/
+   * `talkToNpc`). A no-op while already `"idle"`. */
+  cancelNpcTrip: () => void;
+  /** `NpcTripWatcher.tsx`-only: advance an in-flight trip by one throttled-
    * snapshot tick — a thin store-side wrapper around the pure
-   * `ui/world/smithTrip.ts#nextSmithTripStep`, applying whichever effect it
-   * returns (queue the walk-to-smith `moveTo`, or open the panel + end the
+   * `ui/world/npcTrip.ts#nextNpcTripStep`, applying whichever effect it
+   * returns (queue the walk-to-npc `moveTo`, or open the panel + end the
    * trip). A no-op while `"idle"`. */
-  advanceSmithTrip: () => void;
+  advanceNpcTrip: () => void;
 
   // ---- Owner UX round (2026-07-09): เดินไปที่ประตูก่อน แล้วค่อยวาป ----
   /** `GameClient.tsx`'s `onGateTap`-only: arm a gate trip on an OPEN gate tap
    * — queues the SAME manual `moveTo` intent a ground tap uses (targeting
-   * `gateX`), and arms `gateTrip`. Cancels any in-flight `smithTrip` (mutual
+   * `gateX`), and arms `gateTrip`. Cancels any in-flight `npcTrip` (mutual
    * exclusion — see `gateTrip`'s doc). */
   startGateTrip: (gateX: number, destination: WorldLocation) => void;
   /** Cancel any in-flight gate trip, silently (no notice/toast) — called on a
@@ -1865,7 +1895,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   craftBlockReason: null,
   tomeAssembledCelebration: false,
   activeTownPanel: null,
-  smithTrip: "idle",
+  npcTrip: "idle",
+  npcTripTarget: null,
   gateTrip: "idle",
   gateTripTarget: null,
 
@@ -2081,13 +2112,16 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
-  // A player-initiated fast-travel silently cancels an in-flight gate trip
-  // (owner UX round 2026-07-09) — the trip's OWN internal fast-travel leg
-  // (`startSmithTrip`'s traveling branch) writes `pendingInput.fastTravel`
-  // directly rather than calling this action, so smithTrip never self-cancels.
+  // A player-initiated fast-travel silently cancels any in-flight gate trip
+  // AND npc trip (owner UX round 2026-07-09, npc-trip cancel added R2.5-W3)
+  // — the trip's OWN internal fast-travel leg (`startNpcTrip`'s traveling
+  // branch) writes `pendingInput.fastTravel` directly rather than calling
+  // this action, so npcTrip never self-cancels.
   queueFastTravel: (target) =>
     set((s) => ({
       pendingInput: { ...s.pendingInput, fastTravel: target },
+      npcTrip: s.npcTrip === "idle" ? s.npcTrip : "idle",
+      npcTripTarget: s.npcTrip === "idle" ? s.npcTripTarget : null,
       gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
       gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
     })),
@@ -2149,15 +2183,16 @@ export const useGameStore = create<HudState>((set, get) => ({
     })),
 
   // A manual move/attack order is "the player tapping elsewhere" (owner UX
-  // round 2026-07-09) — silently cancels any in-flight smith trip AND gate
+  // round 2026-07-09) — silently cancels any in-flight npc trip AND gate
   // trip so neither fights a real player-directed command. Each trip's OWN
-  // internal moveTo (`startSmithTrip`/`advanceSmithTrip`/`startGateTrip`/
+  // internal moveTo (`startNpcTrip`/`advanceNpcTrip`/`startGateTrip`/
   // `advanceGateTrip`) writes `pendingInput.moveTo` directly rather than
   // calling this action, so starting/advancing one never self-cancels.
   queueMoveTo: (x) =>
     set((s) => ({
       pendingInput: { ...s.pendingInput, moveTo: { x } },
-      smithTrip: s.smithTrip === "idle" ? s.smithTrip : "idle",
+      npcTrip: s.npcTrip === "idle" ? s.npcTrip : "idle",
+      npcTripTarget: s.npcTrip === "idle" ? s.npcTripTarget : null,
       gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
       gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
     })),
@@ -2165,7 +2200,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   queueAttackTarget: (id) =>
     set((s) => ({
       pendingInput: { ...s.pendingInput, attackTarget: { id } },
-      smithTrip: s.smithTrip === "idle" ? s.smithTrip : "idle",
+      npcTrip: s.npcTrip === "idle" ? s.npcTrip : "idle",
+      npcTripTarget: s.npcTrip === "idle" ? s.npcTripTarget : null,
       gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
       gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
     })),
@@ -2183,10 +2219,12 @@ export const useGameStore = create<HudState>((set, get) => ({
     set((s) => ({ pendingInput: { ...s.pendingInput, claimMainReward: chapterId } })),
 
   // A friend-warp is a manual zone jump too (owner UX round 2026-07-09) —
-  // same gate-trip cancel as `queueFastTravel`.
+  // same gate-trip + npc-trip cancel as `queueFastTravel`.
   queueWarpScroll: (target) =>
     set((s) => ({
       pendingInput: { ...s.pendingInput, useWarpScroll: target },
+      npcTrip: s.npcTrip === "idle" ? s.npcTrip : "idle",
+      npcTripTarget: s.npcTrip === "idle" ? s.npcTripTarget : null,
       gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
       gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
     })),
@@ -2200,67 +2238,73 @@ export const useGameStore = create<HudState>((set, get) => ({
   closeTownPanel: () => set({ activeTownPanel: null }),
 
   // ---- Owner UX round (2026-07-09): ปุ่มตีบวก works from anywhere ----
-  startSmithTrip: () => {
+  // Generalized R2.5-W3 to any of the three town NPCs (was smith-only).
+  startNpcTrip: (npcId) => {
     // Mutual exclusion with an in-flight gate trip (owner UX round
     // 2026-07-09) — a player can only be walking toward one destination.
     set((st) => (st.gateTrip === "idle" ? {} : { gateTrip: "idle", gateTripTarget: null }));
     const s = get();
     if (s.world.kind === "town") {
-      if (s.npcInRange["npc:lungdueng"]) {
-        set({ activeTownPanel: "lungdueng" });
+      if (s.npcInRange[npcId]) {
+        set({ activeTownPanel: TOWN_PANEL_BY_NPC[npcId] });
         return;
       }
       set((st) => ({
-        smithTrip: "walking",
+        npcTrip: "walking",
+        npcTripTarget: npcId,
         pendingInput: {
           ...st.pendingInput,
-          moveTo: { x: townNpcConfig("npc:lungdueng").x },
+          moveTo: { x: townNpcConfig(npcId).x },
         },
       }));
-      get().pushNotice("walkToLungdueng");
+      get().pushNotice(NPC_TRIP_WALK_NOTICE[npcId]);
       return;
     }
     set((st) => ({
-      smithTrip: "traveling",
+      npcTrip: "traveling",
+      npcTripTarget: npcId,
       pendingInput: {
         ...st.pendingInput,
         fastTravel: { mapId: CONFIG.world.townMapId, zoneIdx: 0 },
       },
     }));
-    get().pushNotice("smithTripTraveling");
+    get().pushNotice(NPC_TRIP_TRAVELING_NOTICE[npcId]);
   },
 
-  cancelSmithTrip: () => set((s) => (s.smithTrip === "idle" ? {} : { smithTrip: "idle" })),
+  cancelNpcTrip: () =>
+    set((s) => (s.npcTrip === "idle" ? {} : { npcTrip: "idle", npcTripTarget: null })),
 
-  advanceSmithTrip: () => {
+  advanceNpcTrip: () => {
     const s = get();
-    if (s.smithTrip === "idle") return;
-    const result = nextSmithTripStep(s.smithTrip, {
+    if (s.npcTrip === "idle" || !s.npcTripTarget) return;
+    const npcId = s.npcTripTarget;
+    const result = nextNpcTripStep(s.npcTrip, {
       inTown: s.world.kind === "town",
-      inRange: s.npcInRange["npc:lungdueng"],
+      inRange: s.npcInRange[npcId],
       dead: s.heroes[0]?.dead ?? false,
     });
     if (result.effect === "openPanel") {
-      set({ smithTrip: "idle", activeTownPanel: "lungdueng" });
-    } else if (result.effect === "walkToSmith") {
+      set({ npcTrip: "idle", npcTripTarget: null, activeTownPanel: TOWN_PANEL_BY_NPC[npcId] });
+    } else if (result.effect === "walkToNpc") {
       set((st) => ({
-        smithTrip: "walking",
+        npcTrip: "walking",
         pendingInput: {
           ...st.pendingInput,
-          moveTo: { x: townNpcConfig("npc:lungdueng").x },
+          moveTo: { x: townNpcConfig(npcId).x },
         },
       }));
-    } else if (result.phase !== s.smithTrip) {
-      set({ smithTrip: result.phase });
+    } else if (result.phase !== s.npcTrip) {
+      set({ npcTrip: result.phase });
     }
   },
 
   // ---- Owner UX round (2026-07-09): เดินไปที่ประตูก่อน แล้วค่อยวาป ----
   startGateTrip: (gateX, destination) =>
     set((s) => ({
-      // Mutual exclusion with an in-flight smith trip (mirrors
-      // `startSmithTrip`'s own reset).
-      smithTrip: "idle",
+      // Mutual exclusion with an in-flight npc trip (mirrors
+      // `startNpcTrip`'s own reset).
+      npcTrip: "idle",
+      npcTripTarget: null,
       gateTrip: "walking",
       gateTripTarget: {
         gateX,
@@ -2269,7 +2313,7 @@ export const useGameStore = create<HudState>((set, get) => ({
         armedAt: Date.now(),
       },
       // Writes `pendingInput.moveTo` directly (not via `queueMoveTo`) so
-      // arming never immediately self-cancels — mirrors `startSmithTrip`'s
+      // arming never immediately self-cancels — mirrors `startNpcTrip`'s
       // own bypass.
       pendingInput: { ...s.pendingInput, moveTo: { x: gateX } },
     })),

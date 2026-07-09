@@ -360,8 +360,10 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/DropFeed.tsx` — drop-claim toast juice; epic keeps the fixed top-center discovery beat, commons/stones go to the arena corner.
 - `src/ui/components/GhostToggle.tsx` — "show other players" toggle for ghost-presence (`ghostsVisible`, localStorage-persisted).
 - `src/ui/components/WorldBossBanner.tsx` — hourly world-boss countdown/found-it strip, presentational off `worldBossStatus`.
-- `src/ui/components/RefineButton.tsx` — refine-station shortcut that kicks off the "smith trip" state machine from anywhere.
-- `src/ui/components/SmithTripWatcher.tsx` — renders nothing; drives the `smithTrip` state machine to completion off the throttled snapshot.
+- `src/ui/components/RefineButton.tsx` — refine-station shortcut that kicks off an `npcTrip` (ลุงดึ๋ง target) from anywhere; currently unused in `GameHud.tsx` (owner-confirm-pending judgment call, see that file's doc).
+- `src/ui/components/NpcTripWatcher.tsx` — renders nothing; drives the generalized `npcTrip` (any of the 3 town NPCs) state machine to completion off the throttled snapshot.
+- `src/ui/components/NpcTripButtons.tsx` — R2.5-W3 menu-row ร้านค้า/ตีบวก/ภารกิจ icon tiles, each a `startNpcTrip(npcId)` walk-order (never a remote panel open); boss-phase/travel-blocked dim+toast guard, in-flight pulse badge.
+- `src/ui/components/MiniMapCard.tsx` — top-right compact zone-summary card (zone name, live population, hero/gate/NPC dots strip); tap opens `WorldMapPanel`.
 - `src/ui/components/FastTravelPicker.tsx` — zone-picker modal for warp travel, town pinned + per-map themed sections.
 - `src/ui/components/GateTripWatcher.tsx` — renders nothing; drives the `gateTrip` walk-to-gate-then-transition state machine.
 - `src/ui/components/SettingsPanel.tsx` — generic client-prefs drawer (sound/language only; automation lives in `BotSettingsModal`).
@@ -466,14 +468,14 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 
 ### src/ui/world/ — zone enumeration, gate/warp UX, world map
 - `src/ui/world/zones.ts` — pure UI-side world-zone enumeration mirroring `engine/systems/world.ts`'s zone build, off public `CONFIG`.
-- `src/ui/world/smithTrip.ts` — pure "smith trip" state-machine helper (fast-travel → walk to ลุงดึ๋ง → auto-open dialog).
+- `src/ui/world/npcTrip.ts` — pure, npc-agnostic "walk to a town NPC" state-machine helper (fast-travel → walk to the target's anchor → auto-open dialog); generalized off the M7.6 smith-only `smithTrip.ts`.
 - `src/ui/world/WorldMapPanel.tsx` — world map panel: live population, friends/party last-zone, hot zone, world-boss window, tap-to-travel.
 - `src/ui/world/gateTap.ts` — pure zone-edge gate-tap → `walkToZone`/walk-then-transition action decision.
 - `src/ui/world/gateTrip.ts` — pure "walk to the gate first, then transition" state-machine helper.
 - `src/ui/world/mapTheme.ts` — per-map themed row/header Tailwind classes (anchored to render biome tones, no `@/render` import).
-- `src/ui/world/useZoneCounts.ts` — relay `/presence/counts` population poll, open-only cadence.
+- `src/ui/world/useZoneCounts.ts` — relay `/presence/counts` population poll, `{ open, pollMs }`-driven cadence, pauses while the tab is hidden.
 - `src/ui/world/worldMapModel.ts` — pure view-model builder for `WorldMapPanel` (lock state, badges, friend/party chips).
-- `src/ui/world/__tests__/` — headless pins (zones, smithTrip, gateTap, gateTrip, worldMapModel); 4 files.
+- `src/ui/world/__tests__/` — headless pins (zones, npcTrip, gateTap, gateTrip, worldMapModel); 5 files.
 
 ### src/ui/friends/ — Friends panel (M8 Phase 1)
 - `src/ui/friends/format.ts` — pure zone-parsing display helpers for friend rows.
@@ -509,7 +511,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 
 ### src/ui/store/ — the engine↔React bridge (LOAD-BEARING HUB)
 - `src/ui/store/gameStore.ts` — **the Zustand store**: throttled (~10Hz) engine snapshot for React reads, plus the player→engine `pendingInput` intent queue and UI-owned automation/preference flags (autoCast/autoAllocate/soundMuted/etc).
-- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions); 2 files.
+- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions); 3 files.
 
 ### src/ui/quest/
 - `src/ui/quest/dailyClaimFlow.ts` — POST-first daily-quest claim flow, then queues the engine `claimDaily` intent.
