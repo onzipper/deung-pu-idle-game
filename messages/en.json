@@ -1030,6 +1030,7 @@
     "statHp": "HP +{value}",
     "classReqBlocked": "{cls} only",
     "slot": {
+      "all": "All",
       "weapon": "Weapon",
       "armor": "Armor"
     },
@@ -1159,6 +1160,7 @@
     "currentLabel": "+{level}",
     "nextLabel": "+{level}",
     "successChanceLabel": "{pct}% success",
+    "costAria": "Have {owned} of {required} needed",
     "band": {
       "safe": "Safe — nothing is lost on a miss",
       "degrade": "Miss = drops one level",
@@ -1481,6 +1483,16 @@
           "partyTab": "👥 A Party tab right on the quest tracker — see who's online and their class/level without opening a menu",
           "skillDock": "⚔️ New MMO-style skill bar — numbered skills + AUTO + quick potions, all in one row",
           "collapse": "👁️ Blocking your view? Collapse it! The quest tracker folds to a small chip and the skill bar to a thin strip (AUTO stays tappable) — your choice is remembered"
+        }
+      },
+      "2026-07-10b": {
+        "items": {
+          "expPct": "📊 The EXP bar at the bottom now shows the percentage (e.g. EXP 45.6%) — clearer than a bar alone",
+          "dmgOutline": "✨ Damage and gold numbers floating up now have a dark outline — readable even on bright maps (desert, snow, daytime)",
+          "hudScrim": "🌫️ A subtle dark gradient sits at the top of your screen so HUD buttons and the minimap don't wash out on bright maps",
+          "refineChips": "💎 Enhance cost chips now show owned/required (e.g. 42/30) and turn red when you're short",
+          "toastViolet": "🟣 Info toasts now wear the violet chrome theme across the board",
+          "invAllTab": "🎒 Inventory gained an \"All\" tab to view weapons and armor together; it's now the default view"
         }
       }
     }

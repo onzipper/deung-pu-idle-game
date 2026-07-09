@@ -433,7 +433,12 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   const setInventory = useGameStore((s) => s.setInventory);
   const queueEquip = useGameStore((s) => s.queueEquip);
 
-  const [activeTab, setActiveTab] = useState<GearSlot>("weapon");
+  // R2-W? "all" tab default (owner-visible decision): the bag opens showing
+  // every owned instance across both slots instead of forcing a weapon/armor
+  // pick first. `GearSlot | "all"` widens ONLY this panel's own tab state —
+  // `EquipmentDoll`/`handleSelectRealSlot` stay strictly `GearSlot`-typed
+  // (equipping/tapping a real slot always narrows back to that slot).
+  const [activeTab, setActiveTab] = useState<GearSlot | "all">("all");
   const [classOnly, setClassOnly] = useState(false);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -445,7 +450,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   // owned-fortifier readout below instead (no equip/sell affordances for them).
   const items = useMemo(() => {
     return inventory
-      .filter((i) => i.slot === activeTab)
+      .filter((i) => activeTab === "all" || i.slot === activeTab)
       .filter((i) => lookupTemplate(i.templateId)?.kind !== "fortifier")
       .filter((i) => {
         if (!classOnly || !heroCls) return true;
@@ -464,10 +469,17 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     return { weapon, armor };
   }, [inventory]);
 
-  const equippedItem = inventory.find((i) => i.equippedSlot === activeTab) ?? null;
+  const selectedItem = items.find((i) => i.instanceId === selectedInstanceId) ?? null;
+  // Under the "all" tab, items span both slots, so "the equipped item to
+  // compare against" can't just be "whatever's equipped in activeTab" — it
+  // has to follow the SELECTED item's own slot. Falls back to activeTab when
+  // nothing's selected yet (mirrors the old single-slot-tab behavior).
+  const equippedCompareSlot = selectedItem ? selectedItem.slot : activeTab !== "all" ? activeTab : null;
+  const equippedItem = equippedCompareSlot
+    ? (inventory.find((i) => i.equippedSlot === equippedCompareSlot) ?? null)
+    : null;
   const equippedTemplateId = equippedItem?.templateId ?? null;
   const equippedRefineLevel = equippedItem?.refineLevel ?? 0;
-  const selectedItem = items.find((i) => i.instanceId === selectedInstanceId) ?? null;
 
   async function resync(): Promise<void> {
     const res = await fetchInventory();
@@ -570,7 +582,10 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         <div className="flex shrink-0 flex-col items-center gap-3 md:flex-row md:items-start">
           <EquipmentDoll
             inventory={inventory}
-            activeTab={activeTab}
+            // Doll real-slot highlight stays a strict `GearSlot` — under "all"
+            // it follows the SELECTED item's slot (falls back to "weapon" when
+            // nothing's selected yet; purely cosmetic, doesn't affect filtering).
+            activeTab={activeTab === "all" ? (selectedItem?.slot ?? "weapon") : activeTab}
             onSelectReal={handleSelectRealSlot}
             heroCls={heroCls}
             heroLevel={hero.level}
@@ -639,16 +654,19 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
           </div>
         )}
 
-        {/* Tabs */}
-        <TabRow
-          tabs={SLOT_ORDER.map((slot) => ({
-            id: slot,
-            label: t(`slot.${slot}`),
-            icon: GEAR_SLOT_ICONS[slot],
-          }))}
+        {/* Tabs — "all" leads (default tab), then the per-slot tabs. */}
+        <TabRow<GearSlot | "all">
+          tabs={[
+            { id: "all", label: t("slot.all"), icon: <BagIcon className="h-3.5 w-3.5" /> },
+            ...SLOT_ORDER.map((slot) => ({
+              id: slot,
+              label: t(`slot.${slot}`),
+              icon: GEAR_SLOT_ICONS[slot],
+            })),
+          ]}
           active={activeTab}
-          onChange={(slot) => {
-            setActiveTab(slot);
+          onChange={(tab) => {
+            setActiveTab(tab);
             setSelectedInstanceId(null);
           }}
         />

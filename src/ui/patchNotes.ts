@@ -413,6 +413,19 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-10.items.collapse",
     ],
   },
+  // R2.7 Wave A — code-drawn UI alignment from the #54 audit (issue #55).
+  {
+    id: "2026-07-10b",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10b.items.expPct",
+      "releases.2026-07-10b.items.dmgOutline",
+      "releases.2026-07-10b.items.hudScrim",
+      "releases.2026-07-10b.items.refineChips",
+      "releases.2026-07-10b.items.toastViolet",
+      "releases.2026-07-10b.items.invAllTab",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

@@ -210,7 +210,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/fx/refinePrestige.ts` — +8/+9/+10 refine armor crackle/beat ladder riding gearSparkle's anchor.
 - `src/render/fx/FxController.ts` — event/frame orchestrator wiring all fx pools to `GameEvent`s + continuous per-frame reads.
 - `src/render/fx/impactFilters.ts` — transient attach-only-while-active `ShockwaveFilter`/`RGBSplitFilter` + bloom filter factory.
-- `src/render/fx/__tests__/` — pins skill-spectacle, war-cry aura, world-boss fx, shadow-dash, champion aura, POV-gating, legendary tome, refine prestige/fx-recipes, world-depth fx behavior; 11 files.
+- `src/render/fx/__tests__/` — pins skill-spectacle, war-cry aura, world-boss fx, shadow-dash, champion aura, POV-gating, legendary tome, refine prestige/fx-recipes, world-depth fx, floating-text stroke behavior; 12 files.
 
 ### src/render/environment/
 - `src/render/environment/colorUtils.ts` — pure HSL/RGB math (`shiftHue`/`lerpColor`/`adjustLightness`), no canvas APIs.
@@ -389,7 +389,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/SkillDock.tsx` — R2.6 Wave 2 bottom-center dock wrapper: one row of `SkillBar` tiles + `BotMasterSwitch` + `ConsumableBar` quick-slots + a persisted whole-dock collapse-to-thin-strip (mirrors `GoalLadder.tsx`'s Wave-1 collapse idiom; bot master stays visible/tappable while collapsed).
 - `src/ui/components/GoalLadderOverlaySlot.tsx` — portal target mounting the ONE `GoalLadder` onto the arena's left-mid overlay slot, viewport-independent (R2.6: dropped the old `compact`/`useMediaQuery` branch).
 - `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock (`SkillDock.tsx`), bottom-edge EXP/clock strip; documents the z-index ladder.
-- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, and R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`); 3 files.
+- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`), issue #55 Wave A `InventoryPanel` "all" tab default/both-slots RTL smoke (`inventoryAllTab.test.tsx`), and `RefinePanel` owned/required cost-chip fraction+red-tint RTL smoke (`refinePanelCostChips.test.tsx`); 5 files.
 
 ### src/ui/components/primitives/ — R2 design-system primitives (presentational only, no store reads)
 - `src/ui/components/primitives/Button.tsx` — 3-tier button skin (primary gold / secondary purple / danger red).

@@ -41,6 +41,15 @@
 | จอเกมใหญ่ + HUD ซ้อน | จอเกม 900×300 กรอบ | **desktop/แนวนอน**: จอสูงขึ้น ~16:9 + HUD overlay (มี scrim มืดรอง — กันจมบน biome สว่าง) · **มือถือแนวตั้ง: คงกรอบเดิม** (overlay บังเกม) |
 | Toast/notification + popup ยืนยัน + tab | NoticeToast / useConfirmGuard / tab strips | Toast/ConfirmPopup/Tab primitives |
 
+### ✅ R2.7 Wave A (2026-07-10, issue #55 — จาก audit #54)
+- EXP % readout บน `ExpClockStrip` (ตัวเลขทอง ขอบซ้าย คู่กับนาฬิกาขวา)
+- เลขดาเมจ/ทอง มี stroke ดำ (`floatingText.ts` — `TextStyle.stroke` ครั้งแรกใน repo, ตั้งครั้งเดียวตอน construct, per-spawn cost ศูนย์)
+- Scrim gradient ขอบบนจอ ชั้น z-5 คู่ vignette (`GameHud.tsx`) — กัน HUD มุมบนจมบน biome สว่าง
+- แผงตีบวก: ชิป cost เป็นเศษ มี/ต้องใช้ (เช่น 42/30) + ย้อมแดงเมื่อไม่พอ (state machine เฉลยค้อนสุดท้ายไม่แตะ)
+- Toast info = ม่วง chrome (แก้ `VARIANT_CLASS.info` จุดเดียว)
+- INVENTORY tab "ทั้งหมด" (default, รวม weapon+armor; "ใช้/อื่นๆ" ติด economy — ยังไม่ทำ)
+- gap ที่เหลือจาก audit #54: Wave B (menu-row/action rail/chat) รอ owner เคาะ · Wave C ตาม R3/R4-R5 · Wave D รอ asset pipeline
+
 ### R3 — Presence คนจริง
 - ฉาก gameplay ของ mockup ที่คนเยอะๆ ออร่า/เลขดาเมจของคนอื่น = ghost action stream (8Hz combat + snapshot-on-join + tap ดูโปรไฟล์)
 
