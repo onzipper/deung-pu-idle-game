@@ -28,8 +28,8 @@
  * already budgeted for combat juice, per the "reuse pooling caps, don't add
  * new uncapped emitters" mobile-GPU constraint. Timers are keyed by a small
  * caller-chosen string (e.g. `${heroSlot}-weapon` / `${heroSlot}-armor`) —
- * bounded to at most `MAX_SLOTS * 2` live keys in practice (party cap × two
- * gear slots), so the backing `Map` never grows unbounded.
+ * bounded to at most `MAX_PARTY_SIZE * 2` live keys in practice (party cap
+ * (6) × two gear slots), so the backing `Map` never grows unbounded.
  */
 
 import { burst, type ParticlePool } from "@/render/fx/particles";

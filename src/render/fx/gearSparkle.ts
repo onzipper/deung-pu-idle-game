@@ -18,12 +18,12 @@
  */
 
 import { Container, Graphics } from "pixi.js";
-import { safeRadius } from "@/render/theme";
+import { MAX_PARTY_SIZE, safeRadius } from "@/render/theme";
 
 // ---------------------------------------------------------------------------
 // Knobs
 // ---------------------------------------------------------------------------
-const MAX_SLOTS = 3; // one glint cluster per hero slot (party cap)
+const MAX_SLOTS = MAX_PARTY_SIZE; // one glint cluster per hero slot (party cap)
 const GLINTS_PER_SLOT = 3; // small + subtle, per spec
 const GLINT_RADIUS = 1.6;
 const ORBIT_RX = 11;

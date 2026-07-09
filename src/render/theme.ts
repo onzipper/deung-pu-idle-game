@@ -398,6 +398,17 @@ export function safeRadius(r: number): number {
   return Math.max(0, r);
 }
 
+/** Party-cap mirror for every per-hero-slot fx module (`gearSparkle.ts`,
+ * `championAura.ts`, `warCryAura.ts`, `FxController.ts`'s weapon fx). Render
+ * has no sanctioned import of `src/server/party.ts` (server-only, pulls in
+ * Prisma — would break the client bundle), so this mirrors that module's
+ * `MAX_PARTY_SIZE` the same way `FriendsPanel.tsx` already does; the ONE
+ * place fx modules read it from so a future party-cap change is a single
+ * edit instead of N re-mirrors. Keep in sync with `src/server/party.ts`
+ * `MAX_PARTY_SIZE` / `scripts/party-relay/server.js` `MAX_SLOTS` (owner
+ * raised 3 -> 6, 2026-07-08). */
+export const MAX_PARTY_SIZE = 6;
+
 /** Boss stage-map identity ids — mirrors `CONFIG.world.maps[].id` (map1..map6,
  * see `engine/config/index.ts`). Kept as a plain string union here (render has
  * no sanctioned import of the engine's map list itself) rather than importing

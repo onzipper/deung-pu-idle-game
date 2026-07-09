@@ -324,6 +324,23 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09j.items.partyFixes",
     ],
   },
+  // Post-M8.6 live-feedback round (all owner-reported same day): per-hero bot
+  // settings in a cohort, per-member unlock/asura truth, hidden-tab lane-keepalive
+  // (a folded member keeps farming, peers never stall), world-boss defeated banner
+  // + auto-claim, smith-trip refine button, warp-button relocation + โซน copy.
+  {
+    id: "2026-07-09k",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09k.items.botSettingsParty",
+      "releases.2026-07-09k.items.unlockTruth",
+      "releases.2026-07-09k.items.asuraCounts",
+      "releases.2026-07-09k.items.hiddenTab",
+      "releases.2026-07-09k.items.worldBossDown",
+      "releases.2026-07-09k.items.refineAnywhere",
+      "releases.2026-07-09k.items.warpZone",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

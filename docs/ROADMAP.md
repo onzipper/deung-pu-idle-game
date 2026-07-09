@@ -173,7 +173,8 @@
 - [x] **World chat UI**: ปุ่ม 💬 ลอย + badge ยังไม่อ่าน + แผง ModalPortal (มือถือ bottom sheet/เดสก์ท็อป 360px) · เก็บ 30 นาที client-side
 - [x] **ชิปสัญญาณปาร์ตี้** แทนแถบ "เล่นกับ xxx ในโซนนี้": ขีด 4 ระดับสีตาม RTT มุมขวาบนสนาม + แตะดู lane lag รายคน (ping 5s + EMA, perSlotLag จาก turn engine)
 - [x] **DropFeed จัดระเบียบ**: ของธรรมดา/หินย้ายมุมขวาล่างสนาม ยุบรวม cap 3 + ตัวนับ +N · epic เด้งกลางจอเหมือนเดิม
-- [ ] **ค้างตรวจ**: เทสมือ 2 แท็บ (ghost/chat) + มือถือ (ชิป/แผงแชท) · เจ้าของเล่นจริงก่อน merge · **deploy: redeploy relay (จำเป็น — presence/chat/ping) + web, ไม่มี db push**
+- [x] **Live-feedback round 1 (2026-07-09, เจ้าของเล่นจริงหลัง deploy — แก้ครบ 6 + UX 3)**: ตั้งค่าบอทเป็น per-hero ทั้ง 6 ฟิลด์ (HeroConfig widen, intent ขี่ lane setHeroConfig — แก้ "ตั้งค่าบอทไม่ได้ในตี้" ที่ราก) · เกจ/ลูกศรปลดโซนบอกความจริงของตัวเอง (deriveUnlockedZones cascade — เคส A z38/B z31) · แก่น/ศิลา/กระดาษ/sigil บัญชีต่อคน (essence = mean split, sigil intent เคยหายจริง — อุดแล้ว, craft ตำนาน disable ในตี้) · **พับจอ/สลับแท็บ = lane-keepalive** เพื่อนไม่หยุด ฮีโร่ฟาร์มต่อ กลับมา burst ตามทัน + pagehide = shadow ทันที + relay heartbeat 15s→5s (ตายเงียบ ~35s→~10s) · แบนเนอร์เสี่ยจ๋องรู้จัก "ล้มแล้ว" + auto-claim คนที่ออกโซนไปก่อน · ป้าย 0ms → "✓ ตามทัน" · UX: ปุ่มตีบวกกดได้ทุกที่ (smith trip อัตโนมัติ), ปุ่มวาร์ปย้ายไปข้างป้ายโซนบนซ้าย + ด่าน→โซน, ปุ่มตีบวกเข้าชุดกระเป๋า — patch-notes 2026-07-09k
+- [ ] **ค้างตรวจ**: เทสมือ 2 แท็บ (ghost/chat/keepalive/ตั้งค่าบอทในตี้) + มือถือ (ชิป/แผงแชท/ปุ่มวาร์ปใหม่) + smith trip in-browser · เจ้าของเล่นจริงก่อน merge · **deploy: redeploy relay (จำเป็น — presence/chat/ping + heartbeat 5s) + web, ไม่มี db push**
 
 ## M9 — Economy & Competition
 

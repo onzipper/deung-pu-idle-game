@@ -234,6 +234,14 @@ const WORLD_BOSS_REWARD_MATERIALS = 350;
  * (a batched report, not per-hit). */
 const WB_DAMAGE_REPORT_MS = 10_000;
 
+/** FIX 2 (2026-07-09 live round) — all-clients defeat poll cadence: a client that's
+ * NOT currently engaged in the fight (never receives an hp-report response of its
+ * own) still needs to learn the SHARED pool died so `WorldBossBanner` can stop
+ * showing a stale countdown and the "found it!"/participant auto-claim path can
+ * fire. Same generous order of magnitude as `WB_DAMAGE_REPORT_MS` — a public GET,
+ * cheap, only runs during the ~15-minute active window. */
+const WB_DEFEAT_POLL_MS = 12_000;
+
 /** Party handshake deadline safety net (partySession.ts D1/D2 fixes). A re-seed exchange
  * that hasn't converged within `HANDSHAKE_DEADLINE_MS` is aborted + retried; a trip backs
  * the next window off to `HANDSHAKE_RETRY_MS` so a genuinely-absent peer doesn't thrash.
@@ -738,28 +746,33 @@ let pendingWorldBossClaim: { windowId: number } | null = null;
  * IN A COHORT every member calls this independently for their OWN character —
  * the shared sim's `worldBossDefeated` event fires identically on every
  * client, and each one claims into its own save row (by design).
+ *
+ * Returns a settle outcome (FIX 2, 2026-07-09 live round) so callers can latch
+ * `wbClaimedWindow` — `"pending"` means "try again later" (network failure or the
+ * characterId boot-race), `"ok"`/`"rejected"` are both TERMINAL for this window
+ * (a confirmed grant, or a definitive 403/409 that will never succeed on retry).
  */
 async function attemptWorldBossClaim(
   windowId: number,
   resolveItemName: (templateId: string) => string,
-): Promise<void> {
+): Promise<"ok" | "rejected" | "pending"> {
   if (worldBossClaimInFlight) {
     pendingWorldBossClaim = { windowId };
-    return;
+    return "pending";
   }
   const characterId = useGameStore.getState().myCharacterId;
   if (!characterId) {
     pendingWorldBossClaim = { windowId };
-    return;
+    return "pending";
   }
   worldBossClaimInFlight = true;
   try {
     const res = await postWorldBossClaim(characterId, windowId);
     if (res === null) {
       pendingWorldBossClaim = { windowId }; // network failure — retry next autosave tick
-      return;
+      return "pending";
     }
-    if (!res.ok) return; // terminal rejection — silent, no retry
+    if (!res.ok) return "rejected"; // terminal rejection — silent, no retry
     const store = useGameStore.getState();
     store.creditGold(res.goldCredit);
     store.creditMaterials(WORLD_BOSS_REWARD_MATERIALS);
@@ -770,6 +783,7 @@ async function attemptWorldBossClaim(
       stones: WORLD_BOSS_REWARD_MATERIALS,
       item: resolveItemName(res.item.templateId),
     });
+    return "ok";
   } finally {
     worldBossClaimInFlight = false;
   }
@@ -1049,10 +1063,43 @@ export function GameClient() {
     let wbPingedWindow: number | null = null;
     let wbNetworkInFlight = false;
     let wbLastReportAt = 0;
+    /** FIX 2 (2026-07-09 live round) — the all-clients defeat poll's own bookkeeping,
+     * distinct from the in-zone report/poll bookkeeping above (that branch already
+     * learns `defeated` for free via `state.worldBoss.defeated` the instant the local
+     * sim's shared hp hits 0, so this poll only needs to run for clients NOT currently
+     * engaged — see the per-frame block below). `wbDefeatedWindowId` latches the first
+     * window confirmed dead by EITHER source; `wbDefeatPollAt` gates the GET cadence. */
+    let wbDefeatedWindowId: number | null = null;
+    let wbDefeatPollAt = 0;
+    /** Window-scoped "did I deal damage this window" latch — unlike `wbReportWindow`
+     * (which resets the instant `worldBossDamageDealt` goes null, e.g. I leave the
+     * zone or the fight ends locally), this one SURVIVES that reset so a player who
+     * tapped the boss and then walked away still shows the "defeated, collecting your
+     * reward" banner + auto-claims once the SHARED pool dies elsewhere. */
+    let wbParticipatedWindow: number | null = null;
+    /** Window-scoped "my claim for this window is settled" latch — set once
+     * `attemptWorldBossClaim` resolves to either a confirmed grant or a TERMINAL
+     * rejection (already_claimed/not_owned/stale_window); a network-failure retry
+     * (`"pending"`) leaves it unset so the auto-claim path below tries again. */
+    let wbClaimedWindow: number | null = null;
     /** ดินแดนอสูร daily hot zone: the last Bangkok day-key QUEUED via
      * `setAsuraHotZone` — re-queued only when it changes (idempotent, same
      * shape as `lastWorldBossStatus`'s "only push on transition" idiom). */
     let lastAsuraDayKeyQueued: number | null = null;
+
+    /** FIX 2 (2026-07-09 live round) — thin wrapper over `attemptWorldBossClaim` that
+     * latches `wbClaimedWindow` on a TERMINAL outcome (`"ok"`/`"rejected"`), leaving it
+     * unset on `"pending"` so the retry cadence / next auto-claim frame tries again.
+     * Every call site (the `worldBossDefeated` event, the pending-retry autosave tick,
+     * and the new defeat-poll auto-claim below) routes through this so the latch is
+     * never forgotten. */
+    function settleWorldBossClaim(windowId: number): void {
+      void attemptWorldBossClaim(windowId, (id) => tContentItemsRef.current(`${id}.name`)).then(
+        (outcome) => {
+          if (outcome !== "pending") wbClaimedWindow = windowId;
+        },
+      );
+    }
 
     /** Rebuild the `heroId -> displayName` map `GameRenderer.setHeroDisplayNames`
      * wants (keyed by hero id, not slot/index — see its doc). `null` while solo. */
@@ -1874,11 +1921,73 @@ export function GameClient() {
       // spawn intent for THIS frame — idempotent both here (`shouldQueueWorldBossSpawn`
       // checks the live `state.worldBoss` window) and engine-side (`trySpawnWorldBoss`).
       const worldBossPhase = worldBossPhaseAt(serverNowMs());
-      const worldBossStatus = deriveWorldBossStatus(worldBossPhase, state.location);
+
+      // SHARED-HP client driver (M8.6): read once per frame, reused below by both the
+      // FIX 2 defeat/participation bookkeeping and the report/poll block further down.
+      const dealt = worldBossDamageDealt(state);
+
+      // FIX 2 (2026-07-09 live round) — participation latch: SURVIVES `dealt` going
+      // null (leaving the zone / the local fight ending), unlike `wbReportWindow`
+      // below — so a player who tapped the boss and walked away still sees the
+      // "defeated, collecting your reward" banner and auto-claims once the SHARED
+      // pool dies elsewhere.
+      if (dealt && dealt.damage > 0) wbParticipatedWindow = dealt.windowId;
+
+      // FIX 2 — defeat source (1): the local sim's own witness. `state.worldBoss.
+      // defeated` persists past `active` going false (`retireWorldBoss`), scoped to
+      // the CURRENT schedule window only (a stale prior-window record must never
+      // leak forward as "defeated" for a brand-new window).
+      if (
+        state.worldBoss &&
+        state.worldBoss.windowId === worldBossPhase.windowId &&
+        state.worldBoss.defeated
+      ) {
+        wbDefeatedWindowId = worldBossPhase.windowId;
+      }
+
+      // FIX 2 — defeat source (2): all-clients poll for anyone NOT already covered
+      // by source (1) this frame (`dealt` truthy means I'm locally engaged — the
+      // shared-hp sync below will flip `state.worldBoss.defeated` for me directly
+      // the instant the pool dies, so polling here too would just be a redundant
+      // duplicate request). Cheap public GET, only while the window is genuinely
+      // active and not already known-defeated.
+      if (
+        worldBossPhase.phase === "active" &&
+        !dealt &&
+        wbDefeatedWindowId !== worldBossPhase.windowId &&
+        now - wbDefeatPollAt >= WB_DEFEAT_POLL_MS
+      ) {
+        const pollWindowId = worldBossPhase.windowId;
+        wbDefeatPollAt = now;
+        void getWorldBossState(pollWindowId).then((res) => {
+          if (res && res.ok && res.defeated) wbDefeatedWindowId = pollWindowId;
+        });
+      }
+
+      const wbDefeated = wbDefeatedWindowId === worldBossPhase.windowId;
+      const wbMyUnclaimed =
+        wbParticipatedWindow === worldBossPhase.windowId &&
+        wbClaimedWindow !== worldBossPhase.windowId;
+
+      const worldBossStatus = deriveWorldBossStatus(
+        worldBossPhase,
+        state.location,
+        wbDefeated,
+        wbMyUnclaimed,
+      );
       if (!sameWorldBossStatus(worldBossStatus, lastWorldBossStatus)) {
         lastWorldBossStatus = worldBossStatus;
         store.setWorldBossStatus(worldBossStatus);
       }
+
+      // FIX 2 — AUTO-CLAIM: a defeated window I still have an unclaimed reward for
+      // collects automatically (covers "hit the boss, then left the zone before it
+      // died" — the participation row already exists server-side). Guarded by the
+      // in-flight flag so this doesn't refire every frame while a request is out.
+      if (wbDefeated && wbMyUnclaimed && !worldBossClaimInFlight) {
+        settleWorldBossClaim(worldBossPhase.windowId);
+      }
+
       if (
         shouldQueueWorldBossSpawn(
           worldBossPhase,
@@ -1919,8 +2028,9 @@ export function GameClient() {
       // Reads `worldBossDamageDealt` (not `state.worldBoss` directly) so this is a no-op the
       // instant the fight ends/despawns/is defeated (the read goes null) OR I collapse to
       // solo mid-fight (a fresh solo rebuild never carries `state.worldBoss` over).
+      // `dealt` was already read once above (FIX 2's defeat/participation bookkeeping) —
+      // reused here rather than re-reading `state.worldBoss` a second time this frame.
       {
-        const dealt = worldBossDamageDealt(state);
         if (dealt) {
           if (wbReportWindow !== dealt.windowId) {
             wbReportWindow = dealt.windowId;
@@ -2392,6 +2502,11 @@ export function GameClient() {
         } else if (ev.type === "fastTravelBlocked") {
           useGameStore.getState().clearFastTravelChannel();
           useGameStore.getState().pushNotice(`fastTravelBlocked.${ev.reason}`);
+          // Owner UX round (2026-07-09): a blocked ปุ่มตีบวก trip (boss phase
+          // locked, etc.) already surfaces via the notice above — cancel the
+          // smith trip too so it doesn't linger waiting for a town arrival
+          // that was never actually queued.
+          useGameStore.getState().cancelSmithTrip();
         } else if (ev.type === "npcTrade") {
           // Town NPCs phase 3 (final): flavor-only — the bot's transaction
           // itself is already engine-side (systems/bots.ts); this NEVER opens
@@ -2420,9 +2535,7 @@ export function GameClient() {
           // World boss "เสี่ยจ๋อง": the engine grants NO xp/gold itself (rewards are
           // SERVER-claimed) — fire the claim POST for MY character. In a cohort every
           // member sees this same shared-sim event and claims independently (by design).
-          void attemptWorldBossClaim(ev.windowId, (id) =>
-            tContentItemsRef.current(`${id}.name`),
-          );
+          settleWorldBossClaim(ev.windowId);
         } else if (ev.type === "eliteSpawned") {
           // ดินแดนอสูร elite roaming mob — flavor-only toast (mysterious tone, no
           // stats/rewards spoiled here; the reward beat is `eliteKilled` below).
@@ -2657,9 +2770,7 @@ export function GameClient() {
       if (pendingWorldBossClaim && !worldBossClaimInFlight) {
         const claim = pendingWorldBossClaim;
         pendingWorldBossClaim = null;
-        void attemptWorldBossClaim(claim.windowId, (id) =>
-          tContentItemsRef.current(`${id}.name`),
-        );
+        settleWorldBossClaim(claim.windowId);
       }
     }
 

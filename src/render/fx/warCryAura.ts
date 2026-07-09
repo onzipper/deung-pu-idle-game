@@ -26,9 +26,9 @@
  */
 
 import { Container, Graphics } from "pixi.js";
-import { PALETTE, safeRadius } from "@/render/theme";
+import { MAX_PARTY_SIZE, PALETTE, safeRadius } from "@/render/theme";
 
-const MAX_SLOTS = 3; // one aura per hero slot (party cap)
+const MAX_SLOTS = MAX_PARTY_SIZE; // one aura per hero slot (party cap)
 const CHEVRON_COUNT = 3; // "2-3 slow rising ember chevrons" per spec
 
 /** Per-second lerp rate the whole slot's intensity eases toward its target —
