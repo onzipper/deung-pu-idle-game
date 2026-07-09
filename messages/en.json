@@ -1011,7 +1011,7 @@
   "announcements": {
     "landed": "🔥 {charName} landed a +{level} on {itemName}!",
     "landedMax": "🔥 {charName} landed a +{level} on {itemName}! The whole server bows down!",
-    "firstToCap": "🏆 {charName} is the first player to reach Lv.{level}!",
+    "firstToCap": "🏆 {charName} has hit the level cap — Lv.{level} conquered!",
     "rankOne": "👑 {charName} has claimed the #1 Combat Power throne!"
   },
   "updateBanner": {
@@ -1191,7 +1191,7 @@
       "2026-07-08": {
         "items": {
           "hof": "🏆 The Hall of Fame is OPEN! 5 top-10 boards — level · power · total gold earned · best boss-clear times · online time — filter by class + tap anyone to inspect their gear and auras",
-          "announce": "📣 Server-wide announcements: first player to Lv.90 and every new power #1 — everyone hears about it",
+          "announce": "📣 Server-wide announcements: every hero that hits the Lv.90 cap and every new power #1 — everyone hears about it",
           "quest3": "👑 Tier-3 quest reborn: the tundra frontier gate opens early for you — hunt 90 monsters, then duel the young Glacial Sovereign. No more backtracking",
           "questCard": "🧭 New quest card: see every objective, progress bar, and reward up front — accept, change class, and guide-me buttons all in one place",
           "botSwitch": "🤖 The bot is now ONE switch! On = plays everything for you, off = pure manual — with all bot settings in a single panel and ⓘ hints everywhere",

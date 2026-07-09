@@ -305,8 +305,8 @@ describe("upsertLeaderboardEntry — server-wide announcements (M7.95)", () => {
 
   const capHero = () => ({ ...saveData().hero, level: CONFIG.leveling.levelCap });
 
-  // ── first-to-cap (levelCap singleton) ──────────────────────────────────────
-  it("emits a levelCap singleton the first time a non-suspect char hits the cap", async () => {
+  // ── level-cap celebration (เวลตัน — once per character, owner call 2026-07-09) ──
+  it("emits a levelCap announcement when a non-suspect char hits the cap", async () => {
     await upsertLeaderboardEntry(CHAR, USER, saveData({ hero: capHero() }), NOW);
     const create = mockPrisma.refineAnnouncement.create.mock.calls.find(
       (c) => c[0].data.kind === "levelCap",
@@ -317,7 +317,26 @@ describe("upsertLeaderboardEntry — server-wide announcements (M7.95)", () => {
       characterId: CHAR,
       charName: "Alice",
       refineLevel: CONFIG.leveling.levelCap, // carried into the "Lv.{level}" copy
-      singletonKey: "levelCap", // @unique → exactly-once globally
+      singletonKey: `cap:${CHAR}`, // @unique → exactly-once PER CHARACTER
+    });
+  });
+
+  it("announces EVERY capper: a different character capping later emits its own row", async () => {
+    const CHAR2 = "char-second-capper";
+    mockPrisma.character.findUnique.mockResolvedValue({
+      name: "Bob",
+      baseClass: "archer",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    await upsertLeaderboardEntry(CHAR2, USER, saveData({ hero: capHero() }), NOW);
+    const create = mockPrisma.refineAnnouncement.create.mock.calls.find(
+      (c) => c[0].data.kind === "levelCap",
+    );
+    expect(create).toBeDefined();
+    expect(create![0].data).toMatchObject({
+      characterId: CHAR2,
+      charName: "Bob",
+      singletonKey: `cap:${CHAR2}`, // per-character key — never collides with the first capper's
     });
   });
 
