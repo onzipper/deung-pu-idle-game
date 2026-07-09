@@ -55,8 +55,11 @@ import { computeStatDelta } from "@/ui/gear/statDelta";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import { toInventoryItem, type InventoryItem } from "@/ui/gear/types";
 import { EquipmentDoll } from "@/ui/components/EquipmentDoll";
-import { MaterialIcon } from "@/ui/components/icons";
+import { BagIcon, MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
+import { Button } from "@/ui/components/primitives/Button";
+import { Panel } from "@/ui/components/primitives/Panel";
+import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
 import {
   classTintClass,
   GEAR_SLOT_ICONS,
@@ -539,17 +542,19 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         onClick={onClose}
         className="absolute inset-0 bg-black/70"
       />
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-hidden rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) md:max-w-2xl">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-          >
-            ✕ {t("closeButton")}
-          </button>
-        </div>
+      <Panel
+        variant="gold"
+        className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-hidden md:max-w-2xl"
+      >
+        <PanelHeader
+          title={t("title")}
+          icon={<BagIcon className="h-5 w-5" />}
+          actions={
+            <Button variant="secondary" className="px-2.5 py-1.5 text-[11px]" onClick={onClose}>
+              ✕ {t("closeButton")}
+            </Button>
+          }
+        />
 
         {/* Paper-doll (approved audit design): pinned LEFT column on desktop,
             pinned horizontal strip above the tabs on mobile — outside the
@@ -712,7 +717,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         </div>
         </div>
         </div>
-      </div>
+      </Panel>
     </div>
     </ModalPortal>
   );

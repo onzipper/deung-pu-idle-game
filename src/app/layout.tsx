@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Chakra_Petch, Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Kanit, Prompt } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import "./globals.css";
@@ -15,17 +15,30 @@ const geistMono = Geist_Mono({
 });
 
 /**
- * HUD display/body face (task 86d3k2tap — full HUD redesign). Chakra Petch is
- * drawn for BOTH Latin and Thai (not a Latin face with a generic Thai
- * fallback), so headers, tabular numerals, and Thai copy in the HUD all read
- * as one gamey, legible voice. Self-hosted via next/font (bundled at build
- * time, no runtime Google Fonts CDN request) — see globals.css's `body`
- * font-family for where this is consumed, and its Thai system fallbacks.
+ * HUD type system (R1 "โลกใหม่ หน้าตาใหม่" W1 — replaces the old single-face
+ * Chakra Petch, task 86d3k2tap). Both are drawn for BOTH Latin and Thai (not
+ * a Latin face with a generic Thai substitute), self-hosted via next/font
+ * (bundled at build time, no runtime Google Fonts CDN request).
+ *
+ * Kanit 600/800 (`--font-display`) — headers, numerals, buttons: the heavy,
+ * angular voice for anything that needs to punch through the HUD.
+ * Prompt 400 (`--font-body`) — long-form Thai copy: a text-drawn weight
+ * reads better than a heavy display face for paragraphs/tooltips.
+ * See globals.css's `body`/`.font-display`/`.font-body` for where these are
+ * consumed, and their Thai system fallbacks.
  */
-const chakraPetch = Chakra_Petch({
+const kanit = Kanit({
   variable: "--font-display",
   subsets: ["latin", "thai"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["600", "800"],
+  display: "swap",
+});
+
+const prompt = Prompt({
+  variable: "--font-body",
+  subsets: ["latin", "thai"],
+  weight: ["400"],
+  display: "swap",
 });
 
 // Locale-aware (cookie-resolved, same as the rest of the app — see
@@ -151,7 +164,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${geistSans.variable} ${geistMono.variable} ${chakraPetch.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${kanit.variable} ${prompt.variable} h-full antialiased`}
     >
       <head>
         {process.env.NODE_ENV === "development" && (

@@ -25,7 +25,11 @@ import {
   zonesGroupedByMap,
   type UiZone,
 } from "@/ui/world/zones";
+import { MapIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
+import { Button } from "@/ui/components/primitives/Button";
+import { Panel } from "@/ui/components/primitives/Panel";
+import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
 import { useGameStore } from "@/ui/store/gameStore";
 
 const ALL_TARGETS = fastTravelTargets();
@@ -268,19 +272,19 @@ export function FastTravelPicker({ onClose }: FastTravelPickerProps) {
         onClick={onClose}
         className="absolute inset-0 bg-black/70"
       />
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-extrabold text-ddp-gold-bright">
-            🌀 {t("fastTravelTitle")}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-          >
-            ✕ {t("fastTravelClose")}
-          </button>
-        </div>
+      <Panel
+        variant="gold"
+        className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3"
+      >
+        <PanelHeader
+          title={t("fastTravelTitle")}
+          icon={<MapIcon className="h-5 w-5" />}
+          actions={
+            <Button variant="secondary" className="px-2.5 py-1.5 text-[11px]" onClick={onClose}>
+              ✕ {t("fastTravelClose")}
+            </Button>
+          }
+        />
 
         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
           {TOWN_ZONE && (
@@ -322,7 +326,7 @@ export function FastTravelPicker({ onClose }: FastTravelPickerProps) {
               </div>
             ))}
         </div>
-      </div>
+      </Panel>
     </div>
     </ModalPortal>
   );
