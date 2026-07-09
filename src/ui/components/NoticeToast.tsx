@@ -9,6 +9,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
+import { Toast } from "@/ui/components/primitives/Toast";
 import { useGameStore, type NoticeEntry } from "@/ui/store/gameStore";
 
 const DISPLAY_MS = 3200;
@@ -24,9 +25,9 @@ function Notice({ entry }: { entry: NoticeEntry }) {
   }, []);
 
   return (
-    <div className="animate-buy-pulse pointer-events-none rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/80 px-3 py-1.5 text-xs font-bold text-ddp-ink shadow-(--ddp-shadow-btn)">
+    <Toast variant="info" onDismiss={() => dismiss(entry.id)}>
       {t(entry.messageKey, entry.params)}
-    </div>
+    </Toast>
   );
 }
 

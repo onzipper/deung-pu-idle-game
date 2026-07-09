@@ -50,6 +50,11 @@ import type { InventoryItem } from "@/ui/gear/types";
 import { useConfirmGuard } from "@/ui/gear/useConfirmGuard";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { SellRow } from "@/ui/components/SellRow";
+import { ShopIcon } from "@/ui/components/icons";
+import { Button } from "@/ui/components/primitives/Button";
+import { Panel } from "@/ui/components/primitives/Panel";
+import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
+import { TabRow } from "@/ui/components/primitives/TabRow";
 import { GEAR_SLOT_ICONS, prestigeNameClass, RARITY_COLORS } from "@/ui/labels";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -118,32 +123,24 @@ function BuyRow({ item }: { item: ShopItemId }) {
         </span>
       </div>
       <div className="flex gap-1.5">
-        <button
-          type="button"
+        <Button
+          variant="primary"
           disabled={!canBuyOne}
           onClick={() => buy(item, 1)}
           aria-label={t("buyAria", { name: tContent(`${item}.name`), qty: 1 })}
-          className={`min-h-11 min-w-11 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-all active:scale-95 ${
-            canBuyOne
-              ? "border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:brightness-110"
-              : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
-          }`}
+          className="min-w-11 px-2"
         >
           +1
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
           disabled={!canBuyOne}
           onClick={() => buy(item, 5)}
           aria-label={t("buyAria", { name: tContent(`${item}.name`), qty: 5 })}
-          className={`min-h-11 min-w-11 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-all active:scale-95 ${
-            canBuyOne
-              ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:brightness-110"
-              : "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
-          }`}
+          className="min-w-11 px-2"
         >
           +5
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -181,43 +178,26 @@ function SellSelectionBar({
   return (
     <div className="flex flex-col gap-1.5 border-t border-ddp-border-soft pt-2">
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={onSelectAll}
-          className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 text-[11px] font-bold text-ddp-ink-muted"
-        >
+        <Button variant="secondary" onClick={onSelectAll} className="flex-1 text-[11px]">
           {t("selectAllButton")}
-        </button>
-        <button
-          type="button"
-          disabled={count === 0}
-          onClick={onClear}
-          className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 text-[11px] font-bold text-ddp-ink-muted disabled:opacity-40"
-        >
+        </Button>
+        <Button variant="secondary" disabled={count === 0} onClick={onClear} className="flex-1 text-[11px]">
           {t("clearSelectionButton")}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2 text-[11px] font-bold text-ddp-ink-muted"
-        >
+        </Button>
+        <Button variant="secondary" onClick={onCancel} className="flex-1 text-[11px]">
           {t("cancelSelectionButton")}
-        </button>
+        </Button>
       </div>
-      <button
-        type="button"
+      <Button
+        variant="danger"
         disabled={disabled}
         onClick={() => guard.trigger(count > 0, onConfirmSell)}
-        className={`min-h-11 w-full rounded-(--ddp-radius-md) border px-3 text-sm font-bold transition-all active:scale-95 ${
-          disabled
-            ? "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
-            : "border-amber-400/60 bg-amber-500/20 text-amber-200 hover:brightness-110"
-        }`}
+        className="w-full text-sm"
       >
         {guard.confirming
           ? t("sellSelectedConfirm", { count, total })
           : t("sellSelectedButton", { count, total })}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -290,27 +270,19 @@ function SellTab() {
   return (
     <div className="flex flex-1 flex-col gap-2 overflow-hidden">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={handleSellAllCommon}
-          className="min-h-11 rounded-(--ddp-radius-md) border border-amber-400/50 bg-amber-400/10 px-2.5 py-1.5 text-[11px] font-bold text-amber-300 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <Button variant="danger" disabled={busy} onClick={handleSellAllCommon} className="text-[11px]">
           {t("sellAllCommonButton")}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant={selectMode ? "primary" : "secondary"}
           disabled={busy}
           onClick={toggleSelectMode}
           aria-pressed={selectMode}
-          className={`min-h-11 rounded-(--ddp-radius-md) border px-2.5 py-1.5 text-[11px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
-            selectMode
-              ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-300"
-              : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-          }`}
+          className="text-[11px]"
         >
+          {selectMode ? "✓ " : ""}
           {tShop("multiSelectToggle")}
-        </button>
+        </Button>
       </div>
       <div className="flex-1 space-y-1.5 overflow-y-auto pr-1">
         {items.length === 0 ? (
@@ -405,19 +377,15 @@ function BuybackRow({
         <Coin />
         {entry.price}
       </span>
-      <button
-        type="button"
+      <Button
+        variant="primary"
         disabled={disabled}
         onClick={() => guard.trigger(true, () => onBuy(entry))}
         aria-label={t("buybackAria", { name: tContent(`${entry.templateId}.name`), price: entry.price })}
-        className={`min-h-11 shrink-0 rounded-(--ddp-radius-md) border px-2.5 text-xs font-bold transition-all active:scale-95 ${
-          disabled
-            ? "cursor-not-allowed border-ddp-border bg-black/30 text-ddp-ink-muted/50"
-            : "border-emerald-400/60 bg-emerald-500/20 text-emerald-200 hover:brightness-110"
-        }`}
+        className="shrink-0 px-2.5 text-xs"
       >
         {guard.confirming ? t("buybackConfirm") : t("buybackButton")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -481,13 +449,9 @@ function BuybackTab() {
     return (
       <div className="flex flex-col items-start gap-1.5">
         <p className="text-[11px] text-rose-300">{t("buybackLoadError")}</p>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="min-h-11 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/25 px-2.5 text-xs font-bold text-ddp-ink-muted"
-        >
+        <Button variant="secondary" onClick={() => void load()} className="px-2.5 text-xs">
           {t("buybackRetryButton")}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -541,58 +505,29 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
           onClick={onClose}
           className="absolute inset-0 bg-black/70"
         />
-        <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-gold/40 bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-1.5 text-base font-extrabold text-ddp-gold-bright">
-              <span aria-hidden>🏠</span> {t("title")}
-            </h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-            >
-              ✕ {tInv("closeButton")}
-            </button>
-          </div>
+        <Panel
+          variant="gold"
+          className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3"
+        >
+          <PanelHeader
+            title={t("title")}
+            icon={<ShopIcon className="h-5 w-5" />}
+            actions={
+              <Button variant="secondary" className="px-2.5 py-1.5 text-[11px]" onClick={onClose}>
+                ✕ {tInv("closeButton")}
+              </Button>
+            }
+          />
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setActiveTab("buy")}
-              aria-pressed={activeTab === "buy"}
-              className={`flex min-h-11 flex-1 items-center justify-center rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
-                activeTab === "buy"
-                  ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
-                  : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-              }`}
-            >
-              {t("tabBuy")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("sell")}
-              aria-pressed={activeTab === "sell"}
-              className={`flex min-h-11 flex-1 items-center justify-center rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
-                activeTab === "sell"
-                  ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
-                  : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-              }`}
-            >
-              {t("tabSell")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("buyback")}
-              aria-pressed={activeTab === "buyback"}
-              className={`flex min-h-11 flex-1 items-center justify-center rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors ${
-                activeTab === "buyback"
-                  ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
-                  : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-              }`}
-            >
-              {t("tabBuyback")}
-            </button>
-          </div>
+          <TabRow
+            tabs={[
+              { id: "buy" as const, label: t("tabBuy") },
+              { id: "sell" as const, label: t("tabSell") },
+              { id: "buyback" as const, label: t("tabBuyback") },
+            ]}
+            active={activeTab}
+            onChange={setActiveTab}
+          />
 
           {activeTab === "buy" ? (
             <>
@@ -608,7 +543,7 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
           ) : (
             <BuybackTab />
           )}
-        </div>
+        </Panel>
       </div>
     </ModalPortal>
   );
