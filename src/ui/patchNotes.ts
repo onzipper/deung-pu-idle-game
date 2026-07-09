@@ -341,6 +341,24 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09k.items.warpZone",
     ],
   },
+  // M8.7 "โลกมีมิติ" world-depth round (born as /lab experiment ⑨ and promoted
+  // the same day): depth band + living camera + per-zone terrain + shared
+  // day/night with weather/critters, all behind 3 Settings toggles (default ON).
+  // Rides along: level-cap "เวลตัน" announcement for EVERY capper (once per
+  // character) + the own-screen HOF-title boot fix.
+  {
+    id: "2026-07-09l",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09l.items.worldDepth",
+      "releases.2026-07-09l.items.camera",
+      "releases.2026-07-09l.items.terrain",
+      "releases.2026-07-09l.items.dayNight",
+      "releases.2026-07-09l.items.worldToggles",
+      "releases.2026-07-09l.items.levelCap",
+      "releases.2026-07-09l.items.ownTitleFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
