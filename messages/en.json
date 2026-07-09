@@ -1494,6 +1494,13 @@
           "toastViolet": "🟣 Info toasts now wear the violet chrome theme across the board",
           "invAllTab": "🎒 Inventory gained an \"All\" tab to view weapons and armor together; it's now the default view"
         }
+      },
+      "2026-07-10c": {
+        "items": {
+          "botSkillRow": "🤖 BOT settings: auto-skill picker is now a numbered icon row matching the on-screen skill dock — mapping is clearer",
+          "hudMobileTune": "📱 Mobile HUD tidy-up: top menu now 2 rows, bottom stack tighter on short screens",
+          "expStripFix": "📊 Fixed EXP strip text overflowing into the skill dock"
+        }
       }
     }
   },

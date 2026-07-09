@@ -197,9 +197,15 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
                 module doc. */}
             <div className="pointer-events-auto flex flex-col items-end gap-1.5">
               <CurrencyChipsRow />
+              {/* Issue #58 wave B: `grid-cols-5` (was 4) + `IconTileButton`'s
+                  40px mobile floor packs the 10 tiles into 2 rows instead of
+                  3 below `sm:` — the #54 audit's biggest single vertical-space
+                  win in this cluster. `sm:` and up is UNCHANGED (still
+                  `flex`/`justify-end`, still 44px tiles) — desktop must not
+                  regress. */}
               <div
                 data-onboarding-anchor="menu-row"
-                className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:justify-end"
+                className="grid grid-cols-5 gap-1 sm:flex sm:flex-wrap sm:gap-1.5 sm:justify-end"
               >
                 <CharacterButton />
                 <InventoryButton />
@@ -240,10 +246,19 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
             hand-tuned `top-N%` — the flex-1 region's own box IS the
             available space, so it structurally can't collide with either
             neighbor). */}
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1 pt-1">
+          {/* Issue #58 wave B: verified this can't structurally overlap the
+              top-left portrait+buffs cluster — this `flex-1` region is a
+              normal flex SIBLING that starts right after the top block (not
+              viewport-anchored), so the tracker's `top-0` is always flush
+              below it. The `pt-1` above is a small extra breathing-room
+              margin (absolute children measure from the padding edge, so
+              `max-h-full` shrinks to match); `max-w-[72vw]` (was 78vw) keeps
+              the card's mobile width in the same ballpark as the portrait
+              card's own `max-w-[70vw]` cap for visual rhythm. */}
           <div
             ref={questOverlayRef}
-            className="pointer-events-none absolute top-0 left-0 z-10 max-h-full w-64 max-w-[78vw] overflow-y-auto sm:w-72"
+            className="pointer-events-none absolute top-0 left-0 z-10 max-h-full w-64 max-w-[72vw] overflow-y-auto sm:w-72"
           />
         </div>
 

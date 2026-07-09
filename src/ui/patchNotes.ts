@@ -426,6 +426,16 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-10b.items.invAllTab",
     ],
   },
+  // R2.8 Wave B (safe items) — BOT skill row + mobile HUD tuning (issue #58).
+  {
+    id: "2026-07-10c",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10c.items.botSkillRow",
+      "releases.2026-07-10c.items.hudMobileTune",
+      "releases.2026-07-10c.items.expStripFix",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
