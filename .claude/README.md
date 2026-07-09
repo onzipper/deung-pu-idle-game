@@ -27,9 +27,13 @@ table in `CLAUDE.md` (the Agent tool's `model` param may override a persona's pi
 
 ## Default reading rule
 
-All agents start from `AI.md` + `docs/current-state.md`, then only their task-relevant
+Most agents start from `AI.md` + `docs/current-state.md`, then only their task-relevant
 `docs/context/*.md` pack. `CLAUDE.md` is for Claude-specific orchestration rules only.
 Anything touching code also reads `docs/known-traps.md`.
+
+Exceptions:
+- `haiku-worker` reads no onboarding docs; the brief must be complete by contract.
+- `i18n-th-en-copywriter` may stay copy-only and read only the named message files plus current-state/game-ux when needed.
 
 ## Deferred
 

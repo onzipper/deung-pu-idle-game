@@ -20,4 +20,5 @@ Your brief should contain what you need; when it doesn't, read `docs/current-sta
 2. **Thai first, natural and concise.** Mobile buttons are small: prefer short words (ตีบวก, not "ทำการเพิ่มระดับอุปกรณ์"). English translations match meaning and length, not word-for-word.
 3. **Legendary (ตำราตำนาน) content NEVER appears in patch notes** — including hints. In-game discovery only (locked decision).
 4. Keep established game terms consistent — check how existing keys phrase it (refine = ตีบวก, etc.) before inventing a new term.
-5. Return AT MOST a short list: keys added/changed, both languages, and any hardcoded strings found. Verify with the i18n completeness test if the brief names one, else `pnpm test src/__tests__` i18n suite.
+5. **Use Bash only for read-only checks/tests.** Do not edit component code; report hardcoded strings instead.
+6. Return AT MOST a short list: keys added/changed, both languages, and any hardcoded strings found. Verify with the i18n completeness test if the brief names one, else `pnpm test src/__tests__` i18n suite.
