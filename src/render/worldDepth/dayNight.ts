@@ -29,6 +29,20 @@ import { lerpColor } from "@/render/environment/colorUtils";
 /** Hard ceiling for the night overlay — keep the action readable. */
 export const OVERLAY_ALPHA_MAX = 0.35;
 
+/** Length of one accelerated day/night cycle, ms. Owner call: 30 min/day, run
+ * off a shared wall clock (Date.now()) so every client sees the SAME phase —
+ * no per-save state, no hash surface (render-only). */
+export const DAY_MS = 30 * 60 * 1000;
+
+/**
+ * Wall-clock ms → cycle phase in [0,1) for `samplePalette` (t=0 เช้า … 0.25
+ * เที่ยง … 0.5 ค่ำ … 0.75 กลางคืน). Pure/deterministic in its argument; the
+ * caller supplies Date.now() (or a fixed value in tests). Handles negative ms.
+ */
+export function cyclePhase(nowMs: number): number {
+  return ((((nowMs % DAY_MS) + DAY_MS) % DAY_MS) / DAY_MS);
+}
+
 export interface DayPalette {
   /** Tint for the screen-fixed sky backdrop. */
   skyTint: number;

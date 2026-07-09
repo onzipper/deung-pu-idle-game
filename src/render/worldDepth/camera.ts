@@ -13,8 +13,10 @@
  *   - follows target.x + lookahead; lookahead is a smoothed
  *     clamp(vx * LOOKAHEAD_TIME, ±LOOKAHEAD_MAX) so the camera leads a
  *     running hero and settles dead-center when he stops;
- *   - idle beat: |vx| < IDLE_VX_EPS sustained > IDLE_DELAY eases zoom out to
- *     IDLE_ZOOM ("the world breathes"); any movement eases back to zoomBase;
+ *   - idle beat: |vx| < IDLE_VX_EPS sustained > IDLE_DELAY eases zoom toward
+ *     cam.idleZoom ("the world breathes"); any movement eases back to zoomBase.
+ *     Lab: idleZoom 0.92 < zoomBase 1 (breathe out). Game: idleZoom 1.0 <
+ *     zoomBase 1.06 (follow tight, relax to the full view when idle);
  *   - punchZoom(): zoom kicks to PUNCH_ZOOM then decays exponentially back —
  *     the punch BLENDS over (and therefore wins against) the idle zoom while
  *     active, with no discontinuity as it dies;
@@ -40,7 +42,8 @@ const LOOKAHEAD_K = 4;
 const IDLE_VX_EPS = 5;
 /** Seconds of stillness before the idle zoom-out starts. */
 const IDLE_DELAY = 2;
-/** Idle "breathe out" zoom level. */
+/** Default idle "breathe out" zoom level (lab feel) — used when `createCamera`
+ * is called without an `idleZoom` opt; per-camera value lives on `CameraState`. */
 const IDLE_ZOOM = 0.92;
 /** Zoom easing stiffness (per second) toward base/idle goal. */
 const ZOOM_K = 2;
@@ -70,6 +73,11 @@ export interface CameraState {
   zoom: number;
   /** The "normal play" zoom the camera returns to. */
   zoomBase: number;
+  /** Zoom the camera eases toward after sustained stillness (idle beat).
+   * Lab default 0.92 = "breathe OUT" on a wide world; the game passes 1.0
+   * (INVERTED: follow at zoomBase 1.06, ease to the full-view 1.0 when idle —
+   * a 900px world can't zoom below 1.0 without revealing the letterbox void). */
+  idleZoom: number;
   /** Smoothed lead offset in world px. */
   lookahead: number;
   /** Seconds the target has been standing still. */
@@ -80,11 +88,22 @@ export interface CameraState {
   punch: number;
 }
 
-export function createCamera(worldW: number): CameraState {
+/**
+ * `opts` are optional so the `/lab` experiment's `createCamera(worldW)` stays
+ * bit-identical (defaults zoomBase 1, idleZoom 0.92 = the shipped lab feel).
+ * The game passes `{ zoomBase: 1.06, idleZoom: 1.0 }`.
+ */
+export function createCamera(
+  worldW: number,
+  opts?: { zoomBase?: number; idleZoom?: number },
+): CameraState {
+  const zoomBase = opts?.zoomBase ?? 1;
+  const idleZoom = opts?.idleZoom ?? IDLE_ZOOM;
   return {
-    x: clampX(worldW / 2, worldW, 1),
-    zoom: 1,
-    zoomBase: 1,
+    x: clampX(worldW / 2, worldW, zoomBase),
+    zoom: zoomBase,
+    zoomBase,
+    idleZoom,
     lookahead: 0,
     idleT: 0,
     worldW,
@@ -131,9 +150,9 @@ export function updateCamera(cam: CameraState, target: CameraTarget, dt: number)
   // Follow.
   cam.x += (target.x + cam.lookahead - cam.x) * damp(FOLLOW_K, step);
 
-  // Idle beat → ambient zoom goal.
+  // Idle beat → ambient zoom goal (per-camera idleZoom, defaulted from the knob).
   cam.idleT = Math.abs(target.vx) < IDLE_VX_EPS ? cam.idleT + step : 0;
-  const zoomGoal = cam.idleT > IDLE_DELAY ? IDLE_ZOOM : cam.zoomBase;
+  const zoomGoal = cam.idleT > IDLE_DELAY ? cam.idleZoom : cam.zoomBase;
   cam.zoom += (zoomGoal - cam.zoom) * damp(ZOOM_K, step);
 
   // Punch impulse decay (blended in via effectiveZoom, so it dies smoothly).
