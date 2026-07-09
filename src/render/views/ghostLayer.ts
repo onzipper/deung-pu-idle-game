@@ -14,6 +14,9 @@
 
 import { Container } from "pixi.js";
 import type { HeroClass } from "@/engine";
+import { GROUND_Y } from "@/render/layout";
+import { depthZIndex } from "@/render/worldDepth/depthBand";
+import type { WorldFxContext } from "@/render/worldDepth/worldFxContext";
 import {
   createHeroView,
   updateHeroView,
@@ -54,9 +57,16 @@ function stub(item: GhostDrawItem): HeroRenderModel {
 export class GhostLayer {
   private readonly container: Container;
   private readonly views = new Map<string, HeroView>();
+  /** Shared "โลกมีมิติ" seam (W2), supplied by GameRenderer. When absent (e.g. a
+   *  bare test construction) ghosts keep today's flat pivot-0 / y-0 placement. */
+  private readonly worldFx: WorldFxContext | null;
 
-  constructor(parent: Container) {
+  constructor(parent: Container, opts?: { worldFx?: WorldFxContext }) {
     this.container = new Container();
+    // Depth-sort ghosts among themselves when the depth flag is on; off → every
+    // ghost gets the same neutral zIndex → stable sort keeps insertion order.
+    this.container.sortableChildren = true;
+    this.worldFx = opts?.worldFx ?? null;
     parent.addChild(this.container);
   }
 
@@ -70,6 +80,10 @@ export class GhostLayer {
       let view = this.views.get(item.cid);
       if (!view) {
         view = createHeroView();
+        // Foot-pivot so depth scale/terrain lift plant the feet on the ground
+        // (paired with `view.y = footY` below); only when the seam is present so
+        // a bare-construction ghost stays byte-identical to today.
+        if (this.worldFx) view.pivot.y = GROUND_Y;
         this.views.set(item.cid, view);
         this.container.addChild(view);
       }
@@ -88,6 +102,15 @@ export class GhostLayer {
       // Whole-rig fade (in on appear, out before prune) — container alpha multiplies
       // through every child incl. the nameplate.
       view.alpha = item.alpha;
+      // Depth placement (hash(cid) row): plant feet at the lifted ground, scale
+      // by depth, sort near-over-far. OFF-identity: footY≡GROUND_Y (cancels the
+      // pivot), depthScaleOf≡1, equal neutral zIndex → insertion order.
+      if (this.worldFx) {
+        const d = this.worldFx.depthOf("ghost", item.cid);
+        view.y = this.worldFx.footY(item.x, d);
+        view.scale.set(this.worldFx.depthScaleOf(d));
+        view.zIndex = depthZIndex(d);
+      }
     }
     // Sweep ghosts that vanished from the list.
     for (const [cid, view] of this.views) {
