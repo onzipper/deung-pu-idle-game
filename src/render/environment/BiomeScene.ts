@@ -1,10 +1,13 @@
 /**
  * A fully self-contained visual for ONE resolved biome: sky + horizon glow +
- * clouds (fixed/calm) -> far silhouette parallax -> ground band + near prop
- * parallax -> ambient particles -> optional weather tint -> (boss rooms only)
- * fixed gate-pillar/lintel framing + vignette, see `bossArena.ts`. `Environment`
- * owns up to two of these at once (current + incoming) so it can crossfade by
- * alpha alone on a biome change.
+ * clouds (fixed/calm) -> far silhouette parallax -> ground (flat band, OR a
+ * terrain-tracking polygon + sky-sliver backing strip for a genuinely
+ * non-flat farm zone — see `opts.terrain` on the constructor below) + near
+ * prop parallax (conforming to the same terrain when active) -> ambient
+ * particles -> optional weather tint -> (boss rooms only) fixed gate-pillar/
+ * lintel framing + vignette, see `bossArena.ts`. `Environment` owns up to two
+ * of these at once (current + incoming) so it can crossfade by alpha alone on
+ * a biome OR terrain-flag change.
  */
 
 import { Container } from "pixi.js";
@@ -15,18 +18,30 @@ import type { ResolvedBiome } from "@/render/environment/biomes";
 import { GROUND_Y, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { AmbientField } from "@/render/environment/ambientParticles";
 import { buildBossArenaFraming } from "@/render/environment/bossArena";
-import { buildGroundBand } from "@/render/environment/groundBand";
+import {
+  buildGroundBackingStrip,
+  buildGroundBand,
+  buildGroundPolygon,
+} from "@/render/environment/groundBand";
 import { buildGroundPropsChunk } from "@/render/environment/groundProps";
 import { CloudField } from "@/render/environment/clouds";
 import { ParallaxLayer } from "@/render/environment/ParallaxLayer";
 import { buildSilhouetteChunk } from "@/render/environment/silhouettes";
 import { buildHorizonGlow, buildSkyBands } from "@/render/environment/sky";
 import { buildZoneGateProps, type ZoneGateProps } from "@/render/environment/zoneGateProps";
+import type { Terrain } from "@/render/worldDepth/terrain";
+import { terrainPresetForZone } from "@/render/worldDepth/terrainZone";
 
-const MARGIN = 60;
+/** Exported (W3): the ground-layer tests build `buildGroundPolygon`/
+ * `buildGroundBackingStrip` at the SAME span this class uses internally,
+ * without duplicating the magic numbers. */
+export const MARGIN = 60;
 const FAR_CHUNK_W = 180;
 const NEAR_CHUNK_W = 110;
-const GROUND_DEPTH = WORLD_HEIGHT - GROUND_Y + MARGIN;
+export const GROUND_DEPTH = WORLD_HEIGHT - GROUND_Y + MARGIN;
+/** Ground-polygon/backing-strip sample spacing (px) — mirrors `/lab`
+ * experiment ⑨'s `GROUND_POLY_STEP`. */
+const GROUND_POLY_STEP = 24;
 
 // ---- ดินแดนอสูร (ASURA) daily HOT-ZONE ambience (endgame v1) — a subtle golden
 // ember drift layered ON TOP of the zone's own (violet-blood) particle field,
@@ -60,7 +75,24 @@ export class BiomeScene {
    * is non-null (see above). */
   private readonly hotZoneIdx: number;
 
-  constructor(readonly biome: ResolvedBiome, zone: Zone, state: GameState) {
+  /**
+   * `opts.terrain` (W3 "โลกมีมิติ" ground promotion): undefined = today's flat
+   * `buildGroundBand` rect, byte-identical (the terrain feature is OFF
+   * upstream in `Environment`). When a `Terrain` IS supplied, this
+   * constructor still checks `terrainPresetForZone(zone)` itself (defense in
+   * depth — never trusts a caller to have already filtered): town/boss zones
+   * and any farm zone that hash-picked the "flat" preset (`terrainZone.ts`'s
+   * intentional variety pool) keep the plain rect too; only a genuinely
+   * non-flat farm zone gets `buildGroundPolygon` + `buildGroundBackingStrip`
+   * (see `groundBand.ts`'s doc comment) and conforms its near ground-props
+   * layer to the slope via `ParallaxLayer`'s optional `conformY`.
+   */
+  constructor(
+    readonly biome: ResolvedBiome,
+    zone: Zone,
+    state: GameState,
+    opts?: { terrain?: Terrain },
+  ) {
     const sky = buildSkyBands(
       biome.sky.top,
       biome.sky.bottom,
@@ -87,11 +119,33 @@ export class BiomeScene {
     this.far.view.position.x = -MARGIN;
     this.view.addChild(this.far.view);
 
-    const groundBand = buildGroundBand(biome, -MARGIN, GROUND_Y, WORLD_WIDTH + MARGIN * 2, GROUND_DEPTH);
-    this.view.addChild(groundBand);
+    const groundX = -MARGIN;
+    const groundWidth = WORLD_WIDTH + MARGIN * 2;
+    const terrain = opts?.terrain;
+    const terrainActive = terrain !== undefined && terrainPresetForZone(zone) !== "flat";
 
-    this.near = new ParallaxLayer(NEAR_CHUNK_W, chunkCount(NEAR_CHUNK_W), () =>
-      buildGroundPropsChunk({ chunkWidth: NEAR_CHUNK_W, bandDepth: GROUND_DEPTH, biome }),
+    let nearConformY: ((localCenterX: number) => number) | undefined;
+    if (terrainActive && terrain) {
+      // Sky-sliver guard strip FIRST (behind), then the polygon fill on top
+      // — see `groundBand.ts`'s doc comment.
+      this.view.addChild(buildGroundBackingStrip(biome, groundX, GROUND_Y, groundWidth));
+      this.view.addChild(
+        buildGroundPolygon(biome, terrain, groundX, GROUND_Y, groundWidth, GROUND_DEPTH, GROUND_POLY_STEP),
+      );
+      // Local->world: `near.view` (below) sits at (-MARGIN, GROUND_Y) inside
+      // this own (world-space) `view`, so a chunk-local center x maps to
+      // world x via `localCenterX - MARGIN`; the value this returns is
+      // near.view-LOCAL (world y minus the layer's own GROUND_Y offset).
+      nearConformY = (localCenterX: number) => terrain.groundY(localCenterX - MARGIN) - GROUND_Y;
+    } else {
+      this.view.addChild(buildGroundBand(biome, groundX, GROUND_Y, groundWidth, GROUND_DEPTH));
+    }
+
+    this.near = new ParallaxLayer(
+      NEAR_CHUNK_W,
+      chunkCount(NEAR_CHUNK_W),
+      () => buildGroundPropsChunk({ chunkWidth: NEAR_CHUNK_W, bandDepth: GROUND_DEPTH, biome }),
+      nearConformY,
     );
     this.near.view.position.set(-MARGIN, GROUND_Y);
     this.view.addChild(this.near.view);
