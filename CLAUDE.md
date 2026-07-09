@@ -77,7 +77,19 @@ Each layer has a `README.md` with its contract; `render/README.md` carries the *
 
 **You (Fable) are the orchestrator.** Plan, decompose, synthesize; execution goes to subagents. Keep your own context lean — agents return short conclusions.
 
-Routing: reasoning-heavy → Opus domain agent or `deep-reasoner` · mechanical → Sonnet domain agent or `fast-worker` · trivial fully-specified single-file edits → `haiku-worker` · high-stakes → two independent perspectives in parallel, synthesize without cross-showing.
+**Routing = grade by how much DECISION-MAKING remains in the task, not by domain (owner-approved 2026-07-09):**
+
+| Task shape | Tier |
+|---|---|
+| Design work, debugging with unknown cause, trade-offs to weigh | Opus |
+| Brief names the files + a reference pattern; only execution remains | Sonnet |
+| Single file, change specified down to the exact text | Haiku |
+
+- **Model override beats new personas:** the Agent tool's `model` param overrides a persona's pinned model — e.g. routine backend work = `sr-backend-developer` + `model: sonnet`. Same scope/persona, cheaper run. Don't add duplicate `.claude/agents/` files for tiers.
+- **Never-downgrade guardrail:** `engine/` determinism work, balance-sim adjudication, and `prisma/` schema stay Opus always — bugs in these zones have each cost far more than the tokens saved.
+- **Explore-first:** before spawning any Opus agent to "find where X lives / investigate", run the read-only `Explore` agent to locate, then brief the worker with the exact file list. Cuts the ~20-40k read-in exploration per agent (the single biggest cost).
+- **Haiku by default** for: patch-notes copy, i18n strings, single CONFIG value changes, doc appends, label swaps — when the spec is complete.
+- High-stakes → two independent perspectives in parallel, synthesize without cross-showing.
 
 **Token discipline (learned from the M4 build-out):**
 - One agent = one task; spawn fresh with a tight brief instead of chaining SendMessage (chained context re-reads cost 2-3x). Exception: urgent fixes on work the agent just wrote.
@@ -89,7 +101,7 @@ Routing: reasoning-heavy → Opus domain agent or `deep-reasoner` · mechanical 
 
 ## Project subagents
 
-Personas in `.claude/agents/`, each pinned to a model:
+Personas in `.claude/agents/`, each pinned to a model (the pin is the DEFAULT — the routing table above may override per-call via the Agent tool's `model` param):
 
 | Agent | Model | Scope |
 |---|---|---|
