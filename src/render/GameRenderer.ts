@@ -34,6 +34,7 @@ import {
   WORLD_WIDTH,
   type WorldTransform,
 } from "@/render/layout";
+import { createAtmosphere, type Atmosphere } from "@/render/worldDepth/atmosphere";
 import {
   createCamera,
   updateCamera,
@@ -252,16 +253,30 @@ export class GameRenderer {
    */
   private readonly worldFx: WorldFxContext = createWorldFxContext();
   /** Current world-fx flag set (stored like `povHeroIndex` for defensive
-   * re-apply in `create()`). `camera` is tracked here too even though it isn't
-   * a `worldFx` concern, so a single `setWorldFx()` drives all three. */
-  private worldFxFlags: { depth: boolean; terrain: boolean; camera: boolean } = {
+   * re-apply in `create()`). `camera`/`atmosphere` are tracked here too even
+   * though they aren't `worldFx` (ground/depth) concerns, so a single
+   * `setWorldFx()` drives all four. */
+  private worldFxFlags: {
+    depth: boolean;
+    terrain: boolean;
+    camera: boolean;
+    atmosphere: boolean;
+  } = {
     depth: false,
     terrain: false,
     camera: false,
+    atmosphere: false,
   };
-  /** W5 atmosphere-density stub: stored now (fed by the ghost-fps valve in the
-   * settings wave), no consumer yet. Kept so the public setter can land in W2
-   * alongside `setWorldFx`. */
+  /** W5 atmosphere runtime (day/night tint + weather + critters) — owns its
+   * own Pixi views hosted across `background`/`ghosts`/`entities`/
+   * `cameraRoot`/`world`. Built in `create()`, torn down in `destroy()`;
+   * `null` in between (same lifecycle convention as `environment`/
+   * `ghostLayer`). */
+  private atmosphere: Atmosphere | null = null;
+  /** `setAtmosphereDensity()`'s stored value (defensive re-apply convention,
+   * like `worldFxFlags`) — the perf valve GameClient drives from its
+   * ghost-fps EMA (W6): 1 full / 0.5 reduced / 0 hidden. Only matters once
+   * `setWorldFx({atmosphere: true, ...})` turns the feature on; default 1. */
   private atmosphereDensity = 1;
   /** Living-camera state (created in `create()`, reset per session). Null until
    * then. */
@@ -359,6 +374,13 @@ export class GameRenderer {
     entities.sortableChildren = true;
     this.layers = { background, entities, projectiles, fx, overlay };
     this.ghostLayer = new GhostLayer(ghosts, { worldFx: this.worldFx });
+
+    // W5 atmosphere runtime: day/night tint + weather + critters, composed on
+    // top of the same five layers (see `atmosphere.ts`'s doc comment for the
+    // exact insertion points). Built AFTER `cameraRoot`/`overlay` are already
+    // children of `world` and `entities` is already a child of `cameraRoot`
+    // (both required for its internal `getChildIndex` placement math).
+    this.atmosphere = createAtmosphere({ world, cameraRoot, background, ghosts, entities });
 
     // Living-camera state (reset per session). Knobs: follow-tight 1.06, relax
     // to the full view 1.0 when idle.
@@ -492,8 +514,11 @@ export class GameRenderer {
       depth: this.worldFxFlags.depth,
       terrain: this.worldFxFlags.terrain,
     });
+    this.environment?.setTerrainEnabled(this.worldFxFlags.terrain);
     if (this.worldFxFlags.camera) this.activateCameraMask();
     else this.snapCameraIdentity();
+    this.atmosphere?.setEnabled(this.worldFxFlags.atmosphere);
+    this.atmosphere?.setDensity(this.atmosphereDensity);
 
     // Pixi's built-in `resizeTo` only reacts to `window` resize events; a
     // ResizeObserver on the actual mount element is what makes layout-driven
@@ -530,7 +555,10 @@ export class GameRenderer {
     // Bind the current zone's terrain to the shared seam ONCE per frame (cached
     // — same Zone → same Terrain instance, zero re-alloc). Must precede every
     // placement below so `footY`/`groundY` resolve against the right ground.
-    this.worldFx.setZone(zoneAt(state.location));
+    // Captured once and reused by the atmosphere update at the bottom of this
+    // method (W5) instead of a second `zoneAt` call — same value either way.
+    const zone = zoneAt(state.location);
+    this.worldFx.setZone(zone);
 
     this.environment?.update(dt, state);
 
@@ -704,6 +732,12 @@ export class GameRenderer {
     // off — `cameraRoot` was already snapped to identity. The existing
     // `cameraPunch` on `world` stays the ONLY punch (no double-punch here).
     this.updateCameraFrame(state, dt);
+
+    // Promoted "โลกมีมิติ" atmosphere (W5): day/night tint, weather, critters.
+    // `Date.now()` is the ONE sanctioned wall-clock read in the render layer —
+    // a shared accelerated cycle every client samples identically; the
+    // deterministic engine never reads it. No-op when disabled (the default).
+    this.atmosphere?.update(dt, Date.now(), zone);
   }
 
   /** Full teardown. Idempotent — safe to call multiple times / before create(). */
@@ -720,6 +754,9 @@ export class GameRenderer {
     this.heroPool = null;
     this.enemyPool = null;
     this.projectilePool = null;
+
+    this.atmosphere?.destroy();
+    this.atmosphere = null;
 
     this.fx?.destroy();
     this.fx = null;
@@ -1102,29 +1139,41 @@ export class GameRenderer {
 
   /**
    * Promoted "โลกมีมิติ" master switch (settings wave, W6): toggles the depth
-   * band + terrain ground + living camera. Stored (like `setPovHeroIndex`) so a
-   * call before `create()` resolves is re-applied to the freshly-built scene.
-   * ALL false (the default) = pixel-identical to today: flat ground, no depth,
-   * identity camera, today's tap math. Safe to call any time.
+   * band + terrain ground (incl. `Environment`'s polygon ground layer) +
+   * living camera + atmosphere (day/night tint + weather + critters). Stored
+   * (like `setPovHeroIndex`) so a call before `create()` resolves is
+   * re-applied to the freshly-built scene. ALL false (the default) = pixel-
+   * identical to today: flat ground, no depth, identity camera, no
+   * atmosphere, today's tap math. Safe to call any time.
    */
-  setWorldFx(flags: { depth: boolean; terrain: boolean; camera: boolean }): void {
+  setWorldFx(flags: {
+    depth: boolean;
+    terrain: boolean;
+    camera: boolean;
+    atmosphere: boolean;
+  }): void {
     this.worldFxFlags = { ...flags };
     this.worldFx.setFlags({ depth: flags.depth, terrain: flags.terrain });
+    this.environment?.setTerrainEnabled(flags.terrain);
     // Camera on → engage the clip mask; off → snap `cameraRoot` to identity and
     // detach the mask ONCE (the per-frame updater early-returns while off).
     if (flags.camera) this.activateCameraMask();
     else this.snapCameraIdentity();
+    this.atmosphere?.setEnabled(flags.atmosphere);
   }
 
   /**
-   * Promoted "โลกมีมิติ" atmosphere density (W5 runtime, driven by the ghost-fps
-   * valve in W6): 1 = full, 0.5 = reduced, 0 = off. STORED ONLY for now — the
-   * W5 atmosphere controller (weather/day-night) is not wired yet, so this is a
-   * no-op consumer. The setter lands in W2 so the store subscription in W6 has
-   * a stable seam to call. Safe to call any time.
+   * Promoted "โลกมีมิติ" atmosphere density (W5 runtime, driven by the
+   * ghost-fps valve in W6): 1 = full, 0.5 = reduced (weather dimmed, birds
+   * hidden), 0 = hidden (weather/critters/night-overlay off, and
+   * `atmosphere.update()` skips its whole per-frame body). Independent of
+   * `setWorldFx`'s `atmosphere` on/off flag — only matters once that flag is
+   * on. Stored for the same defensive re-apply reason as `worldFxFlags`.
+   * Safe to call any time.
    */
   setAtmosphereDensity(s: number): void {
     this.atmosphereDensity = s;
+    this.atmosphere?.setDensity(s);
   }
 
   /** Entity-view lookup for the fx layer's hit-flash (id -> live Pixi view). */
