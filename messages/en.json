@@ -115,6 +115,15 @@
       "buff": "+{percent}% ATK for {seconds}s",
       "mana": "Mana {cost}",
       "cooldown": "CD {cd}s"
+    },
+    "skillDetail": {
+      "title": "Skills",
+      "closeButton": "Close",
+      "listAria": "Skill list",
+      "statusReady": "Ready",
+      "statusCooldown": "Cooldown {seconds}s",
+      "statusNoMana": "Not enough mana",
+      "statusDead": "Hero is down"
     }
   },
   "stats": {
@@ -164,21 +173,26 @@
       "atmosphereLabel": "Day-night atmosphere"
     },
     "botModal": {
-      "title": "Bot settings",
+      "title": "Bot",
       "closeButton": "Close",
       "masterOffHint": "The bot switch is off — you can still adjust these settings, but they won't run until you turn the bot switch back on.",
+      "skillGroup": "Auto skills",
+      "skillGroupHint": "Tap a skill's icon to put it into / take it out of an auto-cast slot — the hero casts it on its own once this switch is on.",
       "combatGroup": "Combat",
       "combatGroupHint": "Let the hero cast skills and allocate stat points on its own.",
+      "generalGroup": "Auto settings",
+      "generalGroupHint": "Potion-use thresholds, town buy/sell trips, and auto-equipping the best gear.",
       "potionGroup": "Potions",
       "potionGroupHint": "Auto-use HP/mana potions once a pool drops below its threshold.",
       "townGroup": "Town trips",
       "townGroupHint": "The bot warps to town to buy potions / sell / equip its best gear on its own.",
       "dropGroup": "Drops",
       "dropGroupHint": "Rules for what the bot sells/keeps per drop rarity on its town trips.",
-      "walkGroup": "Walking",
+      "walkGroup": "Walking / area",
       "walkGroupHint": "Behavior after your hero dies, and auto-advancing to the next zone.",
       "autoReturnHint": "After your hero respawns in town, walk back to farming automatically.",
-      "autoAdvanceHint": "Once a zone's quota is cleared, walk into the next unlocked zone automatically (never a boss room)."
+      "autoAdvanceHint": "Once a zone's quota is cleared, walk into the next unlocked zone automatically (never a boss room).",
+      "instantApplyNote": "Every setting here applies instantly — nothing to save."
     },
     "bot": {
       "title": "Helper bots",
@@ -196,7 +210,9 @@
       "masterOffDisabledHint": "Turn the main bot switch on first to enable this.",
       "autoSlotsTitle": "Auto-cast slots",
       "autoSlotEmpty": "Empty",
-      "autoSlotClearAria": "Remove {skill} from its auto-cast slot"
+      "autoSlotClearAria": "Remove {skill} from its auto-cast slot",
+      "autoSlotPickerAria": "{skill}: tap to add to / remove from an auto-cast slot",
+      "autoSlotPickerFull": "All auto-cast slots are full"
     },
     "autoSell": {
       "title": "Auto-dispose drops",

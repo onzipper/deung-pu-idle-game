@@ -15,19 +15,24 @@
  * the skill's max cooldown and whose `animation-delay` is negative by the
  * ALREADY-elapsed amount, so it visually resumes at the right point from a single
  * throttled snapshot value. It only restarts (remounts via `key`) on a fresh cast.
+ *
+ * R2-W4: the old per-skill ⓘ `InfoTip` (a small text popover) now opens the
+ * full `SkillDetailModal` list+detail pane instead (`docs/ui-reference-map.md`'s
+ * SKILL UI row) — the modal instance is lifted to `HeroSkills` (one mount for
+ * the whole kit, not one per button) and `SkillButton` just reports which
+ * skill id to open via `onOpenDetail`.
  */
 
 import { useTranslations } from "next-intl";
-import type { CSSProperties } from "react";
-import { CONFIG, SKILLS } from "@/engine";
+import { useState, type CSSProperties } from "react";
+import { CONFIG } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
-import { InfoTip } from "@/ui/components/InfoTip";
+import { SkillDetailModal } from "@/ui/components/SkillDetailModal";
 import { StatBar } from "@/ui/components/primitives/StatBar";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
 import { HERO_ACCENT, HERO_ICONS, SKILL_ICONS_BY_ID } from "@/ui/labels";
-import { skillStatParts } from "@/ui/skillStats";
 import { useGameStore } from "@/ui/store/gameStore";
 
 /** The `content.classes.<cls>.<key>` i18n key for hero.tier's display name:
@@ -41,15 +46,17 @@ function classNameKeyForTier(tier: 1 | 2 | 3): "name" | "evolvedName" | "tier3Na
 
 
 /** One learned skill: a cast button + an AUTO-slot toggle badge + a tap-to-open
- * ⓘ detail popover (owner ask, UX-fix wave: "every skill button gets a
- * tap-to-open detail" — desc line + live numbers from `CONFIG.skills`, reused
- * via `skillStatParts`). The class-change quest's accept/change-class controls
- * used to live in this file's `ClassQuestAffordance` — that's gone; the WHOLE
- * quest flow now lives in `GoalLadder.tsx`'s `ClassQuestCard` (audit #1). */
+ * detail trigger (owner ask, UX-fix wave: "every skill button gets a
+ * tap-to-open detail" — R2-W4 evolved this from a small `InfoTip` text
+ * popover into the full `SkillDetailModal` list+detail pane, see that file's
+ * doc). The class-change quest's accept/change-class controls used to live in
+ * this file's `ClassQuestAffordance` — that's gone; the WHOLE quest flow now
+ * lives in `GoalLadder.tsx`'s `ClassQuestCard` (audit #1). */
 function SkillButton({
   hero,
   skill,
   slotNumber,
+  onOpenDetail,
 }: {
   hero: HeroSummary;
   skill: SkillSummary;
@@ -57,6 +64,9 @@ function SkillButton({
    * numbered hotbar slots, R2-W2) — purely a display ordinal, NOT the
    * auto-cast slot index (`skill.autoSlot`, shown by the badge below). */
   slotNumber: number;
+  /** Opens `SkillDetailModal` on this skill (lifted to `HeroSkills` so the
+   * whole kit shares ONE modal instance instead of one per button). */
+  onOpenDetail: (skillId: string) => void;
 }) {
   const castSkill = useGameStore((s) => s.castSkill);
   const setAutoSlot = useGameStore((s) => s.setAutoSlot);
@@ -66,11 +76,6 @@ function SkillButton({
   const icon = SKILL_ICONS_BY_ID[skill.id] ?? "✦";
   const accent = HERO_ACCENT[hero.cls];
   const castKey = useCastKey(skill.cd);
-  const skillDef = SKILLS[skill.id];
-  const statsLine = skillStatParts(skillDef)
-    .map((p) => tPanels(`skillStat.${p.key}`, p.values))
-    .join(" · ");
-  const detailText = `${tContent(`skills.${skill.id}.desc`)} · ${statsLine}`;
 
   const ready = skill.ready;
   const delay = -(skill.maxCd - skill.cd);
@@ -156,17 +161,18 @@ function SkillButton({
           </span>
         </button>
         {/* Owner ask (UX-fix wave): every skill button gets a tap-to-open
-            detail — desc line + live numbers (mana/cooldown/damage/etc. off
-            `CONFIG.skills` via `skillStatParts`). Sits OUTSIDE the cast
-            `<button>` (siblings, not nested — nested buttons are invalid
-            HTML) at its top-left corner; `InfoTip` already carries its own
-            ≥44px hit-zone trick. */}
-        <div className="absolute -top-1.5 -left-1.5 z-10">
-          <InfoTip
-            text={detailText}
-            ariaLabel={tPanels("skillInfoAria", { skillName })}
-          />
-        </div>
+            detail — R2-W4 opens the full `SkillDetailModal` list+detail pane
+            instead of a small text popover. Sits OUTSIDE the cast `<button>`
+            (siblings, not nested — nested buttons are invalid HTML) at its
+            top-left corner, same ≥44px hit-zone trick `InfoTip` used. */}
+        <button
+          type="button"
+          onClick={() => onOpenDetail(skill.id)}
+          aria-label={tPanels("skillInfoAria", { skillName })}
+          className="absolute -top-1.5 -left-1.5 z-10 grid h-5 w-5 place-items-center rounded-full border border-ddp-border-soft bg-black/30 text-[10px] leading-none font-bold text-ddp-ink-muted before:absolute before:-inset-3 before:content-[''] hover:text-ddp-ink active:scale-90"
+        >
+          <span aria-hidden>ⓘ</span>
+        </button>
         {/* Numbered hotbar badge (mockup "1-5 กำกับ") — pure display ordinal,
             opposite corner from the ⓘ detail tip so the two never collide. */}
         <span
@@ -230,6 +236,7 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
   const heroName = tContent(`classes.${hero.cls}.${classNameKeyForTier(hero.tier)}`);
   const leveledUpPulse = usePulseOnIncrease(hero.level, 320);
   const accent = HERO_ACCENT[hero.cls];
+  const [detailSkillId, setDetailSkillId] = useState<string | null>(null);
 
   const xpPct = Math.max(0, Math.min(1, hero.xpProgress)) * 100;
 
@@ -318,7 +325,13 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
       {/* The learned skill kit */}
       <div className="flex flex-wrap items-start justify-center gap-2">
         {hero.skills.map((skill, i) => (
-          <SkillButton key={skill.id} hero={hero} skill={skill} slotNumber={i + 1} />
+          <SkillButton
+            key={skill.id}
+            hero={hero}
+            skill={skill}
+            slotNumber={i + 1}
+            onOpenDetail={setDetailSkillId}
+          />
         ))}
       </div>
       {nextLockedLevel !== null && (
@@ -327,6 +340,15 @@ function HeroSkills({ hero }: { hero: HeroSummary }) {
             ? tPanels("autoSlotNextUnlockTier3", { level: nextLockedLevel })
             : tPanels("autoSlotNextUnlock", { level: nextLockedLevel })}
         </span>
+      )}
+      {/* ONE `SkillDetailModal` instance for the whole kit (R2-W4) — every
+          `SkillButton`'s ⓘ trigger just sets which skill id to show. */}
+      {detailSkillId && (
+        <SkillDetailModal
+          hero={hero}
+          initialId={detailSkillId}
+          onClose={() => setDetailSkillId(null)}
+        />
       )}
     </div>
   );

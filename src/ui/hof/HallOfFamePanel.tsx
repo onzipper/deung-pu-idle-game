@@ -32,10 +32,23 @@
  * The backend (`/api/hof`) lands in parallel with this UI wave — a
  * network/non-2xx failure renders `hof.notOpenYet` so this wave is
  * independently testable before the route exists.
+ *
+ * R2-W4 token pass (visual-only, per `docs/ui-reference-map.md`'s RANKING
+ * row): outer shell swapped from a hand-rolled bordered `div` to the
+ * `Panel variant="gold"` + `PanelHeader` primitives (same drop-in shape the
+ * other R2 panels already use — see `InventoryPanel.tsx`) so the modal frame
+ * follows the "gold frame reserved for TOP-LEVEL panels" rule. The board and
+ * boss-stage tab strips (both plain id+label(+icon) lists) now render through
+ * the real `TabRow` primitive, which carries the token-spec's purple
+ * (`--ddp-boss`) active-tab accent — gold stays reserved for numerals/CTAs,
+ * not tab chrome. The class-filter row stays a local icon-only component
+ * (its fixed-square shape isn't what `Tab` renders) but its active state was
+ * recolored to the same purple for consistency. Zero fetch/cache/skeleton/
+ * podium logic touched.
  */
 
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchHof } from "@/ui/hof/api";
 import { formatBossClearTime, formatPlainValue, splitOnlineSeconds } from "@/ui/hof/format";
 import { HofProfileModal } from "@/ui/hof/HofProfileModal";
@@ -61,6 +74,10 @@ import {
 } from "@/ui/hof/types";
 import { useHofRewards } from "@/ui/hof/useHofRewards";
 import { ModalPortal } from "@/ui/components/ModalPortal";
+import { Button } from "@/ui/components/primitives/Button";
+import { Panel } from "@/ui/components/primitives/Panel";
+import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
+import { TabRow } from "@/ui/components/primitives/TabRow";
 import { HERO_ICONS, prestigeNameClass } from "@/ui/labels";
 
 const BOARD_ORDER: readonly HofBoard[] = ["level", "power", "gold", "boss", "online"];
@@ -110,31 +127,9 @@ function formatHofValue(board: HofBoard, value: number, t: Translator): string {
   return formatPlainValue(board, value);
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-(--ddp-radius-md) border px-2.5 py-1.5 text-[11px] font-bold whitespace-nowrap transition-colors ${
-        active
-          ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
-          : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
+/** Icon-only class-filter pill — kept local (its fixed h-9/w-9 square isn't
+ * what the flex-1 `Tab` primitive renders) but recolored to the token spec's
+ * purple active accent (`--ddp-boss`), matching `Tab.tsx`. */
 function IconTabButton({
   active,
   onClick,
@@ -155,7 +150,7 @@ function IconTabButton({
       title={label}
       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border text-base transition-colors ${
         active
-          ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
+          ? "border-ddp-boss bg-ddp-boss/20 text-ddp-boss-light"
           : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
       }`}
     >
@@ -229,10 +224,12 @@ function RankRow({
       {/* Level + value get FIXED widths so every row's name column knows its
        * budget regardless of which board's value format is widest (a boss
        * clear time vs. a 6-digit gold total). */}
-      <span className="w-10 shrink-0 text-right text-[10px] text-ddp-ink-muted tabular-nums">
+      <span className="font-display w-10 shrink-0 text-right text-[10px] text-ddp-ink-muted tabular-nums">
         {tCommon("levelBadge", { level: entry.level })}
       </span>
-      <span className="w-20 shrink-0 text-right text-xs font-bold text-ddp-gold-bright tabular-nums">{value}</span>
+      <span className="font-display w-20 shrink-0 text-right text-xs font-bold text-ddp-gold-bright tabular-nums">
+        {value}
+      </span>
     </button>
   );
 }
@@ -303,17 +300,19 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
           onClick={onClose}
           className="absolute inset-0 bg-black/70"
         />
-        <div className="animate-onboarding-in relative flex h-[min(85vh,42rem)] w-full max-w-lg flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel) sm:max-w-2xl">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base font-extrabold text-ddp-gold-bright">{t("title")}</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-            >
-              ✕ {t("closeButton")}
-            </button>
-          </div>
+        <Panel
+          variant="gold"
+          className="animate-onboarding-in relative flex h-[min(85vh,42rem)] w-full max-w-lg flex-col gap-3 overflow-hidden sm:max-w-2xl"
+        >
+          <PanelHeader
+            title={t("title")}
+            icon={<span aria-hidden>{"\u{1F3C6}"}</span>}
+            actions={
+              <Button variant="secondary" className="px-2.5 py-1.5 text-[11px]" onClick={onClose}>
+                ✕ {t("closeButton")}
+              </Button>
+            }
+          />
 
           {hasAnyUnclaimedAward(rewardsData?.me) && rewardsData?.me && (
             <UnclaimedAwardsBanner
@@ -332,27 +331,27 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
             <PodiumStrip board={board} resolution={resolvePodium(rewardsData, board)} myAward={myAwardForBoard} t={t} />
           )}
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            {BOARD_ORDER.map((b) => (
-              <TabButton key={b} active={board === b} onClick={() => selectBoard(b)}>
-                <span aria-hidden>{BOARD_ICON[b]}</span>
-                {t(`boards.${b}`)}
-              </TabButton>
-            ))}
-          </div>
+          <TabRow
+            className="flex-wrap"
+            tabs={BOARD_ORDER.map((b) => ({
+              id: b,
+              label: t(`boards.${b}`),
+              icon: <span aria-hidden>{BOARD_ICON[b]}</span>,
+            }))}
+            active={board}
+            onChange={selectBoard}
+          />
 
           {board === "boss" && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {HOF_BOSS_STAGES.map((stage) => (
-                <TabButton
-                  key={stage}
-                  active={bossStage === stage}
-                  onClick={() => setBossStage(stage)}
-                >
-                  {t("stageChip", { stage })}
-                </TabButton>
-              ))}
-            </div>
+            <TabRow
+              className="flex-wrap"
+              tabs={HOF_BOSS_STAGES.map((stage) => ({
+                id: String(stage),
+                label: t("stageChip", { stage }),
+              }))}
+              active={String(bossStage)}
+              onChange={(id) => setBossStage(Number(id))}
+            />
           )}
 
           <div className="flex flex-wrap items-center gap-1.5">
@@ -395,7 +394,7 @@ export function HallOfFamePanel({ onClose }: HallOfFamePanelProps) {
               ? t("myRank", { rank: state.data.me.rank })
               : t("notRanked")}
           </div>
-        </div>
+        </Panel>
       </div>
 
       {selected && (
