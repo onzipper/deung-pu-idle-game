@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ดึ๋งปุ๊ Idle Game
 
-## Getting Started
+A web-based **2.5D open-world idle MMO RPG** — Ragnarok-like feel with idle automation.
+Single character auto-hunts across zones; the player steers stats, skills, gear/refine
+(ตีบวก), class changes, and can party up in real time (lockstep, max 6). Fixed camera
+today; true x/y movement is on the roadmap. Power = level + stats + class/skills + gear —
+no purchasable upgrade lines, no speed multiplier.
 
-First, run the development server:
+## Tech stack
+
+Next.js 16 (App Router) · React 19 · PixiJS 8 · Zustand · Prisma 6 (MySQL) · Zod ·
+Vitest · next-intl (th/en). Package manager is **pnpm**.
+
+## Quick start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev      # → http://localhost:3000
+pnpm test     # headless Vitest suites
+pnpm sim      # balance harness (SIM_SECONDS / SEEDS env knobs)
+pnpm build    # production build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Source of truth
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| What | Where |
+|---|---|
+| Vision / design (wins conflicts) | [docs/GDD.md](docs/GDD.md) |
+| Roadmap + task checklists | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| Current project state (updated every round) | [docs/current-state.md](docs/current-state.md) |
+| UI reference + owner-approved decisions | [docs/ui-reference-map.md](docs/ui-reference-map.md) |
+| Docs table of contents | [docs/README.md](docs/README.md) |
+| **AI agent guide (start here if you are an AI)** | [AI.md](AI.md) |
+| Claude Code–specific guidance | [CLAUDE.md](CLAUDE.md) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## AI onboarding (short version)
 
-## Learn More
+Read, in order: this file → [AI.md](AI.md) → [docs/current-state.md](docs/current-state.md)
+→ the task-matching pack in [docs/context/](docs/context/) → only the affected files.
+Do **not** crawl `src/` or the full docs history first — [docs/CODEMAP.md](docs/CODEMAP.md)
+and [docs/feature-map.md](docs/feature-map.md) already map files to responsibilities.
+Locked decisions live in [docs/decision-index.md](docs/decision-index.md); recurring bug
+classes in [docs/known-traps.md](docs/known-traps.md).
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Git flow: `develop` = integration (work lands per task) · `main` = stable, merged via PR
+only with explicit owner confirmation.
