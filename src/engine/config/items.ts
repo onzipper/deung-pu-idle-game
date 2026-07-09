@@ -431,6 +431,21 @@ export function lookupTemplate(id: string): ItemTemplate | undefined {
   return ITEM_TEMPLATES[id] ?? FORTIFIER_TEMPLATES[id] ?? LEGENDARY_TEMPLATES[id];
 }
 
+/** The Record-shaped companion to `lookupTemplate` — EVERY live templateId (gear +
+ *  fortifier + legendary) keyed by id, for consumers that index a whole inventory
+ *  by templateId rather than resolving one id at a time (the bot equip pipeline:
+ *  `ui/gear/autoEquip.ts`). Passing the gear-only `ITEM_TEMPLATES` there made a
+ *  WORN legendary resolve `undefined`, so the bot judged the weapon slot "empty"
+ *  and swapped ordinary drops over it (owner report 2026-07-09 — third instance
+ *  of the gear-only-vs-superset bug class after the ninja-dagger claim and the
+ *  legendary-fx rarity fixes). Drop tables/shop pricing still iterate the
+ *  gear-only maps — this is a pure additive export, no engine behavior change. */
+export const ALL_ITEM_TEMPLATES: Record<string, ItemTemplate> = {
+  ...ITEM_TEMPLATES,
+  ...FORTIFIER_TEMPLATES,
+  ...LEGENDARY_TEMPLATES,
+};
+
 // ---------------------------------------------------------------------------
 // Drop tables — banded to the stage the mob was killed at.
 // ---------------------------------------------------------------------------
