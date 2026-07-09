@@ -37,6 +37,7 @@ import { FriendsButton } from "@/ui/components/FriendsButton";
 import { GoalLadder } from "@/ui/components/GoalLadder";
 import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
 import { HudBar } from "@/ui/components/HudBar";
+import { GateTripWatcher } from "@/ui/components/GateTripWatcher";
 import { InventoryButton } from "@/ui/components/InventoryButton";
 import { NoticeToast } from "@/ui/components/NoticeToast";
 import { RefineButton } from "@/ui/components/RefineButton";
@@ -149,6 +150,10 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       {/* Owner UX round (2026-07-09): drives the ปุ่มตีบวก "smith trip" state
           machine to completion — renders nothing, see SmithTripWatcher.tsx. */}
       <SmithTripWatcher />
+      {/* Owner UX round (2026-07-09): drives the "walk to the gate first"
+          state machine to completion — renders nothing, see
+          GateTripWatcher.tsx. */}
+      <GateTripWatcher />
 
       <GoalLadder />
 

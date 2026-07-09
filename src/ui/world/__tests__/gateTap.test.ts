@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { WorldNav, Zone } from "@/engine";
-import { resolveGateTap } from "@/ui/world/gateTap";
+import { gateAnchorX, resolveGateTap } from "@/ui/world/gateTap";
 
 function nav(overrides: Partial<WorldNav>): WorldNav {
   const current: Zone = { mapId: "map1", zoneIdx: 2, kind: "farm", stage: 2 };
@@ -22,7 +22,7 @@ describe("resolveGateTap", () => {
       right: { zone: { mapId: "map1", zoneIdx: 3, kind: "farm", stage: 3 }, unlocked: true },
     });
     const action = resolveGateTap(n, "right", 10, 24);
-    expect(action).toEqual({ kind: "walk", target: { mapId: "map1", zoneIdx: 3 } });
+    expect(action).toEqual({ kind: "walk", target: { mapId: "map1", zoneIdx: 3 }, gateX: 876 });
   });
 
   it("unlocked left neighbor -> walk, mirrors the left arrow exactly", () => {
@@ -30,7 +30,7 @@ describe("resolveGateTap", () => {
       left: { zone: { mapId: "map1", zoneIdx: 1, kind: "farm", stage: 1 }, unlocked: true },
     });
     const action = resolveGateTap(n, "left", 10, 24);
-    expect(action).toEqual({ kind: "walk", target: { mapId: "map1", zoneIdx: 1 } });
+    expect(action).toEqual({ kind: "walk", target: { mapId: "map1", zoneIdx: 1 }, gateX: 55 });
   });
 
   it("locked neighbor -> 'locked' with the remaining-kills count, never queues a walk", () => {
@@ -60,5 +60,16 @@ describe("resolveGateTap", () => {
       right: { zone: { mapId: "map1", zoneIdx: 3, kind: "farm", stage: 3 }, unlocked: true },
     });
     expect(resolveGateTap(n, "right", 24, 24)).toEqual({ kind: "none" });
+  });
+});
+
+describe("gateAnchorX", () => {
+  it("left is the shared hero min-x, right is fieldWidth minus the right margin", () => {
+    expect(gateAnchorX("map1", "left")).toBe(55);
+    expect(gateAnchorX("map1", "right")).toBe(876);
+  });
+
+  it("falls back to the default 900 fieldWidth for an unconfigured mapId", () => {
+    expect(gateAnchorX("no-such-map", "right")).toBe(876);
   });
 });

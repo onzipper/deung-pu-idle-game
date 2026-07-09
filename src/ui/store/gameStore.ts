@@ -61,6 +61,11 @@ import {
 } from "@/ui/chat/chatMessages";
 import type { PartyWire } from "@/ui/friends/types";
 import { nextSmithTripStep, type SmithTripPhase } from "@/ui/world/smithTrip";
+import {
+  nextGateTripStep,
+  type GateTripPhase,
+  type GateTripTarget,
+} from "@/ui/world/gateTrip";
 
 /**
  * A single learned skill's HUD state (M5 skill framework v2). Precomputed by the
@@ -176,6 +181,12 @@ export interface HeroSummary {
   cls: HeroClass;
   hp: number;
   maxHp: number;
+  /** Current world x position (M7.8 manual play already reads this off the
+   * live engine `state` in `GameClient.tsx`'s `hitTestPointer` seam — this is
+   * the SAME value at throttled ~10Hz precision, added for `gateTrip.ts`'s
+   * arrival check, owner UX round 2026-07-09). Not used for anything
+   * frame-precise; a ~40px arrival radius easily absorbs the throttle. */
+  x: number;
   /**
    * SIGNATURE skill cooldown remaining, seconds (0 = ready). Kept for the
    * onboarding "you cast a skill" detector (`ui/onboarding`); the full per-skill
@@ -1250,6 +1261,21 @@ export interface HudState {
    * to survive a reload, per the task brief) — never part of `SaveData`. */
   smithTrip: SmithTripPhase;
 
+  /**
+   * Owner UX round (2026-07-09) — "เดินไปที่ประตูก่อน แล้วค่อยวาป": an open-gate
+   * tap arms this instead of firing `walkToZone` immediately — see
+   * `ui/world/gateTrip.ts`'s pure transition function. `"idle"` = no trip in
+   * flight; `"walking"` = a `moveTo` toward the gate's own anchor x is in
+   * flight, `GateTripWatcher.tsx` advancing it off the throttled snapshot via
+   * `advanceGateTrip`. Session-only, never part of `SaveData` (same as
+   * `smithTrip`). Mutually exclusive with `smithTrip` (starting one cancels
+   * the other — a player can only be walking toward one destination). */
+  gateTrip: GateTripPhase;
+  /** The armed trip's remembered gate x / destination zone / origin zone /
+   * arm timestamp — `null` while `gateTrip === "idle"`. See
+   * `GateTripTarget`'s doc. */
+  gateTripTarget: GateTripTarget | null;
+
   // ---- M7 Gear & Drops: DB-hydrated inventory + drop-feed juice ----
   /** The active character's owned item instances (DB-authoritative — see
    * `docs/persistence-m7.md`), seeded from the `/api/save` boot payload's
@@ -1611,6 +1637,22 @@ export interface HudState {
    * trip). A no-op while `"idle"`. */
   advanceSmithTrip: () => void;
 
+  // ---- Owner UX round (2026-07-09): เดินไปที่ประตูก่อน แล้วค่อยวาป ----
+  /** `GameClient.tsx`'s `onGateTap`-only: arm a gate trip on an OPEN gate tap
+   * — queues the SAME manual `moveTo` intent a ground tap uses (targeting
+   * `gateX`), and arms `gateTrip`. Cancels any in-flight `smithTrip` (mutual
+   * exclusion — see `gateTrip`'s doc). */
+  startGateTrip: (gateX: number, destination: WorldLocation) => void;
+  /** Cancel any in-flight gate trip, silently (no notice/toast) — called on a
+   * conflicting manual move/attack/talk, a fast-travel/warp start, or death.
+   * A no-op while already `"idle"`. */
+  cancelGateTrip: () => void;
+  /** `GateTripWatcher.tsx`-only: advance an in-flight gate trip by one
+   * throttled-snapshot tick — a thin store-side wrapper around the pure
+   * `ui/world/gateTrip.ts#nextGateTripStep`, firing the ORIGINAL `walkToZone`
+   * intent on arrival. A no-op while `"idle"`. */
+  advanceGateTrip: () => void;
+
   // ---- M8 quest Wave C ----
   /** Install/refresh today's daily roster (from a save GET/POST response's
    * `dailies` field) — see `PendingInput.setDailies`'s doc. Safe to call on
@@ -1795,7 +1837,16 @@ export const useGameStore = create<HudState>((set, get) => ({
   },
   shop: emptyShop,
   bot: defaultBotSettings(),
-  autoHunt: true,
+  // Owner default (2026-07-09) "เข้าเกมมาบอทจะปิดไว้ก่อน": pre-hydration display
+  // value only — `GameClient.tsx`'s boot sequence force-queues a real
+  // `setAutoHunt: false` intent through the engine after any offline-idle
+  // replay finishes (which runs on the SAVED value, untouched — see its own
+  // comment), and the very next `syncFromEngine` overwrites this default
+  // anyway. Matching it here just avoids a one-frame "ON" flash before that
+  // lands, AND keeps this the correct baseline for `manualPlayHint`'s
+  // trigger edge (`prev.autoHunt && !next.autoHunt` must never see a false
+  // "just turned off" transition purely from booting).
+  autoHunt: false,
   unlockedZones: {},
   materials: 0,
   npcInRange: { "npc:pahpu": false, "npc:lungdueng": false, "npc:elder": false },
@@ -1815,6 +1866,8 @@ export const useGameStore = create<HudState>((set, get) => ({
   tomeAssembledCelebration: false,
   activeTownPanel: null,
   smithTrip: "idle",
+  gateTrip: "idle",
+  gateTripTarget: null,
 
   inventory: [],
   dropFeed: [],
@@ -2028,8 +2081,16 @@ export const useGameStore = create<HudState>((set, get) => ({
       },
     })),
 
+  // A player-initiated fast-travel silently cancels an in-flight gate trip
+  // (owner UX round 2026-07-09) — the trip's OWN internal fast-travel leg
+  // (`startSmithTrip`'s traveling branch) writes `pendingInput.fastTravel`
+  // directly rather than calling this action, so smithTrip never self-cancels.
   queueFastTravel: (target) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, fastTravel: target } })),
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, fastTravel: target },
+      gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
+      gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
+    })),
 
   queueSetAutoHunt: (on) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, setAutoHunt: on } })),
@@ -2088,20 +2149,25 @@ export const useGameStore = create<HudState>((set, get) => ({
     })),
 
   // A manual move/attack order is "the player tapping elsewhere" (owner UX
-  // round 2026-07-09) — silently cancels any in-flight smith trip so it never
-  // fights a real player-directed command. The trip's OWN internal moveTo
-  // (`startSmithTrip`/`advanceSmithTrip` below) writes `pendingInput.moveTo`
-  // directly rather than calling this action, so it never self-cancels.
+  // round 2026-07-09) — silently cancels any in-flight smith trip AND gate
+  // trip so neither fights a real player-directed command. Each trip's OWN
+  // internal moveTo (`startSmithTrip`/`advanceSmithTrip`/`startGateTrip`/
+  // `advanceGateTrip`) writes `pendingInput.moveTo` directly rather than
+  // calling this action, so starting/advancing one never self-cancels.
   queueMoveTo: (x) =>
     set((s) => ({
       pendingInput: { ...s.pendingInput, moveTo: { x } },
       smithTrip: s.smithTrip === "idle" ? s.smithTrip : "idle",
+      gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
+      gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
     })),
 
   queueAttackTarget: (id) =>
     set((s) => ({
       pendingInput: { ...s.pendingInput, attackTarget: { id } },
       smithTrip: s.smithTrip === "idle" ? s.smithTrip : "idle",
+      gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
+      gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
     })),
 
   queueCancelCommand: () =>
@@ -2116,8 +2182,14 @@ export const useGameStore = create<HudState>((set, get) => ({
   queueClaimMainReward: (chapterId) =>
     set((s) => ({ pendingInput: { ...s.pendingInput, claimMainReward: chapterId } })),
 
+  // A friend-warp is a manual zone jump too (owner UX round 2026-07-09) —
+  // same gate-trip cancel as `queueFastTravel`.
   queueWarpScroll: (target) =>
-    set((s) => ({ pendingInput: { ...s.pendingInput, useWarpScroll: target } })),
+    set((s) => ({
+      pendingInput: { ...s.pendingInput, useWarpScroll: target },
+      gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",
+      gateTripTarget: s.gateTrip === "idle" ? s.gateTripTarget : null,
+    })),
 
   queueClaimAsuraSigil: () =>
     set((s) => ({ pendingInput: { ...s.pendingInput, claimAsuraSigil: true } })),
@@ -2129,6 +2201,9 @@ export const useGameStore = create<HudState>((set, get) => ({
 
   // ---- Owner UX round (2026-07-09): ปุ่มตีบวก works from anywhere ----
   startSmithTrip: () => {
+    // Mutual exclusion with an in-flight gate trip (owner UX round
+    // 2026-07-09) — a player can only be walking toward one destination.
+    set((st) => (st.gateTrip === "idle" ? {} : { gateTrip: "idle", gateTripTarget: null }));
     const s = get();
     if (s.world.kind === "town") {
       if (s.npcInRange["npc:lungdueng"]) {
@@ -2177,6 +2252,53 @@ export const useGameStore = create<HudState>((set, get) => ({
       }));
     } else if (result.phase !== s.smithTrip) {
       set({ smithTrip: result.phase });
+    }
+  },
+
+  // ---- Owner UX round (2026-07-09): เดินไปที่ประตูก่อน แล้วค่อยวาป ----
+  startGateTrip: (gateX, destination) =>
+    set((s) => ({
+      // Mutual exclusion with an in-flight smith trip (mirrors
+      // `startSmithTrip`'s own reset).
+      smithTrip: "idle",
+      gateTrip: "walking",
+      gateTripTarget: {
+        gateX,
+        destination,
+        originZone: { mapId: s.world.mapId, zoneIdx: s.world.zoneIdx },
+        armedAt: Date.now(),
+      },
+      // Writes `pendingInput.moveTo` directly (not via `queueMoveTo`) so
+      // arming never immediately self-cancels — mirrors `startSmithTrip`'s
+      // own bypass.
+      pendingInput: { ...s.pendingInput, moveTo: { x: gateX } },
+    })),
+
+  cancelGateTrip: () =>
+    set((s) => (s.gateTrip === "idle" ? {} : { gateTrip: "idle", gateTripTarget: null })),
+
+  advanceGateTrip: () => {
+    const s = get();
+    if (s.gateTrip === "idle" || !s.gateTripTarget) return;
+    const target = s.gateTripTarget;
+    const result = nextGateTripStep(s.gateTrip, target, {
+      heroX: s.heroes[0]?.x ?? target.gateX,
+      dead: s.heroes[0]?.dead ?? false,
+      currentZone: { mapId: s.world.mapId, zoneIdx: s.world.zoneIdx },
+      nowMs: Date.now(),
+    });
+    if (result.effect === "transition") {
+      set((st) => ({
+        gateTrip: "idle",
+        gateTripTarget: null,
+        // Fires the ORIGINAL `walkToZone` intent the immediate-transition
+        // flow used to queue directly on tap — see `gateTap.ts`'s doc.
+        pendingInput: { ...st.pendingInput, walkToZone: target.destination },
+      }));
+      return;
+    }
+    if (result.phase !== s.gateTrip) {
+      set({ gateTrip: "idle", gateTripTarget: null });
     }
   },
 

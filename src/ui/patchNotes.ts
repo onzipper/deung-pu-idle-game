@@ -369,6 +369,7 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09m.items.newLook",
       "releases.2026-07-09m.items.gates",
       "releases.2026-07-09m.items.worldMap",
+      "releases.2026-07-09m.items.botDefault",
     ],
   },
 ];
