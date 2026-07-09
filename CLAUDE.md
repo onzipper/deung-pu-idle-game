@@ -87,7 +87,7 @@ Each layer has a `README.md` with its contract; `render/README.md` carries the *
 
 - **Model override beats new personas:** the Agent tool's `model` param overrides a persona's pinned model — e.g. routine backend work = `sr-backend-developer` + `model: sonnet`. Same scope/persona, cheaper run. Don't add duplicate `.claude/agents/` files for tiers.
 - **Never-downgrade guardrail:** `engine/` determinism work, balance-sim adjudication, and `prisma/` schema stay Opus always — bugs in these zones have each cost far more than the tokens saved.
-- **Explore-first:** before spawning any Opus agent to "find where X lives / investigate", run the read-only `Explore` agent to locate, then brief the worker with the exact file list. Cuts the ~20-40k read-in exploration per agent (the single biggest cost).
+- **CODEMAP-first briefs:** `docs/CODEMAP.md` is the file→responsibility index. Before spawning a worker, paste the relevant CODEMAP section into the brief instead of letting the agent explore. Only fall back to the read-only `Explore` agent for questions the map can't answer (unknown-cause debugging, cross-cutting behavior tracing). Cuts the ~20-40k read-in exploration per agent (the single biggest cost).
 - **Haiku by default** for: patch-notes copy, i18n strings, single CONFIG value changes, doc appends, label swaps — when the spec is complete.
 - High-stakes → two independent perspectives in parallel, synthesize without cross-showing.
 
@@ -98,6 +98,17 @@ Each layer has a `README.md` with its contract; `render/README.md` carries the *
 - Agent returns ≤20 lines; detail goes in commit messages / `docs/`.
 - Cross-task context lives in repo files (render/README.md, docs/balance-m4.md), never chat history.
 - Parallel agents must own disjoint file zones (engine vs render vs ui); the orchestrator commits per-zone by path.
+
+## Docs discipline (owner directive 2026-07-09)
+
+**Every code change must update the affected docs in the same change** — include this in every agent brief:
+
+- `docs/CODEMAP.md` — add/move/delete/repurpose a source file ⇒ update its line. Enforced mechanically by `src/__tests__/codemap.test.ts` (unmapped or stale paths fail `pnpm test`).
+- Layer `README.md` (engine/render/ui/server) — when a layer *contract* changes, not for content-level edits.
+- `docs/ROADMAP.md` checkboxes as work lands (existing rule); `docs/GDD.md` wins conflicts.
+- The relevant `docs/*.md` design/balance doc — when behavior it documents changes.
+
+Keep CODEMAP lines *structural* (path + one-line responsibility), never content-level detail — content rots in days here; structure doesn't.
 
 ## Project subagents
 
