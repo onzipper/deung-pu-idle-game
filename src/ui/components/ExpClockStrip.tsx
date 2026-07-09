@@ -64,6 +64,10 @@ export function ExpClockStrip() {
           style={{ width: `${pct}%` }}
         />
       </div>
+      <span className="pointer-events-none absolute left-1.5 bottom-1 rounded bg-black/55 px-1 text-[10px] leading-tight font-semibold text-ddp-ink-muted">
+        {t("expBarLabel")}{" "}
+        <span className="tabular-nums text-ddp-gold">{pct.toFixed(1)}%</span>
+      </span>
       {now && (
         <span className="pointer-events-none absolute right-1.5 bottom-1 rounded bg-black/55 px-1 text-[10px] leading-tight font-semibold tabular-nums text-ddp-ink-muted">
           {formatClock(now)}

@@ -27,7 +27,7 @@ export interface ToastProps {
 
 const VARIANT_CLASS: Record<ToastVariant, string> = {
   success: "border-emerald-400/50 bg-emerald-950/85 text-emerald-100",
-  info: "border-ddp-border-soft bg-black/85 text-ddp-ink",
+  info: "border-violet-400/40 bg-violet-950/85 text-ddp-ink",
   danger: "border-ddp-bad/60 bg-red-950/85 text-rose-100",
 };
 

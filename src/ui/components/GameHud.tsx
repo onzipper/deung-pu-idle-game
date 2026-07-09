@@ -21,7 +21,10 @@
  *
  * Z-INDEX LADDER (documented once here — every new overlay picks a rung):
  *   z-0   canvas mount (Pixi appends its own `<canvas>` here)
- *   z-5   decorative screen-edge vignette (cosmetic, pointer-events-none)
+ *   z-5   decorative screen-edge vignette (cosmetic, pointer-events-none) +
+ *         a top-edge gradient scrim (same rung, also cosmetic/pointer-events-
+ *         none) for contrast under the top-left portrait cluster and
+ *         top-right currency/menu/minimap cluster on bright biomes
  *   z-10  the HUD overlay layer: top-left portrait+buffs, top-right
  *         currency+menu+party-signal, left-mid quest tracker, bottom-center
  *         skill dock, bottom-edge EXP/clock strip, DropFeedCorner (matches
@@ -133,6 +136,14 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 z-5 shadow-[inset_0_0_60px_16px_rgba(0,0,0,0.45)]"
+      />
+
+      {/* Top-edge gradient scrim — extra contrast for the top-left portrait
+          cluster and top-right currency/menu/minimap cluster on bright
+          biomes, without boxing either cluster or darkening mid-screen. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 z-5 h-28 bg-gradient-to-b from-black/35 to-transparent"
       />
 
       {/* FTUE overlay (M4.8): fixed/viewport-anchored, reads its own store
