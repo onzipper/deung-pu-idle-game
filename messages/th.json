@@ -151,6 +151,13 @@
     "closeButton": "ปิด",
     "audioLanguageGroup": "เสียง & ภาษา",
     "showGhosts": "แสดงผู้เล่นคนอื่นในโลก",
+    "worldFx": {
+      "header": "โลกมีมิติ",
+      "desc": "ปิดได้ถ้าเครื่องช้า",
+      "depthLabel": "สนามลึก + พื้นสูงต่ำ",
+      "cameraLabel": "กล้องมีชีวิต",
+      "atmosphereLabel": "บรรยากาศ กลางวัน-กลางคืน"
+    },
     "botModal": {
       "title": "ตั้งค่าบอท",
       "closeButton": "ปิด",

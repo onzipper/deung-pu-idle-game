@@ -151,6 +151,13 @@
     "closeButton": "Close",
     "audioLanguageGroup": "Audio & language",
     "showGhosts": "Show other players in the world",
+    "worldFx": {
+      "header": "Living world",
+      "desc": "Turn these off if your device runs slow",
+      "depthLabel": "Depth field + terrain",
+      "cameraLabel": "Living camera",
+      "atmosphereLabel": "Day-night atmosphere"
+    },
     "botModal": {
       "title": "Bot settings",
       "closeButton": "Close",
