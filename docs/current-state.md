@@ -8,8 +8,8 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5 game screen ✅ → R2.6 quest tracker/skill dock ✅ → R2.7 UI Wave A ✅ (#55, PR #56 merged) → R2.8 Wave B safe ✅ (#58, awaiting owner eye-test)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
-- **Branches**: `develop` = R2 + R2.5 + R2.6 + R2.7 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). R2.8 = PR from `ui/issue-58-wave-b`.
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5 game screen ✅ → R2.6 quest tracker/skill dock ✅ → R2.7 UI Wave A ✅ (#55, PR #56) → R2.8 Wave B safe ✅ (#58, PR #59, owner eye-test PASSED 2026-07-10)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
+- **Branches**: `develop` = R2 + R2.5 + R2.6 + R2.7 + R2.8 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44).
 - **Suite**: 2291+ tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10c (Wave B safe).
 
 ## Latest work (on develop, awaiting owner)
