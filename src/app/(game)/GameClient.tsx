@@ -13,22 +13,27 @@
  *      is ALSO ANDed against the bot MASTER switch (`store.autoHunt` — see
  *      `gameStore.ts`'s `toggleBotMaster` doc) so a single switch silences
  *      every sub-behavior at once,
- *   2. drains the one-shot player-intent queue (`drainPendingInput`) exactly
- *      once and hands it to the FIRST fixed sub-step of the frame,
+ *   2. drains the one-shot player-intent queue (`drainPendingInput`) via
+ *      `soloFrameDrain.ts`'s `drainSoloFrame` and hands it to the FIRST fixed
+ *      sub-step of the frame — ZERO-LOSS: the queue is drained ONLY when this
+ *      frame actually has a sub-step to deliver it into (a 0-step frame, routine
+ *      on 90Hz+ displays and near-guaranteed on the first rAF after boot, used to
+ *      drain-then-discard the intent; see soloFrameDrain.ts's doc),
  *   2b. shapes this frame's real elapsed seconds through `TimeDirector`
  *      (`./timeDirector.ts`) using LAST frame's events, for hit-stop/slow-mo
  *      (M4 juice) — ONLY the accumulator's input is shaped; the renderer,
  *      audio, and the ~10Hz UI-sync below all keep using the real elapsed
  *      time so fx/SFX/HUD stay snappy even while the sim is frozen/slowed,
- *   3. asks the fixed-timestep accumulator how many `FIXED_DT` sub-steps to
- *      run and runs `step()` that many times, concatenating each sub-step's
- *      `state.events` into one `frameEvents` array (M4 juice feed — the buffer
- *      is cleared at the START of every step(), so a multi-sub-step frame
- *      must collect across all of them). The player-facing 1x/2x/3x speed
- *      selector was removed (M6.7) — the accumulator is always drained at a
- *      fixed multiplier of 1 sub-step per real frame now; `drainAccumulator`
- *      itself still takes a speed argument (used by the sim/balance harness
- *      and engine tests), it's just hardcoded to `1` from this integration seam,
+ *   3. asks the fixed-timestep accumulator (via `drainSoloFrame`) how many
+ *      `FIXED_DT` sub-steps to run and runs `step()` that many times,
+ *      concatenating each sub-step's `state.events` into one `frameEvents`
+ *      array (M4 juice feed — the buffer is cleared at the START of every
+ *      step(), so a multi-sub-step frame must collect across all of them). The
+ *      player-facing 1x/2x/3x speed selector was removed (M6.7) — the
+ *      accumulator is always drained at a fixed multiplier of 1 sub-step per
+ *      real frame now; `drainAccumulator` itself still takes a speed argument
+ *      (used by the sim/balance harness and engine tests), it's just hardcoded
+ *      to `1` from this integration seam,
  *   4. draws the resulting state + `frameEvents` with the (one-way,
  *      read-only) `GameRenderer`, which reacts to them on its `fx` layer, then
  *      hands the same `frameEvents` to the `AudioController` (`render/audio`)
@@ -57,7 +62,6 @@ import {
   createAccumulator,
   dailyDef,
   deepestUnlockedFarm,
-  drainAccumulator,
   evolutionQuestFor,
   initGameState,
   isEvolutionQuestOffered,
@@ -175,6 +179,7 @@ import {
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { emaRtt, pickWaitingSlot } from "./cohortNet";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
+import { drainSoloFrame } from "./soloFrameDrain";
 import { resolveGateTap } from "@/ui/world/gateTap";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
@@ -2323,12 +2328,18 @@ export function GameClient() {
           cohortPrevWaiting = waiting;
         }
       } else {
-        // Drain the one-shot intent queue exactly once per real frame; only the first
-        // fixed sub-step of this frame gets it (remaining sub-steps get empty input).
-        const pending = store.drainPendingInput();
-        manualBuyThisFrame = !!pending.buyShopItem;
-        const firstInput = buildFrameInput(pending, store.inventory.length, 0);
-        const steps = drainAccumulator(acc, simElapsed, 1);
+        // Zero-loss drain (see soloFrameDrain.ts): compute this frame's sub-step count
+        // FIRST, and only drain the one-shot intent queue when there's an actual
+        // sub-step to hand it to — a 0-step frame (routine on 90Hz+ displays, and
+        // near-guaranteed on the first rAF after boot) leaves the queue untouched so a
+        // later frame delivers it instead of silently dropping it forever. Only the
+        // first fixed sub-step of this frame gets it (remaining sub-steps get empty
+        // input).
+        const { steps, pending } = drainSoloFrame(acc, simElapsed, 1, () =>
+          store.drainPendingInput(),
+        );
+        if (pending) manualBuyThisFrame = !!pending.buyShopItem;
+        const firstInput = pending ? buildFrameInput(pending, store.inventory.length, 0) : {};
         frameEvents = [];
         for (let i = 0; i < steps; i++) {
           step(state, i === 0 ? firstInput : {});
