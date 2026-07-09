@@ -23,9 +23,23 @@
  * `SettingsButton`'s drawer now holds only sound/language/generic prefs.
  * `autoCast`'s per-skill "+ อัตโนมัติ" slot badges stay in `SkillBar.tsx` as a
  * shortcut (mirrors the same store state).
+ *
+ * R2-W5 "จอเกมใหญ่ + HUD ซ้อน" (docs/ui-reference-map.md): on desktop (`md:`+)
+ * the outer shell widens past the mobile-portrait `max-w-3xl` cap so the
+ * arena (still a fixed 3:1 `aspect-900/300` box — the world dimensions are
+ * untouched, a taller world is the R4 x,y milestone's job) claims
+ * substantially more of the viewport; everything below it (HudBar/console
+ * dock) widens right along with it, which reads as one coherent shell
+ * scaling up rather than a size-mismatched arena. The quest/goal tracker
+ * (`GoalLadder`) additionally moves onto the arena as a top-left overlay
+ * card on desktop — see `GoalLadderOverlaySlot.tsx`'s doc for exactly how
+ * (and why it's a portal, not a CSS-hidden duplicate). Mobile portrait is
+ * byte-identical to before this wave: below `md:` the shell stays
+ * `max-w-3xl` and `GoalLadderOverlaySlot` renders `GoalLadder` inline at its
+ * original spot.
  */
 
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, useRef, type ReactNode } from "react";
 import { AnnouncementBanner } from "@/ui/components/AnnouncementBanner";
 import { AsuraHotZoneBanner } from "@/ui/components/AsuraHotZoneBanner";
 import { AsuraTomeButton } from "@/ui/components/AsuraTomeButton";
@@ -35,7 +49,7 @@ import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { DropFeed, DropFeedCorner } from "@/ui/components/DropFeed";
 import { EquippedLoadout } from "@/ui/components/EquippedLoadout";
 import { FriendsButton } from "@/ui/components/FriendsButton";
-import { GoalLadder } from "@/ui/components/GoalLadder";
+import { GoalLadderOverlaySlot } from "@/ui/components/GoalLadderOverlaySlot";
 import { HallOfFameButton } from "@/ui/components/HallOfFameButton";
 import { HudBar } from "@/ui/components/HudBar";
 import { GateTripWatcher } from "@/ui/components/GateTripWatcher";
@@ -65,12 +79,20 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
   { children },
   canvasSlotRef,
 ) {
+  // R2-W5: portal target for `GoalLadderOverlaySlot` — the slot div below,
+  // rendered INSIDE the arena container so the quest tracker can overlay it
+  // on desktop. Always mounted (empty on mobile — no portal target lookup
+  // failure), see that component's doc.
+  const questOverlayRef = useRef<HTMLDivElement | null>(null);
+
   return (
     // Mobile-portrait-first shell: arena is the hero and always comes first;
     // the console dock (skills / potions / stats / settings) follows as one
     // coherent bottom panel rather than scattered floating boxes. Bottom
-    // safe-area padding covers the phone home-indicator inset.
-    <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4">
+    // safe-area padding covers the phone home-indicator inset. R2-W5: widens
+    // past mobile's `max-w-3xl` from `md:` up (see the file doc) — below
+    // `md:` this is pixel-identical to before.
+    <div className="flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-4 md:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl">
       {/* FTUE overlay (M4.8): fixed/viewport-anchored, reads its own store
           slice + `data-onboarding-anchor` DOM targets below — see
           src/ui/onboarding/. Renders null once onboarding isn't active.
@@ -138,6 +160,22 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
             mirrors BuffBadgeHub's top-left placement, ZERO layout
             participation. Epic keeps the top-center DropFeed beat above. */}
         <DropFeedCorner />
+        {/* R2-W5 quest-tracker overlay slot (desktop only, `GoalLadderOverlaySlot`
+            portals `GoalLadder` in here past `md:`) — positioned BELOW
+            `BuffBadgeHub`'s top-[14%] badge row (own corner, same left edge)
+            so the two never stack; capped height + internal scroll so a tall
+            card (e.g. the full class-quest card) never gets silently clipped
+            by the arena's `overflow-hidden` instead of just scrolling.
+            `pointer-events-none` here (never blocks arena taps) — the slot
+            component restores `pointer-events-auto` around the actual card.
+            Empty + inert on mobile (`hidden` below `md:`), so this adds zero
+            mobile DOM footprint beyond one empty div. NEEDS PLAYTEST: exact
+            top-offset vs. badge-row height across real desktop viewport
+            sizes. */}
+        <div
+          ref={questOverlayRef}
+          className="pointer-events-none absolute top-[24%] left-2 z-10 hidden max-h-[68%] w-72 max-w-[42%] overflow-y-auto md:block"
+        />
       </div>
 
       {/* M6 "World & Town": zone/map label + walk arrows (functional; theming
@@ -156,7 +194,7 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
           GateTripWatcher.tsx. */}
       <GateTripWatcher />
 
-      <GoalLadder />
+      <GoalLadderOverlaySlot overlayRef={questOverlayRef} />
 
       <div className="flex flex-col gap-3.5 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-3 py-3.5 shadow-(--ddp-shadow-panel) backdrop-blur-sm sm:px-4">
         <SkillBar />
