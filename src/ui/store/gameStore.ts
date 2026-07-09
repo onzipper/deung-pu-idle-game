@@ -609,6 +609,54 @@ function writeGhostsVisible(visible: boolean): void {
   }
 }
 
+/** localStorage key for the R2.6 quest-tracker collapse preference —
+ *  same UI-owned client-preference tier as `GHOSTS_VISIBLE_STORAGE_KEY` above
+ *  (NOT `SaveData`). Default EXPANDED (unlike ghosts' default-ON): absence of
+ *  the key reads as `false` (not collapsed) — only an explicit "1" collapses. */
+const QUEST_TRACKER_COLLAPSED_STORAGE_KEY = "ddp-quest-tracker-collapsed";
+
+export function readStoredQuestTrackerCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(QUEST_TRACKER_COLLAPSED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeQuestTrackerCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(QUEST_TRACKER_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
+/** localStorage key for the R2.6 Wave 2 skill-dock collapse preference —
+ *  same UI-owned client-preference tier as `QUEST_TRACKER_COLLAPSED_STORAGE_KEY`
+ *  above (NOT `SaveData`). Default EXPANDED: absence of the key reads as
+ *  `false` (not collapsed) — only an explicit "1" collapses. */
+const SKILL_DOCK_COLLAPSED_STORAGE_KEY = "ddp-skill-dock-collapsed";
+
+export function readStoredSkillDockCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SKILL_DOCK_COLLAPSED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSkillDockCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SKILL_DOCK_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
 /** localStorage keys for the "โลกมีมิติ" world-depth settings wave (W6, promoted
  *  lab experiment ⑨ — see `docs/`/plan `lab-proud-tiger.md`). Same UI-owned
  *  client-preference tier as `GHOSTS_VISIBLE_STORAGE_KEY` above — NOT `SaveData`,
@@ -1462,6 +1510,21 @@ export interface HudState {
    * sim (the One Rule, docs/ghost-presence-design.md §2). */
   ghostsVisible: boolean;
 
+  /** R2.6 quest-tracker (`GoalLadder`) collapse preference — persisted to
+   * localStorage (NOT SaveData, see `QUEST_TRACKER_COLLAPSED_STORAGE_KEY`),
+   * same tier/pattern as `ghostsVisible`. Default expanded (`false`). Forced
+   * expanded regardless while the FTUE is running (`GoalLadder.tsx` ORs this
+   * with `onboardingActive` — see that file). */
+  questTrackerCollapsed: boolean;
+
+  /** R2.6 Wave 2 skill-dock (`SkillDock.tsx`) collapse preference — persisted to
+   * localStorage (NOT SaveData, see `SKILL_DOCK_COLLAPSED_STORAGE_KEY`), same
+   * tier/pattern as `questTrackerCollapsed`. Default expanded (`false`). Forced
+   * expanded regardless while the FTUE is running (`SkillDock.tsx` ORs this
+   * with `onboardingActive` — see that file). The bot MASTER switch stays
+   * visible even while collapsed (only the skill tiles/potion row hide). */
+  skillDockCollapsed: boolean;
+
   // ---- "โลกมีมิติ" world-depth settings wave (W6, promoted lab experiment ⑨) —
   // persisted to localStorage (NOT SaveData, see `WORLD_DEPTH_STORAGE_KEY` etc.),
   // same tier/pattern as `ghostsVisible` above. Default ON for all three.
@@ -1529,6 +1592,18 @@ export interface HudState {
   /** Mount-effect-only: apply the persisted ghost preference post-hydration (mirrors
    * `setSoundMuted`; does NOT re-persist). */
   setGhostsVisible: (visible: boolean) => void;
+
+  /** Toggle the R2.6 quest-tracker collapse state (persists). */
+  toggleQuestTrackerCollapsed: () => void;
+  /** Mount-effect-only: apply the persisted preference once, post-hydration
+   *  (mirrors `setGhostsVisible`; does NOT re-persist). */
+  setQuestTrackerCollapsed: (collapsed: boolean) => void;
+
+  /** Toggle the R2.6 Wave 2 skill-dock collapse state (persists). */
+  toggleSkillDockCollapsed: () => void;
+  /** Mount-effect-only: apply the persisted preference once, post-hydration
+   *  (mirrors `setGhostsVisible`; does NOT re-persist). */
+  setSkillDockCollapsed: (collapsed: boolean) => void;
 
   /** Toggle the "โลกมีมิติ" depth-band + terrain layer (persists). */
   toggleWorldDepthOn: () => void;
@@ -1949,6 +2024,14 @@ export const useGameStore = create<HudState>((set, get) => ({
   // never affects the sim.
   ghostsVisible: true,
 
+  // Default expanded pre-hydration (matches `readStoredQuestTrackerCollapsed`'s
+  // default); corrected post-mount via `setQuestTrackerCollapsed`.
+  questTrackerCollapsed: false,
+
+  // Default expanded pre-hydration (matches `readStoredSkillDockCollapsed`'s
+  // default); corrected post-mount via `setSkillDockCollapsed`.
+  skillDockCollapsed: false,
+
   // Default ON pre-hydration (matches `readStoredWorldDepthOn`/etc.'s default);
   // corrected post-mount via `setWorldDepthOn`/`setWorldCameraOn`/
   // `setWorldAtmosphereOn`. Safe either way — render-only, never affects the sim.
@@ -1993,6 +2076,22 @@ export const useGameStore = create<HudState>((set, get) => ({
       return { ghostsVisible };
     }),
   setGhostsVisible: (ghostsVisible) => set({ ghostsVisible }),
+
+  toggleQuestTrackerCollapsed: () =>
+    set((s) => {
+      const questTrackerCollapsed = !s.questTrackerCollapsed;
+      writeQuestTrackerCollapsed(questTrackerCollapsed);
+      return { questTrackerCollapsed };
+    }),
+  setQuestTrackerCollapsed: (questTrackerCollapsed) => set({ questTrackerCollapsed }),
+
+  toggleSkillDockCollapsed: () =>
+    set((s) => {
+      const skillDockCollapsed = !s.skillDockCollapsed;
+      writeSkillDockCollapsed(skillDockCollapsed);
+      return { skillDockCollapsed };
+    }),
+  setSkillDockCollapsed: (skillDockCollapsed) => set({ skillDockCollapsed }),
 
   toggleWorldDepthOn: () =>
     set((s) => {

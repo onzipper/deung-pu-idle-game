@@ -10,6 +10,18 @@
  *  3. the `GoalLadder` portal (`goal-ladder` anchor) mounts at a mobile
  *     viewport width too (the `md:`-only gate was removed this wave).
  *
+ * R2.6 Wave 1 additions: the whole-card collapse is now driven by the
+ * persisted `questTrackerCollapsed` store field rather than a mobile-only
+ * `compact` prop — anchors nested inside the (now viewport-independent)
+ * collapsible body must keep resolving even while collapsed, and the FTUE
+ * must force BOTH the card open AND the `เควส` tab active (never `ปาร์ตี้`).
+ *
+ * R2.6 Wave 2 additions: the bottom-center skill/bot/potion dock
+ * (`SkillDock.tsx`) gets the SAME persisted whole-card collapse via
+ * `skillDockCollapsed`, EXCEPT the bot MASTER switch (`bot-master` anchor)
+ * must stay VISIBLE (never `hidden`-classed) even while collapsed — it's the
+ * one control the collapsed thin strip keeps tappable by design.
+ *
  * `window.matchMedia` is polyfilled (jsdom doesn't implement it — needed by
  * `useMediaQuery.ts`, always reporting `matches: false` = mobile-first
  * default, matching the SSR/first-paint value the real app also starts
@@ -17,11 +29,12 @@
  * hook never attempts a real network call during the test.
  */
 
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { GameHud } from "@/ui/components/GameHud";
 import { ONBOARDING_STEPS, type OnboardingAnchor } from "@/ui/onboarding/steps";
+import { useGameStore } from "@/ui/store/gameStore";
 // Same relative-import convention as `onboarding/__tests__/tips.test.ts`.
 import thMessages from "../../../../messages/th.json";
 
@@ -47,6 +60,19 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  useGameStore.setState({
+    questTrackerCollapsed: false,
+    skillDockCollapsed: false,
+    onboardingStepIndex: -1,
+  });
+});
+
+beforeEach(() => {
+  useGameStore.setState({
+    questTrackerCollapsed: false,
+    skillDockCollapsed: false,
+    onboardingStepIndex: -1,
+  });
 });
 
 function renderHud() {
@@ -76,11 +102,61 @@ describe("GameHud fullscreen layout (R2-W2 smoke test)", () => {
   });
 
   it("mounts the GoalLadder portal (goal-ladder anchor) at a mobile viewport width", () => {
-    // `matchMedia` is polyfilled to always report `matches: false` above —
-    // `GoalLadderOverlaySlot`'s `isDesktop` reads false, so `GoalLadder`
-    // mounts in its `compact` (mobile, collapsed-by-default) presentation.
     renderHud();
     const goalLadder = document.querySelector('[data-onboarding-anchor="goal-ladder"]');
     expect(goalLadder).not.toBeNull();
+  });
+
+  it("R2.6: goal-ladder/boss-panel/kill-progress anchors still resolve while questTrackerCollapsed=true", () => {
+    useGameStore.setState({ questTrackerCollapsed: true });
+    renderHud();
+    for (const anchor of ["goal-ladder", "boss-panel", "kill-progress"] as const) {
+      expect(
+        document.querySelector(`[data-onboarding-anchor="${anchor}"]`),
+        `anchor "${anchor}" should still resolve while collapsed`,
+      ).not.toBeNull();
+    }
+  });
+
+  it("R2.6: FTUE force-expands the collapsed tracker and force-selects the เควส tab", () => {
+    useGameStore.setState({ questTrackerCollapsed: true, onboardingStepIndex: 0 });
+    renderHud();
+    // FTUE-forced expansion means the body isn't `hidden` — the boss-panel
+    // anchor (inside the [รอง] tag, quest tab) must resolve to a VISIBLE
+    // element, not just be present with a `hidden` ancestor class.
+    const bossPanel = document.querySelector('[data-onboarding-anchor="boss-panel"]');
+    expect(bossPanel).not.toBeNull();
+    const hiddenAncestor = bossPanel?.closest(".hidden");
+    expect(hiddenAncestor).toBeNull();
+  });
+
+  it("R2.6 W2: skill-bar/bot-master/consumables anchors still resolve while skillDockCollapsed=true", () => {
+    useGameStore.setState({ skillDockCollapsed: true });
+    renderHud();
+    for (const anchor of ["skill-bar", "bot-master", "consumables"] as const) {
+      expect(
+        document.querySelector(`[data-onboarding-anchor="${anchor}"]`),
+        `anchor "${anchor}" should still resolve while the dock is collapsed`,
+      ).not.toBeNull();
+    }
+  });
+
+  it("R2.6 W2: bot-master stays VISIBLE (not hidden-classed) while the dock is collapsed", () => {
+    useGameStore.setState({ skillDockCollapsed: true });
+    renderHud();
+    const botMaster = document.querySelector('[data-onboarding-anchor="bot-master"]');
+    expect(botMaster).not.toBeNull();
+    expect(botMaster?.closest(".hidden")).toBeNull();
+  });
+
+  it("R2.6 W2: FTUE force-expands the collapsed skill dock", () => {
+    useGameStore.setState({ skillDockCollapsed: true, onboardingStepIndex: 0 });
+    renderHud();
+    const skillBar = document.querySelector('[data-onboarding-anchor="skill-bar"]');
+    expect(skillBar).not.toBeNull();
+    expect(skillBar?.closest(".hidden")).toBeNull();
+    const consumables = document.querySelector('[data-onboarding-anchor="consumables"]');
+    expect(consumables).not.toBeNull();
+    expect(consumables?.closest(".hidden")).toBeNull();
   });
 });

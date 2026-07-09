@@ -24,6 +24,12 @@
  * (grayscale, dim) when it's actually the game's normal starting state —
  * swapped the grayscale for a warm gold outline + the same invite-glow pulse
  * `SkillButton` uses on a ready cast, so OFF reads as "tap me", not "disabled".
+ *
+ * R2.6 Wave 2: moved AGAIN, this time from `SkillBar.tsx` into the new
+ * `SkillDock.tsx` wrapper (which also owns the whole-dock collapse) — still
+ * the same single mount, same store field; `SkillDock.tsx` keeps this button
+ * OUTSIDE its `hidden`-classed collapse body so it's tappable even when the
+ * dock is collapsed to a thin strip.
  */
 
 import { useTranslations } from "next-intl";

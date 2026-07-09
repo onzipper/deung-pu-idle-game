@@ -10,11 +10,12 @@
  */
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FriendsIcon } from "@/ui/components/icons";
 import { IconTileButton } from "@/ui/components/primitives/IconTileButton";
 import { FriendsPanel } from "@/ui/friends/FriendsPanel";
 import { useFriendsPoll, type FriendToast } from "@/ui/friends/useFriendsPoll";
+import { onOpenFriendsPanelRequest } from "@/ui/openFriendsSignal";
 
 function PingToast({
   toast,
@@ -56,6 +57,11 @@ export function FriendsButton() {
   const [open, setOpen] = useState(false);
   const t = useTranslations("friends");
   const poll = useFriendsPoll(open);
+
+  // R2.6 quest-tracker: the party tab's "จัดการปาร์ตี้" button opens this panel
+  // via `openFriendsSignal.ts` (same idiom as `openSettingsSignal.ts`) instead
+  // of lifting `open` state up through `GameHud.tsx`.
+  useEffect(() => onOpenFriendsPanelRequest(() => setOpen(true)), []);
 
   return (
     <>

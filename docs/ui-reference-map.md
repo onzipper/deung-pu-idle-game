@@ -34,10 +34,10 @@
 | ENHANCE การ์ด +10→+11 + ATK 70→77 + **โอกาสสำเร็จ 65%** + วัสดุ chips + ราคา | RefinePanel (ลุงดึ๋ง) | reskin + **เพิ่มบรรทัด %** (เคาะแล้ว) — ระวัง state machine reveal-on-final-strike ห้ามพัง (migrate ท้ายสุดของ R2) |
 | SKILL UI รายการสกิล + detail pane (ภาพใหญ่ คำอธิบาย MP คูลดาวน์) | skill ⓘ inspector (skillStats.ts) | ยกเป็น detail pane เต็มตาม mockup — **ไม่มีเลเวลสกิล** (นั่นคือ backlog ระบบใหม่) |
 | BOT UI แผงจริงจัง (สกิลออโต้ติ๊กเลือก + เกณฑ์ยา HP/MP + โหมดเดิน + โซนที่กำหนด) | ตัวเลือกมี**ครบแล้ว**ใน Settings (บอท per-hero M8.6) | ยกออกมาเป็นแผง Bot ของตัวเอง จัดหน้าตาม mockup |
-| Quest tracker ซ้อนซ้ายบน ([หลัก]/[รอง]/[รายวัน] + progress) | quest card / GoalLadder | ทำเป็น overlay panel บนจอเกม (desktop ก่อน) |
+| Quest tracker ซ้อนซ้ายบน ([หลัก]/[รอง]/[รายวัน] + progress) | quest card / GoalLadder | **ทำแล้ว R2.6**: แท็บ [เควส\|ปาร์ตี้] (เคาะ 2 แท็บ) + tag [หลัก]/[รอง]/[รายวัน] ([รายวัน] อ่านอย่างเดียว — รับรางวัลที่ผู้ใหญ่บ้านเหมือนเดิม) + **หุบได้ทุกจอ เหลือชิปเล็ก** (เคาะ 2026-07-10, localStorage per-device) — breadcrumb rung เดิมถูกตัด (HoF เปิดจาก menu row) |
 | Portrait + Lv + HP/MP/EXP + พลังต่อสู้ มุมซ้ายบน | HUD มีข้อมูลครบ | StatBar primitive + จัดเป็นบล็อค portrait ตาม mockup |
 | แถบเงิน/เพชรขวาบน | ทอง + หินเสริมพลัง | CurrencyChip primitive |
-| Skill bar เลขกำกับ 1-5 + AUTO + ยาด่วน x99 | SkillBar + auto-potion | reskin + ช่องยาด่วนแบบ mockup |
+| Skill bar เลขกำกับ 1-5 + AUTO + ยาด่วน x99 | SkillBar + auto-potion | **ทำแล้ว R2.6**: SkillDock แถวเดียวตาม ref (tile สกิลเลขกำกับ + AUTO + ยาด่วน badge จำนวน) + **หุบเหลือแถบบาง AUTO ค้างไว้ + ลูกศรกลาง** (เคาะ 2026-07-10, localStorage per-device); ExpClockStrip โชว์ตลอด |
 | จอเกมใหญ่ + HUD ซ้อน | จอเกม 900×300 กรอบ | **desktop/แนวนอน**: จอสูงขึ้น ~16:9 + HUD overlay (มี scrim มืดรอง — กันจมบน biome สว่าง) · **มือถือแนวตั้ง: คงกรอบเดิม** (overlay บังเกม) |
 | Toast/notification + popup ยืนยัน + tab | NoticeToast / useConfirmGuard / tab strips | Toast/ConfirmPopup/Tab primitives |
 

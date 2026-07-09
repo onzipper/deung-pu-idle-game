@@ -76,7 +76,6 @@ import { BuffBadgeHub } from "@/ui/components/BuffBadgeHub";
 import { CancelCommandChip } from "@/ui/components/CancelCommandChip";
 import { CharacterButton } from "@/ui/components/CharacterButton";
 import { CodexButton } from "@/ui/components/CodexButton";
-import { ConsumableBar } from "@/ui/components/ConsumableBar";
 import { CurrencyChipsRow } from "@/ui/components/CurrencyChipsRow";
 import { DropFeed, DropFeedCorner } from "@/ui/components/DropFeed";
 import { ExpClockStrip } from "@/ui/components/ExpClockStrip";
@@ -92,7 +91,7 @@ import { NoticeToast } from "@/ui/components/NoticeToast";
 import { NpcTripButtons } from "@/ui/components/NpcTripButtons";
 import { NpcTripWatcher } from "@/ui/components/NpcTripWatcher";
 import { SettingsButton } from "@/ui/components/SettingsButton";
-import { SkillBar } from "@/ui/components/SkillBar";
+import { SkillDock } from "@/ui/components/SkillDock";
 import { TownNpcPanelHost } from "@/ui/components/TownNpcPanelHost";
 import { UpdateBanner } from "@/ui/components/UpdateBanner";
 import { WarpButton } from "@/ui/components/WarpButton";
@@ -239,19 +238,16 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
 
         {/* BOTTOM: gate/smith-trip cancel chip + fast-travel channel bar +
             notices float just above the skill dock; the dock itself (skills
-            + potions); the full-width EXP/clock strip pins the true bottom
-            edge. */}
+            + AUTO + potions, collapsible to a thin strip — R2.6 Wave 2, see
+            `SkillDock.tsx`); the full-width EXP/clock strip pins the true
+            bottom edge and stays ALWAYS visible regardless of dock state. */}
         <div className="pointer-events-auto flex w-full flex-col items-center gap-2">
           <div className="flex flex-col items-center gap-1.5 px-2">
             <NoticeToast />
             <CancelCommandChip />
             <FastTravelChannelBar />
           </div>
-          <div className="mx-2 w-full max-w-xl rounded-(--ddp-radius-lg) border border-ddp-border bg-black/45 px-3 py-3 shadow-(--ddp-shadow-panel) backdrop-blur-sm">
-            <SkillBar />
-            <div className="my-2.5 h-px bg-ddp-border-soft" />
-            <ConsumableBar />
-          </div>
+          <SkillDock />
           <ExpClockStrip />
         </div>
       </div>

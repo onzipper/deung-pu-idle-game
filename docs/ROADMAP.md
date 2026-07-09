@@ -226,6 +226,15 @@
 - [x] เทส 2188→**2249** · tsc/eslint/next build clean · patch-notes **2026-07-09o** (5 ข้อ th/en)
 - [ ] **ค้าง**: เจ้าของเล่นจริงเทียบภาพ ref — จอเต็มมือถือแนวตั้ง/นอน + desktop · บอทปิด default บน localhost 120Hz (แก้แล้วที่ W0 — เทสได้ทันที) · แตะไม่หาย · ปุ่ม NPC เดินไปหา feel · minimap · FTUE จบรอบ (สร้างตัวใหม่) · แผ่น HP บอสตำแหน่งใหม่กลางจอ · deploy ชุดเดียวกับ R1+R2 (relay ก่อน → web, ไม่มี db push) — merge main เมื่อเจ้าของยืนยันทั้งก้อน
 
+## ✅ M8.11 — R2.6 Quest tracker + Skill dock ตาม ref + หุบได้ (เสร็จ 2026-07-10 บน develop, plan sprightly-lerdorf — รอเจ้าของเล่นจริง)
+
+> **ที่มา:** เจ้าของดู ref เทียบ R2.5 แล้วสั่งปรับ 2 จุด (แผงเควสซ้าย + skill dock กลางล่าง) + โจทย์ใหม่ **ต้องหุบได้เพราะบัง** · เคาะรอบนี้: แท็บ [เควส|ปาร์ตี้] 2 แท็บเลย · โชว์ [รายวัน] แบบอ่านอย่างเดียว (รับรางวัลที่ผู้ใหญ่บ้านเหมือนเดิม) · หุบเหลือชิปเล็ก/แถบบาง AUTO ค้าง
+
+- [x] **W1 Quest tracker**: GoalLadder → แท็บ [เควส|ปาร์ตี้] (TabRow) + tag [หลัก]=บทหลัก / [รอง]=Milestone+CoreLoop เดิมครบพฤติกรรม / [รายวัน]=DailyLines อ่าน s.dailies ฟรีไม่มี poll ใหม่ · แท็บปาร์ตี้ = PartyTrackerList อ่านอย่างเดียว + ปุ่มเปิด FriendsPanel ผ่าน openFriendsSignal · **หุบได้ทุก viewport เหลือชิป** (questTrackerCollapsed, localStorage tier เดียวกับ ghostsVisible) · ตัด RungPill breadcrumb + HoF shortcut ในแผง (ซ้ำกับ menu row — คืนง่ายถ้าเจ้าของทวง) · FTUE บังคับกาง+บังคับแท็บเควส, anchor goal-ladder/boss-panel/kill-progress คง mount เสมอ (hidden-class ไม่ unmount)
+- [x] **W2 Skill dock**: SkillDock.tsx ใหม่ห่อ SkillBar+BotMasterSwitch+ConsumableBar เป็นแถวเดียวตาม ref · ย้าย AUTO ออกจาก SkillBar มาที่ dock (render จุดเดียว) · **หุบเหลือแถบบาง AUTO ยังกดได้ + ลูกศรกลาง** (skillDockCollapsed) · ExpClockStrip โชว์ตลอด · FTUE บังคับกาง
+- [x] เทส 2249→**2258+** (questTracker ใหม่ + gameHudLayout เคสหุบ/FTUE + store round-trip) · tsc/eslint clean · docs sync (CODEMAP/ui-reference-map/ROADMAP)
+- [ ] **ค้าง**: เจ้าของเล่นจริง — ชิปหุบอ่านง่ายบน biome สว่าง? · tile reskin feel · แท็บปาร์ตี้ตอนมี/ไม่มีปาร์ตี้ · FTUE จบรอบตัวใหม่ · merge main รวมก้อน R2+R2.5+R2.6
+
 ## M9 — Economy & Competition
 
 - [ ] ตลาดกลาง: ลงขาย/ซื้อด้วยเงินในเกม + atomic transaction + audit trail + anti-dupe

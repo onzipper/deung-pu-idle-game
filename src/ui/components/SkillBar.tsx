@@ -26,14 +26,18 @@
  * Lv/name + HP/MP/EXP bars + power) that used to sit ABOVE the skill kit here
  * moved OUT into its own top-left overlay card (`HeroPortraitCard.tsx`,
  * verbatim extraction, zero behavior change) — this file now renders ONLY the
- * skill kit + bot switch, for the bottom-center skill dock.
+ * skill kit, for the bottom-center skill dock.
+ *
+ * R2.6 Wave 2 "skill dock reskin": `BotMasterSwitch` MOVED OUT of this file
+ * into `SkillDock.tsx` (the new dock wrapper that also owns the whole-dock
+ * collapse) — it must render exactly ONCE, so don't re-add it here (grep
+ * `data-onboarding-anchor="bot-master"` if this file is touched again).
  */
 
 import { useTranslations } from "next-intl";
 import { useState, type CSSProperties } from "react";
 import { CONFIG } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
-import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { SkillDetailModal } from "@/ui/components/SkillDetailModal";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
 import { HERO_ACCENT, SKILL_ICONS_BY_ID } from "@/ui/labels";
@@ -276,16 +280,8 @@ export function SkillBar() {
       {/* The "Auto สกิล" per-skill master toggle modal stays in
           `BotSettingsModal.tsx` (owner UX pass, 2026-07-07) — this bar keeps
           the per-skill "+ อัตโนมัติ" slot badges (mirrors the same store
-          state, unchanged). The bot MASTER pill (`BotMasterSwitch`) is now
-          mounted HERE instead of `WalkControls.tsx` (R2-W2 mockup: the
-          action-bar row reads skills + AUTO together, "1-5 + AUTO"). It's a
-          MOVE, not a duplicate — WalkControls no longer renders it, same
-          single `state.autoHunt` control, same `BotSettingsModal` behind it,
-          just restyled as the prominent pill the OFF-by-default bot now needs
-          (see that file's own doc for the "inviting, not alarming" restyle). */}
-      <div className="flex justify-center">
-        <BotMasterSwitch />
-      </div>
+          state, unchanged). The bot MASTER pill (`BotMasterSwitch`) is owned
+          by `SkillDock.tsx` now (R2.6 Wave 2) — see this file's module doc. */}
     </div>
   );
 }

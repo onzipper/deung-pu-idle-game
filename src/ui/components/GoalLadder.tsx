@@ -2,59 +2,67 @@
 
 /**
  * The "what do I do next" HUD element (M6 goal-ladder task, ROADMAP.md line
- * 32) — replaces `BossPanel.tsx` entirely (deleted). Two independently-driven
- * pieces (see `src/ui/goalLadder.ts` for the pure selection logic + why
- * they're split this way):
+ * 32) — replaces `BossPanel.tsx` entirely (deleted).
  *
- *  - a BREADCRUMB of all 4 motivation-ladder rungs (next level -> class-
- *    change quest -> unlock next zone / beat the map boss -> Hall of Fame),
- *    current one bright, earlier ones checked "done", later ones dim, and
- *    `hallOfFame` ALWAYS a dimmed/locked tail (M9 doesn't exist yet).
- *  - the "core loop" card — the direct BossPanel replacement (challenge-boss
- *    CTA / victory -> next-stage / zone-unlock kill progress). This is driven
- *    PURELY by `phase`/`bossReady`, independent of the breadcrumb's current
- *    rung, so the challenge CTA (the loop's biggest beat) and the
- *    `hud.zoneUnlockLabel` kill bar (integrated here, no longer duplicated in
- *    `HudBar.tsx`) stay correct and visible from a fresh Lv.1 hero all the
- *    way through post-evolution farming — this is also what keeps BOTH FTUE
- *    anchors (`boss-panel`, `kill-progress`) resolvable no matter which
- *    narrative rung is current. An OPTIONAL milestone card (levelUp progress /
- *    the FULL `ClassQuestCard`) renders additionally, ABOVE the always-present
- *    core loop card, only while one of those is the current rung (i.e. before
- *    the hero evolves to tier 2) — `ClassQuestCard` is the ONE place the
- *    class-change quest's accept/guide/change-class controls live (UX-fix
- *    wave, audit #1: moved off `SkillBar.tsx`'s old `ClassQuestAffordance`,
- *    which is gone entirely).
+ * R2.6 Wave 1 "ref-style tabbed tracker" rewrite: the old always-visible
+ * 4-rung breadcrumb is GONE (the Hall of Fame shortcut it carried lives in
+ * the top-right icon menu row now — a documented duplicate entrance, same
+ * pattern as `RungPill`'s old `hallOfFame` onClick used to be); the pure
+ * `buildGoalLadder` rung-selection logic (`src/ui/goalLadder.ts`) still
+ * drives BOTH the collapsed chip's icon/label AND which content renders
+ * under the `[รอง]` tag below. The card is now a TabRow header
+ * **[เควส | ปาร์ตี้]** over tag-grouped quest lines:
  *
- * The `boss-panel` data-onboarding-anchor moves here (was on `BossPanel`'s
- * two branches) onto the always-rendered core-loop card, so the FTUE
- * `bossChallenge` step keeps resolving it exactly like before.
+ *  - `[หลัก]` — the current main-quest chapter line + its kill progress
+ *    (mirrors `QuestBoardPanel.tsx`'s `MainQuestSection` math so the two
+ *    surfaces never drift in wording; claiming still only happens at the
+ *    Quest Board, read-only here).
+ *  - `[รอง]` — the ORIGINAL `MilestoneCard` (levelUp progress / the full
+ *    `ClassQuestCard` with its accept/guide/change-class buttons) plus the
+ *    always-rendered `CoreLoopCard` (challenge-boss CTA / victory-next-stage
+ *    / zone-unlock kill gauge) — BYTE-IDENTICAL behavior to before this
+ *    rewrite, just re-tagged. `data-onboarding-anchor="boss-panel"` and the
+ *    `kill-progress` anchors nested inside `CoreLoopCard` stay on the exact
+ *    same elements so the FTUE keeps resolving them.
+ *  - `[รายวัน]` — new read-only `DailyLines`, off `s.dailies` (claiming still
+ *    only happens at the Quest Board — no claim button here, just a hint
+ *    pointing there once complete-unclaimed). Omitted entirely when there's
+ *    no daily roster.
  *
- * R2-W2 "fullscreen HUD": `compact` (desktop passes `false`, mobile passes
- * `true` — see `GoalLadderOverlaySlot.tsx`) adds a mobile-only collapsed
- * single-line summary chip (current rung icon + label) ABOVE the full card
- * content; tapping it toggles `expandedMobile`. The full content — including
- * the `kill-progress`/`boss-panel` FTUE anchors nested inside `CoreLoopCard`
- * — is FORCE-expanded whenever the FTUE sequence is actively running
+ * The `[เควส]` tab's content is `hidden`-classed but stays MOUNTED even while
+ * `[ปาร์ตี้]` is active (same "FTUE anchors must always resolve" trick the
+ * whole-card collapse below uses) — `PartyTrackerList.tsx` (party tab) may
+ * unmount freely since nothing in it is FTUE-anchored.
+ *
+ * Collapse-to-chip (R2.6: now on ALL viewports, not just mobile) is driven by
+ * the persisted `questTrackerCollapsed` store field (localStorage, same tier
+ * as `ghostsVisible` — see `gameStore.ts`) rather than the old mobile-only
+ * local `expandedMobile` state; `compact`/`expandedMobile` are GONE.
+ * `GoalLadderOverlaySlot.tsx` no longer branches on viewport width at all.
+ * The full content — including the `kill-progress`/`boss-panel` FTUE anchors
+ * nested inside `CoreLoopCard` — is FORCE-expanded (and the tab FORCE-set to
+ * `เควส`) whenever the FTUE sequence is actively running
  * (`onboardingStepIndex >= 0`), so the guided tour never spotlights a
- * collapsed/hidden target. Outside FTUE, a not-yet-expanded mobile player
- * simply won't see a `CoreLoopCard`-anchored contextual tip's spotlight ring
- * (the tip bubble text itself still shows) — an accepted, honest degrade
- * (needs an in-browser pass to judge how often that actually happens).
+ * collapsed/hidden target.
  */
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { DailyObjectiveType } from "@/engine";
 import { ASURA_MAP_ID, CONFIG, asuraRefineBandForStage } from "@/engine";
-import { HallOfFamePanel } from "@/ui/hof/HallOfFamePanel";
+import { TabRow } from "@/ui/components/primitives/TabRow";
+import { PartyTrackerList } from "@/ui/party/PartyTrackerList";
 import {
   buildGoalLadder,
   selectZoneBossDetail,
   type GoalRungId,
-  type GoalRungState,
 } from "@/ui/goalLadder";
 import { selectQuestGuideTarget } from "@/ui/questGuide";
-import { useGameStore, type HeroQuestSummary } from "@/ui/store/gameStore";
+import {
+  readStoredQuestTrackerCollapsed,
+  useGameStore,
+  type HeroQuestSummary,
+} from "@/ui/store/gameStore";
 
 /** How long an armed (first-tap) class-change button stays armed before it
  * resets — matches the pre-move `ClassQuestAffordance` behavior in `SkillBar.tsx`. */
@@ -66,58 +74,6 @@ const RUNG_ICON: Record<GoalRungId, string> = {
   zoneBoss: "⚔",
   hallOfFame: "🏆",
 };
-
-/** The `hallOfFame` rung (M7.95): the breadcrumb tail is still narratively
- * "locked" (dimmed styling — no season/end-game rung exists yet, see
- * `goalLadder.ts`'s doc), but it's now a REAL clickable shortcut into the
- * `HallOfFamePanel` leaderboard viewer rather than a pure teaser — `onClick`
- * is only ever passed for this one rung id (`GoalLadder`'s render below). */
-function RungPill({ rung, onClick }: { rung: GoalRungState; onClick?: () => void }) {
-  const t = useTranslations("ladder");
-  const label = t(`rungs.${rung.id}`);
-  const icon = rung.status === "done" ? "✓" : RUNG_ICON[rung.id];
-
-  const styles =
-    rung.status === "current"
-      ? "border-ddp-boss/60 bg-ddp-boss/15 text-ddp-ink"
-      : rung.status === "done"
-        ? "border-emerald-400/30 bg-emerald-400/5 text-emerald-300/80"
-        : rung.status === "locked"
-          ? "border-ddp-border-soft bg-black/20 text-ddp-ink-muted/50 grayscale"
-          : "border-ddp-border-soft bg-black/20 text-ddp-ink-muted/70";
-  const title = rung.status === "locked" ? t("hallOfFameHint") : label;
-
-  // The Hall of Fame rung is ALWAYS clickable (a real shortcut into the
-  // leaderboard viewer, `onClick` only ever passed for this one rung id —
-  // see the module doc) even though its narrative `status` reads "locked"
-  // (M9 doesn't exist yet). A live shortcut must never read as
-  // grayscale/disabled (audit #2/#8, owner-reported "สีเหมือนกดไม่ได้") — give
-  // it the SAME gold-accent language as `HallOfFameButton.tsx` so both
-  // entrances into the same panel read as one consistent affordance.
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        title={title}
-        className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-ddp-gold/50 bg-ddp-gold/10 px-2 py-1 text-[10px] font-bold whitespace-nowrap text-ddp-gold-bright transition-all duration-100 hover:border-ddp-gold hover:bg-ddp-gold/20 active:scale-95"
-      >
-        <span aria-hidden>🏆</span>
-        {label}
-      </button>
-    );
-  }
-
-  return (
-    <span
-      title={title}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold whitespace-nowrap ${styles}`}
-    >
-      <span aria-hidden>{icon}</span>
-      {label}
-    </span>
-  );
-}
 
 /** One objective ROW of the full quest card (owner-approved quest UX
  * upgrade): icon + label + its own progress bar (kill objectives, goal > 1)
@@ -687,36 +643,160 @@ function CoreLoopCard() {
   );
 }
 
-/**
- * M8 quest Wave C — a compact "บทที่ N: ชื่อบท" line naming the current (first
- * not-yet-claimed) main-quest chapter, read-only (claiming happens ONLY at
- * ผู้ใหญ่บ้าน's Quest Board panel — town-only claim entry, design decision).
- * Reuses `questBoard.mainChapterLabel`, the SAME template the board's own
- * main-quest card renders, so the two surfaces never drift in wording.
- * Renders nothing once every chapter is claimed (nothing left to point at).
- */
-function MainChapterLine() {
-  const mainChapters = useGameStore((s) => s.mainChapters);
-  const tBoard = useTranslations("questBoard");
-  const tMain = useTranslations("quest.main");
-  const activeIdx = mainChapters.findIndex((c) => !c.claimed);
-  if (activeIdx === -1) return null;
-  const chapter = mainChapters[activeIdx];
+/** A gold bracket tag header (`[หลัก]`/`[รอง]`/`[รายวัน]`) sitting above one
+ * group of quest lines — the ref-style grouping this Wave 1 rewrite adds. */
+function TagHeader({ tag }: { tag: string }) {
   return (
-    <span className="text-[11px] font-semibold text-ddp-ink-muted">
-      {tBoard("mainChapterLabel", { n: activeIdx + 1, title: tMain(`${chapter.id}.title`) })}
+    <span className="text-[10px] font-extrabold tracking-wide text-ddp-gold-bright uppercase">
+      [{tag}]
     </span>
   );
 }
 
-export function GoalLadder({ compact = false }: { compact?: boolean }) {
+/**
+ * M8 quest Wave C — a compact "บทที่ N: ชื่อบท" line naming the current (first
+ * not-yet-claimed) main-quest chapter, read-only (claiming happens ONLY at
+ * ผู้ใหญ่บ้าน's Quest Board panel — town-only claim entry, design decision).
+ * Reuses `questBoard.mainChapterLabel`/`mainProgress*`, the SAME templates
+ * `QuestBoardPanel.tsx`'s `MainQuestSection` renders, so the two surfaces
+ * never drift in wording (R2.6: now additionally mirrors that section's kill-
+ * progress math — a thin bar while I'm standing in the objective's map).
+ * Renders nothing once every chapter is claimed (nothing left to point at).
+ */
+function MainChapterLine() {
+  const mainChapters = useGameStore((s) => s.mainChapters);
+  const world = useGameStore((s) => s.world);
+  const kills = useGameStore((s) => s.kills);
+  const killGoal = useGameStore((s) => s.killGoal);
+  const tBoard = useTranslations("questBoard");
+  const tMain = useTranslations("quest.main");
+  const tMaps = useTranslations("content.maps");
+  const activeIdx = mainChapters.findIndex((c) => !c.claimed);
+  if (activeIdx === -1) return null;
+  const chapter = mainChapters[activeIdx];
+  const here = world.mapId === chapter.mapId;
+  const pct = here && killGoal > 0 ? Math.min(100, (kills / killGoal) * 100) : null;
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] font-semibold text-ddp-ink-muted">
+        {tBoard("mainChapterLabel", { n: activeIdx + 1, title: tMain(`${chapter.id}.title`) })}
+      </span>
+      {!chapter.complete && (
+        <span className="text-[11px] font-semibold text-sky-200">
+          {here
+            ? tBoard("mainProgressHere", { kills, killGoal })
+            : tBoard("mainProgressElsewhere", { map: tMaps(`${chapter.mapId}.name`) })}
+        </span>
+      )}
+      {pct !== null && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/40 ring-1 ring-ddp-border-soft ring-inset">
+          <div
+            className="h-full rounded-full bg-ddp-gold transition-[width] duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Pre-2020, Win10-safe icons already shipped elsewhere (footgun #4) — same
+ * map `QuestBoardPanel.tsx`'s `DAILY_ICON` uses, redeclared here (that one
+ * isn't exported — same "small local const" idiom as `RUNG_ICON` above). */
+const DAILY_ICON: Record<DailyObjectiveType, string> = {
+  killAnywhere: "🗡",
+  refineOnce: "⚒",
+  buyPotions: "🧪",
+  spendGold: "💰",
+  clearAnyBoss: "👑",
+};
+
+/**
+ * R2.6 Wave 1 `[รายวัน]` tag content — read-only rows off `s.dailies` (the
+ * SAME roster `QuestBoardPanel.tsx`'s daily section renders). NO claim button
+ * here by design (claiming stays a Quest Board / ผู้ใหญ่บ้าน-only action) — a
+ * complete-unclaimed row instead shows a gold hint pointing there. Renders
+ * nothing at all when there's no roster (fresh save / server not yet synced).
+ */
+function DailyLines() {
+  const dailies = useGameStore((s) => s.dailies);
+  const t = useTranslations("ladder");
+  const tDaily = useTranslations("quest.daily");
+  if (dailies.quests.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <TagHeader tag={t("tags.daily")} />
+      {dailies.quests.map((quest) => {
+        const pct = quest.target > 0 ? Math.min(100, (quest.progress / quest.target) * 100) : 0;
+        const unclaimedComplete = quest.complete && !quest.claimed;
+        return (
+          <div
+            key={quest.id}
+            className={`flex flex-col gap-1 rounded-(--ddp-radius-md) border px-2.5 py-1.5 ${
+              quest.claimed
+                ? "border-ddp-border-soft bg-black/15 opacity-60"
+                : unclaimedComplete
+                  ? "border-ddp-gold/60 bg-ddp-gold/10"
+                  : "border-ddp-border-soft bg-black/20"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 text-[11px] font-semibold text-ddp-ink-muted">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span aria-hidden>{DAILY_ICON[quest.type]}</span>
+                <span className={`truncate ${quest.claimed ? "" : "text-ddp-ink"}`}>
+                  {tDaily(`${quest.id}.title`)}
+                </span>
+              </span>
+              {quest.claimed ? (
+                <span aria-hidden className="text-emerald-400">
+                  ✓
+                </span>
+              ) : (
+                <span className="tabular-nums">
+                  {Math.min(quest.progress, quest.target)}/{quest.target}
+                </span>
+              )}
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/40 ring-1 ring-ddp-border-soft ring-inset">
+              <div
+                className={`h-full rounded-full transition-[width] duration-300 ${
+                  quest.complete ? "bg-emerald-400" : "bg-ddp-gold"
+                }`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {unclaimedComplete && (
+              <span className="text-[10px] font-semibold text-ddp-gold-bright">
+                {t("dailyClaimHint")}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type LadderTab = "quest" | "party";
+
+export function GoalLadder() {
   const hero = useGameStore((s) => s.heroes[0]);
   const phase = useGameStore((s) => s.phase);
   const bossReady = useGameStore((s) => s.bossReady);
   const onboardingActive = useGameStore((s) => s.onboardingStepIndex >= 0);
-  const [hofOpen, setHofOpen] = useState(false);
-  const [expandedMobile, setExpandedMobile] = useState(false);
+  const questTrackerCollapsed = useGameStore((s) => s.questTrackerCollapsed);
+  const toggleQuestTrackerCollapsed = useGameStore((s) => s.toggleQuestTrackerCollapsed);
+  const setQuestTrackerCollapsed = useGameStore((s) => s.setQuestTrackerCollapsed);
+  const [tab, setTab] = useState<LadderTab>("quest");
   const t = useTranslations("ladder");
+
+  // Apply the persisted preference once, AFTER hydration — same idiom as
+  // `GhostToggle.tsx`'s mount-only sync (reading localStorage during the
+  // initial render would desync SSR/first-client render).
+  useEffect(() => {
+    setQuestTrackerCollapsed(readStoredQuestTrackerCollapsed());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only sync
+  }, []);
 
   const { current, rungs } = buildGoalLadder({
     hero: hero
@@ -731,8 +811,10 @@ export function GoalLadder({ compact = false }: { compact?: boolean }) {
     bossReady,
   });
 
-  // FTUE must never spotlight a collapsed target — see the module doc.
-  const expanded = !compact || expandedMobile || onboardingActive;
+  // FTUE must never spotlight a collapsed target, and never lands on the
+  // party tab — see the module doc.
+  const expanded = !questTrackerCollapsed || onboardingActive;
+  const activeTab: LadderTab = onboardingActive ? "quest" : tab;
   const currentRung = rungs.find((r) => r.id === current) ?? rungs[0];
 
   return (
@@ -740,44 +822,55 @@ export function GoalLadder({ compact = false }: { compact?: boolean }) {
       data-onboarding-anchor="goal-ladder"
       className="flex flex-col gap-2.5 rounded-(--ddp-radius-lg) border border-ddp-boss/25 bg-ddp-panel px-4 py-3 shadow-(--ddp-shadow-panel)"
     >
-      {compact && (
-        <button
-          type="button"
-          onClick={() => setExpandedMobile((e) => !e)}
-          aria-expanded={expanded}
-          className="flex items-center justify-between gap-2"
+      <button
+        type="button"
+        onClick={toggleQuestTrackerCollapsed}
+        aria-expanded={expanded}
+        aria-label={expanded ? t("collapseAria") : t("expandAria")}
+        className="flex min-h-11 items-center justify-between gap-2"
+      >
+        <span className="flex min-w-0 items-center gap-1.5 truncate text-xs font-bold text-ddp-ink">
+          {currentRung && <span aria-hidden>{RUNG_ICON[currentRung.id]}</span>}
+          {currentRung ? t(`rungs.${currentRung.id}`) : ""}
+        </span>
+        <span
+          aria-hidden
+          className={`shrink-0 text-ddp-ink-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
         >
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-xs font-bold text-ddp-ink">
-            {currentRung && (
-              <span aria-hidden>{RUNG_ICON[currentRung.id]}</span>
-            )}
-            {currentRung ? t(`rungs.${currentRung.id}`) : ""}
-          </span>
-          <span
-            aria-hidden
-            className={`shrink-0 text-ddp-ink-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
-          >
-            ▾
-          </span>
-        </button>
-      )}
+          ▾
+        </span>
+      </button>
       <div className={expanded ? "flex flex-col gap-2.5" : "hidden"}>
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-          {rungs.map((rung) => (
-            <RungPill
-              key={rung.id}
-              rung={rung}
-              onClick={rung.id === "hallOfFame" ? () => setHofOpen(true) : undefined}
-            />
-          ))}
+        <TabRow
+          tabs={[
+            { id: "quest", label: t("tabs.quest") },
+            { id: "party", label: t("tabs.party") },
+          ]}
+          active={activeTab}
+          onChange={setTab}
+        />
+        {/* [เควส] — stays MOUNTED (hidden-classed) even while [ปาร์ตี้] is
+            active so the `goal-ladder`/`boss-panel`/`kill-progress` FTUE
+            anchors nested inside always resolve, same trick the whole-card
+            collapse above uses. */}
+        <div className={activeTab === "quest" ? "flex flex-col gap-3" : "hidden"}>
+          <div className="flex flex-col gap-1">
+            <TagHeader tag={t("tags.main")} />
+            <MainChapterLine />
+          </div>
+          <div className="flex flex-col gap-2">
+            <TagHeader tag={t("tags.side")} />
+            <MilestoneCard current={current} />
+            <div data-onboarding-anchor="boss-panel">
+              <CoreLoopCard />
+            </div>
+          </div>
+          <DailyLines />
         </div>
-        <MainChapterLine />
-        <MilestoneCard current={current} />
-        <div data-onboarding-anchor="boss-panel">
-          <CoreLoopCard />
-        </div>
+        {/* [ปาร์ตี้] — presentational, nothing FTUE-anchored, free to unmount
+            when inactive. */}
+        {activeTab === "party" && <PartyTrackerList />}
       </div>
-      {hofOpen && <HallOfFamePanel onClose={() => setHofOpen(false)} />}
     </div>
   );
 }

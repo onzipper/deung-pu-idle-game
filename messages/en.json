@@ -62,10 +62,31 @@
     },
     "powerRatioLabel": "Power {pct}%",
     "bossStatsLabel": "Boss HP {hp} · ATK {atk}",
-    "mapNumberLabel": "Map {n}"
+    "mapNumberLabel": "Map {n}",
+    "tabs": {
+      "quest": "Quests",
+      "party": "Party"
+    },
+    "tags": {
+      "main": "Main",
+      "side": "Side",
+      "daily": "Daily"
+    },
+    "dailyClaimHint": "Claim at the Village Chief",
+    "collapseAria": "Collapse quest tracker",
+    "expandAria": "Expand quest tracker",
+    "party": {
+      "empty": "No party yet",
+      "emptyHint": "Invite friends to hunt together",
+      "manageButton": "Manage party",
+      "onlineLabel": "Online",
+      "offlineLabel": "Offline"
+    }
   },
   "panels": {
     "skillsLabel": "Skills",
+    "dockCollapseAria": "Collapse skill dock",
+    "dockExpandAria": "Expand skill dock",
     "hpBarLabel": "HP",
     "mpBarLabel": "MP",
     "expBarLabel": "EXP",

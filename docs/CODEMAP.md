@@ -315,6 +315,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/updateBanner.ts` — pure show/hide decision for the mid-session "new patch deployed" banner (build-id compare).
 - `src/ui/questGuide.ts` — pure fast-travel destination picker for the quest card's "พาไปเลย" (guide me) button.
 - `src/ui/openSettingsSignal.ts` — tiny `window` CustomEvent signal to request the Settings drawer open from an unrelated component.
+- `src/ui/openFriendsSignal.ts` — tiny `window` CustomEvent signal to request the Friends panel open from an unrelated component (clone of `openSettingsSignal.ts`; used by `PartyTrackerList.tsx`'s manage button).
 - `src/ui/goalLadder.ts` — pure rung-selection logic for the HUD's single "what do I do next" goal ladder + core-loop card.
 - `src/ui/labels.ts` — static per-class/per-stat/rarity icon + color maps (cosmetic only, never fed back to engine).
 - `src/ui/patchNotes.ts` — pure "what's new" patch-notes registry + show/skip/record decision logic.
@@ -375,7 +376,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/AsuraTomeButton.tsx` — "ตำราตำนาน" main-menu entry, invisible until `tomeUnlocked` (never spoils the secret quest).
 - `src/ui/components/BuffBadgeHub.tsx` — arena-overlay active-buff badges (zero layout shift); badge set from pure `ui/buffs/activeBuffs.ts`.
 - `src/ui/components/EquippedLoadout.tsx` — compact equipped weapon/armor summary off `HeroSummary.equipped` (sim-applied loadout, never DB inventory).
-- `src/ui/components/GoalLadder.tsx` — "what do I do next" breadcrumb + core-loop card off pure `ui/goalLadder.ts`; always portaled onto the arena, `compact` prop adds a mobile collapsed-summary/tap-to-expand presentation.
+- `src/ui/components/GoalLadder.tsx` — R2.6 tabbed "what do I do next" tracker: TabRow **[เควส | ปาร์ตี้]** over tag-grouped `[หลัก]/[รอง]/[รายวัน]` quest lines (rung-selection off pure `ui/goalLadder.ts`); collapses to a chip on ALL viewports via the persisted `questTrackerCollapsed` store field.
 - `src/ui/components/SellRow.tsx` — one sellable inventory row (shop sell tab), tap-again-to-confirm guard, optional multi-select mode.
 - `src/ui/components/BotMasterSwitch.tsx` — the ONE bot master ON/OFF switch (`state.autoHunt`) + ⚙ opening `BotSettingsModal`.
 - `src/ui/components/ConsumableBar.tsx` — potion quick-use bar (HP/mana/return-scroll) with cooldown sweep.
@@ -384,10 +385,11 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/RefinePanel.tsx` — town refine station (ตีบวก): reveal-on-final-strike suspense sequence, server-authoritative roll.
 - `src/ui/components/BotSettingsModal.tsx` — consolidated automation settings modal (combat/potions/town-trips/drops/walking), the ONE home for auto-* config.
 - `src/ui/components/SkillDetailModal.tsx` — skill list+detail pane (icon/desc/live stat lines), read-only (never casts, no leveling UI).
-- `src/ui/components/SkillBar.tsx` — per-hero skill KIT ONLY (portrait card extracted to `HeroPortraitCard.tsx`): cast buttons w/ cooldown sweep, ⓘ popovers, auto-slot assignment, bot master switch.
-- `src/ui/components/GoalLadderOverlaySlot.tsx` — portal target mounting `GoalLadder` onto the arena's left-mid overlay slot on every viewport (mobile gets `compact` mode).
-- `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock, bottom-edge EXP/clock strip; documents the z-index ladder.
-- `src/ui/components/__tests__/` — pin for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic; 1 file.
+- `src/ui/components/SkillBar.tsx` — per-hero skill KIT ONLY (portrait card extracted to `HeroPortraitCard.tsx`; bot master switch extracted to `SkillDock.tsx` in R2.6 Wave 2): cast buttons w/ cooldown sweep, ⓘ popovers, auto-slot assignment.
+- `src/ui/components/SkillDock.tsx` — R2.6 Wave 2 bottom-center dock wrapper: one row of `SkillBar` tiles + `BotMasterSwitch` + `ConsumableBar` quick-slots + a persisted whole-dock collapse-to-thin-strip (mirrors `GoalLadder.tsx`'s Wave-1 collapse idiom; bot master stays visible/tappable while collapsed).
+- `src/ui/components/GoalLadderOverlaySlot.tsx` — portal target mounting the ONE `GoalLadder` onto the arena's left-mid overlay slot, viewport-independent (R2.6: dropped the old `compact`/`useMediaQuery` branch).
+- `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock (`SkillDock.tsx`), bottom-edge EXP/clock strip; documents the z-index ladder.
+- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, and R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`); 3 files.
 
 ### src/ui/components/primitives/ — R2 design-system primitives (presentational only, no store reads)
 - `src/ui/components/primitives/Button.tsx` — 3-tier button skin (primary gold / secondary purple / danger red).
@@ -504,14 +506,15 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/worldBoss/schedule.ts` — pure schedule-derivation + countdown-display helpers, shared by `GameClient`/`WorldBossBanner`.
 - `src/ui/worldBoss/__tests__/` — headless pin for `schedule`; 1 file.
 
-### src/ui/party/ — party network-quality signal chip
+### src/ui/party/ — party network-quality signal chip + R2.6 quest-tracker party tab
 - `src/ui/party/PartySignalChip.tsx` — compact 4-bar signal-chip HUD element (RTT/lag), renders nothing while solo.
 - `src/ui/party/signalChip.ts` — pure `cohortStatus`+RTT → visual (tone/bar-count/pulsing) mapping.
+- `src/ui/party/PartyTrackerList.tsx` — R2.6 `GoalLadder` "[ปาร์ตี้]" tab: read-only member rows off `s.party` + a "จัดการปาร์ตี้" button opening `FriendsPanel` via `openFriendsSignal.ts`.
 - `src/ui/party/__tests__/` — headless pin for `signalChip`; 1 file.
 
 ### src/ui/store/ — the engine↔React bridge (LOAD-BEARING HUB)
-- `src/ui/store/gameStore.ts` — **the Zustand store**: throttled (~10Hz) engine snapshot for React reads, plus the player→engine `pendingInput` intent queue and UI-owned automation/preference flags (autoCast/autoAllocate/soundMuted/etc).
-- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions); 3 files.
+- `src/ui/store/gameStore.ts` — **the Zustand store**: throttled (~10Hz) engine snapshot for React reads, plus the player→engine `pendingInput` intent queue and UI-owned automation/preference flags (autoCast/autoAllocate/soundMuted/questTrackerCollapsed/etc).
+- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions, questTrackerCollapsed localStorage round-trip); 4 files.
 
 ### src/ui/quest/
 - `src/ui/quest/dailyClaimFlow.ts` — POST-first daily-quest claim flow, then queues the engine `claimDaily` intent.
