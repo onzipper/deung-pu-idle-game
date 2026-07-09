@@ -5,7 +5,7 @@ import {
   punchZoom,
   updateCamera,
   type CameraTarget,
-} from "@/lab/worldDepth/camera";
+} from "@/render/worldDepth/camera";
 import { WORLD_WIDTH } from "@/render/layout";
 
 /** The experiment's world width (2.75 × WORLD_WIDTH). */

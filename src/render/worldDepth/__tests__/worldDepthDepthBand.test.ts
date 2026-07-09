@@ -8,8 +8,8 @@ import {
   depthOffsetY,
   depthScale,
   depthZIndex,
-} from "@/lab/worldDepth/depthBand";
-import { TERRAIN_MAX_OFFSET, TERRAIN_MIN_OFFSET } from "@/lab/worldDepth/terrain";
+} from "@/render/worldDepth/depthBand";
+import { TERRAIN_MAX_OFFSET, TERRAIN_MIN_OFFSET } from "@/render/worldDepth/terrain";
 import { GROUND_Y, WORLD_HEIGHT } from "@/render/layout";
 
 describe("worldDepth depth band — experiment ⑨", () => {

@@ -4,7 +4,7 @@ import {
   TERRAIN_MAX_OFFSET,
   TERRAIN_MIN_OFFSET,
   TERRAIN_PRESETS,
-} from "@/lab/worldDepth/terrain";
+} from "@/render/worldDepth/terrain";
 import { GROUND_Y } from "@/render/layout";
 
 /** The experiment's world width (2.75 × WORLD_WIDTH). */

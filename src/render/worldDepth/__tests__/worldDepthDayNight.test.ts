@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OVERLAY_ALPHA_MAX, samplePalette, type DayPalette } from "@/lab/worldDepth/dayNight";
+import { OVERLAY_ALPHA_MAX, samplePalette, type DayPalette } from "@/render/worldDepth/dayNight";
 import { lerpColor } from "@/render/environment/colorUtils";
 
 function channels(color: number): [number, number, number] {

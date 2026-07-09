@@ -75,22 +75,22 @@ import {
   updateCamera,
   type CameraTarget,
   type CameraTransform,
-} from "@/lab/worldDepth/camera";
-import { samplePalette, type DayPalette } from "@/lab/worldDepth/dayNight";
-import { depthOffsetY, depthScale, depthZIndex } from "@/lab/worldDepth/depthBand";
+} from "@/render/worldDepth/camera";
+import { samplePalette, type DayPalette } from "@/render/worldDepth/dayNight";
+import { depthOffsetY, depthScale, depthZIndex } from "@/render/worldDepth/depthBand";
 import {
   createTerrain,
   TERRAIN_PRESETS,
   type Terrain,
   type TerrainPresetId,
-} from "@/lab/worldDepth/terrain";
+} from "@/render/worldDepth/terrain";
 import {
   createWeatherLayer,
   WEATHER_OPTIONS,
   type WeatherKind,
   type WeatherLayer,
-} from "@/lab/worldDepth/weather";
-import { createCritters, type Critters } from "@/lab/worldDepth/critters";
+} from "@/render/worldDepth/weather";
+import { createCritters, type Critters } from "@/render/worldDepth/critters";
 
 // ---------------------------------------------------------------------------
 // Knobs
