@@ -1376,6 +1376,17 @@
           "refineAnywhere": "🔨 The refine button now works from anywhere — your hero travels to Uncle Dueng and the refine station opens on arrival.",
           "warpZone": "🌀 The warp button moved next to the zone name at the top-left, and the HUD now says Zone everywhere."
         }
+      },
+      "2026-07-09l": {
+        "items": {
+          "worldDepth": "🏞️ The world has depth! Monsters and heroes now spread across near–far layers — closer looks bigger, farther looks smaller, and the battlefield feels alive.",
+          "camera": "🎥 A living camera — it zooms in on the action while you hunt and pulls back to the full zone view when you rest.",
+          "terrain": "⛰️ The ground is no longer flat — every zone has its own hills and slopes (towns and boss rooms stay flat as before).",
+          "dayNight": "🌗 Day and night cycle every 30 minutes, in sync for everyone on the server, with per-zone weather (rain, snow, ash, leaves), birds by day and fireflies by night — tuned so monsters and HP bars stay clearly visible after dark.",
+          "worldToggles": "⚙️ All of it is adjustable in Settings → World Depth — turn each part off (depth/camera/atmosphere) if you prefer the classic look or your device struggles.",
+          "levelCap": "📣 Hit the level cap and the whole server hears 'maxed out!' — every capper gets their own announcement, once per character, not just the first.",
+          "ownTitleFix": "🏷️ Your title now shows above your own head from the moment you log in — previously only your friends could see it, never you."
+        }
       }
     }
   },

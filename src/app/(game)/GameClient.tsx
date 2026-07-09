@@ -3419,6 +3419,12 @@ export function GameClient() {
       unsubscribeSocialBadge = useGameStore.subscribe((next, prev) => {
         if (next.mySocialBadge !== prev.mySocialBadge) pushHeroSocialBadges();
       });
+      // Seed MY OWN title/aura at boot: `mySocialBadge` starts null and
+      // `townArrived` fires only on BOT town trips, so without this a reload
+      // hid the player's own ฉายา until the idle bot happened to visit town
+      // (peers kept seeing it via the friends poll — the asymmetry the owner
+      // reported). Same fire-and-forget fetch as the town-arrival refresh.
+      refreshHofOnTownArrival();
 
       lastTime = performance.now();
       lastActiveAt = Date.now();
