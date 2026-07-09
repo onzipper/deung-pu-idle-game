@@ -598,6 +598,71 @@ function writeGhostsVisible(visible: boolean): void {
   }
 }
 
+/** localStorage keys for the "โลกมีมิติ" world-depth settings wave (W6, promoted
+ *  lab experiment ⑨ — see `docs/`/plan `lab-proud-tiger.md`). Same UI-owned
+ *  client-preference tier as `GHOSTS_VISIBLE_STORAGE_KEY` above — NOT `SaveData`,
+ *  purely cosmetic/render (never touches the sim). Default ON for all three:
+ *  absence of the key reads as enabled, same "only an explicit '0' disables"
+ *  convention as ghosts. Three separate keys/fields (not one bundle) because each
+ *  drives an independently-toggleable renderer flag via `setWorldFx`. */
+const WORLD_DEPTH_STORAGE_KEY = "ddp-world-depth";
+const WORLD_CAMERA_STORAGE_KEY = "ddp-world-camera";
+const WORLD_ATMOSPHERE_STORAGE_KEY = "ddp-world-atmosphere";
+
+export function readStoredWorldDepthOn(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(WORLD_DEPTH_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeWorldDepthOn(on: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORLD_DEPTH_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
+export function readStoredWorldCameraOn(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(WORLD_CAMERA_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeWorldCameraOn(on: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORLD_CAMERA_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
+export function readStoredWorldAtmosphereOn(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(WORLD_ATMOSPHERE_STORAGE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeWorldAtmosphereOn(on: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WORLD_ATMOSPHERE_STORAGE_KEY, on ? "1" : "0");
+  } catch {
+    /* storage blocked — the toggle still works for this tab/session */
+  }
+}
+
 /** localStorage key for the FTUE-completed flag. Same client-preference
  * pattern as `SOUND_MUTED_STORAGE_KEY` above: UI-owned, not `SaveData`.
  * M5+: fold into server save (cross-device sync) — until then this is a
@@ -1342,6 +1407,21 @@ export interface HudState {
    * sim (the One Rule, docs/ghost-presence-design.md §2). */
   ghostsVisible: boolean;
 
+  // ---- "โลกมีมิติ" world-depth settings wave (W6, promoted lab experiment ⑨) —
+  // persisted to localStorage (NOT SaveData, see `WORLD_DEPTH_STORAGE_KEY` etc.),
+  // same tier/pattern as `ghostsVisible` above. Default ON for all three.
+  // `GameClient.tsx`'s loop reads these and calls `renderer.setWorldFx({depth:
+  // worldDepthOn, terrain: worldDepthOn, camera: worldCameraOn, atmosphere:
+  // worldAtmosphereOn})` — purely cosmetic/render, never touches the sim. ----
+  /** Depth band (mobs/heroes/ghosts scale+layer by distance) + the polygon
+   *  terrain ground layer — ONE switch for both (they read as a single visual
+   *  concept to a player, "one mental model per feature"). */
+  worldDepthOn: boolean;
+  /** Living follow-zoom camera (1.06 in combat, eases to 1.0 idle). */
+  worldCameraOn: boolean;
+  /** Day/night tint + weather + critters. */
+  worldAtmosphereOn: boolean;
+
   // ---- onboarding/FTUE (M4.8) — see src/ui/onboarding/steps.ts for the
   // data-driven step registry and pure trigger/advance logic; this store
   // only holds the session/persisted PROGRESS through that registry. ----
@@ -1394,6 +1474,18 @@ export interface HudState {
   /** Mount-effect-only: apply the persisted ghost preference post-hydration (mirrors
    * `setSoundMuted`; does NOT re-persist). */
   setGhostsVisible: (visible: boolean) => void;
+
+  /** Toggle the "โลกมีมิติ" depth-band + terrain layer (persists). */
+  toggleWorldDepthOn: () => void;
+  /** Mount-effect-only: apply the persisted preference once, post-hydration
+   *  (mirrors `setGhostsVisible`; does NOT re-persist). */
+  setWorldDepthOn: (on: boolean) => void;
+  /** Toggle the "โลกมีมิติ" living camera (persists). */
+  toggleWorldCameraOn: () => void;
+  setWorldCameraOn: (on: boolean) => void;
+  /** Toggle the "โลกมีมิติ" day/night + weather atmosphere (persists). */
+  toggleWorldAtmosphereOn: () => void;
+  setWorldAtmosphereOn: (on: boolean) => void;
 
   /** Onboarding-controller-only: begin the FTUE at step 0. Callers must have
    * already checked `!ftueCompleted && hasSyncedOnce && isFreshSave(...)`. */
@@ -1773,6 +1865,13 @@ export const useGameStore = create<HudState>((set, get) => ({
   // never affects the sim.
   ghostsVisible: true,
 
+  // Default ON pre-hydration (matches `readStoredWorldDepthOn`/etc.'s default);
+  // corrected post-mount via `setWorldDepthOn`/`setWorldCameraOn`/
+  // `setWorldAtmosphereOn`. Safe either way — render-only, never affects the sim.
+  worldDepthOn: true,
+  worldCameraOn: true,
+  worldAtmosphereOn: true,
+
   hasSyncedOnce: false,
   ftueCompleted: true,
   onboardingStepIndex: -1,
@@ -1810,6 +1909,28 @@ export const useGameStore = create<HudState>((set, get) => ({
       return { ghostsVisible };
     }),
   setGhostsVisible: (ghostsVisible) => set({ ghostsVisible }),
+
+  toggleWorldDepthOn: () =>
+    set((s) => {
+      const worldDepthOn = !s.worldDepthOn;
+      writeWorldDepthOn(worldDepthOn);
+      return { worldDepthOn };
+    }),
+  setWorldDepthOn: (worldDepthOn) => set({ worldDepthOn }),
+  toggleWorldCameraOn: () =>
+    set((s) => {
+      const worldCameraOn = !s.worldCameraOn;
+      writeWorldCameraOn(worldCameraOn);
+      return { worldCameraOn };
+    }),
+  setWorldCameraOn: (worldCameraOn) => set({ worldCameraOn }),
+  toggleWorldAtmosphereOn: () =>
+    set((s) => {
+      const worldAtmosphereOn = !s.worldAtmosphereOn;
+      writeWorldAtmosphereOn(worldAtmosphereOn);
+      return { worldAtmosphereOn };
+    }),
+  setWorldAtmosphereOn: (worldAtmosphereOn) => set({ worldAtmosphereOn }),
 
   startOnboarding: () => set({ onboardingStepIndex: 0 }),
   setOnboardingStepIndex: (onboardingStepIndex) => set({ onboardingStepIndex }),

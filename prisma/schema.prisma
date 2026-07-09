@@ -263,8 +263,10 @@ model SoldItem {
 // via the additive `kind` column (default "refine" preserves every old row):
 //   - "refine"   — a refine attempt SUCCEEDED at +8/+9/+10, written in the SAME
 //                  tx as the refine mutation (`refineItem`, src/server/items.ts).
-//   - "levelCap" — the FIRST non-suspect character to reach the level cap (M7.95,
-//                  src/server/leaderboard.ts). SINGLETON: exactly-once globally.
+//   - "levelCap" — a non-suspect character reached the level cap ("เวลตัน") —
+//                  EVERY capper announces, exactly-once per character via
+//                  singletonKey "cap:<characterId>" (owner call 2026-07-09;
+//                  was a global first-to-cap singleton). src/server/leaderboard.ts.
 //   - "rankOne"  — a character NEWLY took #1 on the power board (M7.95). Throttled
 //                  to at most one per character per 24h.
 //   - "legendaryCraft" — the FIRST character to forge a class's "ตำราตำนาน" legendary
@@ -288,8 +290,10 @@ model SoldItem {
 // never bakes in a server-side locale.
 //
 // `singletonKey` is the EXACTLY-ONCE guard for singleton kinds: "levelCap" sets
-// it to "levelCap" so the @unique index rejects any second insert (a concurrent
-// second-to-cap save collides on P2002 → swallowed). Every non-singleton row
+// it to "cap:<characterId>" (once per character; legacy rows hold the plain
+// "levelCap" global key from the first-to-cap era), "legendaryCraft" to
+// "legendary:<cls>" — the @unique index rejects any second insert (a concurrent
+// duplicate save collides on P2002 → swallowed). Every non-singleton row
 // leaves it NULL (MySQL treats NULLs as DISTINCT, so unlimited rows allowed).
 model RefineAnnouncement {
   id           String   @id @default(cuid())

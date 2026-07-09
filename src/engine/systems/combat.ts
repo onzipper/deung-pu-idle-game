@@ -714,6 +714,7 @@ export function resolveDeaths(state: GameState): void {
           x: e.x,
           y: e.y,
           goldGained,
+          id: e.id,
         });
         // Count the kill toward the solo hero's class-change quest (M5 task 5).
         advanceQuestObjective(state, "kill");
@@ -743,7 +744,7 @@ export function resolveDeaths(state: GameState): void {
           const goldGained = CONFIG.goldPerKill(state.stage);
           creditKillGold(state, goldGained);
           grantKillXp(state, CONFIG.leveling.xpPerKill(state.stage));
-          state.events.push({ type: "kill", kind: e.kind, x: e.x, y: e.y, goldGained });
+          state.events.push({ type: "kill", kind: e.kind, x: e.x, y: e.y, goldGained, id: e.id });
           advanceQuestObjective(state, "kill");
           advanceDailyProgress(state, "killAnywhere", 1);
           return false;
