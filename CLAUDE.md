@@ -80,15 +80,21 @@ Keep CODEMAP lines *structural* (path + one-line responsibility), never content-
 
 ## Project subagents
 
-Personas in `.claude/agents/`, each pinned to a model (the pin is the DEFAULT — the routing table above may override per-call via the Agent tool's `model` param):
+Personas in `.claude/agents/` (routing guide: `.claude/README.md`), each pinned to a model (the pin is the DEFAULT — the routing table above may override per-call via the Agent tool's `model` param):
 
 | Agent | Model | Scope |
 |---|---|---|
 | `deep-reasoner` / `fast-worker` / `haiku-worker` | Opus / Sonnet / Haiku | generic tiers (see routing) |
 | `game-engine-specialist` | Opus | pure-TS sim core, determinism (`engine/**`) |
 | `game-economy-balance-designer` | Opus | curves, pacing, gold sinks, drops, refine, shop economy, sim analysis |
+| `pixi-render-performance-specialist` | Opus | PixiJS v8, pooling/filters, 60fps, coordinate seams (`render/**`) |
 | `sr-dba` | Opus | MySQL/Prisma schema, indexing (`prisma/**`) |
 | `sr-backend-developer` | Opus | save/load, offline idle, anti-cheat (`server/**`, `api/**`) |
 | `sr-nextjs-developer` | Sonnet | App Router, GameClient loop, store wiring (`app/**`, `ui/**`) |
 | `sr-uxui-game-designer` | Sonnet | game feel, fx/animation/biomes, HUD design (`render/**`, `ui/**`) |
-| `qa-test-engineer` | Sonnet | headless Vitest strategy, regression suites |
+| `qa-test-engineer` | Sonnet | headless Vitest strategy, regression suites, doc/path guard tests |
+| `ai-docs-context-architect` | Sonnet | AI onboarding docs, context packs, token routing (`AI.md`, `docs/context/**`) |
+| `liveops-release-manager` | Sonnet | patch notes, deploy checklists + ordering, release PR bodies |
+| `i18n-th-en-copywriter` | Haiku | `messages/*.json`, UI labels/tooltips, patch-notes copy |
+
+(`asset-pipeline-art-director` deferred — see `.claude/README.md`.)
