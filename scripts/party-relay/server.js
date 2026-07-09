@@ -35,6 +35,12 @@
  *        member's cached last-value snapshot. Bad ticket → CLOSE 4001.
  *      • p    {v:1, payload}        → store as this member's last-value + fan `{t:"p",
  *        payload}` to ≤ PRESENCE_FAN (12) other members. payload > 256B → CLOSE 4004.
+ *      • pa   {v:1, payload}        → ADDITIVE visual action stream (R3). Fans `{t:"pa",
+ *        payload}` verbatim to ≤ PRESENCE_FAN (12) zone peers. NOT cached (never enters
+ *        the last-value snapshot; `p` stays the sole snapshot-on-join + liveness source),
+ *        NEVER touches liveness/prune. Requires a prior pjoin; unjoined / v!==1 / no
+ *        payload / oversized (>256B) / faster than ~8Hz → dropped SILENTLY (no close, no
+ *        rej — a lossy visual layer never kills a socket).
  *      • pleave {v:1}               → drop presence membership (no broadcast — peers
  *        despawn on ~10s silence). Zone switch = client sends pleave then pjoin.
  *      Any presence msg with v!==1 is dropped SILENTLY (deploy-skew safety).
@@ -86,6 +92,10 @@ const DEFAULTS = {
   // ── World layer (presence + global chat) ──
   presenceFan: intEnv("PARTY_RELAY_PRESENCE_FAN", 12), // max members fanned per zone
   presenceMaxBytes: intEnv("PARTY_RELAY_PRESENCE_MAX_BYTES", 256), // per snapshot payload
+  // Presence action stream (`pa`) min-interval guard. ~8Hz visual stream (125ms); the
+  // 100ms floor (a ~10Hz ceiling) gives jitter/burst headroom while dropping true spam.
+  // A breach SILENTLY drops the frame (lossy visual layer — never a rej/kill).
+  paRateMs: intEnv("PARTY_RELAY_PA_RATE_MS", 100),
   chatHistoryMs: intEnv("PARTY_RELAY_CHAT_HISTORY_MS", 1_800_000), // 30-min ring buffer
   chatMaxEntries: intEnv("PARTY_RELAY_CHAT_MAX_ENTRIES", 200), // hard cap on ring buffer
   chatTextMax: intEnv("PARTY_RELAY_CHAT_TEXT_MAX", 120), // max chat chars (truncated)
@@ -579,6 +589,40 @@ function createRelay(opts = {}) {
     }
   }
 
+  /**
+   * Presence ACTION stream (`pa`) — R3, additive. A high-frequency (~8Hz) visual pose
+   * feed fanned verbatim to zone peers. Deliberately kept OUTSIDE the last-value cache
+   * and every liveness/prune path: `p` remains the ONLY snapshot-on-join + liveness
+   * source, so a peer that spams `pa` but stops sending `p` still despawns on silence.
+   * Every rejection (unjoined / bad version / no payload / oversized / too-fast) is a
+   * SILENT drop — a lossy visual layer must never kill a socket or emit an error frame.
+   */
+  function handlePresenceAction(conn, msg) {
+    if (msg.v !== 1) return; // unknown version — drop silently (deploy skew)
+    const zone = conn.presenceRoom;
+    if (!zone) return; // pa before pjoin — drop silently (additive; never closes)
+    const room = presenceRooms.get(zone);
+    if (!room) return;
+    if (!("payload" in msg)) return; // malformed — drop silently
+    // Per-conn ~8Hz min-interval guard (SEPARATE from the general maxMsgPerSec flood
+    // kill). A breach silently drops this frame — no c-rej analog, no socket kill.
+    const nowMs = now();
+    if (conn.lastPaAt != null && nowMs - conn.lastPaAt < cfg.paRateMs) return;
+    const payloadStr = JSON.stringify(msg.payload);
+    if (Buffer.byteLength(payloadStr, "utf8") > cfg.presenceMaxBytes) return; // oversized — drop silently
+    conn.lastPaAt = nowMs;
+    // NOT cached: never writes room member's `snapshot` (that stays `p`'s last-value +
+    // liveness). Fan verbatim to at most presenceFan OTHER zone members — lossy, no seq.
+    const framed = `{"t":"pa","payload":${payloadStr}}`;
+    let sent = 0;
+    for (const [other] of room.members) {
+      if (other === conn) continue;
+      if (sent >= cfg.presenceFan) break;
+      sendText(other.socket, framed);
+      sent++;
+    }
+  }
+
   // --- world layer: global chat -----------------------------------------------
 
   /** Drop ring-buffer entries older than the 30-min window, then enforce the hard cap. */
@@ -681,6 +725,8 @@ function createRelay(opts = {}) {
         return handlePresenceJoin(conn, msg);
       case "p":
         return handlePresence(conn, msg);
+      case "pa":
+        return handlePresenceAction(conn, msg);
       case "pleave":
         return leavePresence(conn);
       case "cjoin":
@@ -800,6 +846,7 @@ function createRelay(opts = {}) {
       msgTimes: [],
       // World-layer membership (separate from party room/slot — never crosses).
       presenceRoom: null, // zoneKey of the presence room this conn is in, or null
+      lastPaAt: null, // ms of the last accepted `pa` action frame (~8Hz min-interval guard)
       chatJoined: false, // true once cjoin succeeds
       chatName: null,
       chatCharId: null,
