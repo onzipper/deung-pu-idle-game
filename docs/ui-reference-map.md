@@ -50,6 +50,11 @@
 - INVENTORY tab "ทั้งหมด" (default, รวม weapon+armor; "ใช้/อื่นๆ" ติด economy — ยังไม่ทำ)
 - gap ที่เหลือจาก audit #54: Wave B (menu-row/action rail/chat) รอ owner เคาะ · Wave C ตาม R3/R4-R5 · Wave D รอ asset pipeline
 
+### ✅ R2.9 Codegen Asset Phase 1A (2026-07-10, issue #60 — จาก Asset Bible #57)
+- **ภาษาภาพไอคอนใหม่** (silhouette ทึบ + gradient + family glow ตาม GAME ASSET OVERVIEW) เริ่ม 9 id: item 5 (`w_sword_t1_rusty`/`w_bow_t1_short`/`w_sword_t10_apocalypse`/`a_cloth_t1_tunic`/`fort_weapon`) + skill 4 (`sword_whirl`/`mage_meteor`/`mage_frostnova`/`archer_rain`)
+- โครง: `src/ui/components/icons/` (iconBase/itemIcons/skillIcons/gameIcons) — registry id→SVG component + `ItemIcon`/`SkillIcon` seam; **glyph เดิมจาก `labels.ts` = fallback เสมอ** (id นอก slice เห็นของเดิมเป๊ะ) · SVG ล้วน ไม่มีไฟล์ภาพ ไม่มี filter · gradient id กันชนด้วย useId
+- id ที่เหลือ = Phase 1B หลัง owner eye-test slice นี้ · **มาตรฐาน icon ใหม่ต่อจากนี้ = ภาษาภาพนี้** (เส้นทอง 2px ใน `icons.tsx` ยังเป็นของ chrome/เมนู — คนละหน้าที่)
+
 ### ✅ R2.8 Wave B ชุด safe (2026-07-10, issue #58)
 - BOT auto-skill picker → tile row เลขกำกับสไตล์ SkillBar (64px, ✓ emerald ตาม convention ใน modal; semantics automation เดิมทุกอย่าง)
 - Mobile HUD tuning: menu-row มือถือ 3→2 แถว (grid-cols-5 + tile 40px ต่ำกว่า sm) · SkillDock/quest-slot รัดแนวตั้งบนจอเตี้ย · แก้ bug กล่อง ExpClockStrip เตี้ยกว่าข้อความ (text ล้นชน dock)

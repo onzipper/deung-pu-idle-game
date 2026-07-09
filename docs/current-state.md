@@ -8,9 +8,9 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5 game screen ✅ → R2.6 quest tracker/skill dock ✅ → R2.7 UI Wave A ✅ (#55, PR #56) → R2.8 Wave B safe ✅ (#58, PR #59, owner eye-test PASSED 2026-07-10)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
-- **Branches**: `develop` = R2 + R2.5 + R2.6 + R2.7 + R2.8 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44).
-- **Suite**: 2291+ tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10c (Wave B safe).
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5–R2.8 ✅ (game screen / tracker+dock / Wave A #55 / Wave B safe #58 — eye-tests passed) → R2.9 Codegen Asset Phase 1A ✅ (#60, awaiting owner eye-test)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
+- **Branches**: `develop` = R2 ถึง R2.8 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). R2.9 = PR from `ui/issue-60-codegen-icons-1a`.
+- **Suite**: 2303 tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10d (icon slice).
 
 ## Latest work (on develop, awaiting owner)
 
@@ -19,7 +19,8 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 - **#48 agent refresh** (PR #49, merged to `develop`): `.claude` agents re-pointed to `AI.md` + context packs, pre-pivot framing removed, `.claude/README.md` routing guide added, +4 agents (ai-docs-context-architect, pixi-render-performance-specialist, liveops-release-manager, i18n-th-en-copywriter); asset-pipeline-art-director deferred to a future issue. Docs-only.
 - **#54 UI audit** (discussion, no code): 64-row scorecard vs the 2.5D ref posted to the issue — match 40 / partial 18 / missing 6 (missing = locked-defer/backlog only). Waves A–D proposed; owner questions pending: crit system (engine has none), menu-row 10-button scope, action rail, chat overlay.
 - **R2.7 UI Wave A** (#55 / PR #56 merged): EXP % on ExpClockStrip · damage-number black stroke (first `TextStyle.stroke` in repo, construct-once) · top-edge z-5 scrim in GameHud · refine cost chips owned/required (42/30) + `danger` CurrencyChip variant when short · toast info = violet chrome · inventory "ทั้งหมด" tab (default). Web only.
-- **R2.8 Wave B safe** (#58, branch `ui/issue-58-wave-b`): BOT auto-skill picker → numbered icon-tile row mirroring SkillBar (semantics untouched) · mobile HUD tuning (menu-row 3→2 rows via grid-cols-5 + 40px tiles below `sm:`, SkillDock/quest-slot tightened, FTUE anchors unchanged) · fixed real ExpClockStrip box-height bug (labels overflowed into dock gap). Patch notes 2026-07-10c. B2 items (menu-row regroup / action rail / chat) still gated on owner answers in #54. Web only.
+- **R2.8 Wave B safe** (#58 / PR #59 merged, eye-test passed): BOT auto-skill picker → numbered icon-tile row mirroring SkillBar · mobile HUD tuning (menu-row 3→2 rows, FTUE anchors unchanged) · fixed ExpClockStrip box-height bug. B2 items (menu-row regroup / action rail / chat) still gated on owner answers in #54.
+- **R2.9 Codegen Asset Phase 1A** (#60, branch `ui/issue-60-codegen-icons-1a`): new SVG icon language (silhouette+gradient+family glow per GAME ASSET OVERVIEW) — 9-id vertical slice (5 items incl. fort_weapon trap-coverage + 4 skills), NEW `src/ui/components/icons/` registry + `ItemIcon`/`SkillIcon` seam, labels.ts glyphs = verbatim fallback for all other ids, NO image files (grep-asserted). Consumers: ItemTile (+`templateId` prop), SkillBar, SkillDetailModal, BOT picker. Phase 1B (remaining ids) after owner eye-test. Web only.
 
 ## Blockers / owed
 

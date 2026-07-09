@@ -474,6 +474,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     onClick={() => setSelectedKey((cur) => (cur === key ? null : key))}
                     ariaLabel={tContent(`${stack.templateId}.name`)}
                     glyph={GEAR_SLOT_ICONS[tpl.slot]}
+                    templateId={stack.templateId}
                     subLabel={tInv("tierShort", { tier: tpl.tier })}
                     refineBadge={
                       stack.refineLevel > 0 ? tInv("refinePlus", { level: stack.refineLevel }) : undefined

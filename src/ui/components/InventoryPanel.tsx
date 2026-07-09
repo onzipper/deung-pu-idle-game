@@ -151,6 +151,7 @@ function GridCell({
       ariaLabel={tContent(`${item.templateId}.name`)}
       glyph={glyph}
       glyphClassName={tint}
+      templateId={item.templateId}
       subLabel={t("tierShort", { tier: template.tier })}
       refineBadge={item.refineLevel > 0 ? t("refinePlus", { level: item.refineLevel }) : undefined}
       // EQUIPPED must be unmistakable (owner ask): on-tile "ใส่อยู่" ribbon (not a corner dot).
