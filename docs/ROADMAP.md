@@ -188,7 +188,20 @@
 - [x] **ตั้งค่า → โลกมีมิติ**: toggle 3 ตัว (สนามลึก+พื้น / กล้อง / บรรยากาศ) default ON, localStorage tier, ปิดทั้งหมด = ภาพเดิม pixel-identical (มี identity tests ปัก)
 - [x] แถมรอบเดียวกัน: **ประกาศเวลตันทุกคน** ครั้งเดียวต่อตัวละคร (singletonKey `cap:<charId>`) แทน "คนแรกของเซิร์ฟ" + copy ธีมเวลตัน th/en — ไม่ต้อง db push (comment-only schema)
 - [x] Suite 2004→**2120** (+116), tsc/eslint/next build clean — **deploy: web redeploy อย่างเดียว ไม่มี db push ไม่มี relay**
-- [ ] **ค้าง**: patch notes รอบ release · เจ้าของเช็คตอนเล่น: จิ้มม็อบไกล/ใกล้กลางซูม, อ่านเลขดาเมจกลางคืน, hp bar ย่อตามลึกรับได้ไหม, fps มือถือ
+- [x] **Release round (2026-07-09, merge main PR #43 — เจ้าของยืนยัน)**: แก้ตามรีพอร์ตเจ้าของ 2 จุดก่อนปล่อย — (1) **กลางคืนมืดไป มองม็อบไม่เห็น** → entities tint ผ่อน 50% เข้าหาขาว (`ENTITY_TINT_RELIEF` ใหม่ใน dayNight.ts, ฉากหลัง/ghost ยังโดนเต็มคง mood) + `OVERLAY_ALPHA_MAX` 0.35→0.26 (overlay ทับ fx/เลขดาเมจด้วย ลด tint อย่างเดียวไม่พอ) — knob 2 ตัวถ้ายังไม่พอใจปรับเลขได้เลย (2) **ฉายาตัวเองหายบนจอตัวเอง** (เพื่อนเห็นปกติ) → `mySocialBadge` เคยเติมเฉพาะ bot `townArrived`/เลือกฉายาใหม่ ตอนนี้ fetch ตอน boot ด้วย · patch notes **2026-07-09l** (7 ข้อ th/en) · suite 2120→**2123**
+- [ ] **ค้าง**: deploy = web redeploy อย่างเดียว (ไม่มี db push/relay) · เจ้าของเช็คตอนเล่น: กลางคืนหลังจูน (ม็อบ/hp bar ชัด + mood ยังอยู่, peak นาที ~22.5–28 ของรอบ 30 นาที), จิ้มม็อบไกล/ใกล้กลางซูม, hp bar ย่อตามลึกรับได้ไหม, fps มือถือ, ฉายาโผล่เองหลัง reload
+
+## 🧭 Arc "Open World MMO" (วิสัยทัศน์ v3 เคาะ 2026-07-09 — ดู GDD.md "ทิศทางใหญ่ v3" + docs/ui-reference-map.md)
+
+> R1 ✅ (M8.8 ด้านล่าง) → R2 sweep UI ตาม mockup + จอใหญ่ desktop overlay HUD → R3 Presence คนจริง (action stream ~8Hz + snapshot-on-join + tap ดูโปรไฟล์ — กิน "ghost v2" เดิม; relay opcode `pa` additive) → R4-R5 เอนจิ้นแกน x,y (1D→2D, สกิลเป็นเรขาคณิต 2D, sim re-adjudicate เต็มรอบ — never-downgrade zone) + minimap → R6 shared elite/invasion (ขยาย ledger เสี่ยจ๋อง — รุมร่วมกับคนแปลกหน้าจริง) · ตลาดกลาง = แทรกตามจังหวะ · กติกาความซื่อสัตย์: ห้าม copy สัญญาว่า "ตีร่วมกันได้ทุกตัว"
+
+## ✅ M8.8 — R1 "โลกใหม่ หน้าตาใหม่" (เสร็จ 2026-07-09, plan whimsical-frolicking-naur — รอเจ้าของเล่นจริง + deploy)
+
+- [x] **Design system v1** จาก reference เจ้าของ: token กรอบทองเรือง (`--ddp-gold-border`/`--ddp-glow-gold`) + ม่วง chrome + ink-dim/radius-sm · ฟอนต์ **Kanit 600/800 + Prompt 400** แทน Chakra Petch (Thai subset, swap) · primitives `src/ui/components/primitives/` (Panel gold/plain, PanelHeader, Button 3 ระดับ ≥44px, motion 150-250ms transform/opacity เท่านั้น + reduced-motion guard) · ไอคอน SVG เส้นทอง 8 ตัวใน icons.tsx · นำร่อง FastTravelPicker + InventoryPanel (shell swap, พฤติกรรมเดิมเป๊ะ) — ทอง = ตัวเลข/ขอบ/CTA เท่านั้น
+- [x] **ประตูแตะได้แทนปุ่ม ◀▶** (คำสั่งเจ้าของ "คลิกที่ตัวเกม เช่นคลิกที่ประตู"): ซุ้ม M7.5 (gateArch/bossDoor scenery) กลายเป็น interactive — gateLockOverlay ใหม่ (แม่กุญแจ code-drawn + เกจฆ่ามอน / glow เชิญชวนตอนปลด, ประตูบอสย้อม crownColor จาก bossThemes) · `hitTestGate` camera-aware (pure `gateTapSide`, mirror hitTestNpc) · ลำดับแตะ npc→มอน→ประตู→พื้น (ประตูไม่มีวันแย่ง tap ต่อสู้) · ยิง intent `walkToZone` เดิมเป๊ะ (intent-parity test; cohort collapse ขี่ของเดิม) · แตะประตูล็อค = notice บอกเหลือกี่ตัว th/en · ปุ่มลูกศรถอดจาก WalkControls (ป้ายโซน/บอท/เฟืองคงอยู่)
+- [x] **แผนที่โลก**: ป้ายโซนบนซ้ายกลายเป็นปุ่ม → WorldMapPanel (primitives ใหม่, ModalPortal) — ทุกแมพ/โซน + **จำนวนผู้เล่นสดต่อโซน** (relay `GET /presence/counts` ใหม่ additive ข้าง /health, poll 10s เฉพาะแผงเปิด + relayUrlCache seam, relay เก่า/ล่ม = ซ่อน badge เงียบ) + marker ตัวเอง + อักษรย่อเพื่อน ≤3+n (friends poll lastZone "ล่าสุด") + จุดตี้ + 🔥 hot zone (client-derived) + badge เสี่ยจ๋อง**ระดับแมพเท่านั้น** (ห้าม import worldBossZoneFor; จำนวนคนกอง = ใบ้ทางอ้อม ยอมรับเป็นฟีเจอร์ช่วยล่า) · โซนล็อคยังโชว์จำนวนคน (asura = ตัวเลขรวมของแมพ) · แตะโซนปลดแล้ว = queueFastTravel กติกาเดียวกับ picker เป๊ะ · mapTheme.ts แยกสีต่อแมพออกมาแชร์
+- [x] เทส 2123→**2163** (+40: gate 29, worldMapModel 14, relay counts, cache) · tsc/eslint/next build clean · patch-notes **2026-07-09m** (3 ข้อ th/en)
+- [ ] **ค้าง**: เจ้าของเล่นจริงก่อน merge — โฉมใหม่มือถือ+เดสก์ท็อป (ฟอนต์ Kanit/Prompt อ่านง่ายไหม, กรอบทองไม่ล้น) · แตะประตู (ใกล้ม็อบ/กลางกล้องซูม/หน้าห้องบอส/ในเมือง) · แผนที่โลก 2 แท็บเห็นจำนวนคนจริง + degrade ตอน relay ยังไม่ deploy · **deploy: redeploy RELAY ก่อน (counts endpoint) แล้วค่อย web · ไม่มี db push**
 
 ## M9 — Economy & Competition
 
@@ -196,10 +209,14 @@
 - [ ] Backoffice โครงแรก (admin) — tax/ค่าธรรมเนียม **ท้ายสุด**
 - [ ] Hall of Fame หลายหมวด: เวลสูงสุด / พลังต่อสู้ / แยกอาชีพต้น + server re-derive กันโกง
 - [ ] Events / daily-login retention
-- [ ] Open-world visibility (เห็นคนแปลกหน้าใน map — ต่อยอดจาก party infra)
+- [x] ~~Open-world visibility (เห็นคนแปลกหน้าใน map)~~ → ยกระดับเป็น Arc "Open World MMO" ด้านบน (ghost M8.6 ✅ → R3 presence คนจริง)
+- [ ] **Backlog ใหม่จาก mockup เจ้าของ (รับเข้า 2026-07-09)**: เลเวลสกิลอัปด้วยทอง (gold sink ถาวร — คู่หนี้เงินเฟ้อ flat pricing) · คอลเลคชัน
 
 ## ⏸️ พักไว้ / ❌ ตัดออก
 
 - ⏸️ Prestige / reset loop — ตัดสินใจหลัง M9
+- ⏸️ จาก mockup เจ้าของ (ไม่รับเข้า ณ 2026-07-09): กิลด์ · สัตว์เลี้ยง · เซ็ตอุปกรณ์ 1/2 · channel "CH.1" (ขัดกับ presence โลกเดียว)
+- ❌ Full 3D + กล้องหมุนได้ — เจ้าของเคาะไม่ไป (2026-07-09): เสียจุดแข็ง 3 อย่าง (art จากโค้ด/pixel art เจ้าของ · lockstep เสถียร · ความเร็วออกของ) — ทางที่ไปคือ 2.5D แกน x,y มุมตายตัว
+- ❌ Server-authoritative shared zones — ทีม 2 มุมอิสระเห็นตรงกัน (2026-07-09): จุดกลับตัวไม่ได้ของทีม 1 คน (offline/บอทพังครึ่งตัว, always-on live-ops, netcode หนักสุดในสายอาชีพ) — ทางที่ไปคือโลก 3 ชั้น (presence จริง + shared-entity ledgers + party lockstep)
 - ❌ PvP arena — ตัดออก (2026-07-05)
 - ❌ Conditional auto-cast (เลือกสกิลตามสถานการณ์ เช่น AoE ต้องมีมอน ≥3) — เจ้าของตัด (2026-07-08): "ช่วยเหลือมากเกินไป" — auto-play ต้องเล่นแบบซื่อ ๆ ความสูญเสีย/การตายที่ endgame คือ friction ที่ตั้งใจ อย่าเสนอ automation ที่เล่นเก่งแทนผู้เล่นอีก

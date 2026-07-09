@@ -15,7 +15,7 @@
  */
 
 import { CONFIG } from "@/engine/config";
-import type { Zone } from "@/engine";
+import type { Zone, ZoneKind } from "@/engine";
 
 export type GateFamily = "map1" | "map2" | "map3" | "map4" | "map5" | "map6" | "town";
 
@@ -68,6 +68,51 @@ export function isLastFarmZone(zone: Zone): boolean {
 /** Which prop vocabulary a gate/door should draw — decoupled from `biome.id`
  * (many hue-loop biome variants can share one map's family) so `gateArch.ts`/
  * `bossDoor.ts` need only one switch each. */
+/** Half-width (world units) of a gate's tappable rect either side of its x —
+ * `2 * DEFAULT_GATE_TAP_HALF_W` = 60, comfortably over the brief's ≥48px
+ * floor (R1 W2 "tappable gates"). */
+export const DEFAULT_GATE_TAP_HALF_W = 30;
+/** How far above ground (world units) the tap rect extends — tall enough to
+ * cover both a plain archway (`gateArch.ts`'s ~80px total height) and the
+ * taller grand boss door (`bossDoor.ts`'s ~112px). */
+export const DEFAULT_GATE_TAP_UP = 130;
+/** How far below ground the tap rect extends (touch generosity). */
+export const DEFAULT_GATE_TAP_DOWN = 14;
+
+/**
+ * Pure world-space hit test for a zone-edge gate tap — `wx`/`wy` are already
+ * in WORLD coords (post letterbox+camera un-projection, see
+ * `GameRenderer.hitTestGate`). No Pixi/DOM here (headlessly tested in
+ * `__tests__/zoneGates.test.ts`).
+ *
+ * `zoneKind === "boss"` never hits — `zoneGateProps.buildZoneGateProps`
+ * builds NO gate props at all inside a boss room (its own `NONE` branch;
+ * `bossArena.ts`'s fixed pillars carry the "this is a place" framing for the
+ * fight instead). `zoneKind === "town"` skips the LEFT side — no archway is
+ * built there either (`buildZoneGateProps`'s `!isTown` guard; town is the
+ * map's left-most zone, nothing to walk back through).
+ */
+export function gateTapSide(
+  wx: number,
+  wy: number,
+  groundY: number,
+  mapId: string,
+  zoneKind: ZoneKind,
+  halfW: number = DEFAULT_GATE_TAP_HALF_W,
+  upH: number = DEFAULT_GATE_TAP_UP,
+  downH: number = DEFAULT_GATE_TAP_DOWN,
+): "left" | "right" | null {
+  if (zoneKind === "boss") return null;
+  if (wy < groundY - upH || wy > groundY + downH) return null;
+  if (zoneKind !== "town") {
+    const lx = gateX(mapId, "left");
+    if (Math.abs(wx - lx) <= halfW) return "left";
+  }
+  const rx = gateX(mapId, "right");
+  if (Math.abs(wx - rx) <= halfW) return "right";
+  return null;
+}
+
 export function gateFamilyFor(mapId: string, isTown: boolean): GateFamily {
   if (isTown) return "town";
   if (mapId === "map2") return "map2";

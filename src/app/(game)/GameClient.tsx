@@ -175,6 +175,7 @@ import {
 import { CohortTurnEngine, type CohortTickIO } from "./cohortTurnEngine";
 import { emaRtt, pickWaitingSlot } from "./cohortNet";
 import { buildFrameInput, hasZoneChangeIntent, sanitizeLanes } from "./buildFrameInput";
+import { resolveGateTap } from "@/ui/world/gateTap";
 import { BOT_TRIP_LEAVE_DEBOUNCE_MS, shouldLeaveCohortForBotTrip } from "./cohortBotTrip";
 import { buildCohortSocialBadges } from "./cohortBadges";
 import {
@@ -457,6 +458,10 @@ function buildSnapshot(state: GameState): EngineSnapshot {
       cls: h.cls,
       hp: h.hp,
       maxHp: h.maxHp,
+      // Owner UX round (2026-07-09) "เดินไปที่ประตูก่อน แล้วค่อยวาป": `gateTrip.ts`'s
+      // arrival check needs a throttled hero x — same one-way "engine carries
+      // it, store just reflects it" pattern as every other field here.
+      x: h.x,
       // Signature skill cooldown (onboarding's "you cast a skill" detector).
       skillCd: skillCdOf(h, SIGNATURE_SKILL[h.cls]),
       // Owner request: War Cry buff status chip — raw values, no engine math.
@@ -3095,6 +3100,12 @@ export function GameClient() {
     // `TownNpcPanelHost.tsx`. Rotates through 2-3 i18n lines per NPC
     // (`npcGreetingIndex` above) so repeat taps don't feel canned.
     function talkToNpc(id: TownNpcId): void {
+      // Talking to an NPC is a manual command too (owner UX round
+      // 2026-07-09) — cancels an in-flight gate trip, mirroring the
+      // move/attack cancel wiring in `queueMoveTo`/`queueAttackTarget`
+      // (this branch never calls those, since talking doesn't move the
+      // hero, so the cancel has to happen explicitly here).
+      useGameStore.getState().cancelGateTrip();
       useGameStore.getState().openTownPanel(townPanelOf(id));
       const key = npcI18nKey(id);
       const idx = npcGreetingIndex[id];
@@ -3120,6 +3131,28 @@ export function GameClient() {
     // lands in-range while mid-walk toward them) -> talk. The range check
     // reads LIVE off the closure's `state` (not the throttled store snapshot)
     // so it's never a frame stale.
+    // R1 W2 "tappable gates" (owner: "อยากให้เป็นการคลิกที่ตัวเกม เช่นการคลิก
+    // ที่ประตู") — replaces the old ◀ ▶ `WalkArrow` buttons entirely. Checked
+    // AFTER `hitTestPointer`'s monster branch (combat taps always win) but
+    // BEFORE its ground/move-to fallback (a tap landing on a gate reads as
+    // "use the gate", not "walk toward it").
+    //
+    // Owner UX round (2026-07-09) "เดินไปที่ประตูก่อน แล้วค่อยวาป": an unlocked
+    // gate no longer fires `walkToZone` immediately — it ARMS a `gateTrip`
+    // (`ui/world/gateTrip.ts`) that walks the hero to the gate's own anchor x
+    // first (`GateTripWatcher.tsx` fires the exact SAME `walkToZone` intent
+    // the arrows/old immediate-tap used, once the hero arrives). Locked stays
+    // an immediate toast, no trip.
+    function onGateTap(side: "left" | "right"): void {
+      const nav = worldNav(state);
+      const action = resolveGateTap(nav, side, state.kills, CONFIG.killGoal(nav.current.stage));
+      if (action.kind === "walk") {
+        useGameStore.getState().startGateTrip(action.gateX, action.target);
+      } else if (action.kind === "locked") {
+        useGameStore.getState().pushNotice("gateLocked", { need: action.need });
+      }
+    }
+
     function onArenaClick(e: MouseEvent): void {
       if (!arenaEl) return;
       const rect = arenaEl.getBoundingClientRect();
@@ -3137,9 +3170,18 @@ export function GameClient() {
       }
 
       const hit = renderer.hitTestPointer(canvasX, canvasY, state);
-      if (!hit) return;
-      if (hit.kind === "monster") useGameStore.getState().queueAttackTarget(hit.id);
-      else useGameStore.getState().queueMoveTo(hit.x);
+      if (hit?.kind === "monster") {
+        useGameStore.getState().queueAttackTarget(hit.id);
+        return;
+      }
+
+      const gateHit = renderer.hitTestGate(canvasX, canvasY, state);
+      if (gateHit) {
+        onGateTap(gateHit.side);
+        return;
+      }
+
+      if (hit) useGameStore.getState().queueMoveTo(hit.x);
     }
     arenaEl.addEventListener("click", onArenaClick);
 
@@ -3318,6 +3360,20 @@ export function GameClient() {
             `simulated ${ran}/${totalOfflineSteps} steps)`,
         );
       }
+
+      // Owner default (2026-07-09) "เข้าเกมมาบอทจะปิดไว้ก่อน": force the LIVE
+      // session's bot master OFF on every entry, regardless of what the save
+      // says — CRITICALLY queued AFTER the offline-idle replay above, which
+      // ran through `step(state, {})` (an EMPTY input) and therefore never
+      // touched the SAVED bot-master value at all, so offline income stays
+      // byte-identical to today. Queuing here (before the frame loop starts
+      // below) lets the very first live `step()` apply it before the first
+      // throttled snapshot ever displays a stale "ON". Reuses the SAME
+      // `setAutoHunt` intent the AUTO button fires — never a direct engine
+      // mutation — and deliberately does NOT touch `bot.enabled`/
+      // `sellTripEnabled` (the OTHER persisted sub-settings keep whatever the
+      // player saved; only the master switch itself resets).
+      useGameStore.getState().queueSetAutoHunt(false);
 
       // Don't init Pixi against a 0x0 mount (mobile aspect-ratio/flex reflow can
       // report zero for the first frame or two).

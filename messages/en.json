@@ -213,11 +213,11 @@
     "steps": {
       "welcome": {
         "title": "Welcome, {className}!",
-        "body": "Your character just picked the {className} class. It hunts the mobs scattered across the field automatically — your job is to spend stat points, cast skills, and take it to the boss to keep growing stronger. Let's take a look!"
+        "body": "Your character just picked the {className} class. Tap to move/attack and dive in yourself, or flip on the 🤖 bot to let it hunt automatically — your job is to spend stat points, cast skills, and take it to the boss to keep growing stronger. Let's take a look!"
       },
       "watchFight": {
-        "title": "Let your hero fight",
-        "body": "Your hero attacks enemies on its own. Every kill banks gold, and the bar below fills up toward the boss."
+        "title": "Fight your first monster",
+        "body": "Tap a monster to attack it — or flip the 🤖 bot switch above and let your hero fight on its own. Every kill banks gold, and the bar below fills up toward the boss."
       },
       "allocateStats": {
         "title": "Spend stat points on level-up",
@@ -233,7 +233,7 @@
       },
       "botSwitchIntro": {
         "title": "This is the bot switch",
-        "body": "This is the bot switch — you can turn it off if you want to play manually. Turning it off stops ALL automation (skills, stats, potions, town trips, advancing zones); manual play (tap to move/attack) always keeps working. Tap ⚙ next to it to fine-tune each behavior."
+        "body": "This is the bot switch — it starts OFF by default. Turn it on any time to let the game auto-play everything (skills, stats, potions, town trips, advancing zones); manual play (tap to move/attack) always works either way. Tap ⚙ next to it to fine-tune each behavior."
       },
       "bossChallenge": {
         "title": "Challenge the map boss",
@@ -921,6 +921,15 @@
     "asuraTeaserRow": "The Asura Territories ???",
     "asuraHotZoneBadge": "Today's hot zone"
   },
+  "worldMap": {
+    "title": "World Map",
+    "entryAria": "Open the world map",
+    "close": "Close",
+    "bossWindowBadge": "The world boss is around here!",
+    "friendsLastSeenTooltip": "Friend last seen in this zone",
+    "partyMemberTooltip": "Party member last seen in this zone",
+    "populationTooltip": "Players currently here (approximate)"
+  },
   "shop": {
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
@@ -1037,6 +1046,7 @@
     "autoEquipDone": "Bot equipped {count} better item(s)",
     "autoSellNothing": "Bag is full but the auto-sell rules matched nothing - adjust them in Settings or sell manually; the sell-trip bot is paused for now",
     "guideBossDoor": "🚪 Walk into the boss-room door on the right to challenge it!",
+    "gateLocked": "🔒 This gate is still locked — clear {need} more monster(s) to unlock it",
     "guideBossTier3": "You've reached the frontier — hit the challenge button when you're ready",
     "guideGatedTier3Frontier": "Taking you to your frontier — keep unlocking zones onward to map 3's boss gate",
     "walkToLungdueng": "Walk over to Uncle Dueng first",
@@ -1386,6 +1396,14 @@
           "worldToggles": "⚙️ All of it is adjustable in Settings → World Depth — turn each part off (depth/camera/atmosphere) if you prefer the classic look or your device struggles.",
           "levelCap": "📣 Hit the level cap and the whole server hears 'maxed out!' — every capper gets their own announcement, once per character, not just the first.",
           "ownTitleFix": "🏷️ Your title now shows above your own head from the moment you log in — previously only your friends could see it, never you."
+        }
+      },
+      "2026-07-09m": {
+        "items": {
+          "newLook": "✨ A whole new look! Dark-fantasy theme with gold-and-purple frames and a fresh, easier-to-read font",
+          "gates": "🚪 Walk through real gates! The zone arrow buttons are gone — tap the archway at the edge of a zone to walk on. Locked gates tell you how many monsters are left",
+          "worldMap": "🗺️ The World Map is here — tap the zone name chip (top-left) to see every map and zone, how many players are online where, where your friends are, today's hot zone, and warp to any unlocked zone",
+          "botDefault": "🤖 The bot now starts OFF when you log in — flip on AUTO whenever you want it to play for you"
         }
       }
     }

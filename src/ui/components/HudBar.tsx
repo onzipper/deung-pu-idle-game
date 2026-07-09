@@ -20,6 +20,12 @@
  * + an icon, sized to read at a glance on a phone; the stage recedes into a
  * small chip badge (still >= 11px, never the unreadable 8-10px micro-text the
  * old pass shipped).
+ *
+ * R1 W4: the stage chip is now a tappable button opening `WorldMapPanel` (the
+ * "where is everything" surface — population/friends/party/hot-zone/boss
+ * window). The 🌀 warp button stays exactly where it was, unchanged — "warp =
+ * ONE place" per the house rule; the world map is a SEPARATE surface, not a
+ * second warp menu.
  */
 
 import { useTranslations } from "next-intl";
@@ -28,6 +34,7 @@ import { FastTravelPicker } from "@/ui/components/FastTravelPicker";
 import { MaterialIcon } from "@/ui/components/icons";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
 import { useGameStore } from "@/ui/store/gameStore";
+import { WorldMapPanel } from "@/ui/world/WorldMapPanel";
 
 export function HudBar() {
   const stage = useGameStore((s) => s.stage);
@@ -36,20 +43,32 @@ export function HudBar() {
   const worldTraveling = useGameStore((s) => s.world.traveling);
   const channeling = useGameStore((s) => s.fastTravelChannel !== null);
   const [fastTravelOpen, setFastTravelOpen] = useState(false);
+  const [worldMapOpen, setWorldMapOpen] = useState(false);
   const t = useTranslations("hud");
   const tWorld = useTranslations("world");
+  const tWorldMap = useTranslations("worldMap");
 
   const goldPulse = usePulseOnIncrease(gold);
   const materialsPulse = usePulseOnIncrease(materials);
 
   return (
     <div className="flex w-full items-center gap-2 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel px-4 py-3 text-ddp-ink shadow-(--ddp-shadow-panel) backdrop-blur-sm">
-      <span className="inline-flex items-baseline gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2.5 py-1.5">
+      <button
+        type="button"
+        onClick={() => setWorldMapOpen(true)}
+        aria-label={tWorldMap("entryAria")}
+        title={tWorldMap("entryAria")}
+        className="flex min-h-11 items-baseline gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 px-2.5 py-1.5 transition-colors active:scale-95 hover:bg-black/40"
+      >
         <span className="text-[11px] font-semibold tracking-wide text-ddp-ink-muted uppercase">
           {t("stageLabel")}
         </span>
         <span className="text-lg font-bold text-emerald-300 tabular-nums">{stage}</span>
-      </span>
+        <span aria-hidden className="text-[10px] text-ddp-ink-muted">
+          ▸
+        </span>
+      </button>
+      {worldMapOpen && <WorldMapPanel onClose={() => setWorldMapOpen(false)} />}
       <button
         type="button"
         disabled={worldTraveling || channeling}

@@ -46,6 +46,7 @@ function makeSnapshot(
         cls: "swordsman",
         hp: 100,
         maxHp: 100,
+        x: 0,
         skillCd: 0,
         atkBuffMult: buff.mult,
         atkBuffTimer: buff.timer,

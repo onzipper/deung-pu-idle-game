@@ -13,6 +13,8 @@
  * lazily while `ghostsVisible && page-visible`.
  */
 
+import { setCachedRelayUrl } from "./relayUrlCache";
+
 interface WorldSessionHandlers {
   /** A peer presence snapshot (`{t:"p",payload}` frame). The RAW payload — the caller's
    *  `GhostStore` validates it. This is the entire presence write surface. */
@@ -218,7 +220,11 @@ export class WorldSession {
     try {
       const res = await fetch("/api/presence/ticket", { method: "POST" });
       if (!res.ok) return null; // 409 no_character / 503 relay_not_configured / 500
-      return (await res.json()) as PresenceTicketResponse;
+      const parsed = (await res.json()) as PresenceTicketResponse;
+      // Seam only: publish the relayUrl for a future read-only counts consumer. Additive —
+      // the world socket lifecycle below is unchanged (see relayUrlCache.ts).
+      setCachedRelayUrl(parsed.relayUrl);
+      return parsed;
     } catch {
       return null;
     }

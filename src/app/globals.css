@@ -31,8 +31,22 @@
   --ddp-good: #4ade80;
   --ddp-bad: #e24b4a;
 
+  /* R1 "โลกใหม่ หน้าตาใหม่" (W1 design system, owner dark-fantasy MMORPG
+     reference). `--ddp-gold-border`/`--ddp-glow-gold` are the signature
+     TOP-LEVEL panel frame (Panel `variant="gold"` — see
+     `ui/components/primitives/Panel.tsx`); nested rows/sub-boxes keep the
+     plain slate `--ddp-border` look, gold must stay special. `--ddp-boss`
+     (purple) is promoted from "boss telegraph accent" to the general chrome
+     accent: panel-header underlines, active tabs, secondary buttons. */
+  --ddp-gold-border: rgba(242, 177, 52, 0.45);
+  --ddp-glow-gold:
+    0 0 0 1px rgba(242, 177, 52, 0.35), inset 0 1px 0 rgba(255, 216, 115, 0.1),
+    0 8px 30px -16px rgba(0, 0, 0, 0.7);
+  --ddp-ink-dim: rgba(143, 151, 201, 0.55);
+
   --ddp-radius-lg: 1.25rem; /* panels/dock/arena frame */
   --ddp-radius-md: 0.85rem; /* buttons/chips */
+  --ddp-radius-sm: 0.5rem; /* badges/inner tiles */
 
   --ddp-shadow-panel:
     0 12px 32px -14px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -57,20 +71,48 @@
   --color-ddp-boss-light: var(--ddp-boss-light);
   --color-ddp-good: var(--ddp-good);
   --color-ddp-bad: var(--ddp-bad);
+  --color-ddp-gold-border: var(--ddp-gold-border);
+  --color-ddp-ink-dim: var(--ddp-ink-dim);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  /* next/font self-hosted Chakra Petch (Thai + Latin, see layout.tsx) as the
-     ONE display/body face for the whole HUD. Chosen over a Latin-only display
-     font + separate Thai fallback because Chakra Petch is Thai-drawn (not a
-     Latin face with a Thai substitute) — headers, numerals, and Thai labels
-     share one gamey, slightly angular voice instead of visibly swapping fonts
-     mid-string. System Thai fallbacks stay in the stack in case the
-     self-hosted font ever fails to load. */
-  font-family: var(--font-display), "Noto Sans Thai", "Segoe UI", Tahoma, sans-serif;
+  /* R1 W1 type system: two self-hosted next/font Google fonts (Thai + Latin
+     subsets, see layout.tsx), replacing the old single-face Chakra Petch.
+     Kanit 600/800 (`--font-display`) is the header/numerals/button voice —
+     angular and heavy, reserved for display elements. Prompt 400
+     (`--font-body`) is the DEFAULT here on body: long-form Thai copy reads
+     better in a text-drawn weight than in a heavy display face. Opt back
+     into either explicitly via the `.font-display`/`.font-body` utilities
+     below (e.g. a heading nested inside body copy, or vice versa). System
+     Thai fallbacks stay in both stacks in case a self-hosted font fails to
+     load. */
+  font-family: var(--font-body), "Noto Sans Thai", "Segoe UI", Tahoma, sans-serif;
   overflow-x: hidden;
+}
+
+.font-display {
+  font-family: var(--font-display), "Noto Sans Thai", "Segoe UI", Tahoma, sans-serif;
+}
+
+.font-body {
+  font-family: var(--font-body), "Noto Sans Thai", "Segoe UI", Tahoma, sans-serif;
+}
+
+/* R1 W1 primitives motion rule: honor the OS-level reduced-motion preference
+   by zeroing every CSS transition/animation duration globally (plain media
+   query, same "no JS animation library needed" convention as the rest of
+   this file's keyframes — see the M4 juice comment above). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /*

@@ -734,6 +734,35 @@ function createRelay(opts = {}) {
       );
       return;
     }
+    if (url === "/presence/counts") {
+      // Public aggregate of joined ghost-presence members per zoneKey (protocol §11).
+      // No auth: it exposes only headcounts, no identities. Same wildcard-CORS shape as
+      // /health so a browser on the game origin can read it cross-origin.
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+        });
+        res.end();
+        return;
+      }
+      // Every member in a presence room has completed pjoin (handlePresenceJoin is the
+      // only path that adds to room.members), so members.size == joined count. A socket
+      // that connected but never pjoined is in no room at all. Empty rooms are dropped on
+      // leave, but omit any 0-count room defensively anyway.
+      const counts = {};
+      for (const [zone, room] of presenceRooms) {
+        const n = room.members.size;
+        if (n > 0) counts[zone] = n;
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify({ v: 1, counts }));
+      return;
+    }
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("party-relay: POST a websocket upgrade with a join ticket. See /health.");
   });

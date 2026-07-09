@@ -27,6 +27,11 @@ const OPENING_WIDTH = 60; // clear space between posts — each leaf is half thi
 const LEAF_HEIGHT = 86;
 const FRAME_TOP_HEIGHT = 16;
 
+/** Local (negative-y, above ground) y of the frame's top edge — same anchor
+ * role as `gateArch.ts`'s `ARCH_TOP` (R1 W2 "tappable gates"'s
+ * `gateLockOverlay.ts` hangs its padlock/progress-bar readout from this). */
+export const BOSS_DOOR_ARCH_TOP = -(POST_HEIGHT + FRAME_TOP_HEIGHT);
+
 /** How far (radians) each leaf swings by the time it's fully open. */
 const OPEN_ANGLE = 0.55;
 /** Per-second lerp rate easing `openness` toward its 0/1 target. */
@@ -98,9 +103,22 @@ export class BossDoorProp {
   private unlocked = false;
   private glowPhase = Math.random() * Math.PI * 2;
 
-  constructor(x: number, groundY: number, family: GateFamily, biome: BiomeDef) {
+  constructor(
+    x: number,
+    groundY: number,
+    family: GateFamily,
+    biome: BiomeDef,
+    /** R1 W2 "tappable gates": the boss's OWN theme accent (`bossThemes.ts`'s
+     * `crownColor`, e.g. the demon-realm's ram-horn red or the ice sovereign's
+     * pale blue) — overrides `paletteFor`'s biome-generic glow so the door
+     * reads as "this specific boss lives here", not just "a themed door".
+     * Optional (defaults to the biome accent) so existing callers/tests that
+     * don't care about boss identity keep working unchanged. */
+    themeAccent?: number,
+  ) {
     this.view.position.set(x, groundY);
     const pal = paletteFor(family, biome);
+    if (themeAccent !== undefined) pal.glow = themeAccent;
 
     // Static outer frame: two posts + a top lintel — never changes.
     const frame = new Graphics();
