@@ -921,6 +921,15 @@
     "asuraTeaserRow": "ดินแดนอสูร ???",
     "asuraHotZoneBadge": "โซนฮอตวันนี้"
   },
+  "worldMap": {
+    "title": "แผนที่โลก",
+    "entryAria": "เปิดแผนที่โลก",
+    "close": "ปิด",
+    "bossWindowBadge": "เสี่ยจ๋องอยู่แถวนี้!",
+    "friendsLastSeenTooltip": "เพื่อนอยู่โซนนี้ล่าสุด",
+    "partyMemberTooltip": "เพื่อนร่วมทีมอยู่โซนนี้ล่าสุด",
+    "populationTooltip": "มีคนอยู่ในโซนนี้ตอนนี้ (โดยประมาณ)"
+  },
   "shop": {
     "title": "ร้านค้าในเมือง",
     "subtitle": "ซื้อของตุนก่อนออกไปลุย",

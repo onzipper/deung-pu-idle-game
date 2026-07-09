@@ -921,6 +921,15 @@
     "asuraTeaserRow": "The Asura Territories ???",
     "asuraHotZoneBadge": "Today's hot zone"
   },
+  "worldMap": {
+    "title": "World Map",
+    "entryAria": "Open the world map",
+    "close": "Close",
+    "bossWindowBadge": "The world boss is around here!",
+    "friendsLastSeenTooltip": "Friend last seen in this zone",
+    "partyMemberTooltip": "Party member last seen in this zone",
+    "populationTooltip": "Players currently here (approximate)"
+  },
   "shop": {
     "title": "Town Shop",
     "subtitle": "Stock up before you head out",
