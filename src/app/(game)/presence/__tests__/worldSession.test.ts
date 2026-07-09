@@ -113,6 +113,41 @@ describe("WorldSession — connect + zone switch", () => {
     expect(chats).toEqual([{ t: "c", entry: { text: "hi" } }]);
   });
 
+  it("routes inbound `pa` action frames to onGhostAction ONLY (additive, alongside onGhost)", async () => {
+    const ghosts: unknown[] = [];
+    const actions: unknown[] = [];
+    const ws = new WorldSession({
+      onGhost: (p) => ghosts.push(p),
+      onGhostAction: (p) => actions.push(p),
+    });
+    ws.setZone("map-1", 1);
+    ws.connect();
+    await flush();
+    const sock = instances[0];
+    sock.open();
+
+    sock.onmessage?.({ data: JSON.stringify({ t: "p", payload: { v: 1, cid: "peer" } }) });
+    sock.onmessage?.({
+      data: JSON.stringify({ t: "pa", payload: { v: 1, cid: "peer", x: 5, f: 1, a: "basic", at: 3, t: 9 } }),
+    });
+
+    expect(ghosts).toEqual([{ v: 1, cid: "peer" }]);
+    expect(actions).toEqual([{ v: 1, cid: "peer", x: 5, f: 1, a: "basic", at: 3, t: 9 }]);
+  });
+
+  it("drops `pa` frames silently when no onGhostAction handler is wired (forward-compat)", async () => {
+    const ws = new WorldSession({ onGhost: () => {} }); // no onGhostAction
+    ws.setZone("map-1", 1);
+    ws.connect();
+    await flush();
+    const sock = instances[0];
+    sock.open();
+    // Must not throw.
+    expect(() =>
+      sock.onmessage?.({ data: JSON.stringify({ t: "pa", payload: { v: 1, cid: "x", x: 0, a: "dash", at: 1 } }) }),
+    ).not.toThrow();
+  });
+
   it("setPresenceEnabled(false) sends pleave and suppresses future pjoin; re-enabling rejoins", async () => {
     const ws = new WorldSession({ onGhost: () => {} });
     ws.setZone("map-1", 1);

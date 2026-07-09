@@ -244,8 +244,8 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/views/enemyView.ts` — kind-specific enemy silhouette rig (normal/fast/tank/ranged personality shapes).
 - `src/render/views/npcView.ts` — town NPC rig + tap-interaction anchor rendering.
 - `src/render/views/heroView.ts` — articulated per-class hero rig, gear paper-doll, weapon/armor anchor hooks, facing/attack anim.
-- `src/render/views/ghostLayer.ts` — pooled ghost-presence rig rendering for other players' heroes (walk/idle poses only).
-- `src/render/views/__tests__/` — pins headless rig bounds, enemy species, world boss, gear tier7-10, hero facing/party, asura elite, legendary weapon, npc view; 9 files.
+- `src/render/views/ghostLayer.ts` — pooled ghost-presence rig rendering for other players' heroes (walk/idle + R3 edge-triggered `pa` pose pulses; no fx/camera/audio).
+- `src/render/views/__tests__/` — pins headless rig bounds, enemy species, world boss, gear tier7-10, hero facing/party, asura elite, legendary weapon, npc view, ghost-layer pose/invariants; 10 files.
 
 ### src/render/worldDepth/
 - `src/render/worldDepth/atmosphere.ts` (`createAtmosphere`) — day/night + weather + critters runtime composing pure math with pooled Pixi layers.
@@ -289,10 +289,10 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/app/(game)/cohortNet.ts` — pure network-quality HUD chip math (RTT EMA, laggiest-member picker).
 - `src/app/(game)/presence/worldSession.ts` — the "world socket": one WebSocket for ghost-presence + global chat + ping, pub/sub, lossy, zero engine coupling.
 - `src/app/(game)/presence/presencePublish.ts` — pure sampling of MY hero into a presence wire snapshot (one-way read only).
-- `src/app/(game)/presence/ghostStore.ts` — pure ghost-presence receive store: ingest snapshots → interpolated/faded/capped ghost list for render.
+- `src/app/(game)/presence/ghostStore.ts` — pure ghost-presence receive store: ingest `p` snapshots + R3 `pa` action frames → interpolated/faded/capped ghost list (action = pose/facing, never liveness) for render.
 - `src/app/(game)/presence/relayUrlCache.ts` — one-slot module cache of the last-minted presence-ticket relay URL.
 - `src/app/(game)/__tests__/` — lockstep/cohort/party pure-logic pins (catchUp, cohortBotTrip, cohortBadges, buildFrameInput, cohortNet, partyHandshake, partySession, cohortWallet, cohortProgress, cohortTurnEngine, soloFrameDrain); 11 files.
-- `src/app/(game)/presence/__tests__/` — ghost-presence/world-socket pins (ghostStore, presencePublish, ghostGuard "presence never touches engine", worldSession); 4 files.
+- `src/app/(game)/presence/__tests__/` — ghost-presence/world-socket pins (ghostStore, ghostAction R3 stream, presencePublish, ghostGuard "presence never touches engine", worldSession); 5 files.
 
 ### src/app/ — root routes
 - `src/app/characterGate.ts` — read-only server-side "does this visitor have a resolvable active character" gate (cookie-read only, no writes).

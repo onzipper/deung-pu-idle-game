@@ -19,6 +19,12 @@ interface WorldSessionHandlers {
   /** A peer presence snapshot (`{t:"p",payload}` frame). The RAW payload — the caller's
    *  `GhostStore` validates it. This is the entire presence write surface. */
   onGhost: (payload: unknown) => void;
+  /** R3 additive: a peer VISUAL-ACTION frame (`{t:"pa",payload}` — pose/facing stream,
+   *  design §5 wave 3). RAW payload, validated by the caller's `GhostStore.ingestAction`.
+   *  A display feed like `onGhost` — never liveness, never engine. Optional so existing
+   *  call sites (older wiring, tests) that don't consume the action stream keep compiling;
+   *  a `pa` frame with no handler is simply dropped, same as any unknown `t`. */
+  onGhostAction?: (payload: unknown) => void;
   /** A chat frame (`{t:"c"|"c-history"|"c-rej", ...}`), RAW and unvalidated — the
    *  caller's `ui/chat/chatMessages.ts#parseChatFrame` is the one place that trusts its
    *  shape (THE ONE RULE, module doc: this class never inspects chat content itself). */
@@ -281,6 +287,12 @@ export class WorldSession {
       case "p":
         // Presence snapshot -> the GhostStore ONLY. No other path exists (invariant #3).
         this.handlers.onGhost(msg.payload);
+        break;
+      case "pa":
+        // R3 visual-action stream -> the GhostStore's action surface ONLY (display pose +
+        // facing). Same one-way discipline as `p`; unknown `a` values are dropped downstream
+        // by `parseGhostAction`. No handler wired -> silently ignored (forward-compat).
+        this.handlers.onGhostAction?.(msg.payload);
         break;
       case "c":
       case "c-history":

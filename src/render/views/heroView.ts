@@ -1690,6 +1690,49 @@ function startAttack(anim: HeroAnimState, kind: AttackKindAnim): void {
   else if (kind === "dualSlash") anim.comboIndex = (anim.comboIndex + 1) % 2;
 }
 
+/**
+ * Ghost-presence (R3) render-only pose pulse. A GHOST rig is fed `events: []` and a
+ * constant `cd`, so it never self-triggers an attack pose through `updateHeroView`'s
+ * event/cd path. `ghostLayer.ts` edge-triggers this ADDITIVE entry point instead — off a
+ * peer's `pa` action counter — to play the class-appropriate attack/skill pose ONCE, which
+ * then decays back to walk/idle on its own (`resolveAttack`). Purely rig-level: it only
+ * calls `startAttack` (arm rotation), emitting NO `GameEvent`, NO fx, NO camera/audio, and
+ * never touching the HP bar or POV — the exact same surface a real hero's own basic/skill
+ * pose uses, minus the event that would also spawn projectiles/sparks/sfx.
+ *
+ * `pulse` is a generic pose intent, NOT a ghost concept: `"basic"` = the class basic swing/
+ * shot, `"skill"` = the class skill pose, `"dash"` = a quick strike (the ninja-style dash
+ * has no dedicated rig pose — its shadow-streak is engine-fx-driven and never fires for a
+ * ghost, so it reads as a basic-speed strike). No-op before the rig is built (`cls` null).
+ * Real heroes never call this; `HeroFrameContext`/`updateHeroView` are UNCHANGED.
+ */
+export type HeroPosePulse = "basic" | "skill" | "dash";
+
+function posePulseToKind(cls: HeroClass, pulse: HeroPosePulse): AttackKindAnim {
+  if (pulse === "skill") {
+    return cls === "swordsman"
+      ? "spin"
+      : cls === "archer"
+        ? "triple"
+        : cls === "ninja"
+          ? "dualSlash"
+          : "castHold";
+  }
+  // "basic" and "dash": a quick class strike/shot.
+  return cls === "swordsman"
+    ? "swing"
+    : cls === "archer"
+      ? "release"
+      : cls === "ninja"
+        ? "dualSlash"
+        : "staffPulse";
+}
+
+export function playHeroPosePulse(view: HeroView, pulse: HeroPosePulse): void {
+  if (view.cls === null) return; // rig not built yet — skip (next edge will land)
+  startAttack(view.anim, posePulseToKind(view.cls, pulse));
+}
+
 interface AttackFx {
   weaponDelta: number;
   offArmDelta: number;
