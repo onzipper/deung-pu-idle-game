@@ -1397,6 +1397,13 @@
           "levelCap": "📣 Hit the level cap and the whole server hears 'maxed out!' — every capper gets their own announcement, once per character, not just the first.",
           "ownTitleFix": "🏷️ Your title now shows above your own head from the moment you log in — previously only your friends could see it, never you."
         }
+      },
+      "2026-07-09m": {
+        "items": {
+          "newLook": "✨ A whole new look! Dark-fantasy theme with gold-and-purple frames and a fresh, easier-to-read font",
+          "gates": "🚪 Walk through real gates! The zone arrow buttons are gone — tap the archway at the edge of a zone to walk on. Locked gates tell you how many monsters are left",
+          "worldMap": "🗺️ The World Map is here — tap the zone name chip (top-left) to see every map and zone, how many players are online where, where your friends are, today's hot zone, and warp to any unlocked zone"
+        }
       }
     }
   },

@@ -359,6 +359,18 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09l.items.ownTitleFix",
     ],
   },
+  // R1 "โลกใหม่ หน้าตาใหม่" — dark-fantasy design system v1 (owner-reference),
+  // tappable zone gates replace the walk arrows, world map panel w/ live
+  // zone populations.
+  {
+    id: "2026-07-09m",
+    date: "2026-07-09",
+    items: [
+      "releases.2026-07-09m.items.newLook",
+      "releases.2026-07-09m.items.gates",
+      "releases.2026-07-09m.items.worldMap",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
