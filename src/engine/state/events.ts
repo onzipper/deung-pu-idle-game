@@ -47,7 +47,14 @@ export type GameEvent =
       amount: number;
       source: HitSource;
     }
-  | { type: "kill"; kind: EnemyKind; x: number; y: number; goldGained: number }
+  // `id` = the KILLED enemy's entity id (W4 "โลกมีมิติ" render wave). Lets the fx
+  // layer resolve that enemy's depth band + terrain foot-line to anchor the kill
+  // pop / corpse echo / soul wisp on sloped ground — the enemy's pooled view is
+  // already released by the time render drains this event, so its position can't
+  // be read back from a view. ADDITIVE + transient like every event field: never
+  // hashed/persisted (house precedent: `heroIdx` on moveOrdered/targetLocked, PR
+  // #36). Deterministic (no RNG draw).
+  | { type: "kill"; kind: EnemyKind; x: number; y: number; goldGained: number; id: number }
   | { type: "heroDown"; id: number; cls: HeroClass; x: number; y: number }
   | { type: "heroRevived"; id: number; cls: HeroClass; x: number; y: number }
   | { type: "levelUp"; id: number; cls: HeroClass; level: number }

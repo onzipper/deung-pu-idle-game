@@ -471,6 +471,10 @@ export class GameRenderer {
       world,
       (target, id) => this.getEntityView(target, id),
       (id) => this.heroPool?.peek(id) ?? null,
+      // W4 "โลกมีมิติ": host the pixel-weapon-fx layer on the camera-panned
+      // `cameraRoot` + hand the fx layer the shared ground/depth seam so its
+      // kill/impact/foot anchors ride terrain. Flags default OFF ⇒ identity.
+      { cameraRoot: this.cameraRoot, worldFx: this.worldFx },
     );
     // Apply whatever POV index was already registered (possibly before
     // `create()` resolved) — same "ordering doesn't matter" guarantee

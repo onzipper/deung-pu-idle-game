@@ -28,6 +28,18 @@
  * origin by construction). No manual `toGlobal`/bounds bookkeeping needed,
  * and it stays correct across resizes automatically since scale is read
  * fresh at each trigger.
+ *
+ * W4 "โลกมีมิติ" living camera: impact points arrive in `cameraRoot`-LOCAL space
+ * (entities/fx ride the `cameraRoot` the camera pans+zooms — see
+ * `GameRenderer.create()`), while the filter still lives on `world`. So an impact
+ * point maps to filter-space through the camera's own scale+pan FIRST, then the
+ * letterbox scale: `center = (worldX·camScale + camPos)·worldScale`; the ripple's
+ * spatial knobs scale by `worldScale·camScale`. The camera transform is read
+ * INSTANTANEOUSLY at trigger (same one-shot approximation as the punch-scale
+ * read), and when the camera flag is off `cameraRoot` is snapped to identity
+ * (scale 1, pos 0) — or the ref is absent entirely — so `camScale=1, camPos=0`
+ * makes the whole mapping collapse back to the pre-W4 `worldX·worldScale`,
+ * pixel-identical.
  */
 
 import type { Container, Filter } from "pixi.js";
@@ -60,16 +72,35 @@ export class ImpactFilterController {
    * `world.filters` is only reassigned then, never every frame. */
   private dirty = false;
 
-  constructor(private readonly world: Container) {}
+  /** `cameraRoot` (W4): the container the living camera pans/zooms, holding the
+   * entities/fx the impact point is expressed relative to. Null (or identity)
+   * ⇒ the camera term vanishes = pre-W4 mapping. */
+  constructor(
+    private readonly world: Container,
+    private readonly cameraRoot: Container | null = null,
+  ) {}
 
-  /** Fire the shockwave centered on a WORLD-space impact point. */
+  /** Fire the shockwave centered on a `cameraRoot`-local impact point (world/
+   * engine coords). See this file's header for the world→filter mapping; the
+   * camera term is an instantaneous read that collapses to the pre-W4 math when
+   * the camera is off/identity. */
   triggerShockwave(worldX: number, worldY: number): void {
     const scale = this.world.scale.x;
-    this.shockwave.center = { x: worldX * scale, y: worldY * scale };
-    this.shockwave.radius = SHOCKWAVE_RADIUS_WORLD * scale;
-    this.shockwave.wavelength = SHOCKWAVE_WAVELENGTH_WORLD * scale;
-    this.shockwave.speed = SHOCKWAVE_SPEED_WORLD * scale;
-    this.shockwave.amplitude = SHOCKWAVE_AMPLITUDE_WORLD * scale;
+    const cam = this.cameraRoot;
+    const camScale = cam ? cam.scale.x : 1;
+    const camPosX = cam ? cam.position.x : 0;
+    const camPosY = cam ? cam.position.y : 0;
+    // Spatial size composes both zooms (letterbox × camera); center maps through
+    // the camera (scale+pan) then the letterbox scale.
+    const spatial = scale * camScale;
+    this.shockwave.center = {
+      x: (worldX * camScale + camPosX) * scale,
+      y: (worldY * camScale + camPosY) * scale,
+    };
+    this.shockwave.radius = SHOCKWAVE_RADIUS_WORLD * spatial;
+    this.shockwave.wavelength = SHOCKWAVE_WAVELENGTH_WORLD * spatial;
+    this.shockwave.speed = SHOCKWAVE_SPEED_WORLD * spatial;
+    this.shockwave.amplitude = SHOCKWAVE_AMPLITUDE_WORLD * spatial;
     this.shockwave.time = 0;
     this.shockwaveT = SHOCKWAVE_DURATION;
     if (!this.shockwaveActive) {
