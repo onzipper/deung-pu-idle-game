@@ -13,7 +13,7 @@
 
 import type { ReactNode } from "react";
 
-export type CurrencyChipVariant = "gold" | "violet" | "neutral";
+export type CurrencyChipVariant = "gold" | "violet" | "neutral" | "danger";
 
 export interface CurrencyChipProps {
   icon: ReactNode;
@@ -29,6 +29,9 @@ const VARIANT_CLASS: Record<CurrencyChipVariant, string> = {
   gold: "border-ddp-gold/30 bg-ddp-gold/10 text-ddp-gold",
   violet: "border-violet-400/25 bg-violet-400/10 text-violet-300",
   neutral: "border-ddp-border-soft bg-black/25 text-ddp-ink",
+  // Insufficient/cost-short state (R2.7 refine chips) — a real variant instead
+  // of a className override so color utilities never fight the base variant's.
+  danger: "border-ddp-bad/50 bg-ddp-bad/10 text-ddp-bad",
 };
 
 export function CurrencyChip({

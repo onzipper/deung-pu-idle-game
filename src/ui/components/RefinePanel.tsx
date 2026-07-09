@@ -637,22 +637,20 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                       <CurrencyChip
                         icon={<MaterialIcon className="h-3.5 w-3.5" />}
                         value={`${materials.toLocaleString()}/${cost.materials.toLocaleString()}`}
-                        variant="violet"
-                        className={!canAffordMaterials ? "border-ddp-bad/50 bg-ddp-bad/10 text-ddp-bad" : ""}
-                        ariaLabel={t("costAria", {
+                        variant={canAffordMaterials ? "violet" : "danger"}
+                        ariaLabel={`${tHud("materialsAria")} — ${t("costAria", {
                           owned: materials.toLocaleString(),
                           required: cost.materials.toLocaleString(),
-                        })}
+                        })}`}
                       />
                       <CurrencyChip
                         icon={<Coin className="h-3.5 w-3.5" />}
                         value={`${gold.toLocaleString()}/${cost.gold.toLocaleString()}`}
-                        variant="gold"
-                        className={!canAffordGold ? "border-ddp-bad/50 bg-ddp-bad/10 text-ddp-bad" : ""}
-                        ariaLabel={t("costAria", {
+                        variant={canAffordGold ? "gold" : "danger"}
+                        ariaLabel={`${tHud("goldAria")} — ${t("costAria", {
                           owned: gold.toLocaleString(),
                           required: cost.gold.toLocaleString(),
-                        })}
+                        })}`}
                       />
                       {(!canAffordMaterials || !canAffordGold) && (
                         <span className="text-[10px] font-bold text-rose-400">

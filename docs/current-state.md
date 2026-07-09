@@ -8,8 +8,8 @@ _Last updated: 2026-07-10 (post-R2.7 UI Wave A #55 + audit #54; round detail in 
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5 game screen ✅ → R2.6 quest tracker/skill dock ✅ (both on `develop`, unmerged) → R2.7 UI Wave A ✅ (PR `ui/issue-55-wave-a` → develop, pending owner)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
-- **Branches**: `develop` = R2 + R2.5 + R2.6 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). `ui/issue-55-wave-a` = R2.7 (PR open → develop).
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5 game screen ✅ → R2.6 quest tracker/skill dock ✅ (both on `develop`, unmerged) → R2.7 UI Wave A ✅ (#55 / PR #56 → develop, awaiting owner eye-test)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
+- **Branches**: `develop` = R2 + R2.5 + R2.6 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). R2.7 = PR #56.
 - **Suite**: 2287 tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10b (Wave A).
 
 ## Latest work (on develop, awaiting owner)
