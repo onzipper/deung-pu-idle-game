@@ -149,6 +149,10 @@ describe("atmosphere — ON at a night nowMs", () => {
     expect(hosts.background.tint).toBeLessThan(0xffffff);
     expect(hosts.ghosts.tint).toBeLessThan(0xffffff);
     expect(hosts.entities.tint).toBeLessThan(0xffffff);
+    // Actor readability relief: entities are tinted LESS than the moody
+    // backdrop/ghosts (see entityAmbientTint) so mobs/HP bars stay legible.
+    expect(hosts.entities.tint).toBeGreaterThan(hosts.background.tint);
+    expect(hosts.entities.tint).toBeGreaterThan(hosts.ghosts.tint);
     expect(nightOverlayOf(world, cameraRoot).alpha).toBeGreaterThan(0);
     // t=0.75 is the exact "กลางคืน" keyframe: nightness=1.
     expect(firefliesViewOf(cameraRoot, hosts.entities).alpha).toBeCloseTo(1, 5);

@@ -12,7 +12,7 @@
  *                      the scene at noon and must look exactly like today.
  *     t=0.50 ค่ำ       orange-purple dusk
  *     t=0.75 กลางคืน   deep blue night, nightness 1 (fireflies fade in on
- *                      this channel), overlay at its 0.35 ceiling
+ *                      this channel), overlay at its OVERLAY_ALPHA_MAX ceiling
  *
  * Consumers: sky/strata containers tint with skyTint/ambientTint, a
  * screen-fixed overlay rect uses overlayColor/overlayAlpha, and critters read
@@ -27,7 +27,21 @@ import { lerpColor } from "@/render/environment/colorUtils";
 // ---------------------------------------------------------------------------
 
 /** Hard ceiling for the night overlay — keep the action readable. */
-export const OVERLAY_ALPHA_MAX = 0.35;
+export const OVERLAY_ALPHA_MAX = 0.26;
+
+/**
+ * Fraction the entities-container tint is pulled back toward white so actors
+ * (mobs/heroes/HP bars) stay readable at night while background/ghosts keep
+ * the full mood tint. 0 = same as ambient, 1 = never tinted.
+ */
+export const ENTITY_TINT_RELIEF = 0.5;
+
+/** Ambient tint relieved for the entities container (owner call: actors
+ * readable, backdrop moody). Pure; white stays white so the noon/OFF
+ * neutral baseline is untouched. */
+export function entityAmbientTint(ambientTint: number): number {
+  return lerpColor(ambientTint, 0xffffff, ENTITY_TINT_RELIEF);
+}
 
 /** Length of one accelerated day/night cycle, ms. Owner call: 30 min/day, run
  * off a shared wall clock (Date.now()) so every client sees the SAME phase —

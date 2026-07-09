@@ -50,7 +50,7 @@ import { Container, Graphics } from "pixi.js";
 import type { Zone } from "@/engine";
 import { WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
 import { createCritters, type Critters } from "./critters";
-import { cyclePhase, samplePalette, type DayPalette } from "./dayNight";
+import { cyclePhase, entityAmbientTint, samplePalette, type DayPalette } from "./dayNight";
 import { createWeatherLayer, type WeatherLayer } from "./weather";
 import { WEATHER_WINDOW_MS, weatherFor } from "./weatherSchedule";
 
@@ -176,7 +176,9 @@ export function createAtmosphere(hosts: AtmosphereHosts): Atmosphere {
     const palette = samplePalette(cyclePhase(nowMs), paletteScratch);
     hosts.background.tint = palette.ambientTint;
     hosts.ghosts.tint = palette.ambientTint;
-    hosts.entities.tint = palette.ambientTint;
+    // Actors get a relieved tint (pulled toward white) so mobs/heroes/HP bars
+    // stay readable at deep night while the backdrop keeps the full mood.
+    hosts.entities.tint = entityAmbientTint(palette.ambientTint);
     nightOverlay.tint = palette.overlayColor;
     nightOverlay.alpha = palette.overlayAlpha;
 

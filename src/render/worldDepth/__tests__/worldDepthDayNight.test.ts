@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { OVERLAY_ALPHA_MAX, samplePalette, type DayPalette } from "@/render/worldDepth/dayNight";
+import {
+  ENTITY_TINT_RELIEF,
+  entityAmbientTint,
+  OVERLAY_ALPHA_MAX,
+  samplePalette,
+  type DayPalette,
+} from "@/render/worldDepth/dayNight";
 import { lerpColor } from "@/render/environment/colorUtils";
 
 function channels(color: number): [number, number, number] {
@@ -66,7 +72,7 @@ describe("worldDepth day/night palette — experiment ⑨", () => {
     }
   });
 
-  it("overlayAlpha stays in [0, 0.35] over a dense sweep", () => {
+  it("overlayAlpha stays in [0, OVERLAY_ALPHA_MAX] over a dense sweep", () => {
     for (let i = 0; i <= 2048; i++) {
       const p: DayPalette = samplePalette(i / 2048);
       expect(p.overlayAlpha).toBeGreaterThanOrEqual(0);
@@ -74,5 +80,30 @@ describe("worldDepth day/night palette — experiment ⑨", () => {
       expect(p.nightness).toBeGreaterThanOrEqual(0);
       expect(p.nightness).toBeLessThanOrEqual(1);
     }
+  });
+
+  describe("entityAmbientTint — actor readability relief", () => {
+    it("is strictly brighter than the ambient tint at deep night, per channel", () => {
+      const night = samplePalette(0.75);
+      const relieved = entityAmbientTint(night.ambientTint);
+      const amb = channels(night.ambientTint);
+      const rel = channels(relieved);
+      for (let i = 0; i < 3; i++) {
+        expect(rel[i]).toBeGreaterThan(amb[i]);
+        expect(rel[i]).toBeLessThanOrEqual(0xff);
+      }
+    });
+
+    it("keeps the noon/OFF neutral baseline: white stays exactly white", () => {
+      expect(entityAmbientTint(0xffffff)).toBe(0xffffff);
+      expect(entityAmbientTint(samplePalette(0.25).ambientTint)).toBe(0xffffff);
+    });
+
+    it("matches the knob: lerp toward white by ENTITY_TINT_RELIEF", () => {
+      const night = samplePalette(0.75);
+      expect(entityAmbientTint(night.ambientTint)).toBe(
+        lerpColor(night.ambientTint, 0xffffff, ENTITY_TINT_RELIEF),
+      );
+    });
   });
 });
