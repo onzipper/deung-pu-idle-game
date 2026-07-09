@@ -1474,6 +1474,14 @@
           "minimap": "🧭 A mini map sits in the top-right corner — your position, zone gates, and how many players share your zone; tap it to open the World Map",
           "tapFix": "🎯 Fixed 'tap did nothing' on 120Hz displays — every command now reliably reaches the game (bot-off-at-login now truly works)"
         }
+      },
+      "2026-07-10": {
+        "items": {
+          "questTracker": "📜 The quest tracker got a makeover! [Main]/[Goal]/[Daily] groups in one place — see daily quest progress from any zone (still claim at the Village Chief)",
+          "partyTab": "👥 A Party tab right on the quest tracker — see who's online and their class/level without opening a menu",
+          "skillDock": "⚔️ New MMO-style skill bar — numbered skills + AUTO + quick potions, all in one row",
+          "collapse": "👁️ Blocking your view? Collapse it! The quest tracker folds to a small chip and the skill bar to a thin strip (AUTO stays tappable) — your choice is remembered"
+        }
       }
     }
   },

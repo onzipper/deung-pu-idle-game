@@ -400,6 +400,19 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-09o.items.tapFix",
     ],
   },
+  // R2.6 quest tracker + skill dock per the owner's MMO reference — tabbed
+  // [เควส|ปาร์ตี้] tracker with [หลัก]/[รอง]/[รายวัน] tag groups, and BOTH
+  // overlays now collapse (chip / thin AUTO strip) so they never block the view.
+  {
+    id: "2026-07-10",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10.items.questTracker",
+      "releases.2026-07-10.items.partyTab",
+      "releases.2026-07-10.items.skillDock",
+      "releases.2026-07-10.items.collapse",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
