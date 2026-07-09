@@ -47,6 +47,7 @@ import { AutoPotionToggles } from "@/ui/components/AutoPotionToggles";
 import { AutoSellRulesSection } from "@/ui/components/AutoSellRulesSection";
 import { BotSettingsSection } from "@/ui/components/BotSettingsSection";
 import { InfoTip } from "@/ui/components/InfoTip";
+import { SkillIcon } from "@/ui/components/icons/gameIcons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { Button } from "@/ui/components/primitives/Button";
 import { Panel } from "@/ui/components/primitives/Panel";
@@ -163,7 +164,7 @@ function SkillAutoSlotItem({
       }`}
     >
       <span aria-hidden className="text-xl leading-none">
-        {icon}
+        <SkillIcon skillId={skill.id} fallback={icon} className="h-5 w-5" />
       </span>
       <span className="line-clamp-1 w-full px-0.5 text-center text-[9px] leading-tight text-ddp-ink-muted">
         {name}

@@ -436,6 +436,15 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-10c.items.expStripFix",
     ],
   },
+  // Codegen Asset Phase 1A — first 9 SVG item/skill icons (issue #60).
+  {
+    id: "2026-07-10d",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10d.items.itemIconsNew",
+      "releases.2026-07-10d.items.skillIconsNew",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

@@ -391,6 +391,13 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock (`SkillDock.tsx`), bottom-edge EXP/clock strip; documents the z-index ladder.
 - `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`), issue #55 Wave A `InventoryPanel` "all" tab default/both-slots RTL smoke (`inventoryAllTab.test.tsx`), `RefinePanel` owned/required cost-chip fraction+red-tint RTL smoke (`refinePanelCostChips.test.tsx`), and issue #58 item 1 `BotSettingsModal`'s `SkillAutoSlotPicker` icon-tile reskin RTL smoke — slot-number badges + `setAutoSlot` toggle wiring unchanged (`botSettingsSkillPicker.test.tsx`); 6 files.
 
+### src/ui/components/icons/ — issue #60 codegen game-icon set (filled silhouette + metallic/glass gradient + soft family glow; NOT the thin gold-line chrome of `../icons.tsx`)
+- `src/ui/components/icons/iconBase.tsx` — shared seam: `IconSvg` (24-viewBox, className-driven size) + `useIconIds` (per-instance-unique gradient ids off `useId`) + `IconProps`; no `<filter>`/`<image>`/raster.
+- `src/ui/components/icons/itemIcons.tsx` — `ITEM_ICON_COMPONENTS` registry keyed by engine `templateId` (rusty sword / short bow / epic apocalypse blade / cloth tunic / weapon fortifier); epic+fortifier carry the gold glow inside the icon.
+- `src/ui/components/icons/skillIcons.tsx` — `SKILL_ICON_COMPONENTS` registry keyed by engine skill id (sword_whirl / mage_meteor / mage_frostnova / archer_rain), each lead by its element colour.
+- `src/ui/components/icons/gameIcons.tsx` — public contract seam consumers import: re-exports both registries + `ItemIcon`/`SkillIcon` resolvers (registered component or the caller's `fallback` verbatim).
+- `src/ui/components/icons/__tests__/iconRegistry.test.tsx` — guards item keys resolve via `lookupTemplate` (superset trap), skill keys exist in `SKILLS`, fallback render for unknown ids, and all 9 icons render crash-free.
+
 ### src/ui/components/primitives/ — R2 design-system primitives (presentational only, no store reads)
 - `src/ui/components/primitives/Button.tsx` — 3-tier button skin (primary gold / secondary purple / danger red).
 - `src/ui/components/primitives/Panel.tsx` — signature panel shell (`variant="gold"` for top-level panels, `"plain"` for nested boxes).
@@ -403,6 +410,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/primitives/Toast.tsx` — single toast line skin (icon + text + optional dismiss), no timer/positioning.
 - `src/ui/components/primitives/IconTileButton.tsx` — ~44px icon-only menu-row tile skin (R2-W2), every panel-opening HUD trigger renders through it.
 - `src/ui/components/primitives/ConfirmPopup.tsx` — modal confirm dialog (ยกเลิก/ยืนยัน, danger variant), via `ModalPortal`.
+- `src/ui/components/primitives/__tests__/` — issue #60 `ItemTile` glyph→`ItemIcon` wiring pin (in-registry `templateId` renders an `<svg>`, out-of-registry/omitted `templateId` keeps the `glyph` fallback verbatim); 1 file.
 
 ### src/ui/components/characters/
 - `src/ui/components/characters/DeleteCharacterDialog.tsx` — type-the-name-to-confirm character deletion modal.

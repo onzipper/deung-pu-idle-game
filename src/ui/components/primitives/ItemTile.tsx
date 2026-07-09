@@ -17,6 +17,7 @@
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { ItemRarity } from "@/engine";
+import { ItemIcon } from "@/ui/components/icons/gameIcons";
 import { RARITY_COLORS, RARITY_GLOW, TIER_BORDER_COLORS } from "@/ui/labels";
 
 const EQUIPPED_BORDER = "border-emerald-300";
@@ -37,9 +38,17 @@ export interface ItemTileProps extends Omit<ButtonHTMLAttributes<HTMLButtonEleme
   legendary?: boolean;
   selected?: boolean;
   ariaLabel?: string;
-  /** Center glyph (emoji span or a line icon). */
+  /** Center glyph (emoji span or a line icon) — also doubles as the
+   * `ItemIcon` fallback when `templateId` isn't in the codegen SVG registry
+   * (issue #60), so this must stay the FULL "what to show absent an icon"
+   * value, unchanged. */
   glyph: ReactNode;
   glyphClassName?: string;
+  /** Item catalog id (issue #60 "codegen icons" consumer wiring) — when
+   * provided, `ItemIcon` renders a per-item SVG in its place if the codegen
+   * registry has a match; ids outside the registry (or omitted entirely)
+   * keep rendering `glyph` verbatim, byte-identical to before this wave. */
+  templateId?: string;
   /** Small text under the glyph, e.g. "T3" — caller owns i18n. */
   subLabel?: ReactNode;
   /** "+N" refine text, rendered right after `subLabel` in the emerald refine hue. */
@@ -62,6 +71,7 @@ export function ItemTile({
   ariaLabel,
   glyph,
   glyphClassName = "",
+  templateId,
   subLabel,
   refineBadge,
   qty,
@@ -104,7 +114,11 @@ export function ItemTile({
         </span>
       )}
       <span aria-hidden className={`text-xl leading-none ${topRibbon ? "mt-2.5" : ""} ${glyphClassName}`}>
-        {glyph}
+        {templateId ? (
+          <ItemIcon templateId={templateId} fallback={glyph} className="h-5 w-5" />
+        ) : (
+          glyph
+        )}
       </span>
       {(subLabel || refineBadge) && (
         <span className="text-[9px] font-bold text-ddp-ink-muted">

@@ -28,6 +28,7 @@
 import { useTranslations } from "next-intl";
 import { useState, type CSSProperties } from "react";
 import { SKILLS } from "@/engine";
+import { SkillIcon } from "@/ui/components/icons/gameIcons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
 import { Button } from "@/ui/components/primitives/Button";
 import { Panel } from "@/ui/components/primitives/Panel";
@@ -104,7 +105,7 @@ function ListRow({
       }`}
     >
       <span aria-hidden className="shrink-0 text-xl leading-none">
-        {icon}
+        <SkillIcon skillId={skill.id} fallback={icon} className="h-5 w-5" />
       </span>
       <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ddp-ink">
         {tContent(`skills.${skill.id}.name`)}
@@ -184,7 +185,7 @@ export function SkillDetailModal({ hero, initialId, onClose }: SkillDetailModalP
                 className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-2 bg-black/50 text-4xl leading-none"
                 style={{ borderColor: accent.solid, boxShadow: `0 0 22px 5px ${accent.soft}` }}
               >
-                {icon}
+                <SkillIcon skillId={skill.id} fallback={icon} className="h-9 w-9" />
               </span>
               <div className="flex flex-col items-center gap-0.5">
                 <h3 className="text-base font-extrabold text-ddp-ink">
