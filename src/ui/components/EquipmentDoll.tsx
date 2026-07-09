@@ -15,27 +15,53 @@
  * TEASER slots (helmet/gloves/boots/amulet) are display-only "coming soon"
  * ghosts — no catalog entry exists for them, they never persist anything,
  * and tapping one only shows an ephemeral toast (owner-approved wording).
+ *
+ * R2-W3 reskin (mockup "EQUIPMENT" panel): filled real slots now render
+ * through the shared `ItemTile` primitive (same tier/rarity/refine-badge
+ * language as the bag grid's `GridCell` — no bespoke tile styling here
+ * anymore) and a class-glyph "character" roundel (same visual grammar as
+ * `SkillBar.tsx`'s portrait block, via the shared `HERO_ACCENT`/`HERO_ICONS`
+ * — no new painted art) sits at the center, flanked left/right by the real
+ * weapon/armor slots per the mockup's "gear flanks the character" layout.
+ * Mobile keeps the flat single-row strip (now horizontally scrollable so a
+ * narrow viewport can never overflow the modal) with the portrait pinned
+ * above it.
  */
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { lookupTemplate, type GearSlot } from "@/engine";
+import { isLegendaryTemplate, lookupTemplate, type GearSlot, type HeroClass } from "@/engine";
 import { buildRealDollSlots, TEASER_SLOT_ICONS, type TeaserSlotKey } from "@/ui/gear/dollModel";
 import type { InventoryItem } from "@/ui/gear/types";
+import { ItemTile } from "@/ui/components/primitives/ItemTile";
 import {
   classTintClass,
   GEAR_SLOT_ICONS,
-  gearNameClass,
-  RARITY_COLORS,
-  RARITY_GLOW,
-  TIER_BORDER_COLORS,
+  HERO_ACCENT,
+  HERO_ICONS,
   weaponGlyph,
 } from "@/ui/labels";
 
 const TEASER_TOAST_MS = 1800;
 
-function tierBorder(tier: number): string {
-  return TIER_BORDER_COLORS[tier] ?? TIER_BORDER_COLORS[6];
+/** The center-of-doll class glyph roundel — same accent/level-badge grammar
+ * as `SkillBar.tsx`'s hero portrait (shared `HERO_ACCENT`/`HERO_ICONS`), just
+ * without the HP/MP bars (this panel isn't the combat HUD). */
+function CharacterPortrait({ cls, level }: { cls: HeroClass; level: number }) {
+  const tCommon = useTranslations("common");
+  const accent = HERO_ACCENT[cls];
+  return (
+    <div
+      aria-hidden
+      className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 bg-black/50 shadow-(--ddp-shadow-btn)"
+      style={{ borderColor: accent.solid, boxShadow: `0 0 10px 2px ${accent.soft}` }}
+    >
+      <span className="text-2xl leading-none">{HERO_ICONS[cls]}</span>
+      <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 rounded-full border border-ddp-border-soft bg-black/90 px-1.5 py-0.5 text-[9px] leading-none font-black tabular-nums whitespace-nowrap text-ddp-ink">
+        {tCommon("levelBadge", { level })}
+      </span>
+    </div>
+  );
 }
 
 function RealSlotButton({
@@ -52,41 +78,43 @@ function RealSlotButton({
   const t = useTranslations("inventory");
   const tContent = useTranslations("content.items");
   const template = item ? lookupTemplate(item.templateId) : null;
-  const tierCls = template ? tierBorder(template.tier) : "border-ddp-border-soft";
-  const glow = template ? RARITY_GLOW[template.rarity] : "";
-  // "ตำราตำนาน" legendary (endgame v1.3): gold-violet gradient name, else the
-  // ordinary per-rarity text color.
-  const nameCls =
-    item && template
-      ? gearNameClass(item.templateId, item.refineLevel) || RARITY_COLORS[template.rarity].text
-      : "text-ddp-ink-muted/70";
   // Owner ask 2026-07-08: same per-class weapon glyph + subtle class tint as
   // the bag grid — every doll real-slot IS the equipped item already (no
   // separate "equipped" ribbon needed here, unlike the bag's owned pile).
   const glyph = template ? (slot === "weapon" ? weaponGlyph(template.classReq) : GEAR_SLOT_ICONS.armor) : GEAR_SLOT_ICONS[slot];
   const tint = template ? classTintClass(template.classReq) : "";
 
+  if (item && template) {
+    return (
+      <ItemTile
+        rarity={template.rarity}
+        tier={template.tier}
+        equipped
+        legendary={isLegendaryTemplate(item.templateId)}
+        selected={active}
+        onClick={() => onSelect(slot, item.instanceId)}
+        ariaLabel={tContent(`${item.templateId}.name`)}
+        glyph={glyph}
+        glyphClassName={tint}
+        subLabel={t("tierShort", { tier: template.tier })}
+        refineBadge={item.refineLevel > 0 ? t("refinePlus", { level: item.refineLevel }) : undefined}
+        className="h-16 w-16 shrink-0"
+      />
+    );
+  }
+
   return (
     <button
       type="button"
-      onClick={() => onSelect(slot, item?.instanceId ?? null)}
+      onClick={() => onSelect(slot, null)}
       aria-pressed={active}
-      aria-label={item && template ? tContent(`${item.templateId}.name`) : t(`slot.${slot}`)}
-      className={`flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1 transition-transform duration-100 active:scale-95 ${tierCls} ${glow} ${active ? "ring-2 ring-ddp-gold-bright" : ""}`}
+      aria-label={t(`slot.${slot}`)}
+      className={`flex h-16 w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 border-ddp-border-soft bg-black/40 p-1 transition-transform duration-100 active:scale-95 ${active ? "ring-2 ring-ddp-gold-bright" : ""}`}
     >
-      <span aria-hidden className={`text-xl leading-none ${tint}`}>
-        {glyph}
+      <span aria-hidden className="text-xl leading-none">
+        {GEAR_SLOT_ICONS[slot]}
       </span>
-      {item && template ? (
-        <span className={`w-full truncate text-center text-[8px] font-bold leading-tight ${nameCls}`}>
-          {tContent(`${item.templateId}.name`)}
-          {item.refineLevel > 0 && (
-            <span className="text-emerald-400"> {t("refinePlus", { level: item.refineLevel })}</span>
-          )}
-        </span>
-      ) : (
-        <span className="text-[8px] font-bold text-ddp-ink-muted/50">{t("doll.emptyReal")}</span>
-      )}
+      <span className="text-[8px] font-bold text-ddp-ink-muted/50">{t("doll.emptyReal")}</span>
     </button>
   );
 }
@@ -123,10 +151,21 @@ export interface EquipmentDollProps {
   inventory: readonly InventoryItem[];
   activeTab: GearSlot;
   onSelectReal: (slot: GearSlot, instanceId: string | null) => void;
+  /** Character glyph roundel — display-only, no engine reads (caller already
+   * has this off the throttled `HeroSummary` snapshot). */
+  heroCls: HeroClass;
+  heroLevel: number;
   className?: string;
 }
 
-export function EquipmentDoll({ inventory, activeTab, onSelectReal, className }: EquipmentDollProps) {
+export function EquipmentDoll({
+  inventory,
+  activeTab,
+  onSelectReal,
+  heroCls,
+  heroLevel,
+  className,
+}: EquipmentDollProps) {
   const t = useTranslations("inventory");
   const [toastKey, setToastKey] = useState<TeaserSlotKey | null>(null);
   const [weapon, armor] = buildRealDollSlots(inventory);
@@ -152,36 +191,63 @@ export function EquipmentDoll({ inventory, activeTab, onSelectReal, className }:
         {t("doll.comingSoon")}
       </div>
 
-      {/* Desktop layout: helmet top / gloves-weapon-amulet row / armor / boots. */}
+      {/* Desktop layout (mockup: character center, gear flanking left/right):
+          helmet top-center / [weapon+gloves] flank-left | PORTRAIT | [armor+amulet]
+          flank-right / boots bottom-center. */}
       <div className="hidden flex-col items-center gap-2 md:flex">
         <TeaserSlotButton slotKey="helmet" onTap={handleTeaserTap} />
-        <div className="flex items-center gap-2">
-          <TeaserSlotButton slotKey="gloves" onTap={handleTeaserTap} />
-          <RealSlotButton
-            slot="weapon"
-            item={weapon.item}
-            active={activeTab === "weapon"}
-            onSelect={onSelectReal}
-          />
-          <TeaserSlotButton slotKey="amulet" onTap={handleTeaserTap} />
+        <div className="flex items-center gap-2.5">
+          <div className="flex flex-col gap-2">
+            <RealSlotButton
+              slot="weapon"
+              item={weapon.item}
+              active={activeTab === "weapon"}
+              onSelect={onSelectReal}
+            />
+            <TeaserSlotButton slotKey="gloves" onTap={handleTeaserTap} />
+          </div>
+          <CharacterPortrait cls={heroCls} level={heroLevel} />
+          <div className="flex flex-col gap-2">
+            <RealSlotButton
+              slot="armor"
+              item={armor.item}
+              active={activeTab === "armor"}
+              onSelect={onSelectReal}
+            />
+            <TeaserSlotButton slotKey="amulet" onTap={handleTeaserTap} />
+          </div>
         </div>
-        <RealSlotButton slot="armor" item={armor.item} active={activeTab === "armor"} onSelect={onSelectReal} />
         <TeaserSlotButton slotKey="boots" onTap={handleTeaserTap} />
       </div>
 
-      {/* Mobile layout: one flat horizontal strip, pinned above the tabs. */}
-      <div className="flex items-center justify-center gap-1.5 md:hidden">
-        <TeaserSlotButton slotKey="helmet" onTap={handleTeaserTap} />
-        <TeaserSlotButton slotKey="gloves" onTap={handleTeaserTap} />
-        <RealSlotButton
-          slot="weapon"
-          item={weapon.item}
-          active={activeTab === "weapon"}
-          onSelect={onSelectReal}
-        />
-        <RealSlotButton slot="armor" item={armor.item} active={activeTab === "armor"} onSelect={onSelectReal} />
-        <TeaserSlotButton slotKey="amulet" onTap={handleTeaserTap} />
-        <TeaserSlotButton slotKey="boots" onTap={handleTeaserTap} />
+      {/* Mobile layout: portrait above a flat horizontal strip. The strip is
+          horizontally scrollable (`overflow-x-auto`) — 6 fixed 64px tiles
+          don't fit inside a narrow phone's modal width, and clipping/wrapping
+          would either cut tiles off or blow the panel's height; a scroll
+          container keeps every tile tappable at its normal touch size
+          without ever overflowing the modal shell. */}
+      <div className="flex flex-col items-center gap-2 md:hidden">
+        <CharacterPortrait cls={heroCls} level={heroLevel} />
+        <div className="max-w-full overflow-x-auto">
+          <div className="flex w-max items-center justify-center gap-1.5 px-0.5">
+            <TeaserSlotButton slotKey="helmet" onTap={handleTeaserTap} />
+            <TeaserSlotButton slotKey="gloves" onTap={handleTeaserTap} />
+            <RealSlotButton
+              slot="weapon"
+              item={weapon.item}
+              active={activeTab === "weapon"}
+              onSelect={onSelectReal}
+            />
+            <RealSlotButton
+              slot="armor"
+              item={armor.item}
+              active={activeTab === "armor"}
+              onSelect={onSelectReal}
+            />
+            <TeaserSlotButton slotKey="amulet" onTap={handleTeaserTap} />
+            <TeaserSlotButton slotKey="boots" onTap={handleTeaserTap} />
+          </div>
+        </div>
       </div>
     </div>
   );

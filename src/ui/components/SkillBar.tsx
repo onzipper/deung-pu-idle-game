@@ -19,7 +19,6 @@
 
 import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
-import type { HeroClass } from "@/engine";
 import { CONFIG, SKILLS } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
 import { usePulseOnIncrease } from "@/ui/hooks/usePulseOnIncrease";
@@ -27,7 +26,7 @@ import { BotMasterSwitch } from "@/ui/components/BotMasterSwitch";
 import { InfoTip } from "@/ui/components/InfoTip";
 import { StatBar } from "@/ui/components/primitives/StatBar";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
-import { HERO_ICONS, SKILL_ICONS_BY_ID } from "@/ui/labels";
+import { HERO_ACCENT, HERO_ICONS, SKILL_ICONS_BY_ID } from "@/ui/labels";
 import { skillStatParts } from "@/ui/skillStats";
 import { useGameStore } from "@/ui/store/gameStore";
 
@@ -40,16 +39,6 @@ function classNameKeyForTier(tier: 1 | 2 | 3): "name" | "evolvedName" | "tier3Na
   return "name";
 }
 
-/** Presentational-only per-class accent (mirrors src/render/theme.ts
- * HERO_COLORS). `soft` is a pre-mixed rgba so button classes never need a
- * Tailwind opacity-modifier on an arbitrary CSS-var color. */
-const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
-  swordsman: { solid: "#35d0c0", soft: "rgba(53, 208, 192, 0.55)" },
-  archer: { solid: "#b8e04a", soft: "rgba(184, 224, 74, 0.55)" },
-  mage: { solid: "#c77dff", soft: "rgba(199, 125, 255, 0.55)" },
-  // matches `HERO_COLORS.ninja.body` in render/theme.ts (slate/graphite rig tone)
-  ninja: { solid: "#6c7a99", soft: "rgba(108, 122, 153, 0.55)" },
-};
 
 /** One learned skill: a cast button + an AUTO-slot toggle badge + a tap-to-open
  * ⓘ detail popover (owner ask, UX-fix wave: "every skill button gets a

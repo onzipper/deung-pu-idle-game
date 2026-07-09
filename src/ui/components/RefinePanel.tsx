@@ -50,6 +50,12 @@ import {
 } from "@/engine";
 import { Coin, MaterialIcon } from "@/ui/components/icons";
 import { ModalPortal } from "@/ui/components/ModalPortal";
+import { Button } from "@/ui/components/primitives/Button";
+import { CurrencyChip } from "@/ui/components/primitives/CurrencyChip";
+import { ItemTile } from "@/ui/components/primitives/ItemTile";
+import { Panel } from "@/ui/components/primitives/Panel";
+import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
+import { TabRow } from "@/ui/components/primitives/TabRow";
 import { applyRefineResult, executeRefine } from "@/ui/gear/refineFlow";
 import { IDLE_REVEAL_STATE, beatPlanFor, refineRevealReducer } from "@/ui/gear/refineReveal";
 import { groupIntoStacks, type ItemStack } from "@/ui/gear/stacking";
@@ -97,6 +103,34 @@ function statLine(template: ItemTemplate, level: number): string {
   return parts.join(" · ");
 }
 
+/**
+ * R2-W3 mockup addition ("ATK 70 → 77"): the item card's stat delta for the
+ * ATTEMPT about to happen (current +level vs. the target +level), computed
+ * purely off `refinedStat` — no server call, no roll. Same non-spoiler
+ * contract as the success-% line beside it: both are pure functions of the
+ * FROZEN `displayStack`/`template`, so this text is stable and never updates
+ * mid-strike (see the module doc's reveal-suspense invariant).
+ */
+function statCompareLine(template: ItemTemplate, currentLevel: number, nextLevel: number): string {
+  const parts: string[] = [];
+  if (template.stats.atk) {
+    parts.push(
+      `ATK ${refinedStat(template.stats.atk, currentLevel)} → ${refinedStat(template.stats.atk, nextLevel)}`,
+    );
+  }
+  if (template.stats.def) {
+    parts.push(
+      `DEF ${refinedStat(template.stats.def, currentLevel)} → ${refinedStat(template.stats.def, nextLevel)}`,
+    );
+  }
+  if (template.stats.hp) {
+    parts.push(
+      `HP ${refinedStat(template.stats.hp, currentLevel)} → ${refinedStat(template.stats.hp, nextLevel)}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
 function shardStyle(i: number): CSSProperties {
   const angle = (i / 6) * Math.PI * 2;
   const dist = 26 + (i % 3) * 6;
@@ -116,6 +150,9 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
   const tInv = useTranslations("inventory");
   const tContent = useTranslations("content.items");
   const tLore = useTranslations("asura.tome.lore");
+  // R2-W3 reskin: reuses the SAME gold/materials aria copy `HudBar.tsx`'s
+  // `CurrencyChip`s already use (no new i18n strings for this reskin).
+  const tHud = useTranslations("hud");
   const inventory = useGameStore((s) => s.inventory);
   const materials = useGameStore((s) => s.materials);
   const gold = useGameStore((s) => s.gold);
@@ -372,60 +409,51 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
         />
       )}
 
-      <div className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3 rounded-(--ddp-radius-lg) border border-ddp-border bg-ddp-panel-strong p-4 text-ddp-ink shadow-(--ddp-shadow-panel)">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="flex items-center gap-1.5 text-base font-extrabold text-ddp-gold-bright">
-            <span aria-hidden>⚒</span> {t("title")}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-(--ddp-radius-md) px-2 py-1.5 text-xs font-semibold text-ddp-ink-muted hover:text-ddp-ink"
-          >
-            ✕ {tInv("closeButton")}
-          </button>
-        </div>
+      <Panel
+        variant="gold"
+        className="animate-onboarding-in relative flex max-h-[85vh] w-full max-w-md flex-col gap-3"
+      >
+        <PanelHeader
+          title={t("title")}
+          icon="⚒"
+          actions={
+            <Button variant="secondary" className="px-2.5 py-1.5 text-[11px]" onClick={onClose}>
+              ✕ {tInv("closeButton")}
+            </Button>
+          }
+        />
 
         {showLore ? (
           <TomeLoreCard stage={loreStage as 1 | 2} onContinue={() => setLoreDismissed(true)} t={tLore} />
         ) : (
           <>
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-400/10 px-2.5 py-1 text-xs font-bold tabular-nums text-violet-300">
-            <MaterialIcon className="h-3.5 w-3.5" />
-            {materials.toLocaleString()}
-          </span>
-          <span className="flex items-center gap-1 rounded-full border border-ddp-gold/30 bg-ddp-gold/10 px-2.5 py-1 text-xs font-bold tabular-nums text-ddp-gold-bright">
-            <Coin className="h-3.5 w-3.5" />
-            {gold.toLocaleString()}
-          </span>
+          <CurrencyChip
+            icon={<MaterialIcon className="h-3.5 w-3.5" />}
+            value={materials}
+            variant="violet"
+            ariaLabel={tHud("materialsAria")}
+          />
+          <CurrencyChip icon={<Coin className="h-3.5 w-3.5" />} value={gold} variant="gold" ariaLabel={tHud("goldAria")} />
           {!inTown && (
             <span className="text-[11px] font-semibold text-rose-300">{t("townOnlyHint")}</span>
           )}
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1.5">
-          {SLOT_ORDER.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setActiveTab(slot);
-                setSelectedKey(null);
-              }}
-              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-(--ddp-radius-md) border px-2 text-xs font-bold transition-colors disabled:opacity-50 ${
-                activeTab === slot
-                  ? "border-ddp-gold bg-ddp-gold/20 text-ddp-gold-bright"
-                  : "border-ddp-border-soft bg-black/25 text-ddp-ink-muted"
-              }`}
-            >
-              <span aria-hidden>{GEAR_SLOT_ICONS[slot]}</span>
-              {tInv(`slot.${slot}`)}
-            </button>
-          ))}
-        </div>
+        <TabRow
+          tabs={SLOT_ORDER.map((slot) => ({
+            id: slot,
+            label: tInv(`slot.${slot}`),
+            icon: GEAR_SLOT_ICONS[slot],
+            disabled: busy,
+          }))}
+          active={activeTab}
+          onChange={(slot) => {
+            setActiveTab(slot);
+            setSelectedKey(null);
+          }}
+        />
 
         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
           {stacks.length === 0 ? (
@@ -436,44 +464,29 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                 const key = stackKey(stack);
                 const tpl = ITEM_TEMPLATES[stack.templateId];
                 if (!tpl) return null;
-                const maxed = stack.refineLevel >= REFINE.maxRefine;
                 return (
-                  <button
+                  <ItemTile
                     key={key}
-                    type="button"
+                    rarity={tpl.rarity}
+                    tier={tpl.tier}
+                    selected={selectedKey === key}
                     disabled={busy}
                     onClick={() => setSelectedKey((cur) => (cur === key ? null : key))}
-                    aria-pressed={selectedKey === key}
-                    aria-label={tContent(`${stack.templateId}.name`)}
-                    className={`relative flex min-h-16 flex-col items-center justify-center gap-0.5 rounded-(--ddp-radius-md) border-2 bg-black/40 p-1.5 transition-transform duration-100 active:scale-95 disabled:opacity-60 ${
-                      selectedKey === key
-                        ? "border-ddp-gold ring-2 ring-ddp-gold-bright"
-                        : "border-ddp-border-soft"
-                    }`}
-                  >
-                    <span aria-hidden className="text-xl leading-none">
-                      {GEAR_SLOT_ICONS[tpl.slot]}
-                    </span>
-                    <span className="text-[9px] font-bold text-ddp-ink-muted">
-                      {tInv("tierShort", { tier: tpl.tier })}
-                      {stack.refineLevel > 0 && (
-                        <span className={maxed ? "text-ddp-gold-bright" : "text-emerald-400"}>
-                          {" "}
-                          {tInv("refinePlus", { level: stack.refineLevel })}
+                    ariaLabel={tContent(`${stack.templateId}.name`)}
+                    glyph={GEAR_SLOT_ICONS[tpl.slot]}
+                    subLabel={tInv("tierShort", { tier: tpl.tier })}
+                    refineBadge={
+                      stack.refineLevel > 0 ? tInv("refinePlus", { level: stack.refineLevel }) : undefined
+                    }
+                    qty={stack.count}
+                    cornerTopLeft={
+                      stack.equippedInstanceId ? (
+                        <span className="rounded-full bg-emerald-400 px-1 font-black text-emerald-950">
+                          E
                         </span>
-                      )}
-                    </span>
-                    {stack.count > 1 && (
-                      <span className="absolute -top-1.5 -right-1.5 rounded-full bg-ddp-gold px-1.5 py-0.5 text-[9px] font-black text-ddp-panel-strong">
-                        ×{stack.count}
-                      </span>
-                    )}
-                    {stack.equippedInstanceId && (
-                      <span className="absolute -top-1.5 -left-1.5 rounded-full bg-emerald-400 px-1 text-[9px] font-black text-emerald-950">
-                        E
-                      </span>
-                    )}
-                  </button>
+                      ) : undefined
+                    }
+                  />
                 );
               })}
             </div>
@@ -533,7 +546,15 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     {tContent(`${displayStack.templateId}.name`)}
                   </span>
                   <span className="text-[11px] tabular-nums text-ddp-ink-muted">
-                    {statLine(template, displayStack.refineLevel)}
+                    {/* R2-W3 mockup addition: "ATK 70 → 77" once there's a next
+                        level to attempt — pure `refinedStat` math off the
+                        FROZEN `displayStack`/`template`, so this text is stable
+                        for the whole strike (same non-spoiler contract as the
+                        success-% line below). At max there's no "next", so it
+                        falls back to the plain current-stat line. */}
+                    {!atMax
+                      ? statCompareLine(template, displayStack.refineLevel, targetLevel)
+                      : statLine(template, displayStack.refineLevel)}
                   </span>
                 </div>
 
@@ -612,29 +633,29 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                   </p>
 
                   {cost && (
-                    <div className="flex items-center gap-3 text-xs font-bold">
-                      <span
-                        className={`flex items-center gap-1 tabular-nums ${
-                          canAffordMaterials ? "text-violet-300" : "text-rose-400"
-                        }`}
-                      >
-                        <MaterialIcon className="h-3.5 w-3.5" />
-                        {cost.materials.toLocaleString()}
-                      </span>
-                      <span
-                        className={`flex items-center gap-1 tabular-nums ${
-                          canAffordGold ? "text-ddp-gold-bright" : "text-rose-400"
-                        }`}
-                      >
-                        <Coin className="h-3.5 w-3.5" />
-                        {cost.gold.toLocaleString()}
-                      </span>
+                    <div className="flex items-center gap-2">
+                      <CurrencyChip
+                        icon={<MaterialIcon className="h-3.5 w-3.5" />}
+                        value={cost.materials}
+                        variant="violet"
+                        ariaLabel={tHud("materialsAria")}
+                      />
+                      <CurrencyChip
+                        icon={<Coin className="h-3.5 w-3.5" />}
+                        value={cost.gold}
+                        variant="gold"
+                        ariaLabel={tHud("goldAria")}
+                      />
+                      {(!canAffordMaterials || !canAffordGold) && (
+                        <span className="text-[10px] font-bold text-rose-400">
+                          {t(`disabled.${!canAffordMaterials ? "insufficientMaterials" : "insufficientGold"}`)}
+                        </span>
+                      )}
                     </div>
                   )}
 
                   <div className="flex gap-2">
-                    <button
-                      type="button"
+                    <Button
                       // Only truly inert while genuinely unable to act at idle —
                       // during striking/reveal the button must stay clickable
                       // (native `disabled` blocks click entirely) so a tap on it
@@ -648,17 +669,15 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                         }
                         void handleRefine(false);
                       }}
-                      className={`min-h-11 flex-1 rounded-(--ddp-radius-md) border border-ddp-gold/70 bg-ddp-gold/20 px-3 text-sm font-black text-ddp-gold-bright transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
-                        isReveal ? "opacity-70" : ""
-                      }`}
+                      className={`flex-1 text-sm ${isReveal ? "opacity-70" : ""}`}
                     >
                       {busy ? t("refiningButton") : t("refineButton")}
-                    </button>
+                    </Button>
                     {/* World-boss wave: guaranteed-success fortify — same cost, no roll.
                         Only offered while an owned "แกร่ง" fortifier matches this slot. */}
                     {fortifierCount > 0 && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="secondary"
                         disabled={revealState.kind === "idle" && !!disabledReason}
                         title={disabledReason ? t(`disabled.${disabledReason}`) : undefined}
                         onClick={() => {
@@ -668,12 +687,10 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                           }
                           void handleRefine(true);
                         }}
-                        className={`min-h-11 flex-1 rounded-(--ddp-radius-md) border border-violet-400/70 bg-violet-400/15 px-3 text-xs font-black text-violet-300 transition-transform active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
-                          isReveal ? "opacity-70" : ""
-                        }`}
+                        className={`flex-1 ${isReveal ? "opacity-70" : ""}`}
                       >
                         {t("fortifyButton", { count: fortifierCount })}
-                      </button>
+                      </Button>
                     )}
                   </div>
                   {disabledReason && (
@@ -698,7 +715,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
         </div>
           </>
         )}
-      </div>
+      </Panel>
     </div>
     </ModalPortal>
   );

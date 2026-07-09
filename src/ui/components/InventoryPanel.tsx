@@ -44,6 +44,7 @@ import {
   lookupTemplate,
   type GearSlot,
   type HeroClass,
+  type StatKey,
 } from "@/engine";
 import { executeAwakenLegendary } from "@/ui/asura/awakenFlow";
 import { awakenGate } from "@/ui/asura/awakenView";
@@ -63,9 +64,54 @@ import { Panel } from "@/ui/components/primitives/Panel";
 import { PanelHeader } from "@/ui/components/primitives/PanelHeader";
 import { TabRow } from "@/ui/components/primitives/TabRow";
 import { classTintClass, GEAR_SLOT_ICONS, gearNameClass, HERO_ICONS, RARITY_COLORS, weaponGlyph } from "@/ui/labels";
-import { useGameStore } from "@/ui/store/gameStore";
+import { useGameStore, type HeroSummary } from "@/ui/store/gameStore";
 
 const SLOT_ORDER: readonly GearSlot[] = ["weapon", "armor"];
+
+/** Fixed display order (matches `StatPanel.tsx`'s `STAT_ORDER` — the engine
+ * only has these 4 allocatable axes, no 5th "AGI" axis exists to show). */
+const STAT_ORDER: readonly StatKey[] = ["str", "dex", "int", "vit"];
+
+/**
+ * R2-W3 "sweep แผงตาม mockup" — the EQUIPMENT panel's read-only stat column
+ * (mockup: STR/DEX/INT/VIT + พลังต่อสู้ beside the paper-doll). Presentational
+ * only, off the same throttled `HeroSummary` snapshot `StatPanel.tsx` reads —
+ * this is NOT a second stat-allocation surface (no +buttons here; allocating
+ * still lives exclusively in `StatPanel.tsx`, avoiding two places that "spend
+ * a point" per the one-mental-model-per-feature rule).
+ */
+function EquipStatBlock({ hero, className = "" }: { hero: HeroSummary; className?: string }) {
+  const t = useTranslations("stats");
+  return (
+    <div
+      className={`flex shrink-0 flex-col gap-1.5 rounded-(--ddp-radius-md) border border-ddp-border-soft bg-black/30 p-2.5 ${className}`}
+    >
+      <span className="text-center text-[10px] font-bold tracking-wide text-ddp-ink-muted uppercase">
+        {t("title")}
+      </span>
+      <div className="flex flex-row flex-wrap gap-x-3 gap-y-1 md:flex-col md:flex-nowrap md:gap-y-1.5">
+        {STAT_ORDER.map((stat) => (
+          <div key={stat} className="flex min-h-4 items-center justify-between gap-2 text-xs">
+            <span
+              className={`font-semibold ${
+                hero.primaryStat === stat ? "text-ddp-gold-bright" : "text-ddp-ink-muted"
+              }`}
+            >
+              {t(`names.${stat}`)}
+            </span>
+            <span className="font-bold tabular-nums text-ddp-ink">{hero.stats[stat]}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-0.5 flex items-center justify-between gap-2 border-t border-ddp-border-soft/60 pt-1.5 text-xs">
+        <span className="font-semibold text-ddp-ink-muted">{t("combatPower")}</span>
+        <span className="font-black tabular-nums text-ddp-gold-bright">
+          {hero.combatPower.toLocaleString()}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function GridCell({
   item,
@@ -380,7 +426,8 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
   // (the real "⚒️ ตำราตำนาน" main-menu entry takes over from there).
   const tomePagesFound = useGameStore((s) => s.tomePagesFound);
   const tomeUnlocked = useGameStore((s) => s.tomeUnlocked);
-  const heroCls = useGameStore((s) => s.heroes[0]?.cls);
+  const hero = useGameStore((s) => s.heroes[0]);
+  const heroCls = hero?.cls;
   const inTown = useGameStore((s) => s.world.kind === "town");
   const sessionKnownTemplateIds = useGameStore((s) => s.sessionKnownTemplateIds);
   const setInventory = useGameStore((s) => s.setInventory);
@@ -477,7 +524,7 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
     setSelectedInstanceId(instanceId);
   }
 
-  if (!heroCls) return null;
+  if (!hero || !heroCls) return null;
 
   return (
     <ModalPortal>
@@ -520,12 +567,17 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
             row's height so the bag's `min-h-0`/`overflow-y-auto` chain has
             something bounded to clip against. */}
         <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row md:gap-4">
-        <EquipmentDoll
-          inventory={inventory}
-          activeTab={activeTab}
-          onSelectReal={handleSelectRealSlot}
-          className="md:w-45"
-        />
+        <div className="flex shrink-0 flex-col items-center gap-3 md:flex-row md:items-start">
+          <EquipmentDoll
+            inventory={inventory}
+            activeTab={activeTab}
+            onSelectReal={handleSelectRealSlot}
+            heroCls={heroCls}
+            heroLevel={hero.level}
+            className="md:w-52"
+          />
+          <EquipStatBlock hero={hero} className="w-full max-w-60 md:w-28" />
+        </div>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
 
         {/* Capacity bar + materials readout (M7.6 ตีบวก) */}
@@ -626,10 +678,15 @@ export function InventoryPanel({ onClose }: InventoryPanelProps) {
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          {/* R2-W3: pinned at 4 columns (was `sm:grid-cols-5`) — the paper-doll
+              grew a character portrait + stat column beside it this wave, and
+              the modal's own width is capped (`md:max-w-2xl`) regardless of
+              viewport, so 5 columns' 64px-tile minimum no longer leaves enough
+              room; 4 keeps every tile a real, un-squeezed touch target. */}
           {items.length === 0 ? (
             <p className="text-[11px] text-ddp-ink-muted/70">{t("emptySlotHint")}</p>
           ) : (
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+            <div className="grid grid-cols-4 gap-2">
               {items.map((it) => (
                 <GridCell
                   key={it.instanceId}

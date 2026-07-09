@@ -16,6 +16,20 @@ export const HERO_ICONS: Record<HeroClass, string> = {
   ninja: "\u{1F52A}", // 🔪 dual dagger stand-in
 };
 
+/** Presentational-only per-class accent (mirrors `render/theme.ts`
+ * HERO_COLORS). `soft` is a pre-mixed rgba so button classes never need a
+ * Tailwind opacity-modifier on an arbitrary CSS-var color. Originally local
+ * to `SkillBar.tsx`'s portrait roundel; promoted here (R2-W3) so
+ * `EquipmentDoll.tsx`'s paper-doll character glyph can reuse the EXACT same
+ * accent instead of inventing a second per-class palette. */
+export const HERO_ACCENT: Record<HeroClass, { solid: string; soft: string }> = {
+  swordsman: { solid: "#35d0c0", soft: "rgba(53, 208, 192, 0.55)" },
+  archer: { solid: "#b8e04a", soft: "rgba(184, 224, 74, 0.55)" },
+  mage: { solid: "#c77dff", soft: "rgba(199, 125, 255, 0.55)" },
+  // matches `HERO_COLORS.ninja.body` in render/theme.ts (slate/graphite rig tone)
+  ninja: { solid: "#6c7a99", soft: "rgba(108, 122, 153, 0.55)" },
+};
+
 export const SKILL_ICONS: Record<HeroClass, string> = {
   swordsman: "\u{1F300}", // 🌀
   archer: "\u{1F327}️", // 🌧️ arrow rain
