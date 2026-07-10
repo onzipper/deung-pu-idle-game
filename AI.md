@@ -3,6 +3,14 @@
 For **any** AI agent (Claude Code, Codex-style, others). Claude-specific orchestration
 rules live in [CLAUDE.md](CLAUDE.md); everything here applies to everyone.
 
+## Collaboration roles
+
+- **Owner / Project & Game Director**: decides product direction, gameplay scope, art direction, visual-feel acceptance, merge/deploy approval, and when to trigger AI work.
+- **ChatGPT**: owner-side game development advisor, code/direction reviewer, asset design + creation partner, and visual QA. ChatGPT checks whether work matches owner direction, prepares briefs/checklists, creates or critiques references/assets, and should not override owner decisions.
+- **Claude Code / Fable**: development orchestrator. Fable plans implementation, routes work to subagents, edits code/tests/docs, prepares PRs, and stops at owner approval gates.
+- **Working loop**: Owner sets direction → ChatGPT clarifies/reviews/designs → Owner triggers Fable → Fable implements in reviewable PRs → ChatGPT reviews correctness + direction alignment → Owner approves, rejects, or asks for changes.
+- Cross-session facts that matter must land in repo docs; do not make the owner re-explain stable direction or roles.
+
 ## Start here (in order)
 
 1. [README.md](README.md) — what the game is, stack, commands.
