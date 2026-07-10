@@ -16,10 +16,10 @@ import type { GameState } from "@/engine/state";
 import { CONFIG } from "@/engine/config";
 import type { ResolvedBiome } from "@/render/environment/biomes";
 import { BLEED_X, GROUND_BLEED, GROUND_Y, SKY_BLEED, WORLD_HEIGHT, WORLD_WIDTH } from "@/render/layout";
+import { DEPTH_OFFSET_FAR } from "@/render/worldDepth/depthBand";
 import { AmbientField } from "@/render/environment/ambientParticles";
 import { buildBossArenaFraming } from "@/render/environment/bossArena";
 import {
-  buildGroundBackingStrip,
   buildGroundBand,
   buildGroundPolygon,
 } from "@/render/environment/groundBand";
@@ -50,6 +50,24 @@ const NEAR_CHUNK_W = 110;
  * (R2.5 W1) so a tall portrait screen's footroom never runs out of ground.
  * Exported for the SAME test-parity reason as `MARGIN` above. */
 export const GROUND_DEPTH = WORLD_HEIGHT - GROUND_Y + GROUND_BLEED;
+/** FREE-FIELD (Phase 2): sky headroom (world px) reserved ABOVE the field's far
+ * row so far-row actors/silhouettes read against sky, not a hard horizon cut. */
+const HORIZON_MARGIN = 14;
+/**
+ * FREE-FIELD (Phase 2): the scenery horizon — where the sky meets the ground
+ * plane. It sits a small `HORIZON_MARGIN` ABOVE the field's far row
+ * (`GROUND_Y + DEPTH_OFFSET_FAR`), because the depth band is now a TALL walkable
+ * FIELD (far row lifted 64px toward the horizon), not the old cosmetic strip.
+ * The placeholder ground plane fills from here DOWN so it covers the WHOLE field
+ * (far row → past the near row), and far-row actors stand ON the ground instead
+ * of floating above a horizon drawn below them. Sky bottom / horizon glow / far
+ * silhouette baseline all shift up to this line so the composition stays coherent
+ * (no new art — the same build-once builders, just a higher horizon y). Exported
+ * for the SAME test-parity reason as `GROUND_DEPTH` above. */
+export const HORIZON_Y = GROUND_Y + DEPTH_OFFSET_FAR - HORIZON_MARGIN;
+/** Full-field ground base-fill depth: from `HORIZON_Y` down past the near row
+ * and into the decorative `GROUND_BLEED` footroom. */
+export const FIELD_GROUND_DEPTH = WORLD_HEIGHT + GROUND_BLEED - HORIZON_Y;
 /** Ground-polygon/backing-strip sample spacing (px) — mirrors `/lab`
  * experiment ⑨'s `GROUND_POLY_STEP`. */
 const GROUND_POLY_STEP = 24;
@@ -108,25 +126,29 @@ export class BiomeScene {
     // the far/near parallax's own small MARGIN buffer, so a fullscreen tall
     // screen's sky headroom never runs out before the Pixi `Application`'s
     // own flat backgroundColor would show through.
+    // FREE-FIELD (Phase 2): sky bottom / horizon glow / far silhouettes sit at
+    // `HORIZON_Y` (just above the field's far row), not `GROUND_Y` — the depth
+    // band is a tall walkable field now, so the horizon must be above the far
+    // row, and the ground plane below (see the ground section) covers the field.
     const sky = buildSkyBands(
       biome.sky.top,
       biome.sky.bottom,
       -BLEED_X,
       -SKY_BLEED,
       WORLD_WIDTH + BLEED_X * 2,
-      GROUND_Y + SKY_BLEED,
+      HORIZON_Y + SKY_BLEED,
     );
-    const horizonGlow = buildHorizonGlow(biome.sky.horizon, -BLEED_X, WORLD_WIDTH + BLEED_X * 2, GROUND_Y);
+    const horizonGlow = buildHorizonGlow(biome.sky.horizon, -BLEED_X, WORLD_WIDTH + BLEED_X * 2, HORIZON_Y);
     this.view.addChild(sky, horizonGlow);
 
-    this.clouds = new CloudField(biome.sky.horizon, WORLD_WIDTH, GROUND_Y);
+    this.clouds = new CloudField(biome.sky.horizon, WORLD_WIDTH, HORIZON_Y);
     this.view.addChild(this.clouds.view);
 
     this.far = new ParallaxLayer(FAR_CHUNK_W, chunkCount(FAR_CHUNK_W), (index) =>
       buildSilhouetteChunk({
         chunkWidth: FAR_CHUNK_W,
         index,
-        baselineY: GROUND_Y - 2,
+        baselineY: HORIZON_Y - 2,
         shape: biome.far.shape,
         far: biome.far,
       }),
@@ -144,11 +166,17 @@ export class BiomeScene {
     const terrain = opts?.terrain;
     const terrainActive = terrain !== undefined && terrainPresetForZone(zone) !== "flat";
 
+    // FREE-FIELD (Phase 2): the flat ground BASE FILL now tops out at `HORIZON_Y`
+    // and covers the WHOLE walkable field (far row → past the near row) for EVERY
+    // zone. This also subsumes the old `buildGroundBackingStrip` sky-sliver guard:
+    // an opaque full-field base behind the terrain polygon means no sky can show
+    // through a terrain dip either.
+    this.view.addChild(buildGroundBand(biome, groundX, HORIZON_Y, groundWidth, FIELD_GROUND_DEPTH));
+
     let nearConformY: ((localCenterX: number) => number) | undefined;
     if (terrainActive && terrain) {
-      // Sky-sliver guard strip FIRST (behind), then the polygon fill on top
-      // — see `groundBand.ts`'s doc comment.
-      this.view.addChild(buildGroundBackingStrip(biome, groundX, GROUND_Y, groundWidth));
+      // Non-flat farm zone: overlay the terrain-tracking surface polygon (its
+      // slope detail rides around `GROUND_Y`) ON TOP of the full-field base fill.
       this.view.addChild(
         buildGroundPolygon(biome, terrain, groundX, GROUND_Y, groundWidth, GROUND_DEPTH, GROUND_POLY_STEP),
       );
@@ -157,8 +185,6 @@ export class BiomeScene {
       // world x via `localCenterX - MARGIN`; the value this returns is
       // near.view-LOCAL (world y minus the layer's own GROUND_Y offset).
       nearConformY = (localCenterX: number) => terrain.groundY(localCenterX - MARGIN) - GROUND_Y;
-    } else {
-      this.view.addChild(buildGroundBand(biome, groundX, GROUND_Y, groundWidth, GROUND_DEPTH));
     }
 
     this.near = new ParallaxLayer(

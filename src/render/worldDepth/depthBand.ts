@@ -13,7 +13,8 @@
  * All three are strictly monotonic in d (test-enforced) so the band never
  * "folds": if A is nearer than B it is ALWAYS lower, bigger, and in front.
  * Offsets share the plan's headroom budget with terrain: worst-case feet
- * ≈ GROUND_Y + 10 (terrain) + 56 (near offset) = 298 < WORLD_HEIGHT 300.
+ * ≈ GROUND_Y + 10 (terrain) + 56 (near offset) = 298 < WORLD_HEIGHT 312
+ * (Phase 2 grew it 300 → 312 so contact shadows below these feet don't clip).
  */
 
 // ---------------------------------------------------------------------------

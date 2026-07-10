@@ -119,7 +119,7 @@ describe("GhostLayer — invariants", () => {
 describe("GhostLayer — R4.5 Wave 1.1 (issue #69) live planeY placement", () => {
   it("draws at the peer's live planeY when present (not the scatter fallback)", () => {
     const { gl, ctx } = makeWithDepth();
-    const planeY = 10; // within the live plane band [-24, 40]
+    const planeY = 10; // within the live plane field band [-64, 56]
     gl.update([item({ cid: "g1", cls: "swordsman", x: 50, planeY })], DT);
     const view = gl.viewFor("g1")!;
     const d = ctx.depthOf("ghost", "g1", undefined, undefined, planeY);
