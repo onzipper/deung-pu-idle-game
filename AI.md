@@ -7,8 +7,9 @@ rules live in [CLAUDE.md](CLAUDE.md); everything here applies to everyone.
 
 1. [README.md](README.md) — what the game is, stack, commands.
 2. [docs/current-state.md](docs/current-state.md) — what is current, blocked, owed, and off-limits *right now*.
-3. [docs/decision-index.md](docs/decision-index.md) — locked decisions. Do not re-propose rejected ideas.
-4. [docs/feature-map.md](docs/feature-map.md) — feature → docs/source/tests map (only for your task's feature).
+3. [docs/ai-working-memory.md](docs/ai-working-memory.md) — owner-selected working direction and next-step contract for AI agents.
+4. [docs/decision-index.md](docs/decision-index.md) — locked decisions. Do not re-propose rejected ideas.
+5. [docs/feature-map.md](docs/feature-map.md) — feature → docs/source/tests map (only for your task's feature).
 
 Then read **only** the context pack matching your task type, then only the affected files.
 
