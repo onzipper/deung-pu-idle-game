@@ -1259,10 +1259,17 @@ export class GameRenderer {
     let best: GhostDrawItem | null = null;
     let bestDist = Infinity;
     for (const g of this.ghostList) {
-      // Ghosts have no live engine entity — place off the engine's shared scatter
-      // math (`scatterPlaneY(cid)`), the same engine-owned depth source the draw
-      // path uses (R4 Wave C0), so the tap matches the feet.
-      const d = this.worldFx.depthOf("ghost", g.cid, undefined, undefined, scatterPlaneY(g.cid));
+      // R4.5 Wave 1.2 (PR #72 review): the tap ellipse must sit on the SAME row the
+      // ghost is DRAWN on — live published `planeY` when present (Wave 1.1), else the
+      // engine's shared scatter math (`scatterPlaneY(cid)`). Mirrors ghostLayer.ts's
+      // draw-path expression exactly so tap and feet can never disagree.
+      const d = this.worldFx.depthOf(
+        "ghost",
+        g.cid,
+        undefined,
+        undefined,
+        g.planeY ?? scatterPlaneY(g.cid),
+      );
       const scl = this.worldFx.depthScaleOf(d);
       const cy = enemyTapCenterY(GHOST_TAP_CENTER_SIZE, this.worldFx.footY(g.x, d), scl);
       const rx = Math.max(touchHalf, GHOST_TAP_RX * scl);
