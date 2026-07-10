@@ -252,16 +252,16 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/worldDepth/atmosphere.ts` (`createAtmosphere`) — day/night + weather + critters runtime composing pure math with pooled Pixi layers.
 - `src/render/worldDepth/critters.ts` — pooled sky birds + night firefly ambient views for the living world.
 - `src/render/worldDepth/dayNight.ts` — pure day/night palette cycle math (`samplePalette`), noon = OFF-identity baseline.
-- `src/render/worldDepth/depthAssign.ts` — pure per-entity depth (d∈[0,1]) assignment via stable hash (heroes/enemies/ghosts).
+- `src/render/worldDepth/depthAssign.ts` — pure stable string/number→[0,1) FNV-1a hash (`hashUnit`) shared by terrain-preset + weather-window selection + the `depthOf` no-`planeY` fallback (per-entity depth assignment retired at R4 Wave C0 — depth is engine-owned).
 - `src/render/worldDepth/depthBand.ts` — pure depth→screen-effect math (`depthOffsetY`/`depthScale`/`depthZIndex`), monotonic.
 - `src/render/worldDepth/hitTestMath.ts` — pure pointer hit-test math un-projecting through base+camera transforms.
 - `src/render/worldDepth/terrain.ts` (`createTerrain`) — pure cosmetic terrain heightmap (`groundY(x)`) from deterministic presets.
 - `src/render/worldDepth/terrainZone.ts` — zone→terrain preset resolver, flattens ground exactly at gates/town/boss.
 - `src/render/worldDepth/weather.ts` — screen-fixed pooled weather layer (rain/snow/ash/leaves Pixi views).
 - `src/render/worldDepth/weatherSchedule.ts` — pure deterministic weather scheduler (hash zone+time-window→weather kind).
-- `src/render/worldDepth/worldFxContext.ts` — shared pure world-fx seam resolving groundY/footY/depth per (zone,x,entity); R4 Wave B `worldDepthFromEngineY` flag + `planeToDepth` read the engine-owned `planeY` (bit-exact inverse of the render hash path).
+- `src/render/worldDepth/worldFxContext.ts` — shared pure world-fx seam resolving groundY/footY/depth per (zone,x,entity); `depthOf` reads the engine-owned `planeY` (single path since R4 Wave C0) via `planeToDepth` (bit-exact inverse of the plane offset), with a defensive `hashUnit(id)` fallback for a stray actor lacking `planeY`.
 - `src/render/worldDepth/camera.ts` — pure living-camera state/math (follow, lookahead, idle-zoom breathe, punch, clamp).
-- `src/render/worldDepth/__tests__/` — pins atmosphere, depth-assign, camera (+game integration), day-night, depth-band, fx-context, hit-test math, terrain (+zone), weather-schedule; 11 files.
+- `src/render/worldDepth/__tests__/` — pins atmosphere, stable-hash (`hashUnit`), camera (+game integration), day-night, depth-band, fx-context (engine-`planeY` inversion + no-`planeY` fallback), hit-test math, terrain (+zone), weather-schedule; 11 files.
 
 ### src/render/audio/
 - `src/render/audio/AudioEngine.ts` — lazy asset-free WebAudio synth toolkit (tone/noise/sweep primitives), never throws.
@@ -271,7 +271,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/audio/sfxMap.ts` — `GameEvent`→synth recipe palette data (`SFX_PARAMS`) + per-event `play*` functions.
 
 ### src/render/__tests__/
-- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`) + R4 Wave B `worldDepthFromEngineY` ON===OFF identity across every placed entity class (`worldDepthEngineYIdentity.test.ts`, TEMPORARY — retires at Wave C); 4 files.
+- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`); 3 files.
 ## Zone C — src/ui/**, src/app/(game)/**, src/app root, src/i18n/**, src/lab/**
 
 ### src/app/(game)/ — game-loop host + party/presence transport (LOAD-BEARING HUB)

@@ -171,10 +171,10 @@ export class GhostLayer {
       // by depth, sort near-over-far. OFF-identity: footY≡GROUND_Y (cancels the
       // pivot), depthScaleOf≡1, equal neutral zIndex → insertion order.
       if (this.worldFx) {
-        // R4 Wave B: a ghost has no live engine entity, so place it off the
-        // engine's shared scatter math (`scatterPlaneY(cid)`) — the seam inverts
-        // that back to the same `ghostDepth(cid)` hash row (bit-exact), so the
-        // engineY-ON path is pixel-identical to the pre-cutover hash placement.
+        // A ghost has no live engine entity, so place it off the engine's shared
+        // scatter math (`scatterPlaneY(cid)`) — the seam inverts that back to the
+        // ghost's stable depth row (bit-exact), the same engine-owned depth source
+        // every other actor resolves through (R4 Wave C0).
         const d = this.worldFx.depthOf("ghost", item.cid, undefined, undefined, scatterPlaneY(item.cid));
         view.y = this.worldFx.footY(item.x, d);
         view.scale.set(this.worldFx.depthScaleOf(d));

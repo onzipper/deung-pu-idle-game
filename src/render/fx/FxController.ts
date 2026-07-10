@@ -1457,7 +1457,7 @@ export class FxController {
           // kill-gold use) on top of the original puff, all kept subtle/short
           // per the render brief. Aggro's growl SFX lives in `audio/sfxMap.ts`.
           // W4: lift onto the mob's foot-line (the event already carries its id).
-          const df = this.enemyLift(ev.x, ev.id);
+          const df = this.enemyLift(ev.x, ev.id, null);
           burst(this.particles, ev.x, GROUND_Y - 18 + df, 5, PALETTE.enrageAura, {
             speed: 55,
             life: 0.28,
@@ -1888,7 +1888,7 @@ export class FxController {
     this.rings.spawn({
       x: enemy.x,
       // W4: sit the lock-on pulse on the target's depth+terrain foot-line.
-      y: TARGET_LOCK_Y + this.enemyLift(enemy.x, id),
+      y: TARGET_LOCK_Y + this.enemyLift(enemy.x, id, enemy.planeY ?? null),
       r0: TARGET_LOCK_PULSE_R0,
       r1: TARGET_LOCK_PULSE_R1,
       duration: TARGET_LOCK_PULSE_DURATION,
@@ -1911,7 +1911,9 @@ export class FxController {
         : undefined;
     this.targetLock.update(
       dt,
-      enemy ? { x: enemy.x, y: TARGET_LOCK_Y + this.enemyLift(enemy.x, enemy.id) } : null,
+      enemy
+        ? { x: enemy.x, y: TARGET_LOCK_Y + this.enemyLift(enemy.x, enemy.id, enemy.planeY ?? null) }
+        : null,
     );
   }
 
@@ -2013,7 +2015,7 @@ export class FxController {
     // foot-line. The engine removes it from `state.enemies` this same step (its
     // pooled view is already gone), so the kill event's own `id` — not a view —
     // resolves the depth. `df` ≡ 0 when the world-fx flags are off.
-    const df = this.enemyLift(ev.x, ev.id);
+    const df = this.enemyLift(ev.x, ev.id, null);
     const y = GROUND_Y - 20 - 8 * size + df;
     const kindColor = enemyColorFor(zoneAt(state.location).mapId, ev.kind);
 
@@ -2087,7 +2089,7 @@ export class FxController {
     const size = ENEMY_TYPES[ev.kind]?.size ?? 1;
     // W4: lift the whole telegraph onto the elite's depth+terrain foot-line
     // (the event carries its entity id).
-    const y = GROUND_Y - 20 - 8 * size + this.enemyLift(ev.x, ev.id);
+    const y = GROUND_Y - 20 - 8 * size + this.enemyLift(ev.x, ev.id, null);
     this.rings.spawn({
       x: ev.x,
       y,
@@ -3856,7 +3858,7 @@ export class FxController {
     const color = itemDropAccentColor(rarity);
     // W4: land the loot glimmer on the dropping mob's depth+terrain foot-line
     // (the event carries its `mobId`).
-    const y = ITEM_DROP_POP_Y + this.enemyLift(ev.x, ev.mobId);
+    const y = ITEM_DROP_POP_Y + this.enemyLift(ev.x, ev.mobId, null);
 
     this.rings.spawn({
       x: ev.x,
@@ -3882,7 +3884,7 @@ export class FxController {
    * even smaller than the common-gear pop). */
   private onStoneDrop(ev: Extract<GameEvent, { type: "stoneDrop" }>): void {
     // W4: land the stone pop on the dropping mob's depth+terrain foot-line.
-    const y = STONE_DROP_POP_Y + this.enemyLift(ev.x, ev.mobId);
+    const y = STONE_DROP_POP_Y + this.enemyLift(ev.x, ev.mobId, null);
     this.rings.spawn({
       x: ev.x,
       y,
@@ -4186,7 +4188,7 @@ export class FxController {
         // W4: the spawn portal sits under the enemy on its depth+terrain foot-line.
         this.portals.spawn(
           e.x,
-          GROUND_Y + this.enemyLift(e.x, e.id),
+          GROUND_Y + this.enemyLift(e.x, e.id, e.planeY ?? null),
           enemyColorFor(mapId, e.kind),
           e.size,
         );
@@ -4592,8 +4594,8 @@ export class FxController {
    * the flat GROUND_Y baseline onto that enemy's depth-band + terrain foot-line.
    * 0 when the world-fx flags are off (footY ≡ GROUND_Y). Cheap: two pure calls,
    * no view lookup / allocation. */
-  private enemyLift(x: number, id: number): number {
-    return this.wf.footY(x, this.wf.depthOf("enemy", id)) - GROUND_Y;
+  private enemyLift(x: number, id: number, planeY: number | null): number {
+    return this.wf.footY(x, this.wf.depthOf("enemy", id, undefined, undefined, planeY)) - GROUND_Y;
   }
 
   /** W4: same lift for a HERO-anchored fx — needs the party slot to pick the
@@ -4602,8 +4604,13 @@ export class FxController {
     const slot = state.heroes.findIndex((h) => h.id === id);
     if (slot < 0) return 0;
     const hero = state.heroes[slot];
+    // Depth is engine-owned (R4 Wave C0): feed the hero's stamped `planeY` — the
+    // seam inverts it to the same row the pooled hero view is drawn at.
     return (
-      this.wf.footY(hero.x, this.wf.depthOf("hero", id, slot, state.heroes.length)) - GROUND_Y
+      this.wf.footY(
+        hero.x,
+        this.wf.depthOf("hero", id, slot, state.heroes.length, hero.planeY ?? null),
+      ) - GROUND_Y
     );
   }
 
@@ -4618,6 +4625,8 @@ export class FxController {
     }
     const enemy = state.enemies.find((e) => e.id === id);
     const size = enemy?.size ?? 1;
-    return GROUND_Y - 42 - 8 * size - 10 + (enemy ? this.enemyLift(enemy.x, id) : 0);
+    return (
+      GROUND_Y - 42 - 8 * size - 10 + (enemy ? this.enemyLift(enemy.x, id, enemy.planeY ?? null) : 0)
+    );
   }
 }
