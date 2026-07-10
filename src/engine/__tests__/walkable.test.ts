@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { CONFIG, initGameState, makeHero, step, type GameState } from "@/engine";
+import { CONFIG, initGameState, makeHero, step } from "@/engine";
 import { fieldRect } from "@/engine/systems/plane";
 import {
   clampToPolygon,
