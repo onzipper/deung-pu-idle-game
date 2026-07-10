@@ -259,7 +259,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/worldDepth/terrainZone.ts` — zone→terrain preset resolver, flattens ground exactly at gates/town/boss.
 - `src/render/worldDepth/weather.ts` — screen-fixed pooled weather layer (rain/snow/ash/leaves Pixi views).
 - `src/render/worldDepth/weatherSchedule.ts` — pure deterministic weather scheduler (hash zone+time-window→weather kind).
-- `src/render/worldDepth/worldFxContext.ts` — shared pure world-fx seam recomputing groundY/footY/depth per (zone,x,entity).
+- `src/render/worldDepth/worldFxContext.ts` — shared pure world-fx seam resolving groundY/footY/depth per (zone,x,entity); R4 Wave B `worldDepthFromEngineY` flag + `planeToDepth` read the engine-owned `planeY` (bit-exact inverse of the render hash path).
 - `src/render/worldDepth/camera.ts` — pure living-camera state/math (follow, lookahead, idle-zoom breathe, punch, clamp).
 - `src/render/worldDepth/__tests__/` — pins atmosphere, depth-assign, camera (+game integration), day-night, depth-band, fx-context, hit-test math, terrain (+zone), weather-schedule; 11 files.
 
@@ -271,7 +271,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/audio/sfxMap.ts` — `GameEvent`→synth recipe palette data (`SFX_PARAMS`) + per-event `play*` functions.
 
 ### src/render/__tests__/
-- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`); 3 files.
+- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`) + R4 Wave B `worldDepthFromEngineY` ON===OFF identity across every placed entity class (`worldDepthEngineYIdentity.test.ts`, TEMPORARY — retires at Wave C); 4 files.
 ## Zone C — src/ui/**, src/app/(game)/**, src/app root, src/i18n/**, src/lab/**
 
 ### src/app/(game)/ — game-loop host + party/presence transport (LOAD-BEARING HUB)

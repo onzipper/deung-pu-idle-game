@@ -11,7 +11,7 @@ import {
   type PartyWireMsg,
   type SharedCohortSave,
 } from "../partyHandshake";
-import { initGameState, makeHero } from "@/engine";
+import { heroPlaneY, initGameState, makeHero } from "@/engine";
 
 /**
  * M8 party P4b — headless handshake harness. Mirrors
@@ -416,5 +416,34 @@ describe("M8 party handshake — cohort -> solo extraction (design C)", () => {
     p.autoSlots[1] = "mage_meteor";
     expect(h.stats.str).not.toBe(99999);
     expect(h.autoSlots[1]).not.toBe("mage_meteor");
+  });
+});
+
+describe("R4 Wave B — buildCohortState stamps the party depth fan (planeY)", () => {
+  it("each cohort slot gets heroPlaneY(cls, cohortIndex, size); a fan spreads far→near", () => {
+    const built = buildCohortState(2024, sharedSave(7), [
+      { slot: 0, progression: prog("swordsman", 12) },
+      { slot: 2, progression: prog("archer", 15) },
+      { slot: 5, progression: prog("mage", 20) },
+    ]);
+    // Sorted by relay slot, the cohort index (render's slot) is 0,1,2 for a size-3 party.
+    const size = built.heroes.length;
+    expect(size).toBe(3);
+    built.heroes.forEach((h, i) => {
+      expect(h.planeY).toBe(heroPlaneY(h.cls, i, size));
+    });
+    // Real fan: strictly increasing far→near, NOT everyone on the solo row.
+    expect(built.heroes[0].planeY!).toBeLessThan(built.heroes[1].planeY!);
+    expect(built.heroes[1].planeY!).toBeLessThan(built.heroes[2].planeY!);
+    expect(built.heroes[0].planeY).not.toBe(heroPlaneY("swordsman")); // != solo row
+  });
+
+  it("a 1-member cohort (solo rebuild) keeps the SOLO plane row — byte-identical to makeHero", () => {
+    const built = buildCohortState(2024, sharedSave(7), [
+      { slot: 3, progression: prog("ninja", 8) },
+    ]);
+    expect(built.heroes).toHaveLength(1);
+    expect(built.heroes[0].planeY).toBe(heroPlaneY("ninja"));
+    expect(built.heroes[0].planeY).toBe(makeHero(1, "ninja", 8).planeY);
   });
 });
