@@ -9,7 +9,12 @@ The owner chose the R4.5 direction as:
 - Projection: **C — MMO field board with subtle 2.5D depth**.
 - Scale policy: **capped 0.95 → 1.06**, not the old strong shrink/grow curve.
 - Depth should read from **foot-position zIndex, contact shadows, authored ground composition, and visual-only props**, not from character shrinking.
-- First vertical slice: **Forest Outskirts / Dark Forest Road**, starting with `map2` farm zones.
+- First vertical slice: **Map2: Greenmill Hamlet / Farm Border Road** (`map2` farm
+  zones; renamed from the earlier "Forest Outskirts / Dark Forest Road" by the #79
+  reference). Mood: warm farm/hamlet edge → farm border road → gradual forest-mouth
+  mystery — NOT a full dark forest / dungeon / hell gate / otherworld yet. Binding
+  spec: `docs/map-direction.md` Wave 2 (v2) + the #79 World Direction Reference v1
+  board / Map2 Brief.
 - Props in R4.5 are **visual-only**: no collision, no gameplay reads, no tappability, no engine-state effect.
 - R4.5 Wave 1 depth/scale/contact-shadow direction **passed owner eye-test** on 2026-07-10.
 - R4.5 Wave 2 `map2` farm-zone map design is **not accepted yet**. Treat the current Wave 2 stack as Draft/prototype until a map reference/design is approved in #79.
