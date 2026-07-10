@@ -143,6 +143,34 @@ function roadHalfWidth(t: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Road-path helpers EXPOSED for Wave 2C prop placement (`mapProps.ts`) — the
+// 2B handoff note: `roadCenterX`/`roadHalfWidth` were module-private; 2C needs
+// them so props can hug the road edge. The band parameter `t` is IDENTICAL to
+// the depth coordinate d ∈ [0,1] (road row y = bandTop + bandHeight·t, and the
+// depth band spans exactly that same `GROUND_Y + DEPTH_OFFSET_FAR..NEAR`
+// envelope), so a prop at depth d sits beside the road at `roadCenterXAt(d)`.
+// These wrap the module's own field-fraction constants so callers never need
+// them (no new absolute-position constants leak out).
+// ---------------------------------------------------------------------------
+
+/** Road center x at depth `t` ∈ [0,1] (0 = far, 1 = near), using this module's
+ * own S-curve field fractions — for placing props along the road edge. */
+export function roadCenterXAt(t: number): number {
+  return roadCenterX(
+    t,
+    WORLD_WIDTH * ROAD_FAR_X_FRAC,
+    WORLD_WIDTH * ROAD_NEAR_X_FRAC,
+    WORLD_WIDTH * ROAD_SWAY_FRAC,
+  );
+}
+
+/** Road half-width (world px) at depth `t` ∈ [0,1] — the perspective taper a
+ * prop offsets past to clear the road edge. */
+export function roadHalfWidthAt(t: number): number {
+  return roadHalfWidth(t);
+}
+
+// ---------------------------------------------------------------------------
 // Build (Pixi) — one Container, built once
 // ---------------------------------------------------------------------------
 
