@@ -23,6 +23,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/config/index.ts` — `CONFIG` — the one home for all tunable balance constants/curves (sim-sweepable)
 - `src/engine/config/items.ts` — item-template catalog + per-stage drop tables (`ITEM_TEMPLATES`, `dropTableForStage`); contract file shared w/ server claim/equip
 - `src/engine/config/refine.ts` — M7.6 ตีบวก refine tunables + pure `refinedStat`/cost/success-chance derivations (engine never rolls)
+- `src/engine/config/worldArc.ts` — World Arc v1 (epic phase 4, docs/world-arc-freefield-v1.md §2): `WORLD_ARC` naming/theme data for the 10 owner-locked arc areas + `arcAreaForMap` lookup; dormant data-only mapping onto `CONFIG.world.maps` (areas 1-6 -> map1-map6, areas 7-10 unmapped) — no behavior reads it yet
 
 ### src/engine/state/
 
@@ -82,7 +83,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 
 ### src/engine/__tests__/
 
-- `src/engine/__tests__/` — full engine regression + determinism suite (canonical sim gates, class/skill/quest/party/asura/ninja/refine/lockstep behavior, byte-identical hash checks); `balance-sim.ts` + `helpers.ts` support files; 43 files
+- `src/engine/__tests__/` — full engine regression + determinism suite (canonical sim gates, class/skill/quest/party/asura/ninja/refine/lockstep/world-arc-data behavior, byte-identical hash checks); `balance-sim.ts` + `helpers.ts` support files; 45 files
 - `src/engine/lockstep/__tests__/` — lockstep turn-executor multi-client hash-equality tests; 1 file
 
 ### src/server/
