@@ -13,6 +13,34 @@ The owner chose the R4.5 direction as:
 - Props in R4.5 are **visual-only**: no collision, no gameplay reads, no tappability, no engine-state effect.
 - R5 full 2D combat must wait until R4.5 map direction / owner eye-test is accepted, unless the owner explicitly overrides.
 
+## Owner availability / async cadence
+
+The owner is not always available to trigger small next steps. Work should therefore be organized so progress can continue in **slow, safe, reviewable batches** without requiring the owner to micromanage every prompt.
+
+Default cadence:
+
+- Prefer **small stacked Draft PRs** or clearly scoped issue comments over one large unreviewable drop.
+- Each batch should leave an obvious next action in the PR body, issue comment, or `docs/current-state.md`.
+- If a next step is already owner-approved and inside the locked direction, the agent may prepare the next Draft PR/proposal without waiting for a fresh trigger.
+- Do **not** merge, deploy, change DB/relay, or change locked direction without explicit owner approval.
+- For visual-feel work, static tests are not enough: stop at Draft/ready-for-eye-test and ask for owner eye-test before merge.
+- When owner time is limited, present one short decision list: approve / reject / choose A-B-C / eye-test checklist.
+
+This means AI agents should be proactive about preparing the next safe artifact, but conservative about irreversible actions.
+
+## Memory upkeep rule
+
+AI agents must keep repo memory current when they perform work in this repo.
+
+Update docs as follows:
+
+- `docs/current-state.md`: update at the close of each completed work round or merged PR stack, especially when the current branch, suite count, blockers, or next recommended work changes.
+- `docs/ai-working-memory.md`: update only when owner direction, async cadence, work order, guardrails, or merge/review discipline changes. Do not turn it into a changelog.
+- `docs/decision-index.md`: update when a decision is locked/rejected and should not be re-litigated.
+- `docs/CODEMAP.md`: update whenever files are added, moved, or deleted.
+
+If an agent cannot update the docs directly, it must leave an explicit TODO in the PR body or issue comment saying which doc needs the update and why.
+
 ## Immediate work order
 
 Current order of operations:
