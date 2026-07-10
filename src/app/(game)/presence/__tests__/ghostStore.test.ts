@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { CONFIG } from "@/engine";
 import { GhostStore, parseGhostSnapshot, easeToward, GHOST_CAP_DEFAULT } from "../ghostStore";
 
 function snap(cid: string, x: number, t: number, extra: Record<string, unknown> = {}) {
@@ -22,6 +23,30 @@ describe("parseGhostSnapshot — validation", () => {
     const n = parseGhostSnapshot({ v: 1, cid: "a", x: 5, cls: "ninja", tier: 3 });
     expect(n?.cls).toBe("ninja");
     expect(n?.tier).toBe(3);
+  });
+});
+
+describe("parseGhostSnapshot — R4.5 Wave 1.1 (issue #69) `py` -> planeY", () => {
+  it("a legacy x-only payload (no `py`) parses identically to before — planeY: null, never 0", () => {
+    const s = parseGhostSnapshot({ v: 1, cid: "p1", name: "P1", cls: "mage", tier: 1, x: 42, t: 3 });
+    expect(s).toEqual({ cid: "p1", name: "P1", cls: "mage", tier: 1, x: 42, t: 3, planeY: null });
+  });
+
+  it("a wrong-typed or non-finite `py` resolves to null, never NaN/0", () => {
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: "12" })?.planeY).toBeNull();
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: NaN })?.planeY).toBeNull();
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: Infinity })?.planeY).toBeNull();
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: null })?.planeY).toBeNull();
+  });
+
+  it("an in-band `py` passes through untouched", () => {
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: 10 })?.planeY).toBe(10);
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: 0 })?.planeY).toBe(0);
+  });
+
+  it("an out-of-band `py` clamps to the live plane band (defense-in-depth)", () => {
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: 9e9 })?.planeY).toBe(CONFIG.plane.bandNear);
+    expect(parseGhostSnapshot({ v: 1, cid: "a", x: 5, py: -9e9 })?.planeY).toBe(CONFIG.plane.bandFar);
   });
 });
 
@@ -122,5 +147,58 @@ describe("GhostStore — ease / prune / dedupe / cap", () => {
     const gs = new GhostStore();
     for (let i = 0; i < 30; i++) gs.upsert(snap("p" + i, i, 1), i);
     expect(gs.list(30)).toHaveLength(GHOST_CAP_DEFAULT);
+  });
+});
+
+describe("GhostStore — R4.5 Wave 1.1 (issue #69) live `planeY` flow-through", () => {
+  it("a `p`-only-legacy ghost (no `py` ever) omits `planeY` from the render item", () => {
+    const gs = new GhostStore();
+    gs.upsert(snap("p1", 100, 1), 0);
+    expect(gs.list(0)[0]).not.toHaveProperty("planeY");
+  });
+
+  it("a ghost WITH `py` exposes an eased `planeY`, settling at the latest value", () => {
+    const gs = new GhostStore();
+    gs.upsert(snap("p1", 0, 1, { py: 0 }), 0);
+    gs.upsert(snap("p1", 0, 2, { py: 20 }), 1000); // ease 0 -> 20 begins
+    expect(gs.list(1000)[0].planeY).toBeCloseTo(0, 3); // right at the anchor
+    const settled = gs.list(1500)[0].planeY!;
+    expect(settled).toBeGreaterThan(19);
+    expect(settled).toBeLessThanOrEqual(20);
+  });
+
+  it("a mid-ease re-anchor on `planeY` starts from the CURRENT visible row (no teleport)", () => {
+    const gs = new GhostStore();
+    gs.upsert(snap("p1", 0, 1, { py: 0 }), 0);
+    gs.upsert(snap("p1", 0, 2, { py: 20 }), 1000);
+    const before = gs.list(1090)[0].planeY;
+    gs.upsert(snap("p1", 0, 3, { py: 30 }), 1090); // re-anchor mid-ease
+    const after = gs.list(1090)[0].planeY;
+    expect(after).toBeCloseTo(before!, 6);
+  });
+
+  it("a row appearing for the first time (no prior row) starts exactly at the snap, no ease-in", () => {
+    const gs = new GhostStore();
+    gs.upsert(snap("p1", 0, 1), 0); // no py yet
+    gs.upsert(snap("p1", 0, 2, { py: 15 }), 500); // py appears
+    expect(gs.list(500)[0].planeY).toBe(15); // immediate, not eased from some default
+  });
+
+  it("a snapshot that drops `py` again resets the row to unknown (omitted from the render item)", () => {
+    const gs = new GhostStore();
+    gs.upsert(snap("p1", 0, 1, { py: 15 }), 0);
+    expect(gs.list(0)[0]).toHaveProperty("planeY");
+    gs.upsert(snap("p1", 0, 2), 100); // py absent this beat
+    expect(gs.list(100)[0]).not.toHaveProperty("planeY");
+  });
+
+  it("garbage/out-of-band `py` on the wire never reaches the render item as NaN", () => {
+    const gs = new GhostStore();
+    gs.upsert({ v: 1, cid: "p1", x: 0, t: 1, py: "not-a-number" }, 0);
+    expect(gs.list(0)[0]).not.toHaveProperty("planeY"); // treated as absent, not NaN
+    gs.upsert({ v: 1, cid: "p1", x: 0, t: 2, py: 9e9 }, 0);
+    const clamped = gs.list(0)[0].planeY!;
+    expect(Number.isFinite(clamped)).toBe(true);
+    expect(clamped).toBe(CONFIG.plane.bandNear);
   });
 });

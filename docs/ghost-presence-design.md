@@ -104,6 +104,17 @@ even try to simulate.
 carries only `idle|walk`. Richer poses (`basic`, `skill1-4`, `dash`) ride a **separate**
 opcode (`pa`, ~8Hz, see §7) so `p`'s liveness/snapshot-on-join semantics stay untouched.
 
+**SUPERSEDED 2026-07-10 (R4.5 Wave 1.1, issue #69):** `p`'s wire shape gains one more
+OPTIONAL field, `py` — the sender's live ground-plane depth row (`hero.planeY`, rounded to
+int), same `v:1`, no new opcode: `{ v:1, cid, name, cls, tier, x, t, py? }`. Omitted when
+the sender's own hero carries no `planeY` (defensive only). `GhostStore.parseGhostSnapshot`
+treats a missing/non-finite/wrong-typed `py` as `null` ("no live row" — never `0`) and
+clamps an in-range-but-noisy value to `CONFIG.plane.bandFar..bandNear`; `GhostLayer` draws
+at the peer's eased live row when known, falling back to the pre-existing
+`scatterPlaneY(cid)` stable scatter row exactly as it did before this field existed. Same
+render/store-only discipline as everything else in this doc — the field is never read by
+anything engine-side.
+
 ### 3.4 Client receive path
 
 - `GhostStore` (new `src/ui/presence/` or `src/app/(game)/presence/` — ui side of the

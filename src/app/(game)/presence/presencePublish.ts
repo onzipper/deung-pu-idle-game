@@ -25,6 +25,11 @@ export interface PresenceSnapshot {
   x: number;
   /** Monotonic sequence counter — receivers ignore stale/duplicate `t`. */
   t: number;
+  /** R4.5 Wave 1.1 (issue #69): OPTIONAL live ground-plane depth row, rounded to int
+   *  (same tiny-payload discipline as `x`). Additive — `v` stays 1, old receivers ignore
+   *  this unknown field. Omitted entirely when the source hero carries no `planeY` (older
+   *  engine builds mid-migration), so `parseGhostSnapshot` sees it simply absent, never 0. */
+  py?: number;
 }
 
 /** The minimal read-only view of my hero the sampler needs. */
@@ -32,6 +37,10 @@ export interface PublishableHero {
   x: number;
   cls: HeroClass;
   tier: 1 | 2 | 3;
+  /** Engine-owned ground-plane depth row (R4 Wave A/C1) — OPTIONAL because this is a
+   *  structural read of whatever `Hero`-shaped object the caller passes; a hero with no
+   *  `planeY` (defensive only, post-Wave-A every live hero is stamped) simply omits `py`. */
+  planeY?: number;
 }
 
 /** The server-derived identity from the presence ticket. */
@@ -57,6 +66,9 @@ export function buildPresenceSnapshot(
     tier: hero.tier,
     x: Math.round(hero.x),
     t: seq,
+    ...(typeof hero.planeY === "number" && Number.isFinite(hero.planeY)
+      ? { py: Math.round(hero.planeY) }
+      : null),
   };
 }
 
@@ -74,6 +86,7 @@ export function shouldPublish(
 ): boolean {
   if (!prev) return true;
   if (prev.x !== next.x || prev.cls !== next.cls || prev.tier !== next.tier) return true;
+  if (prev.py !== next.py) return true; // includes undefined <-> number transitions
   return beatIndex % keepaliveEvery === 0;
 }
 

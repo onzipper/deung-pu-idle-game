@@ -78,6 +78,11 @@ export interface GhostDrawItem {
   facing?: 1 | -1;
   action?: GhostActionKind;
   at?: number;
+  /** R4.5 Wave 1.1 (issue #69): the peer's live, interpolated ground-plane depth row.
+   *  Present ONLY once the sender has published one (a `p`-only-legacy peer, or one whose
+   *  engine hero has no `planeY` yet, omits it) — `undefined` falls back to the peer's
+   *  stable `scatterPlaneY(cid)` row exactly as every ghost drew before this field existed. */
+  planeY?: number;
 }
 
 /** A ghost's display-only Hero stub — inert everywhere the rig might read "combat" or
@@ -177,11 +182,22 @@ export class GhostLayer {
       // by depth, sort near-over-far. OFF-identity: footY≡GROUND_Y (cancels the
       // pivot), depthScaleOf≡1, equal neutral zIndex → insertion order.
       if (this.worldFx) {
-        // A ghost has no live engine entity, so place it off the engine's shared
-        // scatter math (`scatterPlaneY(cid)`) — the seam inverts that back to the
-        // ghost's stable depth row (bit-exact), the same engine-owned depth source
-        // every other actor resolves through (R4 Wave C0).
-        const d = this.worldFx.depthOf("ghost", item.cid, undefined, undefined, scatterPlaneY(item.cid));
+        // R4.5 Wave 1.1: a ghost with a LIVE published row (`item.planeY`, carried
+        // through from the peer's own hero via the `p` payload's optional `py`) draws at
+        // that row so front/back ordering tracks their actual y movement. A `p`-only-
+        // legacy peer, or one whose engine hero hasn't been stamped with a `planeY` yet,
+        // has no live engine entity on THIS client either way, so it falls back to the
+        // shared scatter math (`scatterPlaneY(cid)`) — the seam inverts that back to the
+        // ghost's stable depth row (bit-exact), the same engine-owned depth source every
+        // other actor resolves through (R4 Wave C0). This is a pure display fallback —
+        // never touches the engine (THE ONE RULE, see the file doc + `ghostGuard.test.ts`).
+        const d = this.worldFx.depthOf(
+          "ghost",
+          item.cid,
+          undefined,
+          undefined,
+          item.planeY ?? scatterPlaneY(item.cid),
+        );
         view.y = this.worldFx.footY(item.x, d);
         view.scale.set(this.worldFx.depthScaleOf(d));
         view.zIndex = depthZIndex(d);
