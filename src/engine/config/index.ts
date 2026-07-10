@@ -926,6 +926,45 @@ export const CONFIG = {
     projMinStep: 12, // arrival threshold = max(this, speed * dt)
   },
 
+  // ---- depth PLANE / y-at-spawn (R4 Wave A "engine-owned deterministic y") ----
+  // The engine assigns each entity a deterministic ground-plane depth row at spawn
+  // (`Entity.planeY`, systems/plane.ts) — the world-y OFFSET (relative to the ground line,
+  // 0 = on the line) it sits at for its depth. These knobs are the PORT of
+  // render/worldDepth/{depthBand,depthAssign} constants so the value reproduces the render
+  // depth every client would otherwise compute (bandFar/bandNear ≡ DEPTH_OFFSET_FAR/NEAR;
+  // formationDepth ≡ HERO_SOLO_DEPTH; heroBandMin/Max ≡ HERO_BAND_MIN/MAX). Wave A is
+  // BEHAVIOUR-NEUTRAL: `planeY` is unused by combat/movement/targeting and by render placement
+  // (render keeps its own depth); it is new deterministic sim state that Wave-B render will read
+  // in place of recomputing depth, and the R4-R5 x/y milestone will move entities along.
+  // A parity test pins these to the render constants — keep them in lock-step, never diverge.
+  plane: {
+    /** World-y offset at depth d=0 (far/upstage row, raised toward the horizon). ≡ DEPTH_OFFSET_FAR. */
+    bandFar: -24,
+    /** World-y offset at depth d=1 (near/downstage row, dropped toward the camera). ≡ DEPTH_OFFSET_NEAR. */
+    bandNear: 40,
+    /** Party depth-fan band endpoints (a party spreads slot 0..last across [min,max]). ≡ HERO_BAND_MIN/MAX. */
+    heroBandMin: 0.45,
+    heroBandMax: 0.85,
+    /**
+     * Per-class hero FORMATION depth (0..1) — the resting plane row each class stands on when
+     * SOLO. Class-INDEPENDENT today (render draws every solo hero on the single 0.65 solo row,
+     * so all four equal it → behaviour-neutral); kept per-class as the R4-R5 hook to spread the
+     * classes onto distinct rows later. ≡ HERO_SOLO_DEPTH.
+     */
+    formationDepth: {
+      swordsman: 0.65,
+      archer: 0.65,
+      mage: 0.65,
+      ninja: 0.65,
+    } as Record<HeroClass, number>,
+    /**
+     * Plane-ease speed (world-y units/sec) for the R4-R5 true x/y movement milestone — entities
+     * will EASE toward their target plane row instead of snapping. UNUSED this wave (`planeY` is
+     * assigned once at spawn and never moved); a placeholder tunable so the knob exists early.
+     */
+    ySpeed: 120,
+  },
+
   // ---- archer basic-attack volley (86d3k2rgf) ----
   // The archer's BASIC attack fires a mini-volley of `archerVolleyCount` small
   // arrows at the SAME target instead of a single arrow ("ยิงลูกธนูย่อยๆ" — a

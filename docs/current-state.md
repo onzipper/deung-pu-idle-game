@@ -4,17 +4,18 @@
 > round is superseded, append the old block to `docs/history/claude-status-log.md` —
 > never let this file grow into a log. Target: short enough to read every session.
 
-_Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
+_Last updated: 2026-07-10 (R4 Wave A engine y-plane, #51 — Draft PR pending owner review)._
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → R2.5–R2.9 ✅ → **R3 presence คนจริง ✅ MERGED (#50 / PR #62, owner eye-test passed + tune round; RELAY DEPLOYED by owner 2026-07-10 — web side goes live with the next develop→main deploy)** → R4–R5 engine x,y → R6 shared elites.
-- **Branches**: `main` = `develop` = **R3 block** (release PR #63 merged 2026-07-10, owner-confirmed). Next work branches from `develop` as usual.
-- **Suite**: 2375 tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10e (R3 presence).
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → R2.5–R2.9 ✅ → R3 presence คนจริง ✅ (merged + relay deployed) → **R4 engine x,y IN PROGRESS (Wave A on Draft PR, #51)** → R5 2D combat → R6 shared elites.
+- **Branches**: `main` = R3 block (PR #63). `develop` = R3 block; **R4 Wave A = Draft PR from `engine/issue-51-wave-a-y-plane`**.
+- **Suite**: 2388 tests green, tsc/eslint clean. Patch notes current: 2026-07-10e (R3 presence).
 
 ## Latest work
 
-- **R3 presence คนจริง** (#50, **Draft PR #62**, staged 5 commits by wave — full detail history v17): relay additive `pa` action stream (not cached, never liveness) · 8Hz publisher + fps valve shared with ghost cap (single source 33/22ms) · ghostStore action fields + render-only GhostPose (no GameEvents, p-only ghosts pixel-identical) · tap-ghost view-only GhostProfileCard (zero pendingInput writes, test-pinned) · ghostGuard determinism expansion · patch notes 2026-07-10e. Deploy: **relay FIRST** then web.
+- **R4 Wave A engine y-plane** (#51, Draft PR from `engine/issue-51-wave-a-y-plane`, plan approved in issue comments): NEW `src/engine/systems/plane.ts` — pure deterministic plane/y helpers, math ported verbatim from `render/worldDepth/{depthBand,depthAssign}` (engine imports nothing from render) · additive `planeY` field on Hero/Enemy/Boss stamped at every spawn site via stateless entity-id hashing (seeded wave RNG untouched) · `CONFIG.plane` namespace (bandFar/bandNear/formation/ySpeed) pinned to render constants by test · `planeY` included in lockstep stateHash · **SAVE_VERSION stays 20 — proven by tests** (planeY lives only on never-persisted live entity arrays, recomputed at spawn on load). Render byte-neutral: existing `Entity.y` (torso anchor used by hit/heroDown/fastTravel fx) deliberately NOT repurposed. Combat stays x-based; sim gates byte-identical. Wave B (render cutover behind flag) + Wave C (y movement) = separate PRs.
+- **R3 presence คนจริง** (#50 / PR #62 merged, release PR #63): relay additive `pa` action stream · 8Hz publisher + fps valve · render-only GhostPose · tap-ghost GhostProfileCard · ghostGuard expansion. Relay deployed ✅; web goes live next main deploy. Full detail history v17.
 - **R2.9 Codegen Asset Phase 1A** (#60 / PR #61 merged): SVG icon language 9-id slice, `src/ui/components/icons/` registry + `ItemIcon`/`SkillIcon` seam, labels.ts glyph = verbatim fallback. Phase 1B (remaining ids) after owner eye-test.
 - **#54 UI audit**: scorecard posted; owner questions still open — crit system / menu-row scope / action rail / chat overlay (gates Wave B ชุดที่เหลือ). R2.5–R2.8 detail → history v13–v15.
 
@@ -36,4 +37,4 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 
 ## Next recommended work
 
-- R3 presence คนจริง: action stream ~8Hz + snapshot-on-join + tap profile; relay opcode `pa` additive.
+- R4 Wave B (#51): render cutover to `entity.planeY` behind `worldDepthFromEngineY` flag + pixel-identity test — after Wave A PR review. Prep notes on the Wave A PR (party `heroPlaneY` fan, town-NPC `scatterPlaneY`, CONFIG↔render constant lock-step).

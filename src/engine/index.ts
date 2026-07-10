@@ -208,6 +208,20 @@ export {
 // pure `npcInRange(state, id)` read — the layer rule holds (engine never imports render).
 export { npcInRange, townNpcConfig, type TownNpcAnchor } from "@/engine/systems/townNpcs";
 
+// Depth-PLANE / y helpers (R4 Wave A "engine-owned deterministic y at spawn"): the engine
+// assigns each entity a deterministic `planeY` (ground-plane depth row) at spawn. These pure
+// derivations are ported from render's depth band so a Wave-B render cutover can READ
+// `entity.planeY` in place of recomputing its own depth (and place ghosts / town NPCs, which
+// have no live engine entity, off the same math). UNUSED by the sim this wave — behaviour-neutral.
+export {
+  hashUnit,
+  planeYForDepth,
+  enemyPlaneY,
+  heroPlaneY,
+  bossPlaneY,
+  scatterPlaneY,
+} from "@/engine/systems/plane";
+
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure
 // reads. Casting / slot assignment happen ONLY through `step()` intents

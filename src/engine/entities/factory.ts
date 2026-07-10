@@ -9,6 +9,8 @@ import { emptyEquipped, ITEM_TEMPLATES, refineOf, type EquippedGear } from "@/en
 import { refinedStat } from "@/engine/config/refine";
 import type { Rng } from "@/engine/core/rng";
 import { baseStats, heroMaxHp, heroMaxMana } from "@/engine/systems/stats";
+// R4 Wave A: deterministic depth-plane y assigned at spawn (engine owns the plane now).
+import { heroPlaneY, enemyPlaneY, bossPlaneY } from "@/engine/systems/plane";
 import type {
   Hero,
   HeroConfig,
@@ -113,6 +115,10 @@ export function makeHero(
     cls,
     x: CONFIG.baseAnchor + t.offset,
     y: CONFIG.layout.heroY,
+    // R4 Wave A depth-plane row (engine-owned deterministic y). SOLO class formation row here;
+    // a cohort builder fans by passing slot/size to `heroPlaneY` (Wave-B render cutover / party).
+    // UNUSED this wave — the legacy `y` above stays the render torso anchor. See Hero.planeY.
+    planeY: heroPlaneY(cls),
     hp: maxHp,
     maxHp,
     cd: 0,
@@ -177,6 +183,9 @@ export function makeEnemy(id: number, kind: EnemyKind, stage: number, rng: Rng):
     kind,
     x: 0,
     y: CONFIG.layout.enemyY,
+    // R4 Wave A depth-plane row (engine-owned deterministic y): stable per-id band scatter.
+    // UNUSED this wave — `y` above stays the render anchor. See Enemy.planeY.
+    planeY: enemyPlaneY(id),
     hp,
     maxHp: hp,
     atk,
@@ -227,6 +236,9 @@ export function makeBoss(
     id,
     x: CONFIG.spawnX,
     y: CONFIG.boss.y,
+    // R4 Wave A depth-plane row (engine-owned deterministic y): fixed NEAR row (frontmost).
+    // UNUSED this wave — `y` above stays the render anchor. See Boss.planeY.
+    planeY: bossPlaneY(),
     hp,
     maxHp: hp,
     atk: Math.round(CONFIG.bossAtk(stage) * atkScale),
@@ -265,6 +277,9 @@ export function makeWorldBoss(id: number): Boss {
     id,
     x: CONFIG.spawnX,
     y: W.boss.y,
+    // R4 Wave A depth-plane row (engine-owned deterministic y): fixed NEAR row (frontmost).
+    // UNUSED this wave — `y` above stays the render anchor. See Boss.planeY.
+    planeY: bossPlaneY(),
     hp,
     maxHp: hp,
     atk: W.atk,
@@ -311,6 +326,9 @@ export function makeBossAdd(id: number, kind: EnemyKind, stage: number, slot: nu
     kind,
     x: 0,
     y: CONFIG.layout.enemyY,
+    // R4 Wave A depth-plane row (engine-owned deterministic y): stable per-id band scatter.
+    // UNUSED this wave — `y` above stays the render anchor. See Enemy.planeY.
+    planeY: enemyPlaneY(id),
     hp,
     maxHp: hp,
     atk,

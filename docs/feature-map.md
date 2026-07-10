@@ -188,14 +188,17 @@ Source:
 - src/engine/state/index.ts
 - src/engine/state/version.ts
 - src/engine/config/index.ts
+- src/engine/systems/plane.ts
 Tests:
 - src/engine/__tests__/engine.test.ts
 - src/engine/__tests__/loop.test.ts
 - src/engine/__tests__/determinism.test.ts
 - src/engine/__tests__/float-determinism-guard.test.ts
+- src/engine/__tests__/plane.test.ts
 Notes:
 - `step(state, dt, input)` is the ONE transition; deterministic, no wall-clock reads inside.
 - Check `src/engine/state/version.ts` for current SAVE_VERSION; bump + add migrate() for any SaveData shape change.
+- R4 Wave A: the engine owns each entity's depth-plane row (`Entity.planeY`, `systems/plane.ts`, `CONFIG.plane`) — deterministic id-hashed y at spawn, ported from render's depth band, folded into `stateHash`, TRANSIENT (no SAVE bump). Unused by the sim this wave; Wave-B render reads it in place of recomputing depth.
 
 ## Party lockstep
 Docs:
