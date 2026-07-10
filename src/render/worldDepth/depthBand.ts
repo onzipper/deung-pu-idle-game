@@ -24,10 +24,23 @@
 export const DEPTH_OFFSET_FAR = -24;
 /** y offset at d=1 (near row: dropped toward the camera). */
 export const DEPTH_OFFSET_NEAR = 40;
-/** Root scale at d=0. */
-export const DEPTH_SCALE_FAR = 0.8;
-/** Root scale at d=1. */
-export const DEPTH_SCALE_NEAR = 1.12;
+/**
+ * Root scale at d=0 (far / upstage).
+ *
+ * R4.5 Wave 1 (issue #69, projection C — "MMO field board with subtle depth"):
+ * capped from the original `0.8` → `0.95`. The old 0.8↔1.12 band was a 40% size
+ * swing that shrank far-row actors so hard they read as "randomly tiny" instead
+ * of "further away". The rule now is **scale is a whisper, composition sells
+ * depth** — foot-sort zIndex + contact shadows carry the depth read, the size
+ * change only nudges it. Offsets (`DEPTH_OFFSET_*`) are UNCHANGED: vertical
+ * position separation was never the problem, only the over-tuned scale.
+ */
+export const DEPTH_SCALE_FAR = 0.95;
+/**
+ * Root scale at d=1 (near / downstage). Capped from the original `1.12` → `1.06`
+ * — see `DEPTH_SCALE_FAR` above for the R4.5 Wave 1 rationale.
+ */
+export const DEPTH_SCALE_NEAR = 1.06;
 
 /** zIndex quantization: d*1000 rounded — plenty of rungs for ~15 actors. */
 const Z_INDEX_STEPS = 1000;

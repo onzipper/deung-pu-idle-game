@@ -32,6 +32,8 @@ import {
   depthZIndex,
   DEPTH_OFFSET_FAR,
   DEPTH_OFFSET_NEAR,
+  DEPTH_SCALE_FAR,
+  DEPTH_SCALE_NEAR,
 } from "@/render/worldDepth/depthBand";
 import {
   canvasToWorld,
@@ -105,7 +107,10 @@ function makeEnemy(): Enemy {
   };
 }
 
-const SCALES = [0.8, 1.0, 1.12] as const;
+// The live depth-band envelope (R4.5 Wave 1 capped it 0.95↔1.06) plus 1.0, kept
+// in sync with `depthBand` by import instead of hardcoded so the planted-feet
+// invariant below is tested at the REAL shipped scale extremes.
+const SCALES = [DEPTH_SCALE_FAR, 1.0, DEPTH_SCALE_NEAR] as const;
 
 /** Bottom (max-y / lowest-on-screen) of a world-space bounds = the feet line. */
 function bottomOf(b: { y: number; height: number }): number {
@@ -116,7 +121,7 @@ function bottomOf(b: { y: number; height: number }): number {
 // 1. Pivot algebra — feet stay planted at footY across every depth scale.
 //    With the root pivot at GROUND_Y and view.y = F, the feet render at F for
 //    ANY scale (the rig grows/shrinks AROUND the foot line). A wrong pivot
-//    (e.g. 0) would swing the feet ~scale*GROUND_Y px — an ~80px spread across
+//    (e.g. 0) would swing the feet ~(1−scale)*GROUND_Y px — tens of px across
 //    these scales — so the tight spread bound below is the real regression trap.
 //    ONE view per rig, varying only the scale, isolates the transform from
 //    heroView's per-instance random idle phase.

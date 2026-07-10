@@ -16,6 +16,7 @@ import { Container } from "pixi.js";
 import { scatterPlaneY, type HeroClass } from "@/engine";
 import { GROUND_Y } from "@/render/layout";
 import { depthZIndex } from "@/render/worldDepth/depthBand";
+import { attachContactShadow, HERO_SHADOW_RX } from "@/render/views/entityShadow";
 import type { WorldFxContext } from "@/render/worldDepth/worldFxContext";
 import {
   createHeroView,
@@ -134,8 +135,13 @@ export class GhostLayer {
         view = createHeroView();
         // Foot-pivot so depth scale/terrain lift plant the feet on the ground
         // (paired with `view.y = footY` below); only when the seam is present so
-        // a bare-construction ghost stays byte-identical to today.
-        if (this.worldFx) view.pivot.y = GROUND_Y;
+        // a bare-construction ghost stays byte-identical to today. The same
+        // gate carries the R4.5 contact shadow — the real renderer always
+        // supplies `worldFx`, so live ghosts always get one.
+        if (this.worldFx) {
+          view.pivot.y = GROUND_Y;
+          attachContactShadow(view, HERO_SHADOW_RX);
+        }
         this.views.set(item.cid, view);
         this.container.addChild(view);
       }

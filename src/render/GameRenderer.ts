@@ -82,9 +82,19 @@ import {
 } from "@/render/views/worldBossView";
 import {
   createEnemyView,
+  effectiveSize,
   updateEnemyView,
   type EnemyView,
 } from "@/render/views/enemyView";
+import {
+  attachContactShadow,
+  BOSS_SHADOW_RX,
+  ENEMY_SHADOW_RX,
+  HERO_SHADOW_RX,
+  NPC_SHADOW_RX,
+  WORLD_BOSS_SHADOW_RX,
+  type HasContactShadow,
+} from "@/render/views/entityShadow";
 import { createHeroView, updateHeroView, type HeroView } from "@/render/views/heroView";
 import { GhostLayer, type GhostDrawItem } from "@/render/views/ghostLayer";
 import { createNpcView, updateNpcView, type NpcView } from "@/render/views/npcView";
@@ -503,14 +513,22 @@ export class GameRenderer {
     // directly — stays byte-untouched. The paired per-frame `view.y = footY`
     // (below, in `draw()`) cancels the pivot to GROUND_Y when flags are off, so
     // the rendered result is identical to today's pivot-0 / y-0 rig.
+    // R4.5 Wave 1: attach a build-once contact shadow as the backmost child of
+    // each pooled actor root (see `entityShadow.ts`). The root's GROUND_Y pivot
+    // + per-frame foot plant plants the shadow on the ground with the SAME
+    // transform the actor rides (no re-added offset — known-traps #3); it also
+    // rides the root's depth scale for free, and is destroyed with the view on
+    // pool sweep (no orphan shadows).
     this.heroPool = new Pool(entities, () => {
       const v = createHeroView();
       v.pivot.y = GROUND_Y;
+      attachContactShadow(v, HERO_SHADOW_RX);
       return v;
     });
     this.enemyPool = new Pool(entities, () => {
       const v = createEnemyView();
       v.pivot.y = GROUND_Y;
+      attachContactShadow(v, ENEMY_SHADOW_RX);
       return v;
     });
     this.projectilePool = new Pool(projectiles, createProjectileView);
@@ -561,6 +579,9 @@ export class GameRenderer {
       // resolves to GROUND_Y = pixel-identical to today.
       view.pivot.y = GROUND_Y;
       view.zIndex = -500;
+      // Same contact-shadow primitive as the pooled actors (town is flat, so the
+      // shadow just sits at GROUND_Y under each NPC's feet).
+      attachContactShadow(view, NPC_SHADOW_RX);
       entities.addChild(view);
       this.npcViews.set(anchor.id, view);
     }
@@ -680,6 +701,10 @@ export class GameRenderer {
     for (const e of state.enemies) {
       const view = this.enemyPool.get(e.id);
       updateEnemyView(view, e, { dt, events: frameEvents, mapId: enemyMapId });
+      // Contact-shadow footprint tracks the enemy's drawn size (elite-scaled to
+      // match the body); a transform-only set (zero alloc). The root depth scale
+      // then applies on top of this local scale.
+      (view as EnemyView & HasContactShadow).contactShadow.scale.set(effectiveSize(e));
       // R4 Wave B: engine-owned `e.planeY` (stable per-id band scatter; boss adds
       // carry it too) drives the row — hash fallback if absent.
       const d = this.worldFx.depthOf("enemy", e.id, undefined, undefined, e.planeY);
@@ -696,6 +721,7 @@ export class GameRenderer {
         // them). Terrain lift only, never depth scale (see `placeStaticActor`).
         this.bossView.pivot.y = GROUND_Y;
         this.bossView.zIndex = 10000;
+        attachContactShadow(this.bossView, BOSS_SHADOW_RX);
         this.layers.entities.addChild(this.bossView);
       }
       // M7.9 "Grand Expansion": the boss entity itself is map-agnostic (see
@@ -732,6 +758,7 @@ export class GameRenderer {
         // Foot-pivot + terrain lift only (never depth scale), like the boss.
         this.worldBossView.pivot.y = GROUND_Y;
         this.worldBossView.zIndex = -10000;
+        attachContactShadow(this.worldBossView, WORLD_BOSS_SHADOW_RX);
         this.layers.entities.addChildAt(this.worldBossView, 0);
       }
       updateWorldBossView(this.worldBossView, wb.entity, { elapsedMs, dt, events: frameEvents });
