@@ -15,6 +15,7 @@ import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
 import { getTargets } from "@/engine/systems/targeting";
+import { stepPlaneY } from "@/engine/systems/plane";
 import type { CombatTarget } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 import type { FrameInput } from "@/engine/core/step";
@@ -68,8 +69,22 @@ function applyOneCommand(state: GameState, heroIdx: number, input: FrameInput): 
   if (input.moveTo && Number.isFinite(input.moveTo.x)) {
     const [minX, maxX] = walkBounds(state);
     const x = clamp(input.moveTo.x, minX, maxX);
-    h.command = { kind: "move", x };
-    state.events.push({ type: "moveOrdered", x, heroIdx });
+    // R4 Wave C2 — OPTIONAL depth-row y. CLAMP it into the plane band at intake (owner
+    // reminder #1: never trust the caller — the UI already inverts the tap to a band row,
+    // but a stale/older/malicious client could send anything). A non-finite y is treated
+    // as ABSENT → an x-only command, byte-identical to pre-C2 (same shape, same event).
+    const rawY = input.moveTo.y;
+    const y =
+      typeof rawY === "number" && Number.isFinite(rawY)
+        ? clamp(rawY, CONFIG.plane.bandFar, CONFIG.plane.bandNear)
+        : undefined;
+    if (y === undefined) {
+      h.command = { kind: "move", x };
+      state.events.push({ type: "moveOrdered", x, heroIdx });
+    } else {
+      h.command = { kind: "move", x, y };
+      state.events.push({ type: "moveOrdered", x, y, heroIdx });
+    }
   }
 
   if (input.attackTarget) {
@@ -107,11 +122,26 @@ export function tickTownManualWalk(state: GameState): void {
   for (const h of state.heroes) {
     if (h.dead) continue;
     if (!h.command || h.command.kind !== "move") continue;
-    const d = h.command.x - h.x;
-    if (Math.abs(d) <= CONFIG.manual.arriveEps) {
+    const cmd = h.command;
+    // R4 Wave C2 — a move command may carry a depth-row `y` (town has no combat, so the
+    // per-hero y-steering in combat.updateHeroes never runs here; ease it in this walk
+    // slice instead). `y` was already clamped into the band at intake. Guarded on the
+    // hero having a `planeY` (hand-built literals may omit it) so it stays a no-op there.
+    if (cmd.y !== undefined && typeof h.planeY === "number") {
+      h.planeY = stepPlaneY(h.planeY, cmd.y, FIXED_DT);
+    }
+    const d = cmd.x - h.x;
+    const xArrived = Math.abs(d) <= CONFIG.manual.arriveEps;
+    // y arrives when absent, un-tracked (no planeY), or within the plane arrive-eps.
+    const yArrived =
+      cmd.y === undefined ||
+      typeof h.planeY !== "number" ||
+      Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
+    if (xArrived && yArrived) {
       h.command = null;
       continue;
     }
-    h.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
+    // Walk x only while it hasn't arrived (x-only path is byte-identical to pre-C2).
+    if (!xArrived) h.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
   }
 }

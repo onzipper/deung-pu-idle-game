@@ -1532,7 +1532,7 @@ export class FxController {
           this.travelPortal.cancelChannel();
           break;
         case "moveOrdered":
-          this.onMoveOrdered(ev.x, ev.heroIdx);
+          this.onMoveOrdered(ev.x, ev.heroIdx, ev.y);
           break;
         case "targetLocked":
           this.onTargetLocked(ev.id, ev.heroIdx, state);
@@ -1856,10 +1856,13 @@ export class FxController {
    * screen too. Same convention as the skill-spectacle pov gate elsewhere in
    * this file (`ev.slot === this.povHeroIndex`). Solo is always heroIdx 0 ===
    * the default `povHeroIndex` 0 — pixel-identical. */
-  private onMoveOrdered(x: number, heroIdx: number): void {
+  private onMoveOrdered(x: number, heroIdx: number, planeY?: number): void {
     if (heroIdx !== this.povHeroIndex) return;
     // W4: drop the sonar-ping marker onto the terrain at the tapped x.
-    const gy = this.wf.groundY(x);
+    // R4 Wave C2: if the move carried a depth row, offset the ping by it so the ring lands
+    // at the tapped DEPTH (screenY = groundLine + planeY), matching where the hero will steer.
+    // Absent (x-only tap) → +0 = ground line, pixel-identical to pre-C2.
+    const gy = this.wf.groundY(x) + (planeY ?? 0);
     for (const r of MOVE_MARKER_RINGS) {
       this.rings.spawn({
         x,

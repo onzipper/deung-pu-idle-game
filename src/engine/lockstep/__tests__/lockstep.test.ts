@@ -294,6 +294,57 @@ describe("M8 lockstep — a slot shadowed mid-run stays hash-identical across cl
   });
 });
 
+describe("R4 Wave C2 — moveTo{x,y} rides the relay as an opaque payload", () => {
+  const NEAR = CONFIG.plane.bandNear;
+  const FAR = CONFIG.plane.bandFar;
+
+  it("a moveTo{x,y} survives a JSON round-trip; an x-only lane decodes byte-identically", () => {
+    // (a) the x/y payload survives the opaque wire (the relay never parses game state — it
+    // JSON-forwards the FrameInput verbatim; see turnLoop.TurnMessage's doc).
+    const xy: FrameInput = { moveTo: { x: 480, y: FAR } };
+    const wired = JSON.parse(JSON.stringify(xy)) as FrameInput;
+    expect(wired.moveTo).toEqual({ x: 480, y: FAR });
+
+    // (b) an OLD x-only client's payload round-trips WITHOUT gaining a y key — additive-safe.
+    const xOnly: FrameInput = { moveTo: { x: 480 } };
+    const wiredX = JSON.parse(JSON.stringify(xOnly)) as FrameInput;
+    expect("y" in wiredX.moveTo!).toBe(false);
+  });
+
+  it("a wired (JSON round-tripped) x/y issue drives the shared sim identically to a direct apply", () => {
+    const wiredClient = new LockstepClient(buildCohort(50, PARTY2), 2);
+    const directClient = new LockstepClient(buildCohort(50, PARTY2), 2);
+    for (const c of [wiredClient, directClient]) {
+      c.state.spawnPaused = true;
+      c.state.enemies = [];
+    }
+    const xy: FrameInput = { moveTo: { x: 480, y: FAR } };
+    wiredClient.issue(1, 0, JSON.parse(JSON.stringify(xy)) as FrameInput); // through the "wire"
+    directClient.issue(1, 0, xy); // direct, un-serialized
+    wiredClient.runTo(4);
+    directClient.runTo(4);
+    expect(wiredClient.hashes).toEqual(directClient.hashes); // opaque relay ⇒ identical state
+    expect(wiredClient.state.heroes[1].command).toEqual({ kind: "move", x: 480, y: FAR });
+  });
+
+  it("2-client relay with MIXED x-only and x/y lanes stays byte-identical every turn", () => {
+    // slot 0 issues x/y moves (alternating band edges), slot 1 issues x-only moves. runRelay
+    // asserts per-turn hash equality across both clients — the x/y field flows through the
+    // turn machinery deterministically, and the x-only lane is unaffected by the new field.
+    const script = (slot: number, turn: number): FrameInput | null => {
+      if (turn < 3) return null;
+      if (slot === 0 && turn % 20 === 0)
+        return { moveTo: { x: 300 + (turn % 200), y: turn % 40 === 0 ? NEAR : FAR } };
+      if (slot === 1 && turn % 17 === 0) return { moveTo: { x: 260 + (turn % 240) } };
+      return null;
+    };
+    const clients = makeClients(2, 1357, PARTY2);
+    const traj = runRelay(clients, script, 800, 0xa11ce);
+    expect(clients[0].hashes).toEqual(clients[1].hashes);
+    expect(new Set(traj).size).toBeGreaterThan(30); // the sim actually moved
+  });
+});
+
 describe("M8 lockstep — stateHash excludes render transients (events + aimX)", () => {
   it("mutating state.events / hero.aimX does NOT change the hash", () => {
     const s = buildCohort(101, PARTY2);

@@ -51,10 +51,16 @@ import {
   type CameraState,
   type CameraTransform,
 } from "@/render/worldDepth/camera";
-import { depthOffsetY, depthZIndex } from "@/render/worldDepth/depthBand";
+import {
+  depthOffsetY,
+  depthZIndex,
+  DEPTH_OFFSET_FAR,
+  DEPTH_OFFSET_NEAR,
+} from "@/render/worldDepth/depthBand";
 import {
   canvasToWorld,
   enemyTapCenterY,
+  tapToPlaneY,
   worldBossTapCenterY,
   worldScale,
   type CamView,
@@ -98,12 +104,18 @@ import {
 
 /**
  * Manual play (M7.8) tap outcome: a live enemy id (monsters WIN over ground
- * on overlap) or a raw world-x ground tap (the engine itself clamps
- * `moveTo.x` to the zone's walkable bounds — see `systems/manual.ts` — so this
- * just reports the world position under the pointer). `null` for a tap
- * outside the logical world rect (the letterbox bars).
+ * on overlap) or a ground tap reporting the world-x under the pointer PLUS the
+ * band `planeY` it landed on (R4 Wave C2). The engine clamps both `moveTo.x`
+ * (walkable bounds) and `moveTo.y` (plane band) at intake — see `systems/manual.ts`
+ * — so this just reports the un-projected position. `null` for a tap outside the
+ * logical world rect (the letterbox bars).
  */
-export type PointerHitResult = { kind: "monster"; id: number } | { kind: "ground"; x: number } | null;
+export type PointerHitResult =
+  | { kind: "monster"; id: number }
+  // R4 Wave C2: `planeY` = the band-clamped depth row the ground tap landed on (inverted
+  // from the tapped world-y through `depthOffsetY`), fed into `moveTo.y` for an x/y move.
+  | { kind: "ground"; x: number; planeY: number }
+  | null;
 
 /**
  * Town NPCs (ป้าปุ๊/ลุงดึ๋ง) tap outcome — see `hitTestNpc()`. Kept as a
@@ -1129,7 +1141,14 @@ export class GameRenderer {
       }
     }
     if (bestId !== null) return { kind: "monster", id: bestId };
-    return { kind: "ground", x: wx };
+    // R4 Wave C2 — a ground tap now also carries the DEPTH-ROW it landed on, so the
+    // move order can steer the hero's plane (x/y move). Invert the tapped world-y through
+    // the SAME `depthOffsetY` forward map (`planeY = wy − groundLine`, clamped to the band):
+    // subtract the terrain-lifted ground line at the tapped x (flat/flags-off → GROUND_Y),
+    // so only the depth offset remains. A tap above/below the band saturates to the edge row;
+    // the engine re-clamps at intake regardless (`systems/manual`).
+    const planeY = tapToPlaneY(wy, this.worldFx.groundY(wx), DEPTH_OFFSET_FAR, DEPTH_OFFSET_NEAR);
+    return { kind: "ground", x: wx, planeY };
   }
 
   /**

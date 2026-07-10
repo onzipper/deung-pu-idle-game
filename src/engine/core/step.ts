@@ -218,8 +218,16 @@ export interface FrameInput {
    * resumes or the hero idles (AUTO off). Overridden by the boss phase's forced
    * combat. Transient command state — NEVER persisted. Applied once per drained
    * input; a later command this frame replaces it.
+   *
+   * R4 Wave C2 — OPTIONAL `y` (a depth-row target): a tap that carries a plane row makes
+   * the hero also STEER its `planeY` toward `y` while walking (the C1 ease), the command
+   * clearing only when BOTH x and y arrive. `y` is CLAMPED to `[bandFar, bandNear]` at
+   * intake (`systems/manual`); a non-finite `y` is treated as ABSENT (x-only). An x-only
+   * `moveTo` is byte-identical to pre-C2 (home-row steering, x-only arrival) — an additive,
+   * lockstep-safe field: an old x-only client's `moveTo{x}` decodes + steps unchanged.
+   * COSMETIC (planeY gates no combat; targeting stays x-only).
    */
-  moveTo?: { x: number };
+  moveTo?: { x: number; y?: number };
   /**
    * Manual play (M7.8): TAP-A-MONSTER attack order. The solo hero closes to attack
    * range and fights the target `id` until it dies (target gone -> command

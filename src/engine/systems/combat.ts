@@ -417,9 +417,22 @@ export function updateHeroes(state: GameState): void {
       const cmd: ManualCommand = h.command;
       if (cmd.kind === "move") {
         // Walk to x, IGNORING huntable targets (no attacking; aggro is unchanged —
-        // engaged mobs keep hitting the hero). Arrival within `arriveEps` COMPLETES
-        // the command; this step then falls through to auto-hunt (AUTO on) / idle.
-        if (Math.abs(h.x - cmd.x) <= CONFIG.manual.arriveEps) {
+        // engaged mobs keep hitting the hero). Arrival COMPLETES the command; this step
+        // then falls through to auto-hunt (AUTO on) / idle.
+        //
+        // R4 Wave C2 — a move command may carry a depth-row `y`. It then arrives only when
+        // BOTH x (`arriveEps`) AND the depth-row y (`plane.yArriveEps`) have landed; while
+        // x is done but y is still easing the command PERSISTS (manualActive holds the hero
+        // at cmd.x + suppresses auto-hunt) and the y-steering block below pulls planeY to
+        // cmd.y. An x-only move (`cmd.y` undefined, or a hand-built hero with no planeY) is
+        // BYTE-IDENTICAL to pre-C2 — yArrived is trivially true, so this reduces to the old
+        // x-only arrival test. The x movement math + move-or-attack ordering are UNCHANGED.
+        const xArrived = Math.abs(h.x - cmd.x) <= CONFIG.manual.arriveEps;
+        const yArrived =
+          cmd.y === undefined ||
+          typeof h.planeY !== "number" ||
+          Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
+        if (xArrived && yArrived) {
           h.command = null;
         } else {
           goalX = cmd.x;
@@ -607,8 +620,20 @@ export function updateHeroes(state: GameState): void {
       // reproducing the spawn/cohort stamp (`heroPlaneY`; solo reduces to the solo formation row).
       const engagedMob = !bossPhase && aimTarget && aimTarget.id !== wbId ? aimTarget : null;
       const homeRow = heroPlaneY(h.cls, state.heroes.indexOf(h), state.heroes.length);
-      const yTarget =
-        engagedMob && typeof engagedMob.planeY === "number" ? engagedMob.planeY : homeRow;
+      // R4 Wave C2 — an ACTIVE move command carrying a depth-row `y` steers the hero to that
+      // row (already band-clamped at intake). Priority: an ENGAGED farm mob's lane wins (an
+      // ATTACK command sets aimTarget → engagedMob; a MOVE command never sets aimTarget, so
+      // engagedMob is null and the command row is used); else HOME. An x-only move (`cmd.y`
+      // undefined) and every non-move state fall through to HOME — byte-identical to C1.
+      const moveCmd = !bossPhase && h.command && h.command.kind === "move" ? h.command : null;
+      let yTarget: number;
+      if (engagedMob && typeof engagedMob.planeY === "number") {
+        yTarget = engagedMob.planeY;
+      } else if (moveCmd && typeof moveCmd.y === "number") {
+        yTarget = moveCmd.y;
+      } else {
+        yTarget = homeRow;
+      }
       h.planeY = stepPlaneY(h.planeY, yTarget, FIXED_DT);
     }
   }

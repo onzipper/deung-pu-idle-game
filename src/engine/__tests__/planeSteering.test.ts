@@ -218,6 +218,91 @@ describe("hero y steering — IRON invariant: y gates NO combat", () => {
   });
 });
 
+describe("hero y steering — R4 Wave C2 manual x/y move command", () => {
+  it("a live x/y MOVE command steers planeY toward command.y (overriding the home row)", () => {
+    const s = initGameState(4, soloSave("swordsman", 3));
+    s.spawnPaused = true;
+    s.enemies = [];
+    const h = s.heroes[0];
+    h.planeY = FAR;
+    const home = heroPlaneY("swordsman");
+    expect(home).not.toBe(NEAR); // home is a distinct lane from the commanded near row
+
+    // Command a far-x, near-row move so the command stays live for many steps.
+    step(s, { moveTo: { x: 850, y: NEAR } });
+    let prev = FAR - 1e-9;
+    let yReached = false;
+    for (let i = 0; i < 60; i++) {
+      step(s, {});
+      if (!h.command) break; // stop sampling once it clears (idle home-steer would pull it back)
+      const y = h.planeY!;
+      expect(y).toBeGreaterThanOrEqual(prev); // monotone toward the commanded NEAR row (not home)
+      expect(y).toBeLessThanOrEqual(NEAR + 1e-9);
+      prev = y;
+      if (Math.abs(y - NEAR) <= EPS) {
+        yReached = true;
+        break;
+      }
+    }
+    // planeY climbed PAST the home row (17.6) all the way to the COMMANDED near lane (40) —
+    // proof the move command's y overrode the home-row steering (home-steer would stop at 17.6).
+    expect(yReached).toBe(true);
+    expect(h.planeY!).toBeGreaterThan(home + 1);
+    expect(h.command).not.toBeNull(); // still walking x (the row arrived first)
+  });
+
+  it("after an x/y move completes, an idle hero eases back to its home row (C1 contract)", () => {
+    const s = initGameState(6, soloSave("swordsman", 3));
+    s.spawnPaused = true;
+    s.enemies = [];
+    const h = s.heroes[0];
+    h.planeY = FAR;
+    const home = heroPlaneY("swordsman");
+
+    // Short x hop with a near-row target: completes quickly, then idles.
+    h.x = 300;
+    step(s, { moveTo: { x: 304, y: NEAR } }); // x nearly arrived; y must finish before clearing
+    for (let i = 0; i < 300 && h.command; i++) step(s, {});
+    expect(h.command).toBeNull();
+    // Idle now → steer HOME (C1). Run it back.
+    for (let i = 0; i < 120; i++) step(s, {});
+    expect(h.planeY).toBeCloseTo(home, 6);
+  });
+
+  it("a y ALREADY on the commanded row reduces the x/y move to the x-only move (byte-identical combat)", () => {
+    // Honest additive-safety proof: when the hero's planeY already equals the command's y, the
+    // y-arrival gate is satisfied from step 0, so the x/y command's LIFETIME — and thus the whole
+    // move-suppresses-auto-attack window and the ensuing combat — is byte-identical to an x-only
+    // command. (The IRON invariant above already proves range/cooldown/targeting never read
+    // planeY; this proves the C2 y machinery adds no perturbation when y is satisfied.)
+    const runTimed = (withY: boolean): { firstHit: number; kill: number; x: number } => {
+      const s = initGameState(31, soloSave("swordsman", 3));
+      s.spawnPaused = true;
+      const hx = s.heroes[0].x;
+      const e = engagedEnemyAt(555, hx, NEAR, 40); // in melee range immediately
+      s.enemies = [e];
+      s.heroes[0].planeY = NEAR; // ALREADY on the commanded row → y arrives instantly
+      const cmd = withY ? { moveTo: { x: hx, y: NEAR } } : { moveTo: { x: hx } };
+      let firstHit = -1;
+      let kill = -1;
+      for (let i = 0; i < 900; i++) {
+        step(s, i === 0 ? cmd : {});
+        const mob = s.enemies.find((m) => m.id === 555);
+        if (firstHit < 0 && mob && mob.hp < mob.maxHp) firstHit = i;
+        if (kill < 0 && !mob) {
+          kill = i;
+          break;
+        }
+      }
+      return { firstHit, kill, x: s.heroes[0].x };
+    };
+    const withY = runTimed(true);
+    expect(withY.firstHit).toBeGreaterThanOrEqual(0);
+    expect(withY.kill).toBeGreaterThan(withY.firstHit);
+    expect(withY).toEqual(runTimed(false)); // byte-identical to the x-only path
+  });
+});
+
 describe("hero y steering — determinism + hash + save", () => {
   it("planeY trajectories are byte-identical across two same-seed runs", () => {
     const run = (): number[] => {

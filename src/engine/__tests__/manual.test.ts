@@ -241,6 +241,147 @@ describe("manual play (M7.8)", () => {
 });
 
 /**
+ * R4 Wave C2 — moveTo gains an OPTIONAL depth-row `y`. An x-only move is byte-identical to
+ * pre-C2 (command shape + event, home-row steering, x-only arrival); an x/y move clamps y to
+ * the plane band at intake and steers the hero's planeY while walking, clearing only when BOTH
+ * axes arrive. y is cosmetic (never gates combat). Non-finite y → treated as absent (x-only).
+ */
+describe("manual play — moveTo x/y (R4 Wave C2)", () => {
+  const NEAR = CONFIG.plane.bandNear; // 40
+  const FAR = CONFIG.plane.bandFar; // -24
+  const YEPS = CONFIG.plane.yArriveEps;
+
+  it("x-only moveTo is byte-identical: command + event carry NO y (home-row steer)", () => {
+    const s = initGameState(1);
+    s.spawnPaused = true;
+    s.enemies = [];
+    step(s, { moveTo: { x: 500 } });
+    const cmd = s.heroes[0].command!;
+    expect(cmd).toEqual({ kind: "move", x: 500 });
+    expect("y" in cmd).toBe(false); // no undefined-y key leaked onto the command
+    const ev = s.events.find((e) => e.type === "moveOrdered")!;
+    expect(ev.type === "moveOrdered" && "y" in ev).toBe(false); // event stays pre-C2 shaped
+  });
+
+  it("x/y moveTo clamps y into the plane band at intake (both edges) + carries it on the event", () => {
+    const s = initGameState(1);
+    s.spawnPaused = true;
+    s.enemies = [];
+
+    step(s, { moveTo: { x: 400, y: NEAR + 999 } }); // far past the near edge
+    expect(s.heroes[0].command).toEqual({ kind: "move", x: 400, y: NEAR });
+    const evHi = s.events.find((e) => e.type === "moveOrdered")!;
+    expect(evHi.type === "moveOrdered" && evHi.y).toBe(NEAR);
+
+    step(s, { moveTo: { x: 400, y: FAR - 999 } }); // far past the far edge
+    expect(s.heroes[0].command).toEqual({ kind: "move", x: 400, y: FAR });
+  });
+
+  it("a non-finite y is treated as ABSENT (x-only command, no y key)", () => {
+    const s = initGameState(1);
+    s.spawnPaused = true;
+    s.enemies = [];
+    step(s, { moveTo: { x: 350, y: Number.NaN } });
+    const cmd = s.heroes[0].command!;
+    expect(cmd).toEqual({ kind: "move", x: 350 });
+    expect("y" in cmd).toBe(false);
+    step(s, { moveTo: { x: 350, y: Infinity } });
+    expect("y" in s.heroes[0].command!).toBe(false);
+  });
+
+  it("hunt-phase x/y move: the hero converges to (x, y); command clears only when BOTH arrive", () => {
+    const s = initGameState(2, soloSave("swordsman", 3));
+    s.spawnPaused = true;
+    s.enemies = [];
+    const h = s.heroes[0];
+    h.planeY = FAR; // start a full band away from the near-row target
+    const goalX = 600;
+
+    step(s, { moveTo: { x: goalX, y: NEAR } });
+    expect(h.command).toEqual({ kind: "move", x: goalX, y: NEAR });
+
+    // Run until the command clears — arrival must gate on BOTH axes. Track that planeY
+    // actually REACHED the commanded row while the command was live (once it clears, the
+    // idle C1 home-steering nudges planeY back one step, so we sample it WHILE active).
+    let cleared = -1;
+    let yReached = false;
+    for (let i = 0; i < 400; i++) {
+      step(s, {});
+      if (h.command) {
+        expect(h.planeY!).toBeLessThanOrEqual(NEAR + 1e-9); // never overshoots the target row
+        if (Math.abs(h.planeY! - NEAR) <= YEPS) yReached = true;
+      } else {
+        cleared = i;
+        break;
+      }
+    }
+    expect(cleared).toBeGreaterThan(0);
+    expect(yReached).toBe(true); // y converged to the commanded lane during the walk
+    expect(Math.abs(h.x - goalX)).toBeLessThanOrEqual(CONFIG.manual.arriveEps); // and x arrived
+  });
+
+  it("x arrives first but the command PERSISTS until y also arrives (y-gated completion)", () => {
+    const s = initGameState(3, soloSave("swordsman", 3));
+    s.spawnPaused = true;
+    s.enemies = [];
+    const h = s.heroes[0];
+    h.x = 300;
+    h.planeY = FAR;
+    // Command x == current x (instantly x-arrived) but a far y → must NOT clear until y eases in.
+    step(s, { moveTo: { x: 300, y: NEAR } });
+    expect(h.command).not.toBeNull();
+    step(s, {});
+    expect(h.command).not.toBeNull(); // x done, y still easing → command HELD (y-gated)
+    expect(h.planeY!).toBeGreaterThan(FAR); // y is moving toward NEAR
+    let yReached = false;
+    for (let i = 0; i < 200 && h.command; i++) {
+      step(s, {});
+      if (h.command && Math.abs(h.planeY! - NEAR) <= YEPS) yReached = true;
+    }
+    expect(h.command).toBeNull(); // cleared once y landed
+    expect(yReached).toBe(true); // it held until planeY reached the commanded row
+    expect(h.x).toBe(300); // never walked (x was already there)
+  });
+
+  it("is deterministic across two runs with an x/y command active", () => {
+    const runOnce = (): string => {
+      const s = initGameState(9, soloSave("swordsman", 3));
+      s.spawnPaused = true;
+      s.enemies = [];
+      s.heroes[0].planeY = FAR;
+      for (let i = 0; i < 120; i++) step(s, i === 5 ? { moveTo: { x: 550, y: NEAR } } : {});
+      return JSON.stringify({ x: s.heroes[0].x, planeY: s.heroes[0].planeY, cmd: s.heroes[0].command });
+    };
+    expect(runOnce()).toBe(runOnce());
+  });
+
+  it("town x/y walk: the hero arrives on BOTH x and the depth row, then completes", () => {
+    const s = initGameState(1);
+    s.location = { mapId: "map1", zoneIdx: 0 }; // town
+    const h = s.heroes[0];
+    h.x = 100;
+    h.planeY = FAR;
+    const goal = 400;
+
+    step(s, { moveTo: { x: goal, y: NEAR } });
+    expect(h.command).toEqual({ kind: "move", x: goal, y: NEAR });
+    for (let i = 0; i < 400 && h.command; i++) step(s, {});
+    expect(h.command).toBeNull();
+    expect(Math.abs(h.x - goal)).toBeLessThanOrEqual(CONFIG.manual.arriveEps);
+    expect(Math.abs(h.planeY! - NEAR)).toBeLessThanOrEqual(YEPS);
+  });
+
+  it("x/y command stays TRANSIENT — never written to SaveData, no SAVE bump", () => {
+    const s = initGameState(1);
+    s.spawnPaused = true;
+    s.enemies = [];
+    step(s, { moveTo: { x: 500, y: NEAR } });
+    expect(s.heroes[0].command).toEqual({ kind: "move", x: 500, y: NEAR });
+    expect(JSON.stringify(toSaveData(s))).not.toContain("command");
+  });
+});
+
+/**
  * UAT round-3 REGRESSION: the town early-return in step() skipped applyManualCommand
  * AND updateHeroes, so a moveTo in town was silently dropped — tap-the-ground did
  * nothing, and the phase-3 tap-an-NPC-to-approach never walked, so the talk range

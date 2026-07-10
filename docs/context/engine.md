@@ -50,6 +50,17 @@ Steering rules (the y-target each step):
 
 **Kill-time fx note (C1 decision)**: no event payload changes. Enemy kill-time fx resolve the spawn-hash fallback row (`hashUnit(id)` at `depthOf`) — exact for static enemies since enemies never move in C1. Hero-anchored fx read the LIVE `planeY` via `FxController.heroLift` (heroes are never removed from state), so they follow the moved hero automatically. **Revisit if C2/R5 moves enemies** (an enemy kill-time fx would then need `planeY` on its event).
 
+### Wave C2 — manual moveTo x/y + dash y + tap plumbing (R4 done)
+
+`FrameInput.moveTo` gains an **OPTIONAL `y`** (`{ x: number; y?: number }`) — the tapped depth row. Additive + lockstep-safe: an old x-only `moveTo{x}` decodes and steps byte-identically (the field rides the relay as an opaque `FrameInput` payload — no protocol change; proven by the JSON-round-trip + mixed x-only/x-y hash-equality tests in `lockstep.test.ts`).
+
+- **Clamp at EVERY input path** (never trust the caller): `applyManualCommand` clamps incoming `y` to `[CONFIG.plane.bandFar, CONFIG.plane.bandNear]`; a **non-finite `y` is treated as ABSENT** (x-only). The `ManualCommand` `move` variant becomes `{ kind: "move"; x; y? }` (transient, never persisted, no SAVE bump — still v20).
+- **Hunt-phase move** (`combat.updateHeroes`): while a `move` command with `y` is active the C1 y-steering targets `command.y` **instead of** the home row (an engaged mob's lane still wins; an x-only move keeps home-row steering — byte-identical). Arrival gates on x (`manual.arriveEps`) **AND** y (`plane.yArriveEps`); the command clears only when BOTH land (x-arrived-first holds the command while y eases). The x movement math + move-or-attack ordering are unchanged.
+- **Town walk** (`tickTownManualWalk`): town has no combat pass, so it eases `planeY` toward `command.y` in the walk slice itself; same both-axes completion; botWalk/fastTravel global yields untouched.
+- **Dash y** (`systems/dash.dashHeroTo` gains an optional `targetPlaneY`): the ninja dash skills (เงาพริบ / เงาสังหาร / พันเงานิรันดร์) pass the struck mob's `planeY` via the new `enemyDashPlaneY(state, target)` helper (returns `undefined` for a **boss / world-boss** — not a `state.enemies` member — so `planeY` is UNCHANGED, upholding the C1 "never adopt boss lane" rule). Clamped to the band on landing; call-site plumbing only (zero skill geometry/range/damage change). The auto dash-evade passes no target row → row unchanged.
+- **Events (additive, decided by audit)**: `moveOrdered` gains an optional `y` (the clamped commanded row) so the render tap-ping lands at the tapped depth (`FxController.onMoveOrdered` offsets the ring by it; absent → +0, pixel-identical). `heroDashed` is UNCHANGED — its shadow-streak/afterimage draws at a fixed `HERO_MID_Y` band and the hero's own view follows the live `planeY`, so no from/to-y is needed.
+- **Iron invariant still holds**: `planeY` (incl. the new command `y`) is never read by targeting/range/cooldown — the sim issues no manual commands, so `pnpm sim` gates are unmoved.
+
 ## Known risks
 
 - Any change that touches ordering, RNG draw sites, or floating-point paths risks a **desync** between party lockstep clients — the hash-equality tests in `src/engine/lockstep/` are the guard; treat a failure here as a stop-everything bug, not a flaky test.
