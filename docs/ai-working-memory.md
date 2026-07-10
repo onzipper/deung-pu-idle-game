@@ -28,35 +28,98 @@ Default cadence:
 
 This means AI agents should be proactive about preparing the next safe artifact, but conservative about irreversible actions.
 
-## Token budget / visual evidence policy
+## Slow Work Mode
 
-The owner cares about token efficiency. Visual evidence is useful, but it must be **token-light** and should not replace concise written handoff.
+When owner availability is limited, use Slow Work Mode:
 
-Default rules:
+- Batch work into reviewable Draft PRs or proposal comments.
+- Each batch must be independently reviewable, reversible, and clearly stopped at owner approval gates.
+- Prefer preparing the next proposal, checklist, or safe Draft PR over waiting silently.
+- Do not convert a Draft PR into merge-ready solely because automated tests pass.
+- Do not expand scope to keep busy; stay inside the current issue/wave.
 
-- Do not paste large image dumps, raw screenshots as text, long logs, or repeated frame-by-frame descriptions into PR bodies or chat.
-- Prefer **links or attachments** to screenshots/videos over embedding verbose descriptions.
-- For a visual PR, provide a small evidence set only:
-  - 1 desktop screenshot of the target state.
-  - 1 mobile portrait screenshot if mobile readability is part of acceptance.
-  - 1 night/dark-palette screenshot only when darkness/readability is the actual risk.
-  - 1 short GIF/video only when motion/sorting/occlusion cannot be judged from stills.
-- Each visual artifact should have a one-line label: what to look at, what should be true, and which owner checklist item it supports.
-- If evidence would be expensive to generate or review, skip it and provide exact local reproduction steps instead.
-- AI review should summarize visual evidence in **3-5 bullets maximum**, not narrate every visible detail.
-- Keep source inspection targeted: use `AI.md`, `docs/ai-working-memory.md`, `docs/current-state.md`, `docs/decision-index.md`, CODEMAP, and only affected files. Do not read broad history unless current-state points there.
+## AI autonomy gates
 
-Preferred pattern:
+AI agents may continue without a fresh owner trigger when the action is safe and already inside an approved direction:
+
+- static PR review;
+- Draft PR proposal;
+- docs sync;
+- test guard proposal;
+- owner checklist preparation;
+- issue handoff comment preparation;
+- small follow-up Draft PR that does not cross an owner approval gate.
+
+AI agents must stop and wait for the owner before:
+
+- merging any Draft PR;
+- accepting visual feel;
+- starting R5/#52;
+- changing projection direction, scale policy, or art pipeline policy;
+- touching DB, relay protocol, save shape, or production deploy;
+- merging `develop` → `main`.
+
+## Owner Trigger Packet
+
+Every PR or major issue handoff should include a short owner-facing packet near the top:
 
 ```md
-## Visual evidence
+## Owner trigger packet
 
-- Desktop / map2 farm / noon: <link> — road + props read as authored field.
-- Mobile portrait / map2 farm / night: <link> — shadow still visible on far strip.
-- 6s motion clip: <link> — hero walks behind/in front of trunk correctly.
+Need owner action:
+- [ ] Eye-test / approve / choose A-B-C / confirm merge order
 
-Owner only needs to answer: pass / fail / which item feels wrong.
+If approved:
+- Next safe action / merge order / follow-up issue
+
+If not approved:
+- What feedback to leave
 ```
+
+Keep this packet short. The owner should not need to read the whole PR body to know what action is needed.
+
+## Active handoff
+
+For any active multi-PR or multi-wave issue, maintain one short handoff in the issue thread, PR body, or `docs/current-state.md`:
+
+```md
+## Active handoff
+
+Current phase:
+...
+
+Open PRs:
+...
+
+Owner next action:
+...
+
+AI next allowed action:
+...
+```
+
+The handoff is not a changelog. It is the fastest way for the next AI session to know where to continue.
+
+## Token budget / evidence policy
+
+Token budget matters. Do not add heavyweight evidence by default.
+
+- Do not require visual evidence packages as a standing rule.
+- Do not paste image dumps, raw screenshots, long logs, or frame-by-frame descriptions into PRs or chat.
+- Prefer text-light evidence: checklist result, local reproduction steps, short risk note, targeted diff/test summary.
+- Add screenshots/GIF/video only when the owner explicitly asks, or when a visual bug cannot be judged any other way.
+- If visual evidence is used, link/attach it with a one-line label per asset; do not narrate every detail.
+- AI review summaries should stay short: 3–5 bullets unless the owner asks for deep review.
+
+## Stacked PR discipline
+
+Stacked PRs are allowed, but they must stay easy to review:
+
+- Prefer 1 PR for small docs/spec/code changes.
+- Use stacks only when each layer has a clean dependency and separate review purpose.
+- Avoid stacks longer than 2–3 PRs unless the final PR is explicitly a stack-close/checklist PR.
+- Always state base branch, dependency chain, merge order, and out-of-scope.
+- Do not write `docs/current-state.md` as if a stack has merged until the stack is actually ready to land or the PR body clearly says it is post-merge wording.
 
 ## Memory upkeep rule
 
@@ -65,11 +128,24 @@ AI agents must keep repo memory current when they perform work in this repo.
 Update docs as follows:
 
 - `docs/current-state.md`: update at the close of each completed work round or merged PR stack, especially when the current branch, suite count, blockers, or next recommended work changes.
-- `docs/ai-working-memory.md`: update only when owner direction, async cadence, work order, guardrails, token/visual-evidence policy, or merge/review discipline changes. Do not turn it into a changelog.
+- `docs/ai-working-memory.md`: update only when owner direction, async cadence, work order, guardrails, or merge/review discipline changes. Do not turn it into a changelog.
 - `docs/decision-index.md`: update when a decision is locked/rejected and should not be re-litigated.
 - `docs/CODEMAP.md`: update whenever files are added, moved, or deleted.
 
 If an agent cannot update the docs directly, it must leave an explicit TODO in the PR body or issue comment saying which doc needs the update and why.
+
+## Close-out requirement
+
+A round is not cleanly closed until the next actor can continue without asking the owner to repeat context.
+
+Before ending a work round, check:
+
+- `docs/current-state.md` updated if status/blockers/next work changed;
+- `docs/ai-working-memory.md` updated only if direction/cadence/work-order changed;
+- `docs/decision-index.md` updated if owner locked/rejected a decision;
+- `docs/CODEMAP.md` updated if files were added/moved/deleted;
+- PR body or issue comment states the next owner action;
+- deploy impact is explicit: web / relay / DB / none.
 
 ## Immediate work order
 
