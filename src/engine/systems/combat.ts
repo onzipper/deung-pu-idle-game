@@ -40,6 +40,7 @@ import {
   nearestTarget,
   nearestWithin,
 } from "@/engine/systems/targeting";
+import { heroPlaneY, stepPlaneY } from "@/engine/systems/plane";
 import type { Hero, Enemy, Boss, Projectile, CombatTarget, ManualCommand } from "@/engine/entities";
 import type { GameState, HitSource } from "@/engine/state";
 
@@ -585,6 +586,30 @@ export function updateHeroes(state: GameState): void {
           state.events.push({ type: "projectileSpawn", kind: "orb", x: px, y: py });
         }
       }
+    }
+
+    // ── R4 Wave C1 hero y steering (COSMETIC — runs UNCONDITIONALLY, gates NOTHING) ──
+    // Ease this hero's depth-row `planeY` toward the lane it is ENGAGING, else back to its home
+    // row. Runs regardless of which x-move/attack branch above ran: it reads only `aimTarget`
+    // (what the hero engages this step) + `planeY`, and writes ONLY `planeY` — it adds/removes/
+    // reorders NO x movement or attack call, and no targeting/range/cooldown/skill ever reads
+    // `planeY`, so y can never gate an attack (targeting stays x-only on the ground line). Guarded
+    // on `typeof h.planeY === "number"` so a hand-built Hero literal WITHOUT a planeY (outer-layer
+    // test fixture) stays untouched → byte-identical stateHash (planeY folds present-only).
+    if (typeof h.planeY === "number") {
+      // Steer toward an ENGAGED FARM MOB's row, else hold/return home. Excluded from steering:
+      //  • the BOSS PHASE (stage/quest boss) and an engaged WORLD BOSS (`aimTarget.id === wbId`):
+      //    bosses RENDER on the static DEPTH_NEUTRAL path, IGNORING their stamped near-row (+40),
+      //    so steering the hero to `boss.planeY` would send it to a lane the boss isn't drawn in —
+      //    during any boss / world-boss fight the hero holds / returns to its HOME row instead.
+      //  • idle / no target / a `move` command → `aimTarget` is null → home row.
+      // The home row is RECOMPUTED (stateless) from class + cohort slot + party size, exactly
+      // reproducing the spawn/cohort stamp (`heroPlaneY`; solo reduces to the solo formation row).
+      const engagedMob = !bossPhase && aimTarget && aimTarget.id !== wbId ? aimTarget : null;
+      const homeRow = heroPlaneY(h.cls, state.heroes.indexOf(h), state.heroes.length);
+      const yTarget =
+        engagedMob && typeof engagedMob.planeY === "number" ? engagedMob.planeY : homeRow;
+      h.planeY = stepPlaneY(h.planeY, yTarget, FIXED_DT);
     }
   }
 }

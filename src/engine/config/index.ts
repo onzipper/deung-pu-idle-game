@@ -958,11 +958,21 @@ export const CONFIG = {
       ninja: 0.65,
     } as Record<HeroClass, number>,
     /**
-     * Plane-ease speed (world-y units/sec) for the R4-R5 true x/y movement milestone — entities
-     * will EASE toward their target plane row instead of snapping. UNUSED this wave (`planeY` is
-     * assigned once at spawn and never moved); a placeholder tunable so the knob exists early.
+     * Plane-ease speed (world-y units/sec) the HERO steers along its depth row at. R4 Wave C1
+     * turned this live: `systems/plane.stepPlaneY` moves a hero's `planeY` toward its engagement
+     * lane (an ENGAGED farm mob's row) or back to its home row (idle / walking / boss fight) at
+     * `ySpeed × FIXED_DT` per step. Enemies/boss/worldBoss stay STATIC (owner-confirmed) — only
+     * heroes move on the plane. Cosmetic by construction: y never gates an attack (targeting is
+     * x-only), so the balance sim is unaffected.
      */
     ySpeed: 120,
+    /**
+     * Arrival epsilon (world-y units) for `stepPlaneY`: once a hero's `planeY` is within this of
+     * its steer target the step SNAPS to the target and holds, so there is no sub-unit oscillation
+     * at arrival. Sized well under one step of travel (ySpeed 120 × FIXED_DT = 2 units/step) so it
+     * only ever absorbs float residue, never visibly short-stops the ease.
+     */
+    yArriveEps: 0.5,
   },
 
   // ---- archer basic-attack volley (86d3k2rgf) ----

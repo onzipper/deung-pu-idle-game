@@ -68,7 +68,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/systems/mainQuest.ts` — main chapter chain wrapping the goal-ladder; completion derived from world unlock state
 - `src/engine/systems/manual.ts` — manual play intents (`moveTo`/`attackTarget`/`cancelCommand`) onto hero's transient command
 - `src/engine/systems/movement.ts` — formation anchor easing (`updateAnchor`); per-entity movement lives in combat.ts
-- `src/engine/systems/plane.ts` — R4 deterministic depth-plane y at spawn (`Entity.planeY`): id-hashed band scatter ported from render depth (behaviour-neutral; unused this wave)
+- `src/engine/systems/plane.ts` — R4 depth-plane y: id-hashed band scatter at spawn (`Entity.planeY`) + `stepPlaneY` pure per-step hero ease (Wave C1 hero y steering — cosmetic, never gates combat; enemies/boss static)
 - `src/engine/systems/questRewards.ts` — single choke point (`grantQuestReward`) for main/daily quest rewards (gold/materials/potions only)
 - `src/engine/systems/quests.ts` — class-change quest framework: offer rule, accept intent, objective counting
 - `src/engine/systems/shadow.ts` — M8 party shadow-body takeover flag transition + lane-policy for disconnected members
@@ -81,7 +81,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 
 ### src/engine/__tests__/
 
-- `src/engine/__tests__/` — full engine regression + determinism suite (canonical sim gates, class/skill/quest/party/asura/ninja/refine/lockstep behavior, byte-identical hash checks); `balance-sim.ts` + `helpers.ts` support files; 42 files
+- `src/engine/__tests__/` — full engine regression + determinism suite (canonical sim gates, class/skill/quest/party/asura/ninja/refine/lockstep behavior, byte-identical hash checks); `balance-sim.ts` + `helpers.ts` support files; 43 files
 - `src/engine/lockstep/__tests__/` — lockstep turn-executor multi-client hash-equality tests; 1 file
 
 ### src/server/
