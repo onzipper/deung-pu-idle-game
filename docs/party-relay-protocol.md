@@ -220,3 +220,61 @@ deploys as a **standalone folder** — no build, no bundler, no app code.
 request. When a party forms, the game server should `GET <relayUrl>/health` first to
 wake the instance before clients attempt the WS upgrade, avoiding a cold-start stall on
 the first join. `/health` is cheap and returns the current room/socket counts.
+
+---
+
+## 12. Presence action stream (`pa`) — additive visual layer (R3)
+
+The ghost-presence world layer already fans a **last-value** snapshot via `p` (§ world
+layer in `server.js`; that snapshot is the sole snapshot-on-join + client-side liveness
+source). `pa` is an **additive** high-frequency (~8Hz) visual pose feed layered on top —
+it drives peer facing/animation between the coarse `p` snapshots, and carries **no**
+authority (it never touches game state, membership, or the lockstep party protocol).
+
+**Client → server**
+
+```jsonc
+{
+  "t": "pa",
+  "v": 1,
+  "payload": {
+    "cid": "cA",          // sender char id (echoed verbatim; relay never inspects it)
+    "x": 512,             // world x
+    "y": 128,             // world y (optional)
+    "f": 1,               // facing: 1 | -1
+    "a": "walk",          // action: idle|walk|basic|skill1|skill2|skill3|skill4|dash
+    "at": 1234,           // action-start marker (client clock)
+    "t": 1712345678901,   // client send time
+  },
+}
+```
+
+The relay fans it verbatim to zone peers as `{ "t":"pa", "payload": <payload> }`.
+
+**Contract (all additive — every existing opcode/behaviour is byte-identical):**
+
+- **Requires a prior `pjoin`.** A `pa` before joining a presence zone is **dropped
+  silently** (no close, unlike `p`'s hard `4002`) — the stream is lossy and must never
+  kill a socket.
+- **NOT cached.** `pa` never enters the presence last-value snapshot and is never handed
+  to a late joiner. `p` remains the ONLY snapshot-on-join source.
+- **No liveness.** `pa` never refreshes any liveness/prune timestamp or the cached
+  snapshot. A peer that spams `pa` but stops sending `p` still despawns on `p` silence.
+- **Fan cap:** at most `PRESENCE_FAN` (12) other zone members, sender excluded, no `seq`,
+  unordered — same lossy fan as `p`.
+- **Size cap:** payload reuses the presence `256B` cap (`PARTY_RELAY_PRESENCE_MAX_BYTES`).
+  Oversized is **dropped silently** (not the `4004` close `p` uses).
+- **Rate cap:** a per-connection `~8Hz` min-interval guard
+  (`PARTY_RELAY_PA_RATE_MS`, default **100ms** ≈ a 10Hz ceiling with jitter headroom).
+  A faster frame is **dropped silently** — no `c-rej`-style reply, no kill.
+- **Version drop:** `v !== 1` → dropped silently (deploy-skew safety, same as `p`).
+
+**Forward-compat:** an old client that receives a `pa` frame it doesn't understand
+ignores it — clients switch on `msg.t`, and unknown `t` values are no-ops (§3). So the
+relay can ship `pa` before any client speaks it.
+
+**Deploy note — relay FIRST.** `pa` is a relay-only additive opcode. Deploy the **relay
+first**, then the web client that emits/consumes `pa`; a client that sends `pa` to an
+old relay is simply ignored (unknown `t`), and an old client on a new relay never
+receives `pa` traffic it didn't subscribe to. There is no schema/DB change (no
+`prisma db push`).

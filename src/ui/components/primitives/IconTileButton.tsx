@@ -11,10 +11,17 @@
  * control cluster (mockup: a tight grid of icon tiles, not a row of labeled
  * pill buttons).
  *
- * A touch target is `h-11 w-11` (44px, the game-ux skill's hard minimum);
- * `accent` picks which existing HUD-button accent language to reuse (gold for
- * HOF-tier "special" entries, fuchsia for the legendary tome, neutral for
- * everything else) — no new color vocabulary invented.
+ * A touch target is `h-11 w-11` (44px, the game-ux skill's hard minimum) from
+ * `sm:` up; `accent` picks which existing HUD-button accent language to reuse
+ * (gold for HOF-tier "special" entries, fuchsia for the legendary tome,
+ * neutral for everything else) — no new color vocabulary invented.
+ *
+ * Issue #58 wave B (mobile HUD overlap tuning): below `sm:` the tile shrinks
+ * to `h-10 w-10` (40px) — a deliberate, SCOPED exception to the 44px house
+ * rule, floored at the task brief's explicit "≥40px" minimum, needed because
+ * this primitive is the ONLY consumer behind the 10-tile top-right menu row
+ * (`GameHud.tsx`) and that row is the tightest vertical-space contender on
+ * narrow portrait screens (grid-cols-5 two-row layout — see that file).
  */
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
@@ -49,9 +56,9 @@ export function IconTileButton({
     <button
       type="button"
       {...rest}
-      className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 ${ACCENT_CLASS[accent]}`}
+      className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-(--ddp-radius-md) border shadow-(--ddp-shadow-btn) transition-all duration-100 active:translate-y-0.5 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-40 sm:h-11 sm:w-11 ${ACCENT_CLASS[accent]}`}
     >
-      <span aria-hidden className="flex h-5 w-5 items-center justify-center text-lg leading-none">
+      <span aria-hidden className="flex h-4 w-4 items-center justify-center text-base leading-none sm:h-5 sm:w-5 sm:text-lg">
         {icon}
       </span>
       {badge}

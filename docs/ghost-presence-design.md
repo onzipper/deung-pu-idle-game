@@ -3,6 +3,10 @@
 Status: **APPROVED — in implementation.** Owner decisions (2026-07-08):
 - Poses limited to **walk/idle ONLY** in all zones (attack/dash poses cut — resolves the
   "fighting invisible air" concern; §5's wave split is superseded: all zones ship at once).
+  **SUPERSEDED 2026-07-10 (issue #50, R3):** the action stream (§7 decision log) adds
+  edge-triggered `basic`/`skill1-4`/`dash` POSES on top of walk/idle — still no swing fx,
+  projectiles, hit sparks, or sfx (that part of the original decision stands). See the
+  updated invariant wording in §2 row 4 and the new decision-log entry in §7.
 - **Global chat added** (§7): text-only, 30-minute history, rides the same world socket.
 - **Town zones are excluded from lockstep cohorts** (bot-stall fix): in town everyone is
   solo-sim; party members in town appear via THIS ghost layer instead.
@@ -39,8 +43,8 @@ Each invariant below names the past bug it kills and the *structural* enforcemen
 | 1 | Presence data never enters `engine/` — no ghost field on `GameState`, ever | hash divergence / desync (cohort wallet, reseed classes) | ghosts can't diverge what they never touch; ESLint layer boundary already forbids engine importing ui/render |
 | 2 | Presence rides a **separate relay room namespace** (`p:<zoneKey>`), unordered, lossy, **no seq** | turn-stream corruption / freeze (turns 0-1 bug) | party rooms and presence rooms share zero code paths for message application; a presence message cannot be parsed as a `TurnMessage` |
 | 3 | Receiving a presence message **never enqueues `pendingInput`** and never calls any engine mutator | "my tap controlled the LEADER's hero" (`buildFrameInput` remap bug) | the ghost store's write surface is `upsertGhost(zoneKey, snapshot)` only; it has no reference to the input queue |
-| 4 | Ghosts never trigger camera, spectacle, `timeDirector`, screen shake, skyDarken, or POV changes | friend-ultimate camera hijack (fixed by pov-gating in PR #21) | ghost render path draws rig + nameplate + walk/attack pose only; it emits no `state.events` and calls no fx module that touches the director |
-| 5 | Tapping a ghost creates **no command intent** — v1: taps pass through to the ground beneath | tap-to-attack locking onto a non-entity → undefined behavior | `hitTestPointer` never sees ghosts (they live in a separate display layer excluded from hit-testing) |
+| 4 | Ghost actions (from `pa` or otherwise) may drive **POSE ONLY** — they never trigger fx, camera, `timeDirector`, screen shake, skyDarken, audio/sfx, the engine, or POV changes | friend-ultimate camera hijack (fixed by pov-gating in PR #21) | ghost render path (`ghostLayer.ts` `GhostPose`) draws rig + nameplate + pose only, edge-triggered once per advancing `at`; it emits no `state.events` and calls no fx/camera/audio module — `heroView.playHeroPosePulse` is additive-only (arm pose, no fx/camera/audio) |
+| 5 | Tapping a ghost creates **no command intent** | tap-to-attack locking onto a non-entity → undefined behavior | R3: `hitTestGhost` (sibling of `hitTestNpc`) reads the renderer's ghost list, not engine state; a ghost tap writes zero `pendingInput` and opens a view-only `GhostProfileCard` (name/class icon/tier — no social actions) |
 | 6 | The publisher only ever **reads** my own hero (pos/facing/pose) from the state closure — it sends a snapshot, not a command; nothing round-trips | any echo/loopback confusion | publish path is one-way: sample → encode → send; there is no "apply" branch for your own messages |
 
 Test-shaped guard for #1–#3: a lockstep-harness regression that runs 2 clients over N
@@ -96,6 +100,10 @@ x-deltas in the receiver's rig, so v1 receivers may ignore `pose` entirely.
 No hp, no damage numbers, no skill ids, no mob references: nothing a receiver could
 even try to simulate.
 
+**SUPERSEDED 2026-07-10 (R3, §7):** this snapshot payload (`p`) is unchanged — it still
+carries only `idle|walk`. Richer poses (`basic`, `skill1-4`, `dash`) ride a **separate**
+opcode (`pa`, ~8Hz, see §7) so `p`'s liveness/snapshot-on-join semantics stay untouched.
+
 ### 3.4 Client receive path
 
 - `GhostStore` (new `src/ui/presence/` or `src/app/(game)/presence/` — ui side of the
@@ -114,6 +122,9 @@ even try to simulate.
   gear-aura / champion-halo reuse the existing pooled fx **bounded per-ghost**.
 - Attack pose plays the weapon swing WITHOUT projectiles, hit sparks, damage numbers,
   or sfx (their mobs aren't in my world; a swing toward their facing reads fine).
+  **SUPERSEDED 2026-07-10 (R3):** shipped as an edge-triggered `GhostPose` pulse (arm
+  pose only, via `heroView.playHeroPosePulse`), not a full weapon-swing animation —
+  narrower than this original plan, same "no fx/sparks/sfx" constraint.
 - Draw beneath my own hero & party (z-order), never dimming or tinting my entities.
 - Perf valve: if fps dips below threshold, ghost cap steps down 12 → 6 → 0
   (render-only decision, per-client).
@@ -156,10 +167,32 @@ Text-only server-wide chat riding the SAME world socket and relay process:
   with cooldown feedback. Chat messages never touch the engine or input queue — same
   One Rule as presence.
 
-## 7. Decision log (all resolved 2026-07-08)
+## 7. Decision log
 
-1. Ghost visuals: **full color + white nameplate** (party members keep their plate style).
-2. Ghost cap per zone: **12** (tune after feel test; fps valve steps 12 → 6 → 0).
-3. Rollout: **all zones at once** (walk/idle-only made the town-first hedge unnecessary).
-4. Poses: **walk/idle only** — attack/dash cut by owner.
-5. Tap-ghost profile card: deferred (taps pass through to the ground in v1).
+1. Ghost visuals: **full color + white nameplate** (party members keep their plate style). _(2026-07-08)_
+2. Ghost cap per zone: **12** (tune after feel test; fps valve steps 12 → 6 → 0). _(2026-07-08)_
+3. Rollout: **all zones at once** (walk/idle-only made the town-first hedge unnecessary). _(2026-07-08)_
+4. Poses: **walk/idle only** — attack/dash cut by owner. _(2026-07-08, SUPERSEDED 2026-07-10 — see #6)_
+5. Tap-ghost profile card: deferred (taps pass through to the ground in v1). _(2026-07-08, RESOLVED 2026-07-10 — see #6)_
+6. **R3 action stream — `pa` opcode (2026-07-10, issue #50):** ghosts gain edge-triggered
+   `basic`/`skill1-4`/`dash` poses and a tappable view-only profile card, closing
+   decisions #4 and #5 above.
+   - **Separate opcode vs extending `p`:** chosen **separate** (`pa`, additive, `v:1`,
+     silently dropped if malformed/wrong version) — keeps `p`'s liveness/snapshot-on-join
+     cache semantics untouched; `pa` is fan-capped (`PRESENCE_FAN` 12), NOT cached, never
+     touches liveness, and requires an active `pjoin`.
+   - **Beat + fps valve:** publish ~8Hz (`PRESENCE_ACTION_BEAT_MS = 125`), sharing the
+     same fps valve as ghost render density (`GHOST_VALVE_HEAVY_MS`/`LIGHT_MS`, single
+     source) — degrades 8→4→0Hz alongside the existing ghost cap 12→6→0 step-down, so a
+     busy zone loses action fidelity before it loses ghosts entirely.
+   - **Edge-triggered `at` counter:** the pose id only advances on a real state edge
+     (basic-attack cooldown reset, a `skillCast` event, `heroDashed`) — an idle hero stays
+     silent, so `pa` traffic is bursty/sparse, not a fixed-rate stream of no-op frames.
+   - **Tap profile = view-only, no intent:** ghost hit-testing lives in the renderer
+     (reads the pooled ghost list, not engine state) and a tap writes **zero**
+     `pendingInput` — it only opens a read-only `GhostProfileCard`. This keeps invariant
+     #5 (§2) true under the new tap-target, not just under the old "taps pass through"
+     behavior.
+   - Determinism: `ghostGuard.test.ts` extended to inject `pa` traffic (in addition to
+     the existing garbage `p` feed) and prove hash-equality unchanged — the One Rule
+     (§2) survives the action stream exactly as it survived the walk/idle-only version.

@@ -121,11 +121,50 @@ export type NpcHitResult = { kind: "npc"; id: TownNpcId } | null;
  */
 export type GateHitResult = { kind: "gate"; side: "left" | "right" } | null;
 
+/**
+ * Ghost-presence "tap profile" outcome (R3 issue #50 Wave 5) — see
+ * `hitTestGhost()`. VIEW-ONLY, same separation-of-concerns as
+ * `NpcHitResult`/`GateHitResult` above: this never produces a command intent,
+ * it only reports which peer's cosmetic identity was tapped (`GameClient.tsx`
+ * opens a read-only profile card and fully consumes the tap — no `moveTo`).
+ */
+export type GhostHitResult = {
+  kind: "ghost";
+  cid: string;
+  name: string;
+  cls: GhostDrawItem["cls"];
+  tier: GhostDrawItem["tier"];
+} | null;
+
 /** Minimum on-screen touch half-extent (CSS px, NOT world units) a monster
  * hit-test guarantees regardless of the current letterbox scale — the task's
  * "≥24px half-extent on mobile" requirement. Converted to world units per-call
  * via the live `baseTransform.scale` (see `hitTestPointer()`). */
 const TOUCH_HALF_EXTENT_PX = 24;
+
+/**
+ * Ghost tap-target knobs (owner eye-test, PR #62 / issue #50): the ghost rig
+ * reuses `HeroView` (see `heroView.ts`'s `HEAD_Y = GROUND_Y - 48`) — a MUCH
+ * taller silhouette than the generic monster ellipse `hitTestPointer` sizes
+ * for (`16 * size*scl` / `22 * size*scl`, centered a mere 14 units above the
+ * foot line). That combo left most of a ghost's visible body/head OUTSIDE the
+ * old tap ellipse, matching the owner's "hit box มันเล็ก" report even though
+ * the `TOUCH_HALF_EXTENT_PX` floor already guaranteed a ~48px circle — the
+ * circle just sat low, hugging the ankles.
+ *
+ * Dedicated (not shared with `hitTestPointer`/`hitTestGate`) so tuning the
+ * ghost feel never touches monster/gate taps. `GHOST_TAP_RX` stays modest —
+ * a wide ellipse would start stealing nearby ground-tap moveTo's; the fix is
+ * height, not width — `GHOST_TAP_RY` covers from just below the feet up past
+ * the head. `GHOST_TAP_CENTER_SIZE` is fed into the SAME `enemyTapCenterY`
+ * used elsewhere (as its `size` param, rise = `TAP_CENTER_RISE_PER_SIZE ·
+ * size`) to lift the ellipse center from ankle height (old: 14 world units,
+ * size=1) to roughly torso height (28 world units, size=2) — the natural spot
+ * a fingertip lands when tapping "on the rig".
+ */
+const GHOST_TAP_RX = 18;
+const GHOST_TAP_RY = 42;
+const GHOST_TAP_CENTER_SIZE = 2;
 
 // ---------------------------------------------------------------------------
 // Living-camera knobs (promoted "โลกมีมิติ" layer, W2). The camera follows the
@@ -1125,6 +1164,50 @@ export class GameRenderer {
 
     const side = gateTapSide(wx, wy, GROUND_Y, zone.mapId, zone.kind);
     return side ? { kind: "gate", side } : null;
+  }
+
+  /**
+   * Ghost-presence "tap profile" (R3 issue #50 Wave 5): same camera-aware
+   * canvas->world un-projection as `hitTestPointer`/`hitTestNpc`/`hitTestGate`
+   * above, scanned against THIS FRAME'S ghost render list (`this.ghostList`,
+   * fed by `draw()` from `GhostStore.list()` — see `ghostLayer.ts`'s doc for
+   * why presence data never reaches the engine). Reuses `enemyTapCenterY`'s
+   * ellipse-math SHAPE but with the DEDICATED `GHOST_TAP_*` knobs above
+   * (taller + higher-centered than the generic monster ellipse) so the touch
+   * target actually covers the tall human rig instead of hugging its ankles.
+   * Takes NO `GameState` (unlike the sibling
+   * hit-tests): ghost identity lives entirely in `this.ghostList`, which
+   * `draw()` already fed from `GhostStore.list()` — presence data never
+   * flows through the engine (THE ONE RULE). VIEW-ONLY: never mutates
+   * anything, never produces a command — see `GhostHitResult`'s doc.
+   */
+  hitTestGhost(canvasX: number, canvasY: number): GhostHitResult {
+    if (!this.app) return null;
+    const cam = this.camView();
+    const w = canvasToWorld(canvasX, canvasY, this.baseTransform, cam, this.hitScratch);
+    const wx = w.x;
+    const wy = w.y;
+    if (wx < 0 || wx > WORLD_WIDTH || wy < 0 || wy > WORLD_HEIGHT) return null;
+
+    const touchHalf = TOUCH_HALF_EXTENT_PX / worldScale(this.baseTransform, cam);
+    let best: GhostDrawItem | null = null;
+    let bestDist = Infinity;
+    for (const g of this.ghostList) {
+      const d = this.worldFx.depthOf("ghost", g.cid);
+      const scl = this.worldFx.depthScaleOf(d);
+      const cy = enemyTapCenterY(GHOST_TAP_CENTER_SIZE, this.worldFx.footY(g.x, d), scl);
+      const rx = Math.max(touchHalf, GHOST_TAP_RX * scl);
+      const ry = Math.max(touchHalf, GHOST_TAP_RY * scl);
+      const dx = (wx - g.x) / rx;
+      const dy = (wy - cy) / ry;
+      const dist = dx * dx + dy * dy;
+      if (dist <= 1 && dist < bestDist) {
+        bestDist = dist;
+        best = g;
+      }
+    }
+    if (!best) return null;
+    return { kind: "ghost", cid: best.cid, name: best.name, cls: best.cls, tier: best.tier };
   }
 
   /**

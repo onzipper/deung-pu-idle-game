@@ -474,6 +474,7 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     onClick={() => setSelectedKey((cur) => (cur === key ? null : key))}
                     ariaLabel={tContent(`${stack.templateId}.name`)}
                     glyph={GEAR_SLOT_ICONS[tpl.slot]}
+                    templateId={stack.templateId}
                     subLabel={tInv("tierShort", { tier: tpl.tier })}
                     refineBadge={
                       stack.refineLevel > 0 ? tInv("refinePlus", { level: stack.refineLevel }) : undefined
@@ -636,15 +637,21 @@ export function RefinePanel({ onClose }: RefinePanelProps) {
                     <div className="flex items-center gap-2">
                       <CurrencyChip
                         icon={<MaterialIcon className="h-3.5 w-3.5" />}
-                        value={cost.materials}
-                        variant="violet"
-                        ariaLabel={tHud("materialsAria")}
+                        value={`${materials.toLocaleString()}/${cost.materials.toLocaleString()}`}
+                        variant={canAffordMaterials ? "violet" : "danger"}
+                        ariaLabel={`${tHud("materialsAria")} — ${t("costAria", {
+                          owned: materials.toLocaleString(),
+                          required: cost.materials.toLocaleString(),
+                        })}`}
                       />
                       <CurrencyChip
                         icon={<Coin className="h-3.5 w-3.5" />}
-                        value={cost.gold}
-                        variant="gold"
-                        ariaLabel={tHud("goldAria")}
+                        value={`${gold.toLocaleString()}/${cost.gold.toLocaleString()}`}
+                        variant={canAffordGold ? "gold" : "danger"}
+                        ariaLabel={`${tHud("goldAria")} — ${t("costAria", {
+                          owned: gold.toLocaleString(),
+                          required: cost.gold.toLocaleString(),
+                        })}`}
                       />
                       {(!canAffordMaterials || !canAffordGold) && (
                         <span className="text-[10px] font-bold text-rose-400">

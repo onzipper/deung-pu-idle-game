@@ -21,7 +21,10 @@
  *
  * Z-INDEX LADDER (documented once here — every new overlay picks a rung):
  *   z-0   canvas mount (Pixi appends its own `<canvas>` here)
- *   z-5   decorative screen-edge vignette (cosmetic, pointer-events-none)
+ *   z-5   decorative screen-edge vignette (cosmetic, pointer-events-none) +
+ *         a top-edge gradient scrim (same rung, also cosmetic/pointer-events-
+ *         none) for contrast under the top-left portrait cluster and
+ *         top-right currency/menu/minimap cluster on bright biomes
  *   z-10  the HUD overlay layer: top-left portrait+buffs, top-right
  *         currency+menu+party-signal, left-mid quest tracker, bottom-center
  *         skill dock, bottom-edge EXP/clock strip, DropFeedCorner (matches
@@ -135,6 +138,14 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
         className="pointer-events-none absolute inset-0 z-5 shadow-[inset_0_0_60px_16px_rgba(0,0,0,0.45)]"
       />
 
+      {/* Top-edge gradient scrim — extra contrast for the top-left portrait
+          cluster and top-right currency/menu/minimap cluster on bright
+          biomes, without boxing either cluster or darkening mid-screen. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 z-5 h-28 bg-gradient-to-b from-black/35 to-transparent"
+      />
+
       {/* FTUE overlay (M4.8): fixed/viewport-anchored, reads its own store
           slice + `data-onboarding-anchor` DOM targets below — see
           src/ui/onboarding/. Renders null once onboarding isn't active.
@@ -186,9 +197,15 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
                 module doc. */}
             <div className="pointer-events-auto flex flex-col items-end gap-1.5">
               <CurrencyChipsRow />
+              {/* Issue #58 wave B: `grid-cols-5` (was 4) + `IconTileButton`'s
+                  40px mobile floor packs the 10 tiles into 2 rows instead of
+                  3 below `sm:` — the #54 audit's biggest single vertical-space
+                  win in this cluster. `sm:` and up is UNCHANGED (still
+                  `flex`/`justify-end`, still 44px tiles) — desktop must not
+                  regress. */}
               <div
                 data-onboarding-anchor="menu-row"
-                className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:justify-end"
+                className="grid grid-cols-5 gap-1 sm:flex sm:flex-wrap sm:gap-1.5 sm:justify-end"
               >
                 <CharacterButton />
                 <InventoryButton />
@@ -229,10 +246,19 @@ export const GameHud = forwardRef<HTMLDivElement, GameHudProps>(function GameHud
             hand-tuned `top-N%` — the flex-1 region's own box IS the
             available space, so it structurally can't collide with either
             neighbor). */}
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1 pt-1">
+          {/* Issue #58 wave B: verified this can't structurally overlap the
+              top-left portrait+buffs cluster — this `flex-1` region is a
+              normal flex SIBLING that starts right after the top block (not
+              viewport-anchored), so the tracker's `top-0` is always flush
+              below it. The `pt-1` above is a small extra breathing-room
+              margin (absolute children measure from the padding edge, so
+              `max-h-full` shrinks to match); `max-w-[72vw]` (was 78vw) keeps
+              the card's mobile width in the same ballpark as the portrait
+              card's own `max-w-[70vw]` cap for visual rhythm. */}
           <div
             ref={questOverlayRef}
-            className="pointer-events-none absolute top-0 left-0 z-10 max-h-full w-64 max-w-[78vw] overflow-y-auto sm:w-72"
+            className="pointer-events-none absolute top-0 left-0 z-10 max-h-full w-64 max-w-[72vw] overflow-y-auto sm:w-72"
           />
         </div>
 

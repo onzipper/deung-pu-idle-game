@@ -38,6 +38,7 @@ import { useTranslations } from "next-intl";
 import { useState, type CSSProperties } from "react";
 import { CONFIG } from "@/engine";
 import { useCastKey } from "@/ui/hooks/useCastKey";
+import { SkillIcon } from "@/ui/components/icons/gameIcons";
 import { SkillDetailModal } from "@/ui/components/SkillDetailModal";
 import type { HeroSummary, SkillSummary } from "@/ui/store/gameStore";
 import { HERO_ACCENT, SKILL_ICONS_BY_ID } from "@/ui/labels";
@@ -125,7 +126,9 @@ function SkillButton({
               !ready ? "grayscale" : ""
             }`}
           >
-            <span className="text-2xl leading-none">{icon}</span>
+            <span className="text-2xl leading-none">
+              <SkillIcon skillId={skill.id} fallback={icon} className="h-6 w-6" />
+            </span>
             <span className="mt-1 line-clamp-1 px-0.5 text-[10px] leading-tight text-ddp-ink-muted">
               {skillName}
             </span>

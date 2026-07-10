@@ -210,7 +210,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/fx/refinePrestige.ts` — +8/+9/+10 refine armor crackle/beat ladder riding gearSparkle's anchor.
 - `src/render/fx/FxController.ts` — event/frame orchestrator wiring all fx pools to `GameEvent`s + continuous per-frame reads.
 - `src/render/fx/impactFilters.ts` — transient attach-only-while-active `ShockwaveFilter`/`RGBSplitFilter` + bloom filter factory.
-- `src/render/fx/__tests__/` — pins skill-spectacle, war-cry aura, world-boss fx, shadow-dash, champion aura, POV-gating, legendary tome, refine prestige/fx-recipes, world-depth fx behavior; 11 files.
+- `src/render/fx/__tests__/` — pins skill-spectacle, war-cry aura, world-boss fx, shadow-dash, champion aura, POV-gating, legendary tome, refine prestige/fx-recipes, world-depth fx, floating-text stroke behavior; 12 files.
 
 ### src/render/environment/
 - `src/render/environment/colorUtils.ts` — pure HSL/RGB math (`shiftHue`/`lerpColor`/`adjustLightness`), no canvas APIs.
@@ -244,8 +244,8 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/views/enemyView.ts` — kind-specific enemy silhouette rig (normal/fast/tank/ranged personality shapes).
 - `src/render/views/npcView.ts` — town NPC rig + tap-interaction anchor rendering.
 - `src/render/views/heroView.ts` — articulated per-class hero rig, gear paper-doll, weapon/armor anchor hooks, facing/attack anim.
-- `src/render/views/ghostLayer.ts` — pooled ghost-presence rig rendering for other players' heroes (walk/idle poses only).
-- `src/render/views/__tests__/` — pins headless rig bounds, enemy species, world boss, gear tier7-10, hero facing/party, asura elite, legendary weapon, npc view; 9 files.
+- `src/render/views/ghostLayer.ts` — pooled ghost-presence rig rendering for other players' heroes (walk/idle + R3 edge-triggered `pa` pose pulses; no fx/camera/audio).
+- `src/render/views/__tests__/` — pins headless rig bounds, enemy species, world boss, gear tier7-10, hero facing/party, asura elite, legendary weapon, npc view, ghost-layer pose/invariants; 10 files.
 
 ### src/render/worldDepth/
 - `src/render/worldDepth/atmosphere.ts` (`createAtmosphere`) — day/night + weather + critters runtime composing pure math with pooled Pixi layers.
@@ -270,7 +270,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/audio/sfxMap.ts` — `GameEvent`→synth recipe palette data (`SFX_PARAMS`) + per-event `play*` functions.
 
 ### src/render/__tests__/
-- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math; 2 files.
+- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`); 3 files.
 ## Zone C — src/ui/**, src/app/(game)/**, src/app root, src/i18n/**, src/lab/**
 
 ### src/app/(game)/ — game-loop host + party/presence transport (LOAD-BEARING HUB)
@@ -288,11 +288,11 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/app/(game)/cohortBadges.ts` — pure HOF seasonal social-badge (title/champion) map builder for the render seam.
 - `src/app/(game)/cohortNet.ts` — pure network-quality HUD chip math (RTT EMA, laggiest-member picker).
 - `src/app/(game)/presence/worldSession.ts` — the "world socket": one WebSocket for ghost-presence + global chat + ping, pub/sub, lossy, zero engine coupling.
-- `src/app/(game)/presence/presencePublish.ts` — pure sampling of MY hero into a presence wire snapshot (one-way read only).
-- `src/app/(game)/presence/ghostStore.ts` — pure ghost-presence receive store: ingest snapshots → interpolated/faded/capped ghost list for render.
+- `src/app/(game)/presence/presencePublish.ts` — pure sampling of MY hero into a presence `p` wire snapshot + R3 wave-3 `pa` visual-action sample (basic/skill/dash edges, facing, fps-valve beat rate) — one-way read only.
+- `src/app/(game)/presence/ghostStore.ts` — pure ghost-presence receive store: ingest `p` snapshots + R3 `pa` action frames → interpolated/faded/capped ghost list (action = pose/facing, never liveness) for render.
 - `src/app/(game)/presence/relayUrlCache.ts` — one-slot module cache of the last-minted presence-ticket relay URL.
 - `src/app/(game)/__tests__/` — lockstep/cohort/party pure-logic pins (catchUp, cohortBotTrip, cohortBadges, buildFrameInput, cohortNet, partyHandshake, partySession, cohortWallet, cohortProgress, cohortTurnEngine, soloFrameDrain); 11 files.
-- `src/app/(game)/presence/__tests__/` — ghost-presence/world-socket pins (ghostStore, presencePublish, ghostGuard "presence never touches engine", worldSession); 4 files.
+- `src/app/(game)/presence/__tests__/` — ghost-presence/world-socket pins (ghostStore, ghostAction R3 stream, presencePublish `p` snapshot, presencePublishAction R3 `pa` publish-side, ghostGuard "presence never touches engine", worldSession); 6 files.
 
 ### src/app/ — root routes
 - `src/app/characterGate.ts` — read-only server-side "does this visitor have a resolvable active character" gate (cookie-read only, no writes).
@@ -389,7 +389,15 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/SkillDock.tsx` — R2.6 Wave 2 bottom-center dock wrapper: one row of `SkillBar` tiles + `BotMasterSwitch` + `ConsumableBar` quick-slots + a persisted whole-dock collapse-to-thin-strip (mirrors `GoalLadder.tsx`'s Wave-1 collapse idiom; bot master stays visible/tappable while collapsed).
 - `src/ui/components/GoalLadderOverlaySlot.tsx` — portal target mounting the ONE `GoalLadder` onto the arena's left-mid overlay slot, viewport-independent (R2.6: dropped the old `compact`/`useMediaQuery` branch).
 - `src/ui/components/GameHud.tsx` — fullscreen-canvas + all-overlay HUD composition (R2-W2 rewrite): top-left portrait/buffs, top-right currency/icon-menu/party-signal, left-mid quest tracker, bottom-center skill dock (`SkillDock.tsx`), bottom-edge EXP/clock strip; documents the z-index ladder.
-- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, and R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`); 3 files.
+- `src/ui/components/GhostProfileCard.tsx` — issue #50 Wave 5 "tap profile": view-only ghost-presence profile card (name/class/tier, no actions), own `ModalPortal`; mounted by `GameClient.tsx` off the `ghostProfileCid` store field + a tap-time identity snapshot ref.
+- `src/ui/components/__tests__/` — pins for `dropFeedCoalesce`'s pure coalesce/dismiss/partition logic, the `GameHud` fullscreen/FTUE-anchor RTL smoke test, R2.6 `GoalLadder` tab/daily-lines/party-tab behavior (`questTracker.test.tsx`), issue #55 Wave A `InventoryPanel` "all" tab default/both-slots RTL smoke (`inventoryAllTab.test.tsx`), `RefinePanel` owned/required cost-chip fraction+red-tint RTL smoke (`refinePanelCostChips.test.tsx`), issue #58 item 1 `BotSettingsModal`'s `SkillAutoSlotPicker` icon-tile reskin RTL smoke (`botSettingsSkillPicker.test.tsx`), and issue #50 Wave 5 `GhostProfileCard` name/class-tier/close-button RTL smoke (`ghostProfileCard.test.tsx`); 7 files.
+
+### src/ui/components/icons/ — issue #60 codegen game-icon set (filled silhouette + metallic/glass gradient + soft family glow; NOT the thin gold-line chrome of `../icons.tsx`)
+- `src/ui/components/icons/iconBase.tsx` — shared seam: `IconSvg` (24-viewBox, className-driven size) + `useIconIds` (per-instance-unique gradient ids off `useId`) + `IconProps`; no `<filter>`/`<image>`/raster.
+- `src/ui/components/icons/itemIcons.tsx` — `ITEM_ICON_COMPONENTS` registry keyed by engine `templateId` (rusty sword / short bow / epic apocalypse blade / cloth tunic / weapon fortifier); epic+fortifier carry the gold glow inside the icon.
+- `src/ui/components/icons/skillIcons.tsx` — `SKILL_ICON_COMPONENTS` registry keyed by engine skill id (sword_whirl / mage_meteor / mage_frostnova / archer_rain), each lead by its element colour.
+- `src/ui/components/icons/gameIcons.tsx` — public contract seam consumers import: re-exports both registries + `ItemIcon`/`SkillIcon` resolvers (registered component or the caller's `fallback` verbatim).
+- `src/ui/components/icons/__tests__/iconRegistry.test.tsx` — guards item keys resolve via `lookupTemplate` (superset trap), skill keys exist in `SKILLS`, fallback render for unknown ids, and all 9 icons render crash-free.
 
 ### src/ui/components/primitives/ — R2 design-system primitives (presentational only, no store reads)
 - `src/ui/components/primitives/Button.tsx` — 3-tier button skin (primary gold / secondary purple / danger red).
@@ -403,6 +411,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/ui/components/primitives/Toast.tsx` — single toast line skin (icon + text + optional dismiss), no timer/positioning.
 - `src/ui/components/primitives/IconTileButton.tsx` — ~44px icon-only menu-row tile skin (R2-W2), every panel-opening HUD trigger renders through it.
 - `src/ui/components/primitives/ConfirmPopup.tsx` — modal confirm dialog (ยกเลิก/ยืนยัน, danger variant), via `ModalPortal`.
+- `src/ui/components/primitives/__tests__/` — issue #60 `ItemTile` glyph→`ItemIcon` wiring pin (in-registry `templateId` renders an `<svg>`, out-of-registry/omitted `templateId` keeps the `glyph` fallback verbatim); 1 file.
 
 ### src/ui/components/characters/
 - `src/ui/components/characters/DeleteCharacterDialog.tsx` — type-the-name-to-confirm character deletion modal.
@@ -514,7 +523,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 
 ### src/ui/store/ — the engine↔React bridge (LOAD-BEARING HUB)
 - `src/ui/store/gameStore.ts` — **the Zustand store**: throttled (~10Hz) engine snapshot for React reads, plus the player→engine `pendingInput` intent queue and UI-owned automation/preference flags (autoCast/autoAllocate/soundMuted/questTrackerCollapsed/etc).
-- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions, questTrackerCollapsed localStorage round-trip); 4 files.
+- `src/ui/store/__tests__/` — headless pins (gameStore, gateTripActions, npcTripActions, questTrackerCollapsed localStorage round-trip, issue #50 Wave 5 `ghostProfileActions` — open/close never touches `pendingInput`); 5 files.
 
 ### src/ui/quest/
 - `src/ui/quest/dailyClaimFlow.ts` — POST-first daily-quest claim flow, then queues the engine `claimDaily` intent.

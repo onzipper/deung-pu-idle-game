@@ -413,6 +413,47 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-10.items.collapse",
     ],
   },
+  // R2.7 Wave A — code-drawn UI alignment from the #54 audit (issue #55).
+  {
+    id: "2026-07-10b",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10b.items.expPct",
+      "releases.2026-07-10b.items.dmgOutline",
+      "releases.2026-07-10b.items.hudScrim",
+      "releases.2026-07-10b.items.refineChips",
+      "releases.2026-07-10b.items.toastViolet",
+      "releases.2026-07-10b.items.invAllTab",
+    ],
+  },
+  // R2.8 Wave B (safe items) — BOT skill row + mobile HUD tuning (issue #58).
+  {
+    id: "2026-07-10c",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10c.items.botSkillRow",
+      "releases.2026-07-10c.items.hudMobileTune",
+      "releases.2026-07-10c.items.expStripFix",
+    ],
+  },
+  // Codegen Asset Phase 1A — first 9 SVG item/skill icons (issue #60).
+  {
+    id: "2026-07-10d",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10d.items.itemIconsNew",
+      "releases.2026-07-10d.items.skillIconsNew",
+    ],
+  },
+  // R3 presence คนจริง — pa action stream + tap profile (issue #50).
+  {
+    id: "2026-07-10e",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10e.items.liveGhosts",
+      "releases.2026-07-10e.items.tapProfile",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always

@@ -109,6 +109,7 @@ import { AudioController } from "@/render/audio";
 import { GameRenderer } from "@/render/GameRenderer";
 import type { AnnouncementWire } from "@/ui/announcements/types";
 import { GameHud } from "@/ui/components/GameHud";
+import { GhostProfileCard } from "@/ui/components/GhostProfileCard";
 import { PatchNotesModal } from "@/ui/components/PatchNotesModal";
 import { AsuraTomeAssembledModal } from "@/ui/asura/AsuraTomeAssembledModal";
 import { selectAutoEquip } from "@/ui/gear/autoEquip";
@@ -207,7 +208,19 @@ import {
 import { TimeDirector } from "./timeDirector";
 import { WorldSession } from "./presence/worldSession";
 import { GhostStore, GHOST_CAP_DEFAULT } from "./presence/ghostStore";
-import { buildPresenceSnapshot, shouldPublish, type PresenceSnapshot } from "./presence/presencePublish";
+import {
+  buildPresenceSnapshot,
+  shouldPublish,
+  type PresenceSnapshot,
+  actionBeatMsForEma,
+  buildActionSample,
+  deriveActionFacing,
+  shouldPublishAction,
+  GHOST_VALVE_HEAVY_MS,
+  GHOST_VALVE_LIGHT_MS,
+  type ActionEdge,
+  type ActionSample,
+} from "./presence/presencePublish";
 import { parseChatFrame } from "@/ui/chat/chatMessages";
 import { onSendChatRequest } from "@/ui/chat/chatSendSignal";
 
@@ -843,6 +856,21 @@ export function GameClient() {
   const tContentItems = useTranslations("content.items");
   const tContentItemsRef = useRef(tContentItems);
   tContentItemsRef.current = tContentItems;
+
+  // R3 "tap profile" (issue #50 Wave 5): the store's `ghostProfileCid` is
+  // (deliberately) just an id — see `gameStore.ts`'s doc. The cosmetic
+  // identity (name/class/tier) a tap resolved is stashed here, in the SAME
+  // synchronous tick as the `openGhostProfile(cid)` dispatch below (inside
+  // `onArenaClick`, captured once by the mount-only effect) — a ref instead
+  // of a second store field because it's a point-in-time display snapshot,
+  // never re-derived per frame, and never a command/intent. The subscription
+  // below re-renders this component exactly when the card should show/hide.
+  const ghostProfileSnapshotRef = useRef<{
+    name: string;
+    cls: HeroClass;
+    tier: 1 | 2 | 3;
+  } | null>(null);
+  const ghostProfileCid = useGameStore((s) => s.ghostProfileCid);
 
   // DEV-ONLY diagnostics: prove hydration actually happened. Fires once on
   // mount; if the inline boot-ping (src/app/layout.tsx) shows up in the dev
@@ -1608,6 +1636,10 @@ export function GameClient() {
     const ghostStore = new GhostStore();
     const worldSession = new WorldSession({
       onGhost: (payload) => ghostStore.upsert(payload, performance.now()),
+      // R3 wave 3: peer visual-action frames (`pa`) -> the GhostStore's action surface
+      // ONLY, mirroring `onGhost` -> `ghostStore.upsert` above. Display-only (facing/pose);
+      // never liveness, never the engine (THE ONE RULE).
+      onGhostAction: (payload) => ghostStore.ingestAction(payload, performance.now()),
       // Wave 3 "chat UI": parse the raw relay frame (the ONE place that trusts its
       // shape, see `ui/chat/chatMessages.ts`) and hand the typed result straight to the
       // store — mirrors `onGhost` -> `ghostStore.upsert` above, just a different sink.
@@ -1629,6 +1661,24 @@ export function GameClient() {
     let presenceBeatIndex = 0;
     let presenceSeq = 0;
     let lastSentPresence: PresenceSnapshot | null = null;
+    /** R3 wave-3 visual-action stream (`pa`) bookkeeping — SEPARATE accumulator/counter
+     *  from the `p` beat above (chattier ~125ms vs ~330ms). `presenceActionCounter` is the
+     *  wire `at` — it only bumps on a real edge (basic/skill/dash), never on a walk/idle
+     *  beat (see `ActionSample.at`'s doc). `pendingActionEdge` is LATCHED every rAF frame
+     *  (not just the frame the beat elapses on) so a skillCast/heroDashed event or an
+     *  attack-cd reset landing between beats is never silently dropped — the same rAF-drop
+     *  bug class as `docs/known-traps.md`'s intent-drain trap, applied to this display-only
+     *  signal instead of an intent. `prevAttackCd` is the previous frame's `hero.cd` reading
+     *  used to edge-detect a basic-attack fire (the engine has no explicit attack counter;
+     *  `hero.cd` resets to a positive value exactly when an attack lands — see
+     *  `systems/combat.updateHeroes`). */
+    let presenceActionAccumMs = 0;
+    let presenceActionCounter = 0;
+    let lastSentAction: ActionSample | null = null;
+    let lastActionX: number | null = null;
+    let lastActionFacing: 1 | -1 = 1;
+    let pendingActionEdge: ActionEdge = { kind: "none" };
+    let prevAttackCd = 0;
     /** fps valve (design §7): a smoothed frame-time EMA steps the ghost cap 12→6→0 so a
      * struggling device sheds ghost rigs first. Client-local, display-only. */
     let ghostFpsEmaMs = 1000 / 60;
@@ -2415,8 +2465,16 @@ export function GameClient() {
         }
         // fps valve: smooth the frame time and step the cap down on sustained slowness
         // (design §7). Thresholds ~45fps → 6, ~30fps → 0; recovers when frames speed up.
+        // `GHOST_VALVE_HEAVY_MS`/`GHOST_VALVE_LIGHT_MS` are the SAME constants that gate
+        // `actionBeatMsForEma` below, so the render-cap valve and the action-rate valve
+        // step down at exactly the same EMA samples (they cannot drift apart).
         ghostFpsEmaMs += (elapsed * 1000 - ghostFpsEmaMs) * 0.05;
-        const wantCap = ghostFpsEmaMs > 33 ? 0 : ghostFpsEmaMs > 22 ? 6 : GHOST_CAP_DEFAULT;
+        const wantCap =
+          ghostFpsEmaMs > GHOST_VALVE_HEAVY_MS
+            ? 0
+            : ghostFpsEmaMs > GHOST_VALVE_LIGHT_MS
+              ? 6
+              : GHOST_CAP_DEFAULT;
         if (wantCap !== ghostCap) {
           ghostCap = wantCap;
           ghostStore.setCap(ghostCap);
@@ -2425,11 +2483,83 @@ export function GameClient() {
         // second timer, see `worldAtmosphereDensity`'s doc) — 1 full / 0.5
         // reduced (weather dimmed, birds hidden) / 0 off, stepped alongside the
         // ghost cap above.
-        const wantAtmosphereDensity = ghostFpsEmaMs > 33 ? 0 : ghostFpsEmaMs > 22 ? 0.5 : 1;
+        const wantAtmosphereDensity =
+          ghostFpsEmaMs > GHOST_VALVE_HEAVY_MS ? 0 : ghostFpsEmaMs > GHOST_VALVE_LIGHT_MS ? 0.5 : 1;
         if (wantAtmosphereDensity !== worldAtmosphereDensity) {
           worldAtmosphereDensity = wantAtmosphereDensity;
           renderer.setAtmosphereDensity(worldAtmosphereDensity);
         }
+
+        // ---- R3 wave-3 visual-action stream (`pa`) — chattier ~8Hz sibling of the `p`
+        // beat above, carrying one-shot poses (attack/skill/dash) + facing so peers see
+        // swings/casts/dashes instead of just walk/idle (design §5 wave 3). Same read-only
+        // discipline: samples MY hero, never touches `pendingInput`/`state`. ----
+        if (myHero) {
+          // EDGE LATCH: must run EVERY frame (not only the frame the beat elapses on) — a
+          // skillCast/heroDashed event or an attack-cd reset landing on a frame BETWEEN
+          // beats would otherwise silently vanish (see the bookkeeping doc above). Dash and
+          // skill are read from THIS frame's already-collected `frameEvents`; a basic
+          // attack has no dedicated event, so it's edge-detected from `hero.cd` resetting
+          // upward (the engine sets it back to `heroAtkSpeedOf(h)` exactly when an attack
+          // fires — `systems/combat.updateHeroes`). Priority when more than one lands in
+          // the same frame: dash > skill > basic (cosmetic tie-break only).
+          let dashFired = false;
+          let skillFired: 1 | 2 | 3 | 4 | null = null;
+          for (const ev of frameEvents) {
+            if (ev.type === "heroDashed" && ev.heroId === myHero.id) {
+              dashFired = true;
+            } else if (ev.type === "skillCast" && ev.slot === myCohortIndex) {
+              // `skillCast.slot` is the HERO index (see `systems/skills.castSkill`'s event
+              // push), NOT an auto-cast slot number — resolve the UI slot (1-4) by finding
+              // this skillId in the hero's own `autoSlots` loadout; a manual cast of a
+              // skill NOT currently slotted falls back to "skill1" (cosmetic only).
+              const idx = myHero.autoSlots.indexOf(ev.skillId);
+              skillFired = (idx >= 0 ? idx + 1 : 1) as 1 | 2 | 3 | 4;
+            }
+          }
+          if (dashFired) pendingActionEdge = { kind: "dash" };
+          else if (skillFired) pendingActionEdge = { kind: "skill", slot: skillFired };
+          else if (myHero.cd > prevAttackCd) pendingActionEdge = { kind: "basic" };
+          prevAttackCd = myHero.cd;
+
+          const actionBeatMs = actionBeatMsForEma(ghostFpsEmaMs);
+          if (actionBeatMs <= 0) {
+            // Suspended by the fps valve (device struggling): drop any backlog instead of
+            // bursting it out the instant fps recovers.
+            presenceActionAccumMs = 0;
+            pendingActionEdge = { kind: "none" };
+          } else {
+            presenceActionAccumMs += elapsed * 1000;
+            if (presenceActionAccumMs >= actionBeatMs) {
+              presenceActionAccumMs = 0;
+              if (me) {
+                const facing = deriveActionFacing(myHero, lastActionX, lastActionFacing);
+                const candidateAt =
+                  pendingActionEdge.kind === "none"
+                    ? presenceActionCounter
+                    : presenceActionCounter + 1;
+                const candidate = buildActionSample(
+                  myHero,
+                  { charId: me.charId, displayName: me.displayName },
+                  pendingActionEdge,
+                  facing,
+                  lastActionX,
+                  candidateAt,
+                  Date.now(),
+                );
+                if (shouldPublishAction(lastSentAction, candidate)) {
+                  if (pendingActionEdge.kind !== "none") presenceActionCounter++;
+                  worldSession.publishAction(candidate);
+                  lastSentAction = candidate;
+                }
+                lastActionX = candidate.x;
+                lastActionFacing = facing;
+                pendingActionEdge = { kind: "none" };
+              }
+            }
+          }
+        }
+
         // Dedupe: never render my OWN ghost, nor a cohort peer (already a fully-simulated
         // real hero in my field). Peers key on displayName — the party wire carries no
         // charId (see `GhostStore.setExcluded`). Cheap set rebuild per frame.
@@ -3195,6 +3325,23 @@ export function GameClient() {
         return;
       }
 
+      // R3 "tap profile" (issue #50 Wave 5): checked AFTER combat/npc/gate (all of
+      // those win over a ghost on overlap) but BEFORE the ground-move fallback — a
+      // tap that lands on a ghost opens its read-only profile card and is FULLY
+      // consumed here: no `moveTo`, no `pendingInput` write of any kind. View-only,
+      // mirrors `hitTestNpc`/`hitTestGate`'s "separate method, separate outcome"
+      // shape (see `GhostHitResult`'s doc in `GameRenderer.ts`).
+      const ghostHit = renderer.hitTestGhost(canvasX, canvasY);
+      if (ghostHit) {
+        ghostProfileSnapshotRef.current = {
+          name: ghostHit.name,
+          cls: ghostHit.cls,
+          tier: ghostHit.tier,
+        };
+        useGameStore.getState().openGhostProfile(ghostHit.cid);
+        return;
+      }
+
       if (hit) useGameStore.getState().queueMoveTo(hit.x);
     }
     arenaEl.addEventListener("click", onArenaClick);
@@ -3550,6 +3697,18 @@ export function GameClient() {
       {/* "ตำราตำนาน" secret-quest reveal — mount only; the store's `tomeAssembledCelebration`
           flag (flipped off the `tomeAssembled` engine event above) drives visibility. */}
       <AsuraTomeAssembledModal />
+      {/* R3 "tap profile" (issue #50 Wave 5) — view-only ghost-presence profile card.
+          `ghostProfileCid` drives visibility; the cosmetic identity it needs comes from
+          `ghostProfileSnapshotRef` (see that ref's doc above), stashed in the SAME tick
+          the tap opened it. */}
+      {ghostProfileCid && ghostProfileSnapshotRef.current && (
+        <GhostProfileCard
+          name={ghostProfileSnapshotRef.current.name}
+          cls={ghostProfileSnapshotRef.current.cls}
+          tier={ghostProfileSnapshotRef.current.tier}
+          onClose={() => useGameStore.getState().closeGhostProfile()}
+        />
+      )}
     </>
   );
 }

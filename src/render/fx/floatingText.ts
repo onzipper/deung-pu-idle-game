@@ -4,6 +4,8 @@
  * gold, boss gold, labels) so neither allocates a Pixi `Text` per occurrence:
  * every slot is a pre-created `Text` reused round-robin, capped at `cap`
  * concurrent labels (spawning past the cap evicts the oldest, per the spec).
+ * Each `Text` gets a black `TextStyle.stroke` set once at construction (never
+ * touched per-spawn) so labels stay readable against bright biomes.
  */
 
 import { Container, Text } from "pixi.js";
@@ -50,6 +52,7 @@ export class FloatingTextPool {
           fontWeight: "700",
           fill: 0xffffff,
           fontFamily: "monospace",
+          stroke: { color: 0x000000, width: 3 },
         },
       });
       text.anchor.set(0.5);

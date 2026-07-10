@@ -96,6 +96,7 @@ function RealSlotButton({
         ariaLabel={tContent(`${item.templateId}.name`)}
         glyph={glyph}
         glyphClassName={tint}
+        templateId={item.templateId}
         subLabel={t("tierShort", { tier: template.tier })}
         refineBadge={item.refineLevel > 0 ? t("refinePlus", { level: item.refineLevel }) : undefined}
         className="h-16 w-16 shrink-0"

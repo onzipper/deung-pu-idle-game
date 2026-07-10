@@ -33,10 +33,45 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { cleanup, render } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { GameHud } from "@/ui/components/GameHud";
+import { Toast } from "@/ui/components/primitives/Toast";
 import { ONBOARDING_STEPS, type OnboardingAnchor } from "@/ui/onboarding/steps";
-import { useGameStore } from "@/ui/store/gameStore";
+import { useGameStore, type HeroSummary } from "@/ui/store/gameStore";
 // Same relative-import convention as `onboarding/__tests__/tips.test.ts`.
 import thMessages from "../../../../messages/th.json";
+
+/** Minimal type-valid `HeroSummary` fixture — mirrors
+ * `store/__tests__/gameStore.test.ts`'s `makeSnapshot` hero shape, only the
+ * `xpProgress` field varies per test. */
+function makeHero(overrides: Partial<HeroSummary> = {}): HeroSummary {
+  return {
+    cls: "swordsman",
+    hp: 100,
+    maxHp: 100,
+    x: 0,
+    skillCd: 0,
+    atkBuffMult: 1,
+    atkBuffTimer: 0,
+    mana: 10,
+    maxMana: 10,
+    skills: [],
+    autoSlots: [null, null, null],
+    unlockedSlots: 1,
+    dead: false,
+    level: 1,
+    xpProgress: 0.456,
+    atLevelCap: false,
+    tier: 1,
+    canEvolve: false,
+    quest: null,
+    statPoints: 0,
+    stats: { str: 10, dex: 10, int: 10, vit: 10 },
+    primaryStat: "str",
+    combatPower: 0,
+    equipped: { weapon: null, armor: null },
+    hasCommand: false,
+    ...overrides,
+  };
+}
 
 beforeAll(() => {
   if (!window.matchMedia) {
@@ -64,6 +99,7 @@ afterEach(() => {
     questTrackerCollapsed: false,
     skillDockCollapsed: false,
     onboardingStepIndex: -1,
+    heroes: [],
   });
 });
 
@@ -72,6 +108,7 @@ beforeEach(() => {
     questTrackerCollapsed: false,
     skillDockCollapsed: false,
     onboardingStepIndex: -1,
+    heroes: [],
   });
 });
 
@@ -158,5 +195,25 @@ describe("GameHud fullscreen layout (R2-W2 smoke test)", () => {
     const consumables = document.querySelector('[data-onboarding-anchor="consumables"]');
     expect(consumables).not.toBeNull();
     expect(consumables?.closest(".hidden")).toBeNull();
+  });
+});
+
+describe("issue #55 Wave A UI polish", () => {
+  it("ExpClockStrip renders a left-edge EXP % readout once a hero is present", () => {
+    useGameStore.setState({ heroes: [makeHero({ xpProgress: 0.456 })] });
+    const { container } = renderHud();
+    expect(container.textContent).toContain("45.6%");
+  });
+
+  it("Toast info variant uses violet chrome, never gold text", () => {
+    const { container } = render(
+      <NextIntlClientProvider locale="th" messages={thMessages}>
+        <Toast variant="info">hello</Toast>
+      </NextIntlClientProvider>,
+    );
+    const toast = container.querySelector('[role="status"]');
+    expect(toast?.className).toMatch(/border-violet-400\/40/);
+    expect(toast?.className).toContain("text-ddp-ink");
+    expect(toast?.className).not.toContain("text-ddp-gold");
   });
 });
