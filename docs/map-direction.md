@@ -42,8 +42,8 @@ rotation, no true 3D (GDD).
 - **Wave 1 — capped depth scale + contact shadows (issue #69, THIS PR).** Scale
   cap 0.95↔1.06; a flat-alpha contact-shadow primitive (`views/entityShadow.ts`)
   under every actor. Render + docs only, no biome content.
-- **Wave 2 — Forest Road biome slice** (first biome under projection C; NOT this
-  PR). See content list below.
+- **Wave 2 — Forest Road biome slice** (first biome under projection C).
+  **2A ✅ 2B ✅ 2C ✅ 2D ✅** (issue #69) — see content list below.
 - **Wave 3 — prop occlusion** (actors sort against world props by foot line).
 - **Wave 4 — far-row atmospheric tint + polish pass.**
 
@@ -57,14 +57,14 @@ hit-test targets, no image assets (layered flat-alpha primitives per
 
 ### Element list (what "authored" means for this slice)
 
-1. **Ground composition (Wave 2B)** — the playable band stops being one flat
+1. **Ground composition (Wave 2B ✅)** — the playable band stops being one flat
    fill: 2–3 horizontal depth tone strips (far strip darkest, colors derived
    from the biome's existing `ground.base/band` palette — no new hex constants
    where a `shiftHue`/darken of the biome palette works), plus a **dirt-road
    S-curve** crossing the band from far-left toward near-right (edge-highlight
    per the flat-tone vocabulary, using `ground.accent`). Road flattens/fades at
    gates per the existing `terrainZone` gate-flattening rule.
-2. **World props (Wave 2C)** — code-drawn, deterministic placement (stateless
+2. **World props (Wave 2C ✅)** — code-drawn, deterministic placement (stateless
    hash on zone+index, same policy as everything else — never the wave RNG):
    4–6 trees (trunk column + canopy mass), 3–4 rocks, low grass clumps,
    1 lamp post (gold flat-glow halo, no additive), 1 wooden sign, 1 broken
@@ -72,9 +72,16 @@ hit-test targets, no image assets (layered flat-alpha primitives per
    band carry a `footY`-derived zIndex and join the Wave-1.2 **shared actor
    sort domain** (`entities` container) so actors walk in front of/behind them.
    A thin **foreground grass strip** at the near edge may cover feet/shins only.
-3. **Readability pass (Wave 2D)** — tune strip/road alphas vs contact shadows,
+3. **Readability pass (Wave 2D ✅)** — tune strip/road alphas vs contact shadows,
    verify mobile portrait/landscape legibility, damage-feedback never occluded,
-   day/night palettes both read; tests + docs sync.
+   day/night palettes both read; tests + docs sync. Fixed a real contrast bug:
+   the far depth-tone strip's darken amount (`forestRoad.ts`'s
+   `STRIP_FAR_DARKEN`) clamped to pure `0x000000` on map2's darkest farm
+   zones (HSL lightness floor via `adjustLightness`) — a near-black contact
+   shadow over a literally-black strip has zero luminance delta, so the
+   shadow melted in completely. Reduced `0.12` → `0.05` (comfortable
+   non-zero floor on every map2 farm zone, both noon and deep-night palettes
+   — test-pinned in `src/render/__tests__/wave2dReadability.test.ts`).
 
 ### Seam map (files each PR touches — identified in 2A, modified later)
 
@@ -100,8 +107,16 @@ hit-test targets, no image assets (layered flat-alpha primitives per
   RULES (the `MapProp` data model, layer priorities, "never hide combat
   feedback" as a testable rule) remain **Wave 3** — 2C ships the minimum
   footY-sort behavior only.
-- **2D** (base = 2C): readability/mobile polish, alpha/knob tuning within the
-  locked scale policy, tests + docs.
+- **2D** (base = 2C, ✅): readability/mobile polish, alpha/knob tuning within
+  the locked scale policy, tests + docs. Knob change: `forestRoad.ts`'s
+  `STRIP_FAR_DARKEN` `0.12 → 0.05` (see the Wave-2D bullet above). Added a
+  scale-policy PIN test (`worldDepth/__tests__/worldDepthDepthBand.test.ts`)
+  and a combined cross-module readability guard
+  (`src/render/__tests__/wave2dReadability.test.ts`): shadow-vs-strip
+  contrast (noon + deep-night), foreground-strip shin bound, prop-density
+  bound across all 5 map2 farm zones, and the near-grass-strip/road overlap
+  seam (structural — the strip's blade-tip apex never rises above the near
+  depth-tone strip's own top).
 
 ### Per-PR eye-test items
 
@@ -123,12 +138,32 @@ hit-test targets, no image assets (layered flat-alpha primitives per
 - No gradients / filters / additive blend for depth cues — layered flat alpha
   only (`render/README.md`).
 
-## Owner eye-test checklist (Wave 1)
+## Owner eye-test checklist (combined Wave 2 slice — 2A-2D, issue #69)
 
-- Contact shadow reads under hero(es), enemies, boss, world boss, ghosts, NPCs.
-- Shadow reads on BOTH bright (town/noon) and dark (night/cave) palettes — never
-  a hard black cutout, never invisible.
-- Far-row actors look "further", not "shrunk/broken", at the 0.95↔1.06 cap.
-- Feet stay planted on the ground across the depth band (no floating shadows).
-- Tap ping still lands on the tapped row after the scale cap.
-- 60fps on desktop + mid mobile (shadows add one build-once Graphics per actor).
+Supersedes the earlier Wave-1-only list — Wave 1 (contact shadows + the scale
+cap) is folded in below since 2D's fixes touch both.
+
+- **Ground + road (2B)**: map2 farm zones read as an authored field (3 tone
+  strips + the dirt-road S-curve), on mobile portrait/landscape AND desktop;
+  road flattens toward both walk gates; every other map/zone stays
+  byte-identical.
+- **Props (2C)**: 4-6 trees, 3-4 rocks, 1 lamp (warm glow, no additive), 1
+  sign, 1 broken gate fragment scatter naturally per zone; hero/mobs/ghosts
+  walk in FRONT of far props and BEHIND near trunks; the foreground grass
+  strip covers feet/shins at most, never a knee or higher.
+- **Contact shadow (1, re-verified after 2D's strip fix)**: reads under every
+  actor (hero, enemies, boss, world boss, ghosts, NPCs) on TOP of the new
+  ground strips specifically — no strip tone (especially the far/darkest
+  strip on map2's demon-realm zones) swallows the shadow into a flat black
+  smear.
+- **Day/night**: cycle through เช้า/เที่ยง/ค่ำ/กลางคืน (or force the phase) and
+  confirm the road, strips, props, AND the shadow all still read at the
+  darkest (กลางคืน) extreme — never a hard cutout, never invisible.
+- **Depth scale cap**: far-row actors/props look "further", not
+  "shrunk/broken", at the LOCKED 0.95↔1.06 band; feet stay planted (no
+  floating shadows or props) across the whole depth band.
+- **No occlusion regressions**: no prop ever covers a damage number, HP bar,
+  or the boss HP plate; gate/NPC taps land correctly (props are never
+  tappable); tap ping still lands on the tapped row.
+- **Perf**: 60fps holds on desktop + mid mobile with the full slice active
+  (strips + road + ~13-15 props + grass + shadows, all build-once).

@@ -74,8 +74,12 @@ const TREE_MIN = 4;
 const TREE_MAX = 6;
 const ROCK_MIN = 3;
 const ROCK_MAX = 4;
-const GRASS_MIN = 6;
-const GRASS_MAX = 10;
+/** Grass-clump count bounds — exported so the R4.5 Wave 2D cross-zone density
+ * guard (`wave2dReadability.test.ts`) can pin the full inventory range
+ * without duplicating the literal (mirrors `GRASS_D_MIN`/`GRASS_D_MAX`
+ * already being exported for the same reason). */
+export const GRASS_MIN = 6;
+export const GRASS_MAX = 10;
 /** Clearance (world px) each prop keeps from BOTH walk gates — comfortably over
  * `zoneGates.DEFAULT_GATE_TAP_HALF_W` (30) so a prop x can never land inside a
  * gate's tap rect (verified by the no-tap test). */

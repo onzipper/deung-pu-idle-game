@@ -35,11 +35,14 @@ import { PALETTE, safeRadius } from "@/render/theme";
 
 /** Near-black — `PALETTE.shadow` (0x000000). */
 const SHADOW_COLOR = PALETTE.shadow;
-/** Wide faint skirt alpha (the soft outer edge). */
-const SHADOW_OUTER_ALPHA = 0.16;
+/** Wide faint skirt alpha (the soft outer edge) — exported (not just internal)
+ * because it is the WORST-CASE (weakest) shadow alpha: the R4.5 Wave 2D
+ * strip-contrast guard (`wave2dReadability.test.ts`) composites this against
+ * every map2 farm strip tone to make sure the shadow never melts in. */
+export const SHADOW_OUTER_ALPHA = 0.16;
 /** Tighter core alpha, stacked over the skirt (composited ≈ 0.30 in the overlap
  * — the low end of the dark-fantasy "reads on bright AND dark" window). */
-const SHADOW_INNER_ALPHA = 0.22;
+export const SHADOW_INNER_ALPHA = 0.22;
 /** Inner-core half-width as a fraction of the footprint half-width. */
 const SHADOW_INNER_FRAC = 0.62;
 /** Ellipse flatten (vertical radius ÷ horizontal radius) — a ground disc read
