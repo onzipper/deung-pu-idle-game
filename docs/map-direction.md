@@ -47,17 +47,72 @@ rotation, no true 3D (GDD).
 - **Wave 3 — prop occlusion** (actors sort against world props by foot line).
 - **Wave 4 — far-row atmospheric tint + polish pass.**
 
-## Wave 2 — Forest Road slice content (NOT implemented here)
+## Wave 2 — Forest Outskirts / Dark Forest Road vertical slice (SPEC — Wave 2A)
 
-Visual-only, no engine/collision changes:
+**Target: `map2` farm zones** (the forest biome family, `propStyle: "bush"` in
+`environment/biomes.ts`). One map only — the pattern generalizes to other biomes
+after the owner signs off the slice. Visual-only: no engine, no collision, no
+hit-test targets, no image assets (layered flat-alpha primitives per
+`render/README.md`).
 
-- Raked forest-road ground plane (path narrowing toward the horizon) via the
-  existing terrain seam.
-- Layered tree props: far treeline silhouette, mid trunks, near foreground trunks
-  framing the lane.
-- Foliage ambient (drifting leaves) tuned for the road.
-- Row tint calibration so far-lane mobs desaturate slightly into the treeline.
-- Contact shadows (Wave 1) verified against the raked ground.
+### Element list (what "authored" means for this slice)
+
+1. **Ground composition (Wave 2B)** — the playable band stops being one flat
+   fill: 2–3 horizontal depth tone strips (far strip darkest, colors derived
+   from the biome's existing `ground.base/band` palette — no new hex constants
+   where a `shiftHue`/darken of the biome palette works), plus a **dirt-road
+   S-curve** crossing the band from far-left toward near-right (edge-highlight
+   per the flat-tone vocabulary, using `ground.accent`). Road flattens/fades at
+   gates per the existing `terrainZone` gate-flattening rule.
+2. **World props (Wave 2C)** — code-drawn, deterministic placement (stateless
+   hash on zone+index, same policy as everything else — never the wave RNG):
+   4–6 trees (trunk column + canopy mass), 3–4 rocks, low grass clumps,
+   1 lamp post (gold flat-glow halo, no additive), 1 wooden sign, 1 broken
+   gate/arch reusing the `gateArch` visual language. Props that stand ON the
+   band carry a `footY`-derived zIndex and join the Wave-1.2 **shared actor
+   sort domain** (`entities` container) so actors walk in front of/behind them.
+   A thin **foreground grass strip** at the near edge may cover feet/shins only.
+3. **Readability pass (Wave 2D)** — tune strip/road alphas vs contact shadows,
+   verify mobile portrait/landscape legibility, damage-feedback never occluded,
+   day/night palettes both read; tests + docs sync.
+
+### Seam map (files each PR touches — identified in 2A, modified later)
+
+| Seam | File | Wave |
+|---|---|---|
+| Biome palette + propStyle | `src/render/environment/biomes.ts` | B (read), C (read) |
+| Ground band composition | `src/render/environment/groundBand.ts` + `BiomeScene.ts` | B |
+| Zone→terrain preset / gate flattening | `src/render/worldDepth/terrainZone.ts` | B (read/extend) |
+| Ground line / foot line reads | `src/render/worldDepth/worldFxContext.ts` | B/C (read-only) |
+| Prop vocabulary to promote | `src/render/environment/groundProps.ts` | C (reference) |
+| NEW world-prop module (depth-sorted) | `src/render/environment/mapProps.ts` (new) | C |
+| Shared actor sort domain | `GameRenderer.ts` `entities` container | C (wiring) |
+| Gate/arch visual language | `src/render/environment/gateArch.ts` | C (reference) |
+| Depth cues / shadows tuning | `views/entityShadow.ts`, `worldDepth/depthBand.ts` (knobs only) | D |
+
+### PR split & dependency chain (stacked drafts, merge only on owner approval)
+
+- **2A (this PR)**: this spec + seam map. Docs only.
+- **2B** (base = 2A): ground composition only — tone strips + road, `map2`
+  zones only. No props, no occlusion.
+- **2C** (base = 2B): world props, visual-only, deterministic placement,
+  shared-sort-domain zIndex. No collision, no gameplay reads. Full occlusion
+  RULES (the `MapProp` data model, layer priorities, "never hide combat
+  feedback" as a testable rule) remain **Wave 3** — 2C ships the minimum
+  footY-sort behavior only.
+- **2D** (base = 2C): readability/mobile polish, alpha/knob tuning within the
+  locked scale policy, tests + docs.
+
+### Per-PR eye-test items
+
+- **2B**: forest zones read as an authored field (strips + road) on mobile +
+  desktop · road flattens at gates · town/boss/other maps byte-identical ·
+  night palette keeps the road visible but calm.
+- **2C**: hero/mobs/ghosts walk in FRONT of far props and BEHIND near trunks ·
+  foreground grass covers shins at most · no prop hides damage numbers/HP ·
+  gate/NPC taps unaffected (props are not tappable).
+- **2D**: combined slice reads at a glance on mobile portrait · shadows sit
+  correctly on strip boundaries · no readability regression in the other maps.
 
 ## Rules
 
