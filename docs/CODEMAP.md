@@ -246,7 +246,8 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/views/npcView.ts` — town NPC rig + tap-interaction anchor rendering.
 - `src/render/views/heroView.ts` — articulated per-class hero rig, gear paper-doll, weapon/armor anchor hooks, facing/attack anim.
 - `src/render/views/ghostLayer.ts` — pooled ghost-presence rig rendering for other players' heroes (walk/idle + R3 edge-triggered `pa` pose pulses; no fx/camera/audio).
-- `src/render/views/__tests__/` — pins headless rig bounds, enemy species, world boss, gear tier7-10, hero facing/party, asura elite, legendary weapon, npc view, ghost-layer pose/invariants; 10 files.
+- `src/render/views/entityShadow.ts` — R4.5 contact-shadow primitive: build-once flat-alpha ground ellipse attached as the backmost child of every actor root (rides the root foot-pivot/depth-scale transform).
+- `src/render/views/__tests__/` — pins headless rig bounds, enemy species, world boss, gear tier7-10, hero facing/party, asura elite, legendary weapon, npc view, ghost-layer pose/invariants, contact-shadow geometry; 11 files.
 
 ### src/render/worldDepth/
 - `src/render/worldDepth/atmosphere.ts` (`createAtmosphere`) — day/night + weather + critters runtime composing pure math with pooled Pixi layers.

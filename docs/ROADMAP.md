@@ -256,6 +256,15 @@
 - [x] **Wave C2 — manual moveTo x/y + dash y + tap plumbing (#51, LAST R4 step)**: `FrameInput.moveTo` เพิ่ม **`y?` optional** (`{x, y?}`) — **additive + lockstep-safe** (old x-only client decode เป๊ะ; ride relay เป็น opaque `FrameInput` — **ไม่แตะ protocol**; พิสูจน์ด้วย JSON round-trip + mixed x-only/x-y hash-equality ใน `lockstep.test.ts`). **Clamp y ทุกทางเข้า** (`applyManualCommand` → `[bandFar,bandNear]`; non-finite = ถือว่าไม่มี → x-only). `ManualCommand.move` = `{kind:"move";x;y?}` (transient, **ไม่ bump SAVE — ยัง v20**). Hunt-phase (`combat.updateHeroes`): move+y steer `planeY` ไป `command.y` แทน home row (มอบ engage ยังชนะ; x-only = home row เป๊ะ), arrival gate ทั้ง x (`manual.arriveEps`) **และ** y (`plane.yArriveEps`) — clear เมื่อครบสองแกน. Town (`tickTownManualWalk`) ease y เองใน walk slice. **Dash y** (`dashHeroTo` รับ `targetPlaneY?`): ninja เงาพริบ/เงาสังหาร/พันเงานิรันดร์ ส่งแถวมอบผ่าน `enemyDashPlaneY` (boss/world-boss = undefined → ไม่แตะแถว, กติกา C1) — call-site plumbing ล้วน, ไม่แตะ geometry/range/damage. Events additive: `moveOrdered` เพิ่ม `y?` (ping ลงแถวที่แตะ); `heroDashed` ไม่เปลี่ยน (streak วาดที่ `HERO_MID_Y`, hero view ตาม live `planeY`). Tap: `hitTestPointer` คืน `planeY` (invert `depthOffsetY` ผ่าน `tapToPlaneY`, clamp band), desktop+mobile ผ่าน tap handler เดียว (เคารพ rAF one-shot drain). **IRON invariant คงเดิม** — y ไม่ gate combat; sim ไม่ยิง manual command → **sim gates ไม่ขยับ**. `targeting.ts` ไม่แตะ; `skills.ts` แตะเฉพาะ dash call sites
 - [ ] **Wave C+ — 2D movement + สกิลเรขาคณิต + minimap** (never-downgrade; balance-sim re-adjudicate เต็มรอบ)
 
+## M8.14 — R4.5 "โลกมีมิติ, บางเบา" (render + docs only; projection C, owner-approved #69)
+
+> เก็บ world-depth ให้ "อ่านออก" ก่อนลุยแกน x,y จริง: scale เป็นเสียงกระซิบ, composition ขายมิติ. เอนจิ้นไม่แตะเลย. เต็มสเปกที่ `docs/map-direction.md`.
+
+- [x] **Wave 1 — capped depth scale + contact shadows (#69)**: `depthBand` scale band **0.8↔1.12 → 0.95↔1.06** (offsets เดิม, ยัง strictly monotonic — test-enforced); NEW `views/entityShadow.ts` = flat-alpha 2-ellipse contact shadow (ไม่มี gradient/filter/additive, alpha ต่ำ อ่านได้ทั้ง palette สว่าง/มืด) attach เป็น backmost child ของ actor root ทุกตัว (hero/enemy/boss/world-boss/NPC ใน `GameRenderer`, ghost ใน `GhostLayer`) — ride GROUND_Y pivot + foot plant + depth scale เดียวกับ actor (ไม่ re-add offset, known-traps #3), destroy กับ view ตอน pool sweep (ไม่มี orphan). Enemy shadow scale ตาม `effectiveSize` (elite-aware). Projection C + scale policy = locked ที่ `docs/decision-index.md`. **Engine/sim/save ไม่แตะ**
+- [ ] **Wave 2 — Forest Road biome slice** (first biome ใต้ projection C; raked road ground + layered tree props visual-only + foliage ambient + row tint)
+- [ ] **Wave 3 — prop occlusion** (actor sort กับ world prop ตาม foot line)
+- [ ] **Wave 4 — far-row atmospheric tint + polish**
+
 ## M9 — Economy & Competition
 
 - [ ] ตลาดกลาง: ลงขาย/ซื้อด้วยเงินในเกม + atomic transaction + audit trail + anti-dupe

@@ -42,3 +42,5 @@ Locked owner + architecture decisions. **Do not re-propose anything marked Locke
 | All modals render through `ModalPortal` | Locked | iOS Safari backdrop-filter containing-block bug | `docs/known-traps.md` |
 | UI icons = pre-2020 emoji or CSS-drawn only | Locked | Windows 10 lacks Unicode-13+ glyphs | `docs/known-traps.md` |
 | Presence/chat are render/store-only — zero code paths into engine state | Locked | Pinned by garbage-feed hash-equality test | `docs/ghost-presence-design.md` |
+| World projection = C "MMO field board with subtle depth" (fixed low camera; A flat side-scroller / B steep iso rejected) | Locked (R4.5) | Ragnarok/idle-MMO feel without true 3D; A reads 1D, B needs tile occlusion rebuild | issue #69, `docs/map-direction.md` |
+| Depth scale band capped 0.95↔1.06 (cap, don't flatten); offsets unchanged; orthographic (flat-1.0) fallback if it ever reads as jitter | Locked (R4.5) | Old 0.8↔1.12 40% swing read as "tiny", not "far" — scale is a whisper, composition sells depth | issue #69, `docs/map-direction.md` |

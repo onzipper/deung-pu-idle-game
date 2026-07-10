@@ -63,7 +63,7 @@ const ELITE_AURA_SCALE_SWING = 0.1;
 /** The render-only effective size an elite draws at (scaled up) vs the
  * engine's own `enemy.size` (untouched — this never feeds back into
  * `GameState`). Every other kind reads its plain `enemy.size` unchanged. */
-function effectiveSize(enemy: Enemy): number {
+export function effectiveSize(enemy: Enemy): number {
   return enemy.elite ? enemy.size * ELITE_SIZE_SCALE : enemy.size;
 }
 
