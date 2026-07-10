@@ -34,6 +34,7 @@ Locked owner + architecture decisions. **Do not re-propose anything marked Locke
 | Art: references-first — owner supplies visual references / own pixel art; never invent a look | Locked | 3 art attempts rejected before rule | `docs/ui-reference-map.md` |
 | Every UI must play comfortably on BOTH desktop and mobile (touch-first) | Locked | Owner directive 2026-07-06 | `CLAUDE.md` |
 | Docs sync in the same change (CODEMAP + current-state + affected docs) | Locked | Owner directive 2026-07-09/10, test-enforced | `CLAUDE.md`, `src/__tests__/codemap.test.ts` |
+| Big-epic workflow: old issue stack closed/superseded; future work opens ONLY as a large Epic or large implementation PR with phases inside — no micro-task issues unless owner explicitly asks | Locked (2026-07-11) | Owner ended micro-issue ping-pong when approving the World Arc v1 direction | `docs/world-arc-freefield-v1.md` §4, PR #80 |
 | Production deploys are owner-triggered; relay redeploys FIRST when its protocol grows | Locked | Live incidents from stale relay | `docs/context/deployment.md` |
 
 ## Technical

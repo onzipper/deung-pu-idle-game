@@ -265,7 +265,7 @@
 
 ## M8.15 — World Arc v1 + Free-field 2.5D (direction reset, owner 2026-07-10)
 
-> Spec เต็ม: `docs/world-arc-freefield-v1.md`. โลก = 10 areas (Capital Outskirts → Rift Sanctum); field = free-field 2.5D (คลิก/แตะจุดไหนก็ได้ที่ไปถึงได้, ถนน = visual guide, depth จากตำแหน่งเท้า). Wave 1 depth language + R4 x/y plumbing = substrate ที่เก็บไว้ทั้งหมด.
+> Spec เต็ม: `docs/world-arc-freefield-v1.md`. โลก = 10 areas (Capital Outskirts → Rift Sanctum); field = free-field 2.5D (คลิก/แตะจุดไหนก็ได้ที่ไปถึงได้, ถนน = visual guide, depth จากตำแหน่งเท้า). Wave 1 depth language + R4 x/y plumbing = substrate ที่เก็บไว้ทั้งหมด. **Tracking (owner 2026-07-11): slices ข้างล่าง = phases ใน Epic ใหญ่ / implementation PR ใหญ่อันเดียว — ห้ามแตกเป็น micro-issues เว้นแต่ owner สั่งเอง; old issue stack ปิดหมดแล้ว (superseded/not planned).**
 
 - [x] **Spec + docs reset** (`docs/world-arc-freefield-v1.md`; map-direction/decision-index/current-state synced)
 - [ ] **Slice 1 — free-field foundation** (engine: field rect แทน narrow band, 2D step จริงสำหรับ moveTo x/y, IRON invariant คงเดิม, lockstep+determinism tests, sim gates ต้องนิ่ง)

@@ -18,14 +18,17 @@
   clings to. Roads stay, but as visual guides on an open field.
 - **Map2 "Greenmill Hamlet / Farm Border Road" design** — the whole Wave 2
   slice (spec v2, S-curve ground prototype, prop reworks, readability polish).
-  Owner did not accept it (#79); the reset supersedes it entirely.
-- **PRs #73 / #74 / #75 / #76** — the stacked Wave 2 drafts. Status:
-  **superseded / historical reference only.** Recommend closing #73, #74, #76
-  with a "superseded by World Arc v1" comment (#75 already merged *into the
-  stack branch*, never into `develop` — nothing from Wave 2 is in `develop`).
-  Branches stay for archaeology; nothing from them merges as-is. Uncommitted
-  Wave 2B prototype work is preserved in a labeled git stash on
-  `r45/issue-69-wave2b-ground` (historical only).
+  Owner did not accept it; the reset supersedes it entirely.
+- **PRs #73 / #74 / #75 / #76 — factual status: #73, #74, #76 CLOSED as
+  superseded; #75 was merged into the stack branch only (never into
+  `develop`) — historical, not active direction.** Nothing from Wave 2 is in
+  `develop`. Branches stay for archaeology; uncommitted Wave 2B prototype
+  work is preserved in a labeled git stash on `r45/issue-69-wave2b-ground`
+  (historical only).
+- **The old planning-issue stack** (R4/R4.5/R5-era issues, including the
+  map-design and mobile follow-ups) — **CLOSED as superseded / not planned.
+  No old issue remains the active task holder.** Future work is opened only
+  as a large Epic or a large implementation PR (owner workflow, 2026-07-11).
 
 ### Carries forward (owner-passed or proven substrate — keep, do not redo)
 
@@ -163,33 +166,40 @@ Phased so the field model never blocks on authoring tools:
 - **Short term**: the IRON invariant stays — `y` does not gate combat;
   targeting/range stay x-based, so combat behavior and balance sim are
   untouched while the field opens up.
-- **Long term (R5, #52)**: targeting metric flips to true 2D distance — that
-  is already R5's planned first PR and is where the invariant is deliberately
-  retired, with a full balance-sim re-adjudication (never-downgrade zone).
+- **Long term (the R5 combat phase)**: targeting metric flips to true 2D
+  distance — a later phase inside the implementation epic, where the invariant
+  is deliberately retired with a full balance-sim re-adjudication
+  (never-downgrade zone). The open crit design question is answered there.
 - **Rule for all new code starting now: do not assume x-only.** New systems
   take `(x, y)` positions and distance helpers, even while combat still reads
   x — so the R5 flip is a metric change, not a rewrite.
 
 ## 4. Recommended implementation sequence
 
-Each step is one PR-sized slice, engine determinism rules and docs-sync rule
-apply to all; nothing merges without owner review. Visual/art passes are gated
-per-area on references and are NOT in this sequence.
+> **Tracking (owner workflow, 2026-07-11): these slices are PHASES of one
+> plan, NOT separate micro-issues.** Future work is tracked as **one large
+> Epic or one large implementation PR** with these phases as its internal
+> checklist. Do not open per-slice issues or micro tasks unless the owner
+> explicitly asks for them.
 
-| # | Slice | Layer | Contents |
+Each slice is one phase; engine determinism rules and docs-sync rule apply to
+all; nothing merges without owner review. Visual/art passes are gated per-area
+on references and are NOT in this sequence.
+
+| # | Phase | Layer | Contents |
 |---|---|---|---|
-| 1 | **Free-field foundation** ← *recommended first implementation PR* | engine | Per-map field rect replaces the narrow band as the y domain; hero movement becomes a real 2D step (straight-line to `moveTo {x,y}`, honest diagonal speed); all intake clamps target the field rect. IRON invariant kept; lockstep hash-equality + determinism tests; SAVE_VERSION reviewed (expect additive/none — positions already exist). Sim gates must hold unmoved. |
+| 1 | **Free-field foundation** ← *recommended first implementation phase* | engine | Per-map field rect replaces the narrow band as the y domain; hero movement becomes a real 2D step (straight-line to `moveTo {x,y}`, honest diagonal speed); all intake clamps target the field rect. IRON invariant kept; lockstep hash-equality + determinism tests; SAVE_VERSION reviewed (expect additive/none — positions already exist). Sim gates must hold unmoved. |
 | 2 | **Field board + tap-anywhere** | render/ui | Ground plane drawn to the full field rect under projection C (placeholder tones, no art); tap→world inversion generalized to the taller field, desktop + mobile; move ping at tapped point. Owner-testable: "I can click anywhere and walk there." |
 | 3 | **Enemy/NPC field placement** | engine | Spawns/idle positions become 2D points in the field (deterministic, seeded-RNG rules respected); engagement approach stays dumb. Combat still x-gated. |
 | 4 | **World Arc scaffolding** | engine data | Arc area names/ids/theme hooks for the 10 areas + the owner-signed mapping to existing maps/stages. Naming/data only — zero balance movement. |
 | 5 | **Walkable polygon v1** | engine + render | Per-map walkable outline data + tap clamp + move stop-at-boundary; one map shaped as proof. |
 | 6 | **Prop foot-sort + blockers** | render, then engine data | Props in the shared sort domain (old Wave 3 concept) and, later, prop blocker shapes. |
 | — | Area visual passes (1 → 10) | render | Each gated on that area's owner reference. |
-| — | R5 targeting flip (#52) | engine | Picks up after slices 1–3; needs the #54 crit answer as before. |
+| — | R5 targeting flip | engine | Later phase inside the epic; picks up after phases 1–3 (crit design question resolved within it). |
 
 ### Smallest useful vertical slice (prove the model)
 
-**One existing map, full-rect walkable, placeholder ground**: slices 1 + 2 on
+**One existing map, full-rect walkable, placeholder ground**: phases 1 + 2 on
 a single map — click/tap any point on a taller field, hero walks there in
 x+y, foot-sort and contact shadows keep depth reading correctly, enemies
 fight exactly as today. No art, no arc content, no walkable authoring. If that
@@ -203,7 +213,8 @@ else is layering.
 - No relay protocol changes without explicit scope; `moveTo` extensions ride
   the opaque `FrameInput` (proven pattern).
 - Desktop + mobile first-class for every interaction (mobile gameplay/HUD
-  *design* remains its own open issue, #78).
+  *design* is still an open design question — resolved inside the epic plan;
+  its old tracking issue is closed).
 - Flat-alpha code-drawn art rules per `render/README.md`; no gradients/
   filters/additive for depth cues.
 - Never merge to `main` without per-merge owner confirm; balance gates hold
