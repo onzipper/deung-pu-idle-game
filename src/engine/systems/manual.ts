@@ -17,6 +17,7 @@ import { clamp } from "@/engine/core/math";
 import { dhypot } from "@/engine/core/dmath";
 import { getTargets } from "@/engine/systems/targeting";
 import { fieldRect } from "@/engine/systems/plane";
+import { clampToWalkable } from "@/engine/systems/walkable";
 import type { CombatTarget } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 import type { FrameInput } from "@/engine/core/step";
@@ -61,25 +62,23 @@ function applyOneCommand(state: GameState, heroIdx: number, input: FrameInput): 
   }
 
   if (input.moveTo && Number.isFinite(input.moveTo.x)) {
-    // FREE-FIELD (Phase 1): clamp the tap to the per-map play FIELD rect (THE shared seam) —
-    // x to the hunt/walk bounds (byte-identical), y to the depth-field edges.
-    const field = fieldRect(state.location.mapId);
-    const x = clamp(input.moveTo.x, field.minX, field.maxX);
-    // OPTIONAL depth-row y. CLAMP it into the field at intake (owner reminder #1: never trust
-    // the caller — the UI already inverts the tap to a field row, but a stale/older/malicious
-    // client could send anything). A non-finite y is treated as ABSENT → an x-only command,
-    // byte-identical to pre-y (same shape, same event).
+    // FREE-FIELD: resolve the tap to the nearest REACHABLE point (owner reminder #1: never trust
+    // the caller — the UI inverts the tap to a field row, but a stale/older/malicious client could
+    // send anything). A non-finite y is treated as ABSENT → an x-only command (byte-identical to
+    // pre-y: same shape, same event), clamped to the play-field x bounds.
     const rawY = input.moveTo.y;
-    const y =
-      typeof rawY === "number" && Number.isFinite(rawY)
-        ? clamp(rawY, field.minY, field.maxY)
-        : undefined;
-    if (y === undefined) {
+    if (typeof rawY === "number" && Number.isFinite(rawY)) {
+      // Phase 5 — 2D tap resolves through the WALKABLE outline (nearest point on/inside the polygon
+      // when the map defines one; otherwise a bit-identical field-rect x/y clamp — never fail
+      // silently). `clampToWalkable` is the single seam so x-only + 2D share one truth.
+      const c = clampToWalkable(state.location.mapId, input.moveTo.x, rawY);
+      h.command = { kind: "move", x: c.x, y: c.y };
+      state.events.push({ type: "moveOrdered", x: c.x, y: c.y, heroIdx });
+    } else {
+      const field = fieldRect(state.location.mapId);
+      const x = clamp(input.moveTo.x, field.minX, field.maxX);
       h.command = { kind: "move", x };
       state.events.push({ type: "moveOrdered", x, heroIdx });
-    } else {
-      h.command = { kind: "move", x, y };
-      state.events.push({ type: "moveOrdered", x, y, heroIdx });
     }
   }
 
