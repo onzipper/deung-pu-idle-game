@@ -10,20 +10,29 @@
  * milestone has a real y axis to move entities along.
  *
  * PROVENANCE (engine must NOT import render — ESLint boundary rule). `hashUnit`, the far/near
- * band, and the hero solo/party rows are DUPLICATED from
- * `src/render/worldDepth/{depthAssign,depthBand}.ts`. They are kept numerically in lock-step
- * via `CONFIG.plane` (bandFar/bandNear ≡ DEPTH_OFFSET_FAR/NEAR; formationDepth ≡
- * HERO_SOLO_DEPTH; heroBandMin/Max ≡ HERO_BAND_MIN/MAX). A parity test pins the two together.
+ * band, and the hero solo/party rows were PORTED from the render depth layer. The band math
+ * still lives in `src/render/worldDepth/depthBand.ts` (kept numerically in lock-step via
+ * `CONFIG.plane.bandFar/bandNear ≡ DEPTH_OFFSET_FAR/NEAR`; a parity test pins the two). The
+ * per-actor row ASSIGNMENT it also mirrored (`render/worldDepth/depthAssign` heroDepth/enemyDepth/
+ * ghostDepth + its HERO_* constants) was RETIRED at R4 Wave C0 — depth is now engine-owned — so
+ * the hero-row knobs (formationDepth, heroBandMin/Max) are engine-only invariants with no render
+ * twin (see git history for the retired depth-assignment source).
  *
  * DETERMINISM. Pure — a STATELESS FNV-1a hash of the entity id (numbers are stringified, so
  * `hashUnit(3) === hashUnit("3")`), NEVER the seeded wave-composition RNG stream (reserved;
  * CLAUDE.md) and NEVER a wall-clock. Same id → same `planeY` on every client, so it is
  * lockstep-safe by construction (and folded into `stateHash` as a divergence canary).
  *
- * WAVE A SCOPE. `planeY` is assigned ONCE at spawn and is UNUSED by combat/movement/targeting
- * and by render placement this wave (render keeps computing its own depth; combat stays
- * x-based on the ground line). It is new deterministic sim state only — behaviour-neutral.
- * Movement across the plane (easing at `CONFIG.plane.ySpeed`) arrives with the R4-R5 milestone.
+ * WAVE A SCOPE. `planeY` was assigned ONCE at spawn and (Wave A) UNUSED by combat/movement/
+ * targeting — new deterministic sim state only.
+ *
+ * WAVE C1 (hero y steering). Hero `planeY` becomes MUTABLE per step: `stepPlaneY` eases a hero
+ * toward its engagement lane (an ENGAGED farm mob's `planeY`) or back to its home row (idle /
+ * walking / boss & world-boss fights) at `CONFIG.plane.ySpeed`. Enemies/boss/worldBoss `planeY`
+ * stay STATIC (owner-confirmed — only heroes move on the plane). The steering is COSMETIC by
+ * construction: `planeY` is never read by targeting/range/cooldown/skills, so it can never gate
+ * an attack (targeting stays x-only on the ground line). The wiring lives in `systems/combat.ts`
+ * (the per-hero update); this module owns only the pure math helper.
  */
 
 import { CONFIG } from "@/engine/config";
@@ -65,16 +74,17 @@ export function planeYForDepth(d: number): number {
 
 /**
  * Enemy (incl. asura elite + boss-summoned add) depth row: a stable per-id scatter across the
- * FULL band, so a crowd reads with real front/back rows. Mirror of `depthAssign.enemyDepth`
- * → `depthOffsetY`. Deterministic per spawn id (no RNG draw), so every client agrees.
+ * FULL band, so a crowd reads with real front/back rows. Ported from the retired render depth-
+ * assignment (see git history) → `depthOffsetY`. Deterministic per spawn id (no RNG draw), so
+ * every client agrees. STATIC in C1 — enemies never steer their `planeY` (only heroes do).
  */
 export function enemyPlaneY(id: number): number {
   return planeYForDepth(hashUnit(id));
 }
 
 /**
- * Stable per-key scatter row (mirror of `depthAssign.ghostDepth` → `depthOffsetY`): the
- * engine helper for ghosts and town NPCs, which are render/CONFIG-anchor concepts with NO
+ * Stable per-key scatter row (ported from the retired render depth-assignment, see git history,
+ * → `depthOffsetY`): the engine helper for ghosts and town NPCs, which are render/CONFIG-anchor concepts with NO
  * live engine entity to write `planeY` onto. Exposed so Wave-B render places them off the
  * engine's plane math instead of its own.
  */
@@ -83,7 +93,8 @@ export function scatterPlaneY(key: string | number): number {
 }
 
 /**
- * Hero depth row (mirror of `depthAssign.heroDepth` → `depthOffsetY`): a SOLO hero stands on
+ * Hero depth row (ported from the retired render depth-assignment, see git history, →
+ * `depthOffsetY`): a SOLO hero stands on
  * its class FORMATION row (`formationDepth[cls]` — all four classes equal today, so this
  * reproduces render's single solo depth exactly; kept PER-CLASS as the R4-R5 hook to spread
  * classes onto distinct rows later). A party FANS evenly across [heroBandMin, heroBandMax] by
@@ -104,4 +115,26 @@ export function heroPlaneY(cls: HeroClass, slot = 0, partySize = 1): number {
  */
 export function bossPlaneY(): number {
   return planeYForDepth(1);
+}
+
+/**
+ * Ease `current` a hero's-depth-row `planeY` toward `target` by at most `ySpeed × dt` this step
+ * (R4 Wave C1 hero y steering). Pure — only +, −, and `clamp` (float-determinism policy: no
+ * transcendental, no wall-clock, no RNG), so it evolves bit-identically on every lockstep client.
+ *
+ * ARRIVE-EPS. Once the remaining gap is within `CONFIG.plane.yArriveEps` the step SNAPS to
+ * `target` and holds — there is no sub-unit chatter/oscillation at arrival. (The clamp alone
+ * already lands exactly on `target` the first step the gap drops under one `ySpeed × dt`, since
+ * `clamp(delta,−m,m) === delta` there; the eps is a belt-and-suspenders guard against float
+ * residue and documents the "no oscillation" intent.)
+ *
+ * COSMETIC. The caller (`systems/combat.updateHeroes`) runs this UNCONDITIONALLY after the
+ * x-move / attack decision, and `planeY` is never read by targeting/range/cooldown/skills, so
+ * steering can never gate an attack — the balance sim is unaffected by construction.
+ */
+export function stepPlaneY(current: number, target: number, dt: number): number {
+  const delta = target - current;
+  if (Math.abs(delta) <= CONFIG.plane.yArriveEps) return target;
+  const maxStep = CONFIG.plane.ySpeed * dt;
+  return current + clamp(delta, -maxStep, maxStep);
 }

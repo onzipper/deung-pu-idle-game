@@ -135,7 +135,13 @@ describe("spawn-y determinism — every spawn site stamps planeY", () => {
     for (let i = 0; i < 40; i++) step(s, {});
     expect(s.enemies.length).toBeGreaterThan(0);
     for (const e of s.enemies) expect(e.planeY).toBe(enemyPlaneY(e.id));
-    expect(s.heroes[0].planeY).toBe(heroPlaneY(s.heroes[0].cls));
+    // R4 Wave C1: hero `planeY` is now MUTABLE (it steers toward the lane it engages). After a
+    // run it need NOT equal the spawn home row anymore, but it stays a finite value inside the
+    // band (enemies, by contrast, remain pinned to their spawn scatter — asserted above).
+    const hy = s.heroes[0].planeY!;
+    expect(Number.isFinite(hy)).toBe(true);
+    expect(hy).toBeGreaterThanOrEqual(CONFIG.plane.bandFar - 1e-9);
+    expect(hy).toBeLessThanOrEqual(CONFIG.plane.bandNear + 1e-9);
   });
 
   it("same seed + save → identical planeY on every entity (lockstep-safe)", () => {

@@ -220,6 +220,9 @@ export {
   heroPlaneY,
   bossPlaneY,
   scatterPlaneY,
+  // R4 Wave C1 hero y steering: the pure per-step plane ease (hero `planeY` toward its
+  // engagement lane / home row). Cosmetic — never gates combat (targeting stays x-only).
+  stepPlaneY,
 } from "@/engine/systems/plane";
 
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill

@@ -35,7 +35,20 @@ The engine owns each entity's **ground-plane depth row**: `Entity.planeY` (optio
 - **Determinism**: pure FNV-1a of the entity id — never the wave RNG, never a wall-clock. Same id → same `planeY` on every client, so it is folded into `stateHash` (present-only) as a divergence canary.
 - **Wave A is behaviour-neutral**: `planeY` is UNUSED by combat/movement/targeting (combat stays x-based on the ground line) and by render placement (render still computes its own depth). The legacy `Entity.y` (the render torso-anchor that `hit`/`fastTravel` events carry) is untouched.
 - **No SAVE bump**: the live entity arrays are never persisted, so `planeY` is recomputed at spawn on every load (transient, like `command`/`aimX`). Proven in `plane.test.ts`.
-- **Wave B / R4-R5 handoff**: render will read `entity.planeY` in place of recomputing depth; the x/y milestone will MOVE entities along it (ease at `CONFIG.plane.ySpeed`, unused today). Cohort builders that stand up a >1-hero party should set `hero.planeY = heroPlaneY(cls, slot, size)` to reproduce render's party fan (`makeHero` defaults to the solo row).
+- **Wave B / C0**: render reads `entity.planeY` at the ONLY depth path (`worldFxContext.depthOf`); the render-side depth-assignment scaffold is retired. Cohort builders that stand up a >1-hero party set `hero.planeY = heroPlaneY(cls, cohortIndex, size)` to reproduce the party fan (`makeHero` defaults to the solo row).
+
+### Wave C1 — hero y steering (live movement)
+
+Hero `planeY` is now **mutable per step** (heroes ONLY — enemies/boss/worldBoss stay static scatter, owner-confirmed). The pure math is `systems/plane.stepPlaneY(current, target, dt) → next` (ease at `CONFIG.plane.ySpeed`, snap-and-hold within `CONFIG.plane.yArriveEps` so there is no oscillation at arrival — `+`/`−`/`clamp` only, float-determinism-safe). The wiring lives at the END of the per-hero loop in `combat.updateHeroes`, and is **unconditional cosmetic steering**: it runs regardless of which x-move/attack branch the hero took, reads only `aimTarget` + `planeY`, writes only `planeY`, and adds/removes/reorders NO x movement or attack call.
+
+Steering rules (the y-target each step):
+- **Engaging a farm mob** (the step's `aimTarget` is a `state.enemies` member): steer toward that mob's `planeY`.
+- **Idle / no target / a `move` command** (`aimTarget` null): steer back to the **home row** = `heroPlaneY(cls, cohortIndex, heroes.length)`, RECOMPUTED (never stored), so it matches the spawn/cohort stamp; solo reduces to the solo formation row.
+- **Boss phase / an engaged world boss** (`aimTarget.id === state.worldBoss.entity.id`): do **NOT** steer toward `boss.planeY` — hold/return to the home row. Bosses render on the static `DEPTH_NEUTRAL` path IGNORING their stamped near-row (+40), so steering the hero to the boss's stamped row would send it to a lane the boss isn't drawn in.
+
+**Iron invariant**: `planeY` is never read by targeting/range/cooldown/target-selection/skills (`targeting.ts`, `skills.ts` untouched) — y can never gate an attack. Proven by the "attack timing byte-identical (aligned vs max-separated in y)" test in `src/engine/__tests__/planeSteering.test.ts`; the balance sim is byte-identical (steering is cosmetic by construction).
+
+**Kill-time fx note (C1 decision)**: no event payload changes. Enemy kill-time fx resolve the spawn-hash fallback row (`hashUnit(id)` at `depthOf`) — exact for static enemies since enemies never move in C1. Hero-anchored fx read the LIVE `planeY` via `FxController.heroLift` (heroes are never removed from state), so they follow the moved hero automatically. **Revisit if C2/R5 moves enemies** (an enemy kill-time fx would then need `planeY` on its event).
 
 ## Known risks
 
