@@ -16,6 +16,8 @@ import {
   heroPlaneY,
   bossPlaneY,
   scatterPlaneY,
+  npcInRange,
+  townNpcConfig,
 } from "@/engine";
 import type { HeroClass } from "@/engine";
 import { soloSave } from "./helpers";
@@ -153,6 +155,111 @@ describe("spawn-y determinism — every spawn site stamps planeY", () => {
       return [s.heroes[0].planeY!, ...s.enemies.map((e) => e.planeY!)];
     };
     expect(run()).toEqual(run());
+  });
+});
+
+describe("FREE-FIELD Phase 3 — enemy 2D placement spans the widened field", () => {
+  const { bandFar, bandNear } = CONFIG.plane;
+  const span = bandNear - bandFar; // widened band = 120 (−64..56)
+
+  it("enemyPlaneY covers the FULL widened band, edge to edge (id-hash → linear map)", () => {
+    // A representative spawn-id population: the id-hash distributes uniformly over [0,1),
+    // so a linear map into [bandFar,bandNear] reaches within a hair of both far/near edges.
+    // Deterministic (pure hash — no RNG), so this span is fixed on every client.
+    const ys: number[] = [];
+    for (let id = 1; id <= 200; id++) ys.push(enemyPlaneY(id));
+    const min = Math.min(...ys);
+    const max = Math.max(...ys);
+    // Every row is inside the band…
+    expect(min).toBeGreaterThanOrEqual(bandFar);
+    expect(max).toBeLessThanOrEqual(bandNear);
+    // …and the crowd reaches deep into BOTH the far quarter and the near quarter, so a
+    // field genuinely fills the taller y axis (not clustered near the old ±40 strip).
+    expect(min).toBeLessThan(bandFar + span * 0.1); // reaches the far edge
+    expect(max).toBeGreaterThan(bandNear - span * 0.1); // reaches the near edge
+  });
+
+  it("a live hunt field spreads mobs across x AND y (genuine 2D scatter)", () => {
+    const s = initGameState(2024, soloSave("swordsman", 2));
+    // Sample the whole live population as mobs die + respawn across the run, so the id
+    // pool that actually spawns is large enough to exercise the full band (a single
+    // ≤17-mob snapshot can id-hash-cluster; over a run the field visits both edges).
+    const ys: number[] = [];
+    const xs: number[] = [];
+    for (let i = 0; i < 600; i++) {
+      step(s, {});
+      for (const e of s.enemies) {
+        ys.push(e.planeY!);
+        xs.push(e.x);
+      }
+    }
+    expect(ys.length).toBeGreaterThan(50);
+    const mid = (bandFar + bandNear) / 2;
+    // y: the run's mobs straddle the mid row and cover a wide slice of the band.
+    expect(Math.min(...ys)).toBeLessThan(mid);
+    expect(Math.max(...ys)).toBeGreaterThan(mid);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(span * 0.4);
+    // x: scattered across the seeded spawn band (2D, not a single column).
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(50);
+  });
+
+  it("boss + worldBoss stay on ONE fixed downstage row — never id-scattered by the wider band", () => {
+    for (const id of [1, 7, 42, 999]) {
+      expect(makeBoss(id, 5).planeY).toBe(bandNear);
+      expect(makeWorldBoss(id).planeY).toBe(bandNear);
+    }
+    // Same row regardless of id (contrast enemyPlaneY, which varies by id).
+    expect(makeBoss(1, 5).planeY).toBe(makeBoss(2, 5).planeY);
+  });
+});
+
+describe("FREE-FIELD Phase 3 — town NPCs are PLACED 2D points, interaction stays x-only", () => {
+  const NPCS = ["npc:pahpu", "npc:lungdueng", "npc:elder"] as const;
+  const TOWN = { mapId: "map1", zoneIdx: 0 };
+
+  it("every town NPC carries an explicit deterministic planeY (design constant, in-band)", () => {
+    for (const id of NPCS) {
+      const a = townNpcConfig(id);
+      expect(typeof a.planeY).toBe("number");
+      expect(Number.isFinite(a.planeY)).toBe(true);
+      expect(a.planeY).toBeGreaterThanOrEqual(CONFIG.plane.bandFar);
+      expect(a.planeY).toBeLessThanOrEqual(CONFIG.plane.bandNear);
+      // PLACED, not hash-scattered — the constant must NOT equal the enemy-style scatter row.
+      // (This is what makes NPC depth intentional; if a future stagger happens to collide it's
+      // still a design choice, but today they're pinned on the ground line, scatter is not.)
+      expect(a.planeY).not.toBe(scatterPlaneY(id));
+      expect(townNpcConfig(id).planeY).toBe(a.planeY); // pure/deterministic
+    }
+  });
+
+  it("npcInRange gates on x ONLY — hero depth never changes tap-to-talk (IRON invariant)", () => {
+    const s = initGameState(1);
+    s.location = { ...TOWN };
+    const hero = s.heroes[0];
+    const merchant = townNpcConfig("npc:pahpu");
+    // In range at the anchor x, out of range one radius away — regardless of hero planeY.
+    for (const py of [-64, -12, 0, 33, 56, 999, -999]) {
+      hero.planeY = py;
+      hero.x = merchant.x;
+      expect(npcInRange(s, "npc:pahpu")).toBe(true);
+      hero.x = merchant.x + merchant.radius + 1;
+      expect(npcInRange(s, "npc:pahpu")).toBe(false);
+    }
+  });
+
+  it("interaction radius is unchanged (walk-order trips fire at the same x distances)", () => {
+    const s = initGameState(1);
+    s.location = { ...TOWN };
+    const hero = s.heroes[0];
+    for (const id of NPCS) {
+      const a = townNpcConfig(id);
+      expect(a.radius).toBe(42); // pinned — Phase 3 must not move the trip distance
+      hero.planeY = -64; // far row: still purely x-gated
+      hero.x = a.x + a.radius; // exactly on the boundary → in range (≤)
+      expect(npcInRange(s, id)).toBe(true);
+      hero.x = a.x - a.radius - 0.001;
+      expect(npcInRange(s, id)).toBe(false);
+    }
   });
 });
 
