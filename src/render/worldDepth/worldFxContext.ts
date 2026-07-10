@@ -54,6 +54,17 @@ export type WorldFxKind = "hero" | "enemy" | "ghost";
 export interface WorldFxContext {
   /** Turn depth / terrain effects on or off (both default OFF = today). */
   setFlags(f: { depth: boolean; terrain: boolean }): void;
+  /**
+   * Whether the depth band is currently ON. THE single source of truth a
+   * consumer that lives in the shared actor container (`GhostLayer` since R4.5
+   * Wave 1.2 #69) branches its sort-key on: depth ON → `depthZIndex(d)` (near
+   * over far, interleaving with heroes/enemies); depth OFF → a fixed backmost
+   * key that keeps ghosts behind every local actor (the pre-#69 "ghosts under
+   * my party" z-order, now that they no longer live in a separate below-
+   * `entities` container). Mirrors `depthOf`'s own `depthOn` branch so the two
+   * can never disagree.
+   */
+  depthEnabled(): boolean;
   /** Bind the current zone's terrain (null → flat). Cached: zero re-alloc. */
   setZone(zone: Zone | null): void;
   /** Ground line y at world x (terrain flag ? zone terrain : GROUND_Y). */
@@ -98,6 +109,9 @@ export function createWorldFxContext(): WorldFxContext {
     setFlags(f) {
       depthOn = f.depth;
       terrainOn = f.terrain;
+    },
+    depthEnabled() {
+      return depthOn;
     },
     setZone(zone) {
       terrain = zone ? terrainForZone(zone) : FLAT_TERRAIN;

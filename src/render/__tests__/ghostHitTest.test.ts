@@ -131,6 +131,56 @@ describe("hitTestGhost math — camera OFF (today's tap math)", () => {
   });
 });
 
+describe("hitTestGhost math — live planeY row (R4.5 Wave 1.2, PR #72 review)", () => {
+  const base = { x: 100, y: 50, scale: 2 };
+  const cam = { x: 0, y: 0, scale: 1 };
+
+  it("with depth ON, the tap center follows the LIVE published row, not the scatter row", () => {
+    const fx = createWorldFxContext();
+    fx.setFlags({ depth: true, terrain: false });
+    fx.setZone(null);
+    const ghostX = 300;
+    const cid = "peer-live";
+    const livePlaneY = 38; // near the band's downstage edge — far from most scatter rows
+
+    // Mirrors the FIXED hitTestGhost composition: depthOf fed `planeY ?? scatter`.
+    const dLive = fx.depthOf("ghost", cid, undefined, undefined, livePlaneY);
+    const dScatter = fx.depthOf("ghost", cid);
+    // The live row must actually differ from the scatter row for this ghost id,
+    // otherwise the assertion below is vacuous.
+    expect(dLive).not.toBeCloseTo(dScatter, 6);
+
+    const cyLive = enemyTapCenterY(
+      GHOST_TAP_CENTER_SIZE,
+      fx.footY(ghostX, dLive),
+      fx.depthScaleOf(dLive),
+    );
+    const cyScatter = enemyTapCenterY(
+      GHOST_TAP_CENTER_SIZE,
+      fx.footY(ghostX, dScatter),
+      fx.depthScaleOf(dScatter),
+    );
+    expect(cyLive).not.toBeCloseTo(cyScatter, 6);
+
+    // A tap at the LIVE row's center hits an ellipse centered per the fixed math…
+    const canvasX = base.x + (cam.x + ghostX * cam.scale) * base.scale;
+    const canvasY = base.y + (cam.y + cyLive * cam.scale) * base.scale;
+    const w = canvasToWorld(canvasX, canvasY, base, cam);
+    expect(hitsGhost(w.x, w.y, ghostX, cyLive, touchHalf(base, cam))).toBe(true);
+  });
+
+  it("without a live planeY the composition falls back to the scatter row (legacy peers unchanged)", () => {
+    const fx = createWorldFxContext();
+    fx.setFlags({ depth: true, terrain: false });
+    fx.setZone(null);
+    const cid = "peer-legacy";
+    // `planeY: undefined` → the `?? scatterPlaneY(cid)` arm — same d as the pure scatter call.
+    const dFallback = fx.depthOf("ghost", cid, undefined, undefined, undefined);
+    const dScatter = fx.depthOf("ghost", cid);
+    expect(dFallback).toBeCloseTo(dScatter, 10);
+  });
+});
+
 describe("hitTestGhost math — camera ON (two-transform inverse)", () => {
   const base = { x: 100, y: 50, scale: 2 };
   const cam = { x: 40, y: -18, scale: 1.06 };

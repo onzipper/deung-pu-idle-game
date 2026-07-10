@@ -435,9 +435,13 @@ export class GameRenderer {
     // never spills content onto the letterbox bars. With the camera OFF
     // (default) `cameraRoot` is an identity transform, so this composition is
     // pixel-identical to adding the five layers straight to `world`.
-    // `ghosts` sits BETWEEN background and entities: other players' ghosts draw UNDER my
-    // own hero/party (design §3.5 z-order) and, being outside `entities`, are invisible to
-    // `hitTestPointer` (which only scans `state.enemies`/`worldBoss`) — invariant #5.
+    // `ghosts` sits BETWEEN background and entities. Since R4.5 Wave 1.2 (#69) it no longer
+    // hosts the ghost VIEWS themselves — those moved into the shared `entities` container so
+    // depth can interleave peers with my hero/enemy roots (see `GhostLayer`). It stays in
+    // the stack purely as `atmosphere.ts`'s dedicated ghost ambient-tint slot + a stable
+    // cameraRoot child index; it renders nothing on its own now (empty container). Ghosts
+    // remain invisible to `hitTestPointer` regardless — that scans `state.enemies`/
+    // `worldBoss`, never any container's children (invariant #5).
     const cameraRoot = new Container();
     cameraRoot.addChild(background, ghosts, entities, projectiles, fx);
     world.addChild(cameraRoot, overlay);
@@ -461,7 +465,10 @@ export class GameRenderer {
     // stable sort preserves insertion order = today's paint order.
     entities.sortableChildren = true;
     this.layers = { background, entities, projectiles, fx, overlay };
-    this.ghostLayer = new GhostLayer(ghosts, { worldFx: this.worldFx });
+    // #69: ghost roots live in the SHARED `entities` container so depth ordering
+    // interleaves peers with my hero/enemy roots (was the separate `ghosts`
+    // container, which could only sort ghosts among themselves).
+    this.ghostLayer = new GhostLayer(entities, { worldFx: this.worldFx });
 
     // W5 atmosphere runtime: day/night tint + weather + critters, composed on
     // top of the same five layers (see `atmosphere.ts`'s doc comment for the
@@ -1252,10 +1259,17 @@ export class GameRenderer {
     let best: GhostDrawItem | null = null;
     let bestDist = Infinity;
     for (const g of this.ghostList) {
-      // Ghosts have no live engine entity — place off the engine's shared scatter
-      // math (`scatterPlaneY(cid)`), the same engine-owned depth source the draw
-      // path uses (R4 Wave C0), so the tap matches the feet.
-      const d = this.worldFx.depthOf("ghost", g.cid, undefined, undefined, scatterPlaneY(g.cid));
+      // R4.5 Wave 1.2 (PR #72 review): the tap ellipse must sit on the SAME row the
+      // ghost is DRAWN on — live published `planeY` when present (Wave 1.1), else the
+      // engine's shared scatter math (`scatterPlaneY(cid)`). Mirrors ghostLayer.ts's
+      // draw-path expression exactly so tap and feet can never disagree.
+      const d = this.worldFx.depthOf(
+        "ghost",
+        g.cid,
+        undefined,
+        undefined,
+        g.planeY ?? scatterPlaneY(g.cid),
+      );
       const scl = this.worldFx.depthScaleOf(d);
       const cy = enemyTapCenterY(GHOST_TAP_CENTER_SIZE, this.worldFx.footY(g.x, d), scl);
       const rx = Math.max(touchHalf, GHOST_TAP_RX * scl);

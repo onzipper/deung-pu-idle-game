@@ -89,6 +89,7 @@ describe("W4 โลกมีมิติ — FxController kill-pop ground/depth 
     // records the (kind, id, x) it was asked about so we can prove the wiring.
     const spy: WorldFxContext = {
       setFlags: () => {},
+      depthEnabled: () => true,
       setZone: () => {},
       groundY: () => GROUND_Y + LIFT,
       depthOf: (kind, id) => {
