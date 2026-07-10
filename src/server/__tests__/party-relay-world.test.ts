@@ -23,6 +23,7 @@ const relayMod = require("../../../scripts/party-relay/server.js") as {
     heartbeatMs?: number;
     presenceFan?: number;
     presenceMaxBytes?: number;
+    paRateMs?: number;
     chatHistoryMs?: number;
     chatMaxEntries?: number;
     chatTextMax?: number;
@@ -299,6 +300,131 @@ describe("relay world layer — presence", () => {
     a.send({ t: "p", v: 1, payload: { blob: "x".repeat(200) } });
     await a.waitFor(() => a.closeCode !== null);
     expect(a.closeCode).toBe(4004);
+  });
+});
+
+describe("relay world layer — presence action stream (pa)", () => {
+  it("fans a pa frame verbatim to joined zone peers (sender excluded)", async () => {
+    const a = await connect(port);
+    const b = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "pa1" });
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "pa1" });
+    await a.waitFor(() => relay.presenceRooms.get("pa1")?.members.size === 2);
+
+    const payload = { cid: "cA", x: 10, y: 4, f: 1, a: "walk", at: 1, t: 2 };
+    a.send({ t: "pa", v: 1, payload });
+    await b.waitFor(() => only(b.msgs, "pa").length >= 1);
+    expect((only(b.msgs, "pa")[0] as { payload: unknown }).payload).toEqual(payload);
+    expect(only(a.msgs, "pa")).toHaveLength(0); // never echoed to the sender
+  });
+
+  it("never delivers pa across zones", async () => {
+    const a = await connect(port);
+    const c = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "paZoneA" });
+    c.send({ t: "pjoin", v: 1, ticket: presenceTicket("uC", "cC", "C"), zone: "paZoneB" });
+    await a.waitFor(() => relay.presenceRooms.get("paZoneA")?.members.size === 1);
+    await c.waitFor(() => relay.presenceRooms.get("paZoneB")?.members.size === 1);
+
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", x: 1, f: 1, a: "dash", at: 0, t: 0 } });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(only(c.msgs, "pa")).toHaveLength(0); // different zone room
+  });
+
+  it("drops a pa sent before pjoin silently (no close, unlike p)", async () => {
+    const a = await connect(port);
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", x: 1, f: 1, a: "idle", at: 0, t: 0 } });
+    await new Promise((r) => setTimeout(r, 60));
+    // Additive lossy stream: an unjoined pa is silently ignored, socket stays open.
+    expect(a.closeCode).toBe(null);
+    expect(relay.presenceRooms.size).toBe(0);
+  });
+
+  it("does NOT appear in a late joiner's snapshot (pa is never cached)", async () => {
+    const a = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "pa4" });
+    await a.waitFor(() => relay.presenceRooms.get("pa4")?.members.size === 1);
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", x: 9, f: 1, a: "walk", at: 0, t: 0 } });
+    await new Promise((r) => setTimeout(r, 60)); // let the relay process the pa
+
+    const b = await connect(port);
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "pa4" });
+    await b.waitFor(() => relay.presenceRooms.get("pa4")?.members.size === 2);
+    await new Promise((r) => setTimeout(r, 60));
+    // A never sent a `p` snapshot, so the joiner gets neither a cached p nor any pa.
+    expect(only(b.msgs, "pa")).toHaveLength(0);
+    expect(only(b.msgs, "p")).toHaveLength(0);
+  });
+
+  it("does not refresh liveness / the last-value cache (pa never writes snapshot)", async () => {
+    const a = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "pa5" });
+    await a.waitFor(() => relay.presenceRooms.get("pa5")?.members.size === 1);
+    const member = () => [...relay.presenceRooms.get("pa5")!.members.values()][0];
+
+    // Spam pa (advance the clock so the ~8Hz rate guard passes each one).
+    for (let i = 0; i < 5; i++) {
+      clock = 1_000_000 + i * 200;
+      a.send({ t: "pa", v: 1, payload: { cid: "cA", x: i, f: 1, a: "walk", at: 0, t: 0 } });
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    // The member's cached snapshot (the liveness/despawn signal) is untouched by pa —
+    // `p` is the sole source, so a pa-only peer still despawns on `p` silence.
+    expect(member().snapshot).toBe(null);
+
+    // A real `p` DOES populate the cache — proving pa and p are cleanly separated.
+    a.send({ t: "p", v: 1, payload: { cid: "cA", x: 99 } });
+    await a.waitFor(() => member().snapshot != null);
+    expect(member().snapshot).toContain('"t":"p"');
+  });
+
+  it("drops a pa with an unknown version silently", async () => {
+    const a = await connect(port);
+    const b = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "pa6" });
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "pa6" });
+    await a.waitFor(() => relay.presenceRooms.get("pa6")?.members.size === 2);
+
+    a.send({ t: "pa", v: 2, payload: { cid: "cA", x: 1, f: 1, a: "walk", at: 0, t: 0 } });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(only(b.msgs, "pa")).toHaveLength(0);
+    expect(a.closeCode).toBe(null); // deploy-skew safe: no close
+  });
+
+  it("drops an oversized pa silently (no close, unlike p's 4004)", async () => {
+    const a = await connect(port);
+    const b = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "pa7" });
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "pa7" });
+    await a.waitFor(() => relay.presenceRooms.get("pa7")?.members.size === 2);
+
+    // > presenceMaxBytes (256) — dropped silently for pa (p would CLOSE 4004 here).
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", blob: "x".repeat(300) } });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(only(b.msgs, "pa")).toHaveLength(0);
+    expect(a.closeCode).toBe(null);
+  });
+
+  it("enforces a ~8Hz per-conn min interval (a too-fast 2nd pa is dropped, no kill)", async () => {
+    const a = await connect(port);
+    const b = await connect(port);
+    a.send({ t: "pjoin", v: 1, ticket: presenceTicket("uA", "cA", "A"), zone: "pa8" });
+    b.send({ t: "pjoin", v: 1, ticket: presenceTicket("uB", "cB", "B"), zone: "pa8" });
+    await a.waitFor(() => relay.presenceRooms.get("pa8")?.members.size === 2);
+
+    clock = 5_000_000;
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", x: 1, f: 1, a: "walk", at: 0, t: 0 } });
+    await b.waitFor(() => only(b.msgs, "pa").length >= 1);
+    clock = 5_000_050; // +50ms < 100ms guard → dropped
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", x: 2, f: 1, a: "walk", at: 0, t: 0 } });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(only(b.msgs, "pa")).toHaveLength(1); // 2nd throttled, not fanned
+    expect(a.closeCode).toBe(null); // never a kill
+
+    clock = 5_000_200; // past the window → accepted again
+    a.send({ t: "pa", v: 1, payload: { cid: "cA", x: 3, f: 1, a: "walk", at: 0, t: 0 } });
+    await b.waitFor(() => only(b.msgs, "pa").length >= 2);
+    expect(only(b.msgs, "pa")).toHaveLength(2);
   });
 });
 

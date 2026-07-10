@@ -235,6 +235,16 @@
 - [x] เทส 2249→**2272** (questTracker ใหม่ + gameHudLayout เคสหุบ/FTUE + store round-trip) · tsc/eslint/next build clean · docs sync (CODEMAP/ui-reference-map/ROADMAP) · patch-notes **2026-07-10** (4 ข้อ th/en)
 - [ ] **ค้าง**: เจ้าของเล่นจริง — ชิปหุบอ่านง่ายบน biome สว่าง? · tile reskin feel · แท็บปาร์ตี้ตอนมี/ไม่มีปาร์ตี้ · FTUE จบรอบตัวใหม่ · merge main รวมก้อน R2+R2.5+R2.6
 
+## M8.12 — R3 "Presence คนจริง" (Action Stream) (issue #50, on branch, ดีไซน์ = docs/ghost-presence-design.md §7 + docs/party-relay-protocol.md §12)
+
+> ต่อยอด M8.6 ghost layer (walk/idle เดิม) ด้วย action stream: เห็นผู้เล่นจริงตี/ร่ายสกิล/แดชแบบ pose-only (ไม่มี fx/camera/audio/engine — One Rule เดิมยังอยู่ครบ) + แตะดูโปรไฟล์ ghost view-only
+
+- [x] **W1-2 Relay**: opcode `pa` additive (fan ≤ `PRESENCE_FAN` 12, cap 256B, rate guard 100ms/conn, NOT cached, ไม่แตะ liveness, ต้อง `pjoin` ก่อน, `v!==1`/malformed ถูก drop เงียบ) — protocol doc §12
+- [x] **W3 Publisher**: `presencePublish.ts` buildActionSample/shouldPublishAction (pure), `PRESENCE_ACTION_BEAT_MS` ~8Hz แชร์ fps valve เดียวกับ ghost render density (8→4→0Hz ควบคู่ cap 12→6→0) — `a` derive จาก edge จริง (basic/skill1-4/dash) เท่านั้น เฟรมว่างเงียบ
+- [x] **W4 Receive + Render**: `worldSession` onGhostAction/publishAction · `ghostStore` GhostAction parse/apply/ingest (facing/action/actionAt, lerpAt แยกจาก lastAt, stale-at reject) · `ghostLayer` GhostPose render-only edge-trigger ครั้งเดียวต่อ `at` ที่ขยับ, decay กลับ walk/idle · `heroView.playHeroPosePulse` เสริมเฉยๆ (arm pose, ไม่มี fx/camera/audio)
+- [x] **W5 Tap profile**: `GameRenderer.hitTestGhost` (sibling `hitTestNpc`, อ่าน renderer ghost list ไม่แตะ engine) ลำดับแตะ npc→มอน→ประตู→ghost→พื้น, แตะ ghost = zero `pendingInput` · `GhostProfileCard` (ModalPortal, view-only: ชื่อ/ไอคอนคลาส/ชื่อ tier, ไม่มีปุ่ม social)
+- [ ] **W6 Guard + owner playtest + deploy**: `ghostGuard.test.ts` ขยายพิสูจน์ inject `pa` + taps ⇒ hash เท่ากันทุกกรณี (in flight) · เจ้าของเล่นจริง 2 client (action pose อ่านง่าย/ไม่ล้ำ engine, tap-profile card feel) · **deploy: redeploy relay ก่อน (opcode `pa` ใหม่) แล้วค่อย web** — ไม่มี `prisma db push`
+
 ## M9 — Economy & Competition
 
 - [ ] ตลาดกลาง: ลงขาย/ซื้อด้วยเงินในเกม + atomic transaction + audit trail + anti-dupe

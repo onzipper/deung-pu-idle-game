@@ -19,13 +19,54 @@ import { depthZIndex } from "@/render/worldDepth/depthBand";
 import type { WorldFxContext } from "@/render/worldDepth/worldFxContext";
 import {
   createHeroView,
+  playHeroPosePulse,
   updateHeroView,
+  type HeroPosePulse,
   type HeroRenderModel,
   type HeroView,
 } from "@/render/views/heroView";
 
+/** The R3 visual-action values a peer may broadcast (mirrors `GhostStore.GhostActionKind`
+ *  — kept LOCAL so `render/` imports nothing from the app/ui layer). */
+export type GhostActionKind =
+  | "idle"
+  | "walk"
+  | "basic"
+  | "skill1"
+  | "skill2"
+  | "skill3"
+  | "skill4"
+  | "dash";
+
+/** RENDER-ONLY pose intent (NOT a `GameEvent`): the rig pulse a `pa` action maps to. Only
+ *  one-shot actions map; `idle`/`walk` map to `null` (locomotion falls out of the x-lerp,
+ *  no pulse). skill1-4 collapse to the single class skill pose the rig already has. */
+type GhostPose = HeroPosePulse | null;
+
+function actionToPose(a: GhostActionKind | undefined): GhostPose {
+  switch (a) {
+    case "basic":
+      return "basic";
+    case "skill1":
+    case "skill2":
+    case "skill3":
+    case "skill4":
+      return "skill";
+    case "dash":
+      return "dash";
+    default:
+      return null; // idle / walk / undefined -> locomotion only
+  }
+}
+
+/** How far ahead of the ghost's x the synthetic aim sits when a `pa` facing is known —
+ *  comfortably past the rig's combat-aim deadband so the flip is decisive. */
+const FACING_AIM_REACH = 100;
+
 /** One ghost to draw this frame. Structurally matches `GhostStore.GhostRenderItem` — kept
- *  as a LOCAL interface so `render/` takes no import from the app/ui layer (one-way flow). */
+ *  as a LOCAL interface so `render/` takes no import from the app/ui layer (one-way flow).
+ *  `facing`/`action`/`at` are present ONLY for a peer seen via the R3 `pa` stream; a plain
+ *  `p`-only ghost omits them and renders exactly as before (walk/idle, velocity facing). */
 export interface GhostDrawItem {
   cid: string;
   name: string;
@@ -33,16 +74,23 @@ export interface GhostDrawItem {
   tier: 1 | 2 | 3;
   x: number;
   alpha: number;
+  facing?: 1 | -1;
+  action?: GhostActionKind;
+  at?: number;
 }
 
 /** A ghost's display-only Hero stub — inert everywhere the rig might read "combat" or
  *  "networked" state. `equipped: null/null` gives the plain bare tier look (see
- *  `buildGearWeapon`'s null contract); hp==maxHp + dead:false keeps the rig upright. */
+ *  `buildGearWeapon`'s null contract); hp==maxHp + dead:false keeps the rig upright.
+ *  Facing: a `pa` peer sets an explicit facing via a synthetic `aimX` (the ONLY thing
+ *  `aimX` drives in `updateHeroView` — pure rig flip, no combat behavior); a `p`-only peer
+ *  keeps `aimX: null`, so facing derives from walk velocity exactly as before. */
 function stub(item: GhostDrawItem): HeroRenderModel {
+  const aimX = item.facing !== undefined ? item.x + item.facing * FACING_AIM_REACH : null;
   return {
     cls: item.cls,
     x: item.x,
-    aimX: null, // never faces a target — facing derives from walk velocity only
+    aimX,
     equipped: { weapon: null, armor: null, refine: { weapon: 0, armor: 0 } },
     tier: item.tier,
     shadowed: false,
@@ -57,6 +105,10 @@ function stub(item: GhostDrawItem): HeroRenderModel {
 export class GhostLayer {
   private readonly container: Container;
   private readonly views = new Map<string, HeroView>();
+  /** Per-ghost last PLAYED action counter (`pa.at`) — the edge-trigger memory: a pose
+   *  fires only when a peer's counter ADVANCES past this, so a re-delivered/held `at` never
+   *  restarts the pose (matches the store's own stale-`at` rejection one layer up). */
+  private readonly lastPlayedAt = new Map<string, number>();
   /** Shared "โลกมีมิติ" seam (W2), supplied by GameRenderer. When absent (e.g. a
    *  bare test construction) ghosts keep today's flat pivot-0 / y-0 placement. */
   private readonly worldFx: WorldFxContext | null;
@@ -87,8 +139,9 @@ export class GhostLayer {
         this.views.set(item.cid, view);
         this.container.addChild(view);
       }
-      // slot !== 0 shows the white nameplate (the existing display-name seam); empty
-      // events = no attack/skill pose ever triggers, so ghosts stay walk/idle only.
+      // slot !== 0 shows the white nameplate (the existing display-name seam). `events: []`
+      // stays empty — a pose is NEVER driven through a synthesized engine event; the R3
+      // pulse below is a rig-only entry point (see `playHeroPosePulse`).
       updateHeroView(view, stub(item), {
         dt,
         slot: 1,
@@ -97,6 +150,18 @@ export class GhostLayer {
         displayName: item.name || null,
         socialBadge: null,
       });
+      // R3 action stream: edge-trigger a one-shot pose when the peer's action counter
+      // ADVANCES (walk/idle map to no pulse). Fired AFTER `updateHeroView` so the rig is
+      // built (`cls` set) — the pose then plays from the next frame's `resolveAttack` and
+      // decays back to walk/idle on its own. `p`-only ghosts (no `at`) never enter here.
+      if (item.at !== undefined) {
+        const last = this.lastPlayedAt.get(item.cid);
+        if (last === undefined || item.at > last) {
+          this.lastPlayedAt.set(item.cid, item.at);
+          const pose = actionToPose(item.action);
+          if (pose) playHeroPosePulse(view, pose);
+        }
+      }
       // Ghosts show no combat readout: hide the HP bar the rig draws for real heroes.
       view.hpBar.visible = false;
       // Whole-rig fade (in on appear, out before prune) — container alpha multiplies
@@ -118,8 +183,15 @@ export class GhostLayer {
         this.container.removeChild(view);
         view.destroy({ children: true });
         this.views.delete(cid);
+        this.lastPlayedAt.delete(cid);
       }
     }
+  }
+
+  /** Read-only pooled-view accessor (renderer diagnostics / headless tests) — lets a caller
+   *  inspect a ghost's rig state without a reference to the private pool. */
+  viewFor(cid: string): HeroView | undefined {
+    return this.views.get(cid);
   }
 
   /** Full teardown (renderer destroy / StrictMode unmount). */
@@ -129,6 +201,7 @@ export class GhostLayer {
       view.destroy({ children: true });
     }
     this.views.clear();
+    this.lastPlayedAt.clear();
     this.container.destroy({ children: true });
   }
 }

@@ -8,25 +8,21 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5–R2.8 ✅ (game screen / tracker+dock / Wave A #55 / Wave B safe #58 — eye-tests passed) → R2.9 Codegen Asset Phase 1A ✅ (#60, awaiting owner eye-test)** → next R3 presence คนจริง → R4–R5 engine x,y → R6 shared elites.
-- **Branches**: `develop` = R2 ถึง R2.8 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). R2.9 = PR from `ui/issue-60-codegen-icons-1a`.
-- **Suite**: 2303 tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10d (icon slice).
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5–R2.9 ✅ (game screen / tracker+dock / Wave A / Wave B safe / icon slice #60 — merged to develop) → R3 presence คนจริง ✅ code-complete (#50, Draft PR #62 staged by wave, awaiting owner review)** → R4–R5 engine x,y → R6 shared elites.
+- **Branches**: `develop` = R2 ถึง R2.9 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). R3 = Draft PR #62 from `r3/issue-50-presence-actions`.
+- **Suite**: 2350+ tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10e (R3 presence).
 
-## Latest work (on develop, awaiting owner)
+## Latest work
 
-- **R2.5 game screen** (M8.10): fullscreen canvas + all-overlay HUD both platforms; W0 input-drop root fix (rAF accumulator drained one-shot intents on 0-step frames — bot-off default + swallowed taps on 90Hz+); npcTrip replaces smithTrip; NPC walk-order buttons; minimap-lite.
-- **R2.6**: quest tracker + skill dock per ref, both collapsible (`0466f81`).
-- **#48 agent refresh** (PR #49, merged to `develop`): `.claude` agents re-pointed to `AI.md` + context packs, pre-pivot framing removed, `.claude/README.md` routing guide added, +4 agents (ai-docs-context-architect, pixi-render-performance-specialist, liveops-release-manager, i18n-th-en-copywriter); asset-pipeline-art-director deferred to a future issue. Docs-only.
-- **#54 UI audit** (discussion, no code): 64-row scorecard vs the 2.5D ref posted to the issue — match 40 / partial 18 / missing 6 (missing = locked-defer/backlog only). Waves A–D proposed; owner questions pending: crit system (engine has none), menu-row 10-button scope, action rail, chat overlay.
-- **R2.7 UI Wave A** (#55 / PR #56 merged): EXP % on ExpClockStrip · damage-number black stroke (first `TextStyle.stroke` in repo, construct-once) · top-edge z-5 scrim in GameHud · refine cost chips owned/required (42/30) + `danger` CurrencyChip variant when short · toast info = violet chrome · inventory "ทั้งหมด" tab (default). Web only.
-- **R2.8 Wave B safe** (#58 / PR #59 merged, eye-test passed): BOT auto-skill picker → numbered icon-tile row mirroring SkillBar · mobile HUD tuning (menu-row 3→2 rows, FTUE anchors unchanged) · fixed ExpClockStrip box-height bug. B2 items (menu-row regroup / action rail / chat) still gated on owner answers in #54.
-- **R2.9 Codegen Asset Phase 1A** (#60, branch `ui/issue-60-codegen-icons-1a`): new SVG icon language (silhouette+gradient+family glow per GAME ASSET OVERVIEW) — 9-id vertical slice (5 items incl. fort_weapon trap-coverage + 4 skills), NEW `src/ui/components/icons/` registry + `ItemIcon`/`SkillIcon` seam, labels.ts glyphs = verbatim fallback for all other ids, NO image files (grep-asserted). Consumers: ItemTile (+`templateId` prop), SkillBar, SkillDetailModal, BOT picker. Phase 1B (remaining ids) after owner eye-test. Web only.
+- **R3 presence คนจริง** (#50, **Draft PR #62**, staged 5 commits by wave — full detail history v17): relay additive `pa` action stream (not cached, never liveness) · 8Hz publisher + fps valve shared with ghost cap (single source 33/22ms) · ghostStore action fields + render-only GhostPose (no GameEvents, p-only ghosts pixel-identical) · tap-ghost view-only GhostProfileCard (zero pendingInput writes, test-pinned) · ghostGuard determinism expansion · patch notes 2026-07-10e. Deploy: **relay FIRST** then web.
+- **R2.9 Codegen Asset Phase 1A** (#60 / PR #61 merged): SVG icon language 9-id slice, `src/ui/components/icons/` registry + `ItemIcon`/`SkillIcon` seam, labels.ts glyph = verbatim fallback. Phase 1B (remaining ids) after owner eye-test.
+- **#54 UI audit**: scorecard posted; owner questions still open — crit system / menu-row scope / action rail / chat overlay (gates Wave B ชุดที่เหลือ). R2.5–R2.8 detail → history v13–v15.
 
 ## Blockers / owed
 
-1. **Owner eye-test vs the ref** (fullscreen mobile portrait/landscape + desktop, bot-off on his 120Hz localhost, taps never vanish, NPC walk-order button feel, minimap, FTUE full run on fresh char, boss HP plate mid-screen position, quest tracker + skill dock).
-2. On his confirm → **merge R2+R2.5+R2.6 to `main` as ONE block** (never merge without per-merge owner confirm).
-3. **Deploy: relay FIRST** (presence counts endpoint) **then web. NO `prisma db push` pending.**
+1. **R3 Draft PR #62**: owner review → ready-for-review → merge confirm → deploy **relay FIRST** then web → 2-tab manual test (snapshot fast · ~8Hz alive · tap profile no-command · relay-down silent degrade).
+2. **Owner eye-test ค้าง**: R2.9 icon slice (#60 ยังเปิดรอ eye-test) + ก้อน R2.5–R2.6 เดิม (fullscreen/FTUE/minimap ฯลฯ).
+3. On owner confirm → **merge develop→`main` as ONE block** (never without per-merge confirm) → deploy relay FIRST then web. **NO `prisma db push` pending.**
 
 ## Owner decisions affecting immediate work
 

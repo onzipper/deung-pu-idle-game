@@ -445,6 +445,15 @@ export const PATCH_NOTES: readonly PatchNoteRelease[] = [
       "releases.2026-07-10d.items.skillIconsNew",
     ],
   },
+  // R3 presence คนจริง — pa action stream + tap profile (issue #50).
+  {
+    id: "2026-07-10e",
+    date: "2026-07-10",
+    items: [
+      "releases.2026-07-10e.items.liveGhosts",
+      "releases.2026-07-10e.items.tapProfile",
+    ],
+  },
 ];
 
 /** Ordered oldest -> newest by construction — the latest release is always
