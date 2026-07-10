@@ -20,6 +20,9 @@ Locked owner + architecture decisions. **Do not re-propose anything marked Locke
 | Refine success-% shown to player | Locked (R2) | Single-sourced from `src/engine/config/refine.ts` for UI + server | `docs/ui-reference-map.md` |
 | Flat shop pricing (priceStageBase 1.0 — potions cost base forever) | Locked, with accepted debt | Owner call; late-game gold accumulates faster — event sinks planned, revisit before central marketplace | `docs/history/claude-status-log.md` |
 | Legendary (ตำราตำนาน) content never appears in patch notes | Locked | Discovery is fully in-game | owner 2026-07-09 |
+| Map2 = Greenmill Hamlet / Farm Border Road slice (issue #79, PR #73 stack, x-axis-first field) | **Superseded (2026-07-10 owner reset)** | Owner reset the map/field direction; Wave 2 design + PRs #73–#76 are historical only, never merged to develop | `docs/world-arc-freefield-v1.md` |
+| World Arc v1 = 10 areas (Capital Outskirts → Rift Sanctum), mood darkens progressively; arc→engine-map mapping decided in the arc-scaffolding PR with owner sign-off; stage balance does not move | Locked (2026-07-10) | Owner direction reset | `docs/world-arc-freefield-v1.md` |
+| Field model = free-field 2.5D — real x/y positioning, click/tap any reachable point, road = visual guide not a rail, depth from foot position, walkable data phased in later; x-axis-first model retired | Locked (2026-07-10) | Owner direction reset; new code must not assume x-only; combat stays x-gated until the R5 targeting flip | `docs/world-arc-freefield-v1.md` |
 | Skill leveling (gold sink) + collections | Backlog (parked) | Owner parked; do not build uninvited | `docs/ui-reference-map.md` |
 | Guilds / pets / equipment sets / channels | On hold | Owner พัก | `docs/ui-reference-map.md` |
 
@@ -31,6 +34,7 @@ Locked owner + architecture decisions. **Do not re-propose anything marked Locke
 | Art: references-first — owner supplies visual references / own pixel art; never invent a look | Locked | 3 art attempts rejected before rule | `docs/ui-reference-map.md` |
 | Every UI must play comfortably on BOTH desktop and mobile (touch-first) | Locked | Owner directive 2026-07-06 | `CLAUDE.md` |
 | Docs sync in the same change (CODEMAP + current-state + affected docs) | Locked | Owner directive 2026-07-09/10, test-enforced | `CLAUDE.md`, `src/__tests__/codemap.test.ts` |
+| Big-epic workflow: old issue stack closed/superseded; future work opens ONLY as a large Epic or large implementation PR with phases inside — no micro-task issues unless owner explicitly asks | Locked (2026-07-11) | Owner ended micro-issue ping-pong when approving the World Arc v1 direction | `docs/world-arc-freefield-v1.md` §4, PR #80 |
 | Production deploys are owner-triggered; relay redeploys FIRST when its protocol grows | Locked | Live incidents from stale relay | `docs/context/deployment.md` |
 
 ## Technical

@@ -1,4 +1,13 @@
-# Map direction — R4.5 "โลกมีมิติ, บางเบา" (owner-approved, issue #69)
+# Map direction — R4.5 "โลกมีมิติ, บางเบา" (issue #69) — PARTIALLY SUPERSEDED
+
+> **⚠️ Direction reset (owner, 2026-07-10): the active world/map/field direction
+> is now `docs/world-arc-freefield-v1.md` (World Arc v1 + free-field 2.5D).**
+> What still applies from this doc: **Projection C, the scale policy (0.95↔1.06),
+> the depth-cue priority list, and the Wave 1 rules** — owner-passed and carried
+> forward. What is historical only: **the Wave 2/3/4 plan below** (Forest Road /
+> Map2 Greenmill slice and its x-axis-first field model). PRs #73/#74/#75/#76
+> are superseded — do not continue them; prop occlusion and area visuals now
+> live in the new direction's implementation sequence.
 
 The render-side art spec for how the 2.5D world reads. Binding for depth/biome
 work; complements `src/render/README.md`'s art direction. Engine is untouched by
@@ -47,7 +56,7 @@ rotation, no true 3D (GDD).
 - **Wave 3 — prop occlusion** (actors sort against world props by foot line).
 - **Wave 4 — far-row atmospheric tint + polish pass.**
 
-## Wave 2 — Forest Road slice content (NOT implemented here)
+## Wave 2 — Forest Road slice content (SUPERSEDED 2026-07-10 — historical only, see `docs/world-arc-freefield-v1.md`)
 
 Visual-only, no engine/collision changes:
 
