@@ -11,6 +11,9 @@ The owner chose the R4.5 direction as:
 - Depth should read from **foot-position zIndex, contact shadows, authored ground composition, and visual-only props**, not from character shrinking.
 - First vertical slice: **Forest Outskirts / Dark Forest Road**, starting with `map2` farm zones.
 - Props in R4.5 are **visual-only**: no collision, no gameplay reads, no tappability, no engine-state effect.
+- R4.5 Wave 1 depth/scale/contact-shadow direction **passed owner eye-test** on 2026-07-10.
+- R4.5 Wave 2 `map2` farm-zone map design is **not accepted yet**. Treat the current Wave 2 stack as Draft/prototype until a map reference/design is approved in #79.
+- R4 x/y mobile is **not accepted yet** because no mobile gameplay/HUD design is locked. Handle mobile under #78; do not block desktop/R4.5 Wave 1 acceptance on this.
 - R5 full 2D combat must wait until R4.5 map direction / owner eye-test is accepted, unless the owner explicitly overrides.
 
 ## Owner availability / async cadence
@@ -151,22 +154,28 @@ Before ending a work round, check:
 
 Current order of operations:
 
-1. Review and merge R4.5 Wave 2 stacked PRs only after owner approval:
+1. **Attach owner visual references** as binary design-reference files in `docs/references/` and link them from `docs/ui-reference-map.md`. They are reference images, not runtime assets.
+2. **Resolve map design before accepting R4.5 Wave 2**:
+   - Use #79 to create/choose an owner-approved `map2` farm-zone map reference/design.
+   - Do not merge the Wave 2 stack as final visuals until the map reference/design passes owner review.
+   - Current Wave 2 PRs remain Draft/prototype material.
+3. Review/rework R4.5 Wave 2 stacked PRs only after the map direction is approved:
    - `#73` Wave 2A spec/docs-only
    - `#74` Wave 2B ground composition
    - `#75` Wave 2C visual-only props
    - `#76` Wave 2D readability/mobile polish + guards
-2. Merge order is bottom-up: **#73 → #74 → #75 → #76**.
-3. After the stack lands, run owner eye-test on the combined Wave 2 slice.
-4. Then decide the next R4.5 step:
+4. If/when the Wave 2 stack is approved, merge order is bottom-up: **#73 → #74 → #75 → #76**.
+5. Handle mobile gameplay/HUD direction separately in #78 before calling mobile final.
+6. Then decide the next R4.5 step:
    - Wave 3: formal prop occlusion rules / `MapProp` model, still visual-only unless owner changes scope.
    - Wave 4: far-row atmospheric tint / final polish.
-5. Only after R4.5 direction pass should R5/#52 start: 2D combat metric, skill geometry, minimap y, and balance re-baseline.
+7. Only after R4.5 direction pass should R5/#52 start: 2D combat metric, skill geometry, minimap y, and balance re-baseline.
 
 ## Owner eye-test focus
 
 Before calling R4.5 Wave 2 accepted, check:
 
+- Approved `map2` farm-zone reference/design exists and the implementation matches it.
 - `map2` farm zones read as an authored field, not a flat strip.
 - Road / tone strips / props remain readable on desktop and mobile.
 - Hero, mobs, and ghosts sort correctly in front of / behind props.
