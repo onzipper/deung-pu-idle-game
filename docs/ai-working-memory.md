@@ -28,6 +28,36 @@ Default cadence:
 
 This means AI agents should be proactive about preparing the next safe artifact, but conservative about irreversible actions.
 
+## Token budget / visual evidence policy
+
+The owner cares about token efficiency. Visual evidence is useful, but it must be **token-light** and should not replace concise written handoff.
+
+Default rules:
+
+- Do not paste large image dumps, raw screenshots as text, long logs, or repeated frame-by-frame descriptions into PR bodies or chat.
+- Prefer **links or attachments** to screenshots/videos over embedding verbose descriptions.
+- For a visual PR, provide a small evidence set only:
+  - 1 desktop screenshot of the target state.
+  - 1 mobile portrait screenshot if mobile readability is part of acceptance.
+  - 1 night/dark-palette screenshot only when darkness/readability is the actual risk.
+  - 1 short GIF/video only when motion/sorting/occlusion cannot be judged from stills.
+- Each visual artifact should have a one-line label: what to look at, what should be true, and which owner checklist item it supports.
+- If evidence would be expensive to generate or review, skip it and provide exact local reproduction steps instead.
+- AI review should summarize visual evidence in **3-5 bullets maximum**, not narrate every visible detail.
+- Keep source inspection targeted: use `AI.md`, `docs/ai-working-memory.md`, `docs/current-state.md`, `docs/decision-index.md`, CODEMAP, and only affected files. Do not read broad history unless current-state points there.
+
+Preferred pattern:
+
+```md
+## Visual evidence
+
+- Desktop / map2 farm / noon: <link> — road + props read as authored field.
+- Mobile portrait / map2 farm / night: <link> — shadow still visible on far strip.
+- 6s motion clip: <link> — hero walks behind/in front of trunk correctly.
+
+Owner only needs to answer: pass / fail / which item feels wrong.
+```
+
 ## Memory upkeep rule
 
 AI agents must keep repo memory current when they perform work in this repo.
@@ -35,7 +65,7 @@ AI agents must keep repo memory current when they perform work in this repo.
 Update docs as follows:
 
 - `docs/current-state.md`: update at the close of each completed work round or merged PR stack, especially when the current branch, suite count, blockers, or next recommended work changes.
-- `docs/ai-working-memory.md`: update only when owner direction, async cadence, work order, guardrails, or merge/review discipline changes. Do not turn it into a changelog.
+- `docs/ai-working-memory.md`: update only when owner direction, async cadence, work order, guardrails, token/visual-evidence policy, or merge/review discipline changes. Do not turn it into a changelog.
 - `docs/decision-index.md`: update when a decision is locked/rejected and should not be re-litigated.
 - `docs/CODEMAP.md`: update whenever files are added, moved, or deleted.
 
