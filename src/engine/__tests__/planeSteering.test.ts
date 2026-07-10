@@ -26,8 +26,8 @@ import { soloSave, makeParty, forceBoss } from "./helpers";
 const DT = FIXED_DT;
 const YSPEED = CONFIG.plane.ySpeed;
 const EPS = CONFIG.plane.yArriveEps;
-const NEAR = CONFIG.plane.bandNear; // 40 (downstage row)
-const FAR = CONFIG.plane.bandFar; // -24 (upstage row)
+const NEAR = CONFIG.plane.bandNear; // 56 (downstage row)
+const FAR = CONFIG.plane.bandFar; // -64 (upstage row)
 
 /** A stationary, always-engaged melee stub with a controlled depth row. speed/atk 0 so it never
  * moves or deals damage — the only thing that changes is what the hero does around it. */
@@ -113,9 +113,9 @@ describe("hero y steering — engagement convergence", () => {
       if (reached < 0 && Math.abs(y - NEAR) < 1e-9) reached = i;
       prev = y;
     }
-    // ~ (40 − 17.6)/2 ≈ 12 steps to close the gap at ySpeed.
+    // Free-field band: ~ (56 − 14)/2 ≈ 21 steps to close the gap at ySpeed.
     expect(reached).toBeGreaterThan(0);
-    expect(reached).toBeLessThan(20);
+    expect(reached).toBeLessThan(30);
     // Held at the mob's lane once arrived — no chatter.
     step(s, {});
     expect(s.heroes[0].planeY).toBeCloseTo(NEAR, 9);
@@ -218,12 +218,13 @@ describe("hero y steering — IRON invariant: y gates NO combat", () => {
   });
 });
 
-describe("hero y steering — R4 Wave C2 manual x/y move command", () => {
-  it("a live x/y MOVE command steers planeY toward command.y (overriding the home row)", () => {
+describe("hero y steering — free-field 2D manual x/y move command", () => {
+  it("a live x/y MOVE command drives planeY toward command.y along the honest 2D line (past the home row)", () => {
     const s = initGameState(4, soloSave("swordsman", 3));
     s.spawnPaused = true;
     s.enemies = [];
     const h = s.heroes[0];
+    h.x = 100;
     h.planeY = FAR;
     const home = heroPlaneY("swordsman");
     expect(home).not.toBe(NEAR); // home is a distinct lane from the commanded near row
@@ -231,24 +232,23 @@ describe("hero y steering — R4 Wave C2 manual x/y move command", () => {
     // Command a far-x, near-row move so the command stays live for many steps.
     step(s, { moveTo: { x: 850, y: NEAR } });
     let prev = FAR - 1e-9;
-    let yReached = false;
-    for (let i = 0; i < 60; i++) {
+    let cleared = false;
+    for (let i = 0; i < 600; i++) {
       step(s, {});
-      if (!h.command) break; // stop sampling once it clears (idle home-steer would pull it back)
+      if (!h.command) {
+        cleared = true;
+        break;
+      }
       const y = h.planeY!;
       expect(y).toBeGreaterThanOrEqual(prev); // monotone toward the commanded NEAR row (not home)
       expect(y).toBeLessThanOrEqual(NEAR + 1e-9);
       prev = y;
-      if (Math.abs(y - NEAR) <= EPS) {
-        yReached = true;
-        break;
-      }
     }
-    // planeY climbed PAST the home row (17.6) all the way to the COMMANDED near lane (40) —
-    // proof the move command's y overrode the home-row steering (home-steer would stop at 17.6).
-    expect(yReached).toBe(true);
-    expect(h.planeY!).toBeGreaterThan(home + 1);
-    expect(h.command).not.toBeNull(); // still walking x (the row arrived first)
+    expect(cleared).toBe(true);
+    // planeY climbed PAST the home row all the way to the COMMANDED near lane — proof the move
+    // command's y drove the row (home-steer alone would have stopped at the class formation row).
+    expect(prev).toBeGreaterThan(home + 1);
+    expect(h.planeY).toBe(NEAR); // snapped onto the exact commanded row on completion
   });
 
   it("after an x/y move completes, an idle hero HOLDS the tapped row (R4.5 Wave 1.1)", () => {
@@ -260,9 +260,9 @@ describe("hero y steering — R4 Wave C2 manual x/y move command", () => {
     const home = heroPlaneY("swordsman");
     expect(home).not.toBe(NEAR); // home is a distinct lane from the tapped near row
 
-    // Short x hop with a near-row target: completes quickly, then idles.
+    // Short x hop with a near-row target: the honest 2D line completes, then idles.
     h.x = 300;
-    step(s, { moveTo: { x: 304, y: NEAR } }); // x nearly arrived; y must finish before clearing
+    step(s, { moveTo: { x: 304, y: NEAR } }); // walks the (4,120) line; both axes arrive together
     for (let i = 0; i < 300 && h.command; i++) step(s, {});
     expect(h.command).toBeNull();
     expect(h.planeYHold).toBe(NEAR); // the completed x/y move LATCHED the tapped row

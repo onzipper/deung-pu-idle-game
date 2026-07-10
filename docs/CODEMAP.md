@@ -68,7 +68,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/systems/mainQuest.ts` — main chapter chain wrapping the goal-ladder; completion derived from world unlock state
 - `src/engine/systems/manual.ts` — manual play intents (`moveTo`/`attackTarget`/`cancelCommand`) onto hero's transient command
 - `src/engine/systems/movement.ts` — formation anchor easing (`updateAnchor`); per-entity movement lives in combat.ts
-- `src/engine/systems/plane.ts` — R4 depth-plane y: id-hashed band scatter at spawn (`Entity.planeY`) + `stepPlaneY` pure per-step hero ease (Wave C1 hero y steering — cosmetic, never gates combat; enemies/boss static)
+- `src/engine/systems/plane.ts` — depth-plane y: id-hashed field scatter at spawn (`Entity.planeY`) + `stepPlaneY` pure per-step hero ease (cosmetic, never gates combat; enemies/boss static) + `fieldRect(mapId)` free-field play-field seam (the shared x/y clamp bounds)
 - `src/engine/systems/questRewards.ts` — single choke point (`grantQuestReward`) for main/daily quest rewards (gold/materials/potions only)
 - `src/engine/systems/quests.ts` — class-change quest framework: offer rule, accept intent, objective counting
 - `src/engine/systems/shadow.ts` — M8 party shadow-body takeover flag transition + lane-policy for disconnected members

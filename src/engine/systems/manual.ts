@@ -14,18 +14,12 @@
 import { CONFIG } from "@/engine/config";
 import { FIXED_DT } from "@/engine/core/loop";
 import { clamp } from "@/engine/core/math";
+import { dhypot } from "@/engine/core/dmath";
 import { getTargets } from "@/engine/systems/targeting";
-import { stepPlaneY } from "@/engine/systems/plane";
+import { fieldRect } from "@/engine/systems/plane";
 import type { CombatTarget } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 import type { FrameInput } from "@/engine/core/step";
-
-/** The current zone's walkable x range for a moveTo clamp (mirrors combat's bounds). */
-function walkBounds(state: GameState): [min: number, max: number] {
-  const map = CONFIG.world.maps.find((m) => m.id === state.location.mapId);
-  const fieldWidth = map?.fieldWidth ?? 900;
-  return [CONFIG.hunt.heroMinX, fieldWidth - CONFIG.hunt.fieldRightMargin];
-}
 
 /** A live (hp > 0) attackable target with `id`, or null — the attackTarget validity gate. */
 function findAliveTarget(state: GameState, id: number): CombatTarget | null {
@@ -67,16 +61,18 @@ function applyOneCommand(state: GameState, heroIdx: number, input: FrameInput): 
   }
 
   if (input.moveTo && Number.isFinite(input.moveTo.x)) {
-    const [minX, maxX] = walkBounds(state);
-    const x = clamp(input.moveTo.x, minX, maxX);
-    // R4 Wave C2 — OPTIONAL depth-row y. CLAMP it into the plane band at intake (owner
-    // reminder #1: never trust the caller — the UI already inverts the tap to a band row,
-    // but a stale/older/malicious client could send anything). A non-finite y is treated
-    // as ABSENT → an x-only command, byte-identical to pre-C2 (same shape, same event).
+    // FREE-FIELD (Phase 1): clamp the tap to the per-map play FIELD rect (THE shared seam) —
+    // x to the hunt/walk bounds (byte-identical), y to the depth-field edges.
+    const field = fieldRect(state.location.mapId);
+    const x = clamp(input.moveTo.x, field.minX, field.maxX);
+    // OPTIONAL depth-row y. CLAMP it into the field at intake (owner reminder #1: never trust
+    // the caller — the UI already inverts the tap to a field row, but a stale/older/malicious
+    // client could send anything). A non-finite y is treated as ABSENT → an x-only command,
+    // byte-identical to pre-y (same shape, same event).
     const rawY = input.moveTo.y;
     const y =
       typeof rawY === "number" && Number.isFinite(rawY)
-        ? clamp(rawY, CONFIG.plane.bandFar, CONFIG.plane.bandNear)
+        ? clamp(rawY, field.minY, field.maxY)
         : undefined;
     if (y === undefined) {
       h.command = { kind: "move", x };
@@ -123,31 +119,43 @@ export function tickTownManualWalk(state: GameState): void {
     if (h.dead) continue;
     if (!h.command || h.command.kind !== "move") continue;
     const cmd = h.command;
-    // R4 Wave C2 — a move command may carry a depth-row `y` (town has no combat, so the
-    // per-hero y-steering in combat.updateHeroes never runs here; ease it in this walk
-    // slice instead). `y` was already clamped into the band at intake. Guarded on the
-    // hero having a `planeY` (hand-built literals may omit it) so it stays a no-op there.
+
+    // FREE-FIELD (Phase 1) — HONEST 2D town walk. A move command carrying a depth-row `y` (and a
+    // hero that has a `planeY`) walks the STRAIGHT LINE to (x, y) at the walk speed: the per-frame
+    // budget `huntSpeed × dt` is split by the normalized direction (via `dhypot`), so a diagonal
+    // is NOT faster than an axis-aligned move and BOTH axes arrive together (mirrors combat's
+    // hunt-phase honest 2D). Town has NO combat y-steering to consume a sub-eps y residue, so on
+    // arrival BOTH axes SNAP to the exact tapped (x, y) — the hero lands precisely on the point.
+    // `x`/`y` were field-clamped at intake. The x-ONLY (or no-`planeY`) path below stays
+    // BYTE-IDENTICAL to pre-Phase-1.
     if (cmd.y !== undefined && typeof h.planeY === "number") {
-      h.planeY = stepPlaneY(h.planeY, cmd.y, FIXED_DT);
+      const dx = cmd.x - h.x;
+      const dy = cmd.y - h.planeY;
+      const dist = dhypot(dx, dy);
+      if (dist <= CONFIG.manual.arriveEps) {
+        h.x = cmd.x;
+        h.planeY = cmd.y;
+        h.planeYHold = cmd.y; // LATCH the tapped row (carried into a farm zone; cleared on arrival there)
+        h.command = null;
+      } else {
+        const s = stepPx / dist;
+        h.x = h.x + dx * s;
+        h.planeY = h.planeY + dy * s;
+      }
+      continue;
     }
+
     const d = cmd.x - h.x;
     const xArrived = Math.abs(d) <= CONFIG.manual.arriveEps;
-    // y arrives when absent, un-tracked (no planeY), or within the plane arrive-eps.
-    const yArrived =
-      cmd.y === undefined ||
-      typeof h.planeY !== "number" ||
-      Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
+    // y arrives when absent or un-tracked (no planeY) — the x-only path.
+    const yArrived = cmd.y === undefined || typeof h.planeY !== "number";
     if (xArrived && yArrived) {
-      // R4.5 Wave 1.1 — LATCH the tapped depth row (or CLEAR it for an x-only walk), mirroring
-      // the hunt-phase arrival in `combat.updateHeroes`. Town has no idle steering to consume the
-      // hold, but keeping the set/clear here means the hero carries the held row consistently if
-      // it steps into a farm zone (where `reviveHeroesFull` then clears it on arrival). `cmd.y`
-      // was band-clamped at intake; undefined (x-only) clears the hold → pre-Wave-1.1 behaviour.
+      // R4.5 Wave 1.1 — an x-only walk CLEARS the hold (cmd.y undefined) → pre-Wave-1.1 behaviour.
       h.planeYHold = cmd.y;
       h.command = null;
       continue;
     }
-    // Walk x only while it hasn't arrived (x-only path is byte-identical to pre-C2).
+    // Walk x only while it hasn't arrived (x-only path is byte-identical to pre-Phase-1).
     if (!xArrived) h.x += Math.abs(d) <= stepPx ? d : Math.sign(d) * stepPx;
   }
 }

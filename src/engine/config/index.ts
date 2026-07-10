@@ -938,10 +938,21 @@ export const CONFIG = {
   // in place of recomputing depth, and the R4-R5 x/y milestone will move entities along.
   // A parity test pins these to the render constants — keep them in lock-step, never diverge.
   plane: {
-    /** World-y offset at depth d=0 (far/upstage row, raised toward the horizon). ≡ DEPTH_OFFSET_FAR. */
-    bandFar: -24,
-    /** World-y offset at depth d=1 (near/downstage row, dropped toward the camera). ≡ DEPTH_OFFSET_NEAR. */
-    bandNear: 40,
+    /**
+     * World-y offset at depth d=0 (far/upstage row, raised toward the horizon). ≡ DEPTH_OFFSET_FAR.
+     *
+     * FREE-FIELD (Phase 1): widened from −24 → −64. The old ±(−24..40) "depth band" was a narrow
+     * cosmetic strip; the free-field 2.5D model turns it into a TALL per-map play FIELD the hero
+     * genuinely explores in x AND y (see `fieldRect`, `docs/world-arc-freefield-v1.md` §3). Kept
+     * bit-exact to `render/worldDepth/depthBand.DEPTH_OFFSET_FAR` (parity-tested) — sync both sides.
+     */
+    bandFar: -64,
+    /**
+     * World-y offset at depth d=1 (near/downstage row, dropped toward the camera). ≡ DEPTH_OFFSET_NEAR.
+     * FREE-FIELD (Phase 1): widened 40 → 56 (field height 120). Worst-case feet = groundY(232) +
+     * terrain dip(≤10) + 56 = 298 < WORLD_HEIGHT 300 (2px margin; contact shadows are Phase-2 render).
+     */
+    bandNear: 56,
     /** Party depth-fan band endpoints (a party spreads slot 0..last across [min,max]). ≡ HERO_BAND_MIN/MAX. */
     heroBandMin: 0.45,
     heroBandMax: 0.85,

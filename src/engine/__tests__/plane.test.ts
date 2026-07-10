@@ -51,8 +51,9 @@ describe("plane helpers — determinism + render-band parity", () => {
   it("CONFIG.plane band knobs stay pinned to render depthBand; hero rows are engine-owned", () => {
     // ≡ render/worldDepth/depthBand.DEPTH_OFFSET_FAR / DEPTH_OFFSET_NEAR (still the
     // live render band math — keep in lock-step).
-    expect(CONFIG.plane.bandFar).toBe(-24);
-    expect(CONFIG.plane.bandNear).toBe(40);
+    // FREE-FIELD (Phase 1): the depth band widened into a tall play field (−64..56).
+    expect(CONFIG.plane.bandFar).toBe(-64);
+    expect(CONFIG.plane.bandNear).toBe(56);
     // Hero-row knobs: engine-owned invariants since R4 Wave C0 (the render-side
     // depthAssign HERO_* constants they used to mirror are retired). Pinned so
     // Wave C1 can't drift them unnoticed.

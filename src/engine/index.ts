@@ -223,7 +223,11 @@ export {
   // R4 Wave C1 hero y steering: the pure per-step plane ease (hero `planeY` toward its
   // engagement lane / home row). Cosmetic — never gates combat (targeting stays x-only).
   stepPlaneY,
+  // FREE-FIELD (Phase 1): the per-map walkable play-field rect — THE clamp seam for every
+  // manual/dash/combat field bound (x hunt bounds + y depth-field edges). Takes a mapId.
+  fieldRect,
 } from "@/engine/systems/plane";
+export type { FieldRect } from "@/engine/systems/plane";
 
 // Skill-kit read helpers (M5 skill framework v2): the UI derives its per-skill
 // button state (learned/ready/affordable) and auto-slot state from these pure

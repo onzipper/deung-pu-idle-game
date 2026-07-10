@@ -15,15 +15,9 @@
 
 import { CONFIG } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
+import { fieldRect } from "@/engine/systems/plane";
 import type { Hero } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
-
-/** The current zone's walkable right edge (mirrors combat.ts `fieldMaxX` — the dash lands
- *  on the field, never off-screen). Kept local so dash stays a standalone primitive. */
-function fieldMaxX(state: GameState): number {
-  const map = CONFIG.world.maps.find((m) => m.id === state.location.mapId);
-  return map?.fieldWidth ?? 900;
-}
 
 /**
  * Blink `hero` to land adjacent to a target at world-x `targetX`, on the FAR side (dash
@@ -44,15 +38,16 @@ export function dashHeroTo(
   targetPlaneY?: number,
 ): number {
   const nj = CONFIG.ninja;
-  const hunt = CONFIG.hunt;
   const fromX = hero.x;
+  // FREE-FIELD (Phase 1): the walkable landing bounds come from the shared `fieldRect` seam.
+  const field = fieldRect(state.location.mapId);
   // Land on the far side of the target (blink through), so a follow-up strike sits in range.
   const fromLeft = fromX <= targetX;
   const desired = targetX + (fromLeft ? nj.dashLandGap : -nj.dashLandGap);
   // Cap the hop (short blink for skill 1; unbounded for the field-wide chain/ult).
   const hop = clamp(desired - fromX, -maxReach, maxReach);
   // Keep the landing on the walkable field (never blink off-screen or into the spawn edge).
-  const toX = clamp(fromX + hop, hunt.heroMinX, fieldMaxX(state) - hunt.fieldRightMargin);
+  const toX = clamp(fromX + hop, field.minX, field.maxX);
 
   hero.x = toX;
   // R4 Wave C2 — OPTIONAL depth-row landing. The CALLER passes the target's `planeY` ONLY
@@ -67,7 +62,7 @@ export function dashHeroTo(
     Number.isFinite(targetPlaneY) &&
     typeof hero.planeY === "number"
   ) {
-    hero.planeY = clamp(targetPlaneY, CONFIG.plane.bandFar, CONFIG.plane.bandNear);
+    hero.planeY = clamp(targetPlaneY, field.minY, field.maxY);
   }
   state.events.push({ type: "heroDashed", heroId: hero.id, fromX, toX });
   return toX;

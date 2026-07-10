@@ -16,7 +16,8 @@ const XS = [0, 55, 200, 460, 700, 876, 900];
 describe("worldDepth fx context (the shared seam)", () => {
   it("DEPTH_NEUTRAL is the exact zero-lift row (offset 0)", () => {
     expect(depthOffsetY(DEPTH_NEUTRAL)).toBe(0);
-    expect(DEPTH_NEUTRAL).toBeCloseTo(0.375, 12);
+    // FREE-FIELD (Phase 1): band −64..56 → zero-lift row at 64/120 = 0.5333…
+    expect(DEPTH_NEUTRAL).toBeCloseTo(0.5333333333333333, 12);
   });
 
   it("flags OFF is bit-identical to today (flat ground, no depth)", () => {
