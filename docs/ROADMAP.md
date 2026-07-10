@@ -261,9 +261,19 @@
 > เก็บ world-depth ให้ "อ่านออก" ก่อนลุยแกน x,y จริง: scale เป็นเสียงกระซิบ, composition ขายมิติ. เอนจิ้นไม่แตะเลย. เต็มสเปกที่ `docs/map-direction.md`.
 
 - [x] **Wave 1 — capped depth scale + contact shadows (#69)**: `depthBand` scale band **0.8↔1.12 → 0.95↔1.06** (offsets เดิม, ยัง strictly monotonic — test-enforced); NEW `views/entityShadow.ts` = flat-alpha 2-ellipse contact shadow (ไม่มี gradient/filter/additive, alpha ต่ำ อ่านได้ทั้ง palette สว่าง/มืด) attach เป็น backmost child ของ actor root ทุกตัว (hero/enemy/boss/world-boss/NPC ใน `GameRenderer`, ghost ใน `GhostLayer`) — ride GROUND_Y pivot + foot plant + depth scale เดียวกับ actor (ไม่ re-add offset, known-traps #3), destroy กับ view ตอน pool sweep (ไม่มี orphan). Enemy shadow scale ตาม `effectiveSize` (elite-aware). Projection C + scale policy = locked ที่ `docs/decision-index.md`. **Engine/sim/save ไม่แตะ**
-- [ ] **Wave 2 — Forest Road biome slice** (first biome ใต้ projection C; raked road ground + layered tree props visual-only + foliage ambient + row tint)
-- [ ] **Wave 3 — prop occlusion** (actor sort กับ world prop ตาม foot line)
-- [ ] **Wave 4 — far-row atmospheric tint + polish**
+- ~~Wave 2 — Map2/Greenmill biome slice~~ · ~~Wave 3 — prop occlusion~~ · ~~Wave 4 — far-row tint~~ — **SUPERSEDED (owner reset 2026-07-10)**: ทิศทาง map/field ใหม่ = **World Arc v1 + Free-field 2.5D** (`docs/world-arc-freefield-v1.md`); PRs #73–#76 = historical only. Prop foot-sort/occlusion + area visual passes ย้ายไปอยู่ใน sequence ของ direction ใหม่
+
+## M8.15 — World Arc v1 + Free-field 2.5D (direction reset, owner 2026-07-10)
+
+> Spec เต็ม: `docs/world-arc-freefield-v1.md`. โลก = 10 areas (Capital Outskirts → Rift Sanctum); field = free-field 2.5D (คลิก/แตะจุดไหนก็ได้ที่ไปถึงได้, ถนน = visual guide, depth จากตำแหน่งเท้า). Wave 1 depth language + R4 x/y plumbing = substrate ที่เก็บไว้ทั้งหมด.
+
+- [x] **Spec + docs reset** (`docs/world-arc-freefield-v1.md`; map-direction/decision-index/current-state synced)
+- [ ] **Slice 1 — free-field foundation** (engine: field rect แทน narrow band, 2D step จริงสำหรับ moveTo x/y, IRON invariant คงเดิม, lockstep+determinism tests, sim gates ต้องนิ่ง)
+- [ ] **Slice 2 — field board + tap-anywhere** (render/ui: ground เต็ม field rect บน placeholder tones, tap→world inversion เต็มสนาม desktop+mobile)
+- [ ] **Slice 3 — enemy/NPC field placement** (2D points ใน field, deterministic)
+- [ ] **Slice 4 — World Arc scaffolding** (ชื่อ/ids/theme hooks 10 areas + mapping ที่ owner เซ็น; data-only, balance ไม่ขยับ)
+- [ ] **Slice 5 — walkable polygon v1** · **Slice 6 — prop foot-sort + blockers**
+- [ ] Area visual passes (1→10) — gated per-area บน owner reference (references-first)
 
 ## M9 — Economy & Competition
 

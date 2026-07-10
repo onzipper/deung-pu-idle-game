@@ -21,6 +21,7 @@ Entry path for agents: repo [README.md](../README.md) → [AI.md](../AI.md) →
 ## Source of truth
 
 - [GDD.md](GDD.md) — vision/design (wins all conflicts)
+- [world-arc-freefield-v1.md](world-arc-freefield-v1.md) — ACTIVE world/map/field direction: World Arc v1 (10 areas) + free-field 2.5D movement (owner reset 2026-07-10; supersedes map-direction.md's Wave 2+ plan)
 - [ROADMAP.md](ROADMAP.md) — milestones + task checklists
 - [ui-reference-map.md](ui-reference-map.md) — owner-approved UI reference mapping + เคาะ log
 - [CODEMAP.md](CODEMAP.md) — file → responsibility index (test-enforced)
