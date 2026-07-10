@@ -24,6 +24,7 @@ import {
   buildGroundPolygon,
 } from "@/render/environment/groundBand";
 import { buildGroundPropsChunk } from "@/render/environment/groundProps";
+import { buildForestRoad, forestRoadActiveForZone } from "@/render/environment/forestRoad";
 import { CloudField } from "@/render/environment/clouds";
 import { ParallaxLayer } from "@/render/environment/ParallaxLayer";
 import { buildSilhouetteChunk } from "@/render/environment/silhouettes";
@@ -159,6 +160,17 @@ export class BiomeScene {
       nearConformY = (localCenterX: number) => terrain.groundY(localCenterX - MARGIN) - GROUND_Y;
     } else {
       this.view.addChild(buildGroundBand(biome, groundX, GROUND_Y, groundWidth, GROUND_DEPTH));
+    }
+
+    // Forest Road ground composition (R4.5 Wave 2B, #69) — map2 farm zones
+    // ONLY (gated + defended here at the single composition site; every other
+    // map/zone stays byte-identical). Sits ON TOP of the ground fill but BELOW
+    // the near ground-props layer, so bushes/rocks draw over the road. Static,
+    // built once — never touched in `update()`.
+    if (forestRoadActiveForZone(zone)) {
+      this.view.addChild(
+        buildForestRoad(biome, zone, GROUND_Y, groundX, groundWidth, terrainActive ? terrain : undefined),
+      );
     }
 
     this.near = new ParallaxLayer(

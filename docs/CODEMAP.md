@@ -232,8 +232,9 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/environment/BiomeScene.ts` — wires one resolved biome's sky+clouds+silhouettes+ground+props+ambient+weather into a Container.
 - `src/render/environment/sky.ts` — flat-rect sky band + horizon glow builders (built once, no scroll).
 - `src/render/environment/groundBand.ts` — static ground band fill + highlight + baked speckle texture, built once per biome.
+- `src/render/environment/forestRoad.ts` — R4.5 Wave 2B map2-farm-only ground composition: depth tone strips + dirt-road S-curve, built once, gated by `forestRoadActiveForZone`.
 - `src/render/environment/bossArena.ts` — boss-room-only fixed gate-pillar + lintel + vignette framing, built once.
-- `src/render/environment/__tests__/` — pins grand-expansion biomes, town llama, town honor board, asura zones, gate hit-test, gate lock overlay, gate props, parallax layer, terrain ground; 9 files.
+- `src/render/environment/__tests__/` — pins grand-expansion biomes, town llama, town honor board, asura zones, gate hit-test, gate lock overlay, gate props, parallax layer, terrain ground, forest road; 10 files.
 
 ### src/render/views/
 - `src/render/views/hpBar.ts` — shared HP-bar drawer (dark track + green/red fill, flips under 35%) used by all views.
