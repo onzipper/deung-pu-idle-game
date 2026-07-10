@@ -76,3 +76,16 @@ describe("worldDepth depth band — experiment ⑨", () => {
     expect(highestFeetY).toBeGreaterThan(0);
   });
 });
+
+describe("R4.5 Wave 2D — scale policy is LOCKED (docs/map-direction.md § Scale policy)", () => {
+  // "Scale policy: cap, don't flatten (LOCKED)" — 0.95 (far) -> 1.06 (near),
+  // capped from the pre-R4.5 0.8->1.12 swing that read as "randomly tiny"
+  // rather than "further away". This test PINS the two exported constants so
+  // a future tuning PR (Wave 3/4 or beyond) can't drift them silently — any
+  // change here needs an explicit owner sign-off + a doc update, not a
+  // side-effect of an unrelated knob pass.
+  it("DEPTH_SCALE_FAR is exactly 0.95 and DEPTH_SCALE_NEAR is exactly 1.06", () => {
+    expect(DEPTH_SCALE_FAR).toBe(0.95);
+    expect(DEPTH_SCALE_NEAR).toBe(1.06);
+  });
+});

@@ -25,6 +25,7 @@ import {
   scatterPlaneY,
   tomePagesFound,
   zoneAt,
+  type Zone,
 } from "@/engine";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
@@ -69,8 +70,15 @@ import {
 import {
   createWorldFxContext,
   DEPTH_NEUTRAL,
+  planeToDepth,
   type WorldFxContext,
 } from "@/render/worldDepth/worldFxContext";
+import { biomeForZone } from "@/render/environment/biomes";
+import {
+  buildMapProps,
+  mapPropsActiveForZone,
+  type MapPropSpec,
+} from "@/render/environment/mapProps";
 import { PALETTE, safeRadius } from "@/render/theme";
 import { createBossView, updateBossView, type BossView } from "@/render/views/bossView";
 import {
@@ -380,6 +388,23 @@ export class GameRenderer {
    * Reused (cleared each frame) — zero alloc. */
   private readonly enemyDepthScratch = new Map<number, number>();
 
+  /**
+   * R4.5 Wave 2C world props (`environment/mapProps.ts`) — code-drawn, visual-
+   * only decoration for map2 farm zones. Standing props (trees/rocks/lamp/sign/
+   * gate fragment) live DIRECTLY in `entities` so they share the actor depth
+   * sort domain (Wave 1.2); the near-layer container frames the near edge with a
+   * fixed high zIndex. Built ONCE on a zone (or depth/terrain flag) change and
+   * torn down/rebuilt on transition — never per frame (`mapPropsKey` gates the
+   * rebuild). The `entities` Pool only sweeps ids IT created, so these siblings
+   * never disturb actor pool sorting (Pool.ts guarantee). Aligned arrays: each
+   * `mapPropSpecs[i]` describes `mapPropViews[i]`. */
+  private mapPropViews: Graphics[] = [];
+  private mapPropSpecs: MapPropSpec[] = [];
+  private mapPropsNear: Container | null = null;
+  /** `mapId:zoneIdx:depthOn:terrainOn` the current props were built for (`null`
+   * = none built / not a map2 farm zone). A change triggers rebuild. */
+  private mapPropsKey: string | null = null;
+
   /** Set up the Pixi Application and scene layers. Client-only. */
   async create(canvasParent: HTMLElement): Promise<void> {
     // Idempotent: a stray double-mount (React StrictMode) tears down any prior
@@ -666,6 +691,11 @@ export class GameRenderer {
     const zone = zoneAt(state.location);
     this.worldFx.setZone(zone);
 
+    // R4.5 Wave 2C world props: (re)build the map2-farm prop set on a zone (or
+    // depth/terrain flag) change, else a cheap key-compare no-op. Standing props
+    // join the shared `entities` sort domain; the near layer frames the edge.
+    this.syncMapProps(zone);
+
     this.environment?.update(dt, state);
 
     const marching = this.lastAnchorX != null && state.anchorX > this.lastAnchorX + 1e-3;
@@ -875,6 +905,16 @@ export class GameRenderer {
     this.atmosphere?.destroy();
     this.atmosphere = null;
 
+    // R4.5 Wave 2C world props: destroyed here as an explicit belt-and-braces
+    // teardown (the `app.destroy({children:true})` below would also reap them as
+    // `entities` descendants). Reset the rebuild key so a recreate rebuilds.
+    for (const v of this.mapPropViews) v.destroy({ children: true });
+    this.mapPropViews = [];
+    this.mapPropSpecs = [];
+    this.mapPropsNear?.destroy({ children: true });
+    this.mapPropsNear = null;
+    this.mapPropsKey = null;
+
     this.fx?.destroy();
     this.fx = null;
 
@@ -1036,6 +1076,73 @@ export class GameRenderer {
    */
   private placeStaticActor(view: Container, x: number): void {
     view.y = this.worldFx.footY(x, DEPTH_NEUTRAL);
+  }
+
+  /**
+   * Foot-plant + depth-scale + depth-sort a Wave-2C world prop the SAME way
+   * `placeActor` does an actor: invert the prop's `planeY` through
+   * `planeToDepth` and run it through the shared `footY`/`depthScaleOf`/
+   * `depthZIndex` pipeline, so a prop's foot line and sort key are bit-for-bit
+   * the ones an actor standing on the same row gets (actors walk in front of /
+   * behind it). OFF-identity (depth flag off): `d = DEPTH_NEUTRAL` → foot at
+   * `groundY(x)`, scale 1, `zIndex 0` (equal → insertion order), matching the
+   * actors' own flag-off behavior. Baked once at build time (props are static);
+   * a flag flip rebuilds via `mapPropsKey`.
+   */
+  private placeProp(view: Graphics, spec: MapPropSpec): void {
+    const depthOn = this.worldFx.depthEnabled();
+    const d = depthOn ? planeToDepth(spec.planeY) : DEPTH_NEUTRAL;
+    view.x = spec.x;
+    view.y = this.worldFx.footY(spec.x, d);
+    view.scale.set(this.worldFx.depthScaleOf(d));
+    view.zIndex = depthOn ? depthZIndex(d) : 0;
+  }
+
+  /**
+   * (Re)build the map2-farm world-prop set (`environment/mapProps.ts`) when the
+   * zone — or the depth/terrain flags — change; otherwise a cheap key-compare
+   * early return (zero per-frame allocation). Standing props are added directly
+   * to `entities` (shared actor sort domain, Wave 1.2); the near-layer container
+   * frames the near edge. Tearing down/rebuilding here never disturbs the actor
+   * pools — `Pool` only sweeps ids IT created (`Pool.ts`), and these are plain
+   * siblings.
+   */
+  private syncMapProps(zone: Zone): void {
+    if (!this.layers) return;
+    const active = mapPropsActiveForZone(zone);
+    const depthOn = this.worldFx.depthEnabled();
+    const key = active
+      ? `${zone.mapId}:${zone.zoneIdx}:${depthOn ? 1 : 0}:${this.worldFxFlags.terrain ? 1 : 0}`
+      : null;
+    if (key === this.mapPropsKey) return;
+
+    // Teardown any existing set (removed from `entities`, fully destroyed).
+    for (const v of this.mapPropViews) {
+      this.layers.entities.removeChild(v);
+      v.destroy({ children: true });
+    }
+    this.mapPropViews = [];
+    this.mapPropSpecs = [];
+    if (this.mapPropsNear) {
+      this.layers.entities.removeChild(this.mapPropsNear);
+      this.mapPropsNear.destroy({ children: true });
+      this.mapPropsNear = null;
+    }
+    this.mapPropsKey = key;
+    if (!active) return;
+
+    const biome = biomeForZone(zone);
+    const built = buildMapProps(
+      biome,
+      zone,
+      (x) => this.worldFx.groundY(x),
+      (view, spec) => this.placeProp(view, spec),
+    );
+    for (const v of built.standing) this.layers.entities.addChild(v);
+    this.layers.entities.addChild(built.near);
+    this.mapPropViews = built.standing;
+    this.mapPropSpecs = built.layout.standing;
+    this.mapPropsNear = built.near;
   }
 
   /** The `cameraRoot`'s live transform for hit-test un-projection (identity

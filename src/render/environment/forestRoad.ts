@@ -70,6 +70,21 @@ const ROAD_SEGMENTS = 12;
  * mirrors `terrainZone.ts`'s `GATE_FLATTEN_PX` gate-flattening idea (the road
  * FADES here rather than flattening the ground line). */
 const ROAD_GATE_FADE_PX = 90;
+/**
+ * How much HSL lightness the far strip's tone is pulled down from
+ * `biome.ground.base` (R4.5 Wave 2D, issue #69 readability pass). Was `0.12`
+ * in 2B — but `adjustLightness` CLAMPS at L=0, and map2's darkest farm zones
+ * (`ground.base` L ≈ 0.08-0.12, the demon-realm palette) clamped straight to
+ * pure `0x000000`. A near-black contact shadow (`views/entityShadow.ts`,
+ * near-black low-alpha ellipses) composited over a LITERALLY black strip has
+ * zero luminance delta — it melts in completely, failing the "shadow reads on
+ * every strip tone, day AND night" rule (`docs/map-direction.md`). `0.05`
+ * keeps the far strip comfortably non-zero (min composited luminance delta
+ * ≈0.43 vs the zero-delta bug, checked at the deep-night ambient tint) while
+ * staying visibly darker than the near strip on every map2 farm zone
+ * (test-pinned, `wave2dReadability.test.ts`).
+ */
+const STRIP_FAR_DARKEN = 0.05;
 
 // ---------------------------------------------------------------------------
 // Pure geometry / color (headlessly unit-testable — no Pixi here)
@@ -109,7 +124,7 @@ export function forestRoadStrips(biome: BiomeDef, groundY: number): ForestRoadSt
   const bandTop = groundY + DEPTH_OFFSET_FAR;
   const bandHeight = DEPTH_OFFSET_NEAR - DEPTH_OFFSET_FAR;
   const stripH = bandHeight / STRIP_COUNT;
-  const farTone = adjustLightness(biome.ground.base, -0.12);
+  const farTone = adjustLightness(biome.ground.base, -STRIP_FAR_DARKEN);
   const strips: ForestRoadStrip[] = [];
   for (let i = 0; i < STRIP_COUNT; i++) {
     const frac = i / (STRIP_COUNT - 1); // 0 = far, 1 = near
@@ -140,6 +155,34 @@ function roadCenterX(t: number, farX: number, nearX: number, sway: number): numb
 /** Road half-width at t — perspective taper (far narrow -> near wide). */
 function roadHalfWidth(t: number): number {
   return lerp(ROAD_HALF_W_FAR, ROAD_HALF_W_NEAR, t);
+}
+
+// ---------------------------------------------------------------------------
+// Road-path helpers EXPOSED for Wave 2C prop placement (`mapProps.ts`) — the
+// 2B handoff note: `roadCenterX`/`roadHalfWidth` were module-private; 2C needs
+// them so props can hug the road edge. The band parameter `t` is IDENTICAL to
+// the depth coordinate d ∈ [0,1] (road row y = bandTop + bandHeight·t, and the
+// depth band spans exactly that same `GROUND_Y + DEPTH_OFFSET_FAR..NEAR`
+// envelope), so a prop at depth d sits beside the road at `roadCenterXAt(d)`.
+// These wrap the module's own field-fraction constants so callers never need
+// them (no new absolute-position constants leak out).
+// ---------------------------------------------------------------------------
+
+/** Road center x at depth `t` ∈ [0,1] (0 = far, 1 = near), using this module's
+ * own S-curve field fractions — for placing props along the road edge. */
+export function roadCenterXAt(t: number): number {
+  return roadCenterX(
+    t,
+    WORLD_WIDTH * ROAD_FAR_X_FRAC,
+    WORLD_WIDTH * ROAD_NEAR_X_FRAC,
+    WORLD_WIDTH * ROAD_SWAY_FRAC,
+  );
+}
+
+/** Road half-width (world px) at depth `t` ∈ [0,1] — the perspective taper a
+ * prop offsets past to clear the road edge. */
+export function roadHalfWidthAt(t: number): number {
+  return roadHalfWidth(t);
 }
 
 // ---------------------------------------------------------------------------
