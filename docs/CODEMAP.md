@@ -76,6 +76,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/systems/stats.ts` — derived hero stats: level+base-stats+tier+gear → atk/hp/mana/`combatPower`
 - `src/engine/systems/targeting.ts` — pure positional queries (`nearestAny`, `aliveHeroes`, `enemyTargets`)
 - `src/engine/systems/townNpcs.ts` — town NPC anchor geometry + interaction-range reads (ป้าปุ๊/ลุงดึ๋ง)
+- `src/engine/systems/walkable.ts` — walkable-area v1: optional per-map outline polygon + `clampToWalkable(mapId,x,y)` nearest-reachable resolver (falls back bit-identically to fieldRect when absent; intake seam, off hot path)
 - `src/engine/systems/world.ts` — zone/navigation layer: maps, farm-zone unlock, transit, boss-room progression, respawn
 - `src/engine/systems/worldBoss.ts` — hourly world boss "เสี่ยจ๋อง": pure schedule helpers + spawn/AI/death engine hooks
 
@@ -233,7 +234,8 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/environment/sky.ts` — flat-rect sky band + horizon glow builders (built once, no scroll).
 - `src/render/environment/groundBand.ts` — static ground band fill + highlight + baked speckle texture, built once per biome.
 - `src/render/environment/bossArena.ts` — boss-room-only fixed gate-pillar + lintel + vignette framing, built once.
-- `src/render/environment/__tests__/` — pins grand-expansion biomes, town llama, town honor board, asura zones, gate hit-test, gate lock overlay, gate props, parallax layer, terrain ground, free-field ground coverage + tap↔field parity; 10 files.
+- `src/render/environment/fieldProps.ts` (`FieldProps`) — static world props in the shared `entities` foot-sort domain (build-once, zone-pooled, depth-seam placed); placeholder stump prop + authored farm placement + unread blocker hook.
+- `src/render/environment/__tests__/` — pins grand-expansion biomes, town llama, town honor board, asura zones, gate hit-test, gate lock overlay, gate props, parallax layer, terrain ground, free-field ground coverage + tap↔field parity, field-prop interleave/flat-fallback/scene-swap; 11 files.
 
 ### src/render/views/
 - `src/render/views/hpBar.ts` — shared HP-bar drawer (dark track + green/red fill, flips under 35%) used by all views.
@@ -272,7 +274,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/audio/sfxMap.ts` — `GameEvent`→synth recipe palette data (`SFX_PARAMS`) + per-event `play*` functions.
 
 ### src/render/__tests__/
-- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`); 3 files.
+- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + `hitTestGhost()` hit-test composition + ghost↔actor depth interleave + Phase 6 field-prop combat-feedback layer/non-tappable guards (`fieldPropsGuard.test.ts`); 5 files.
 ## Zone C — src/ui/**, src/app/(game)/**, src/app root, src/i18n/**, src/lab/**
 
 ### src/app/(game)/ — game-loop host + party/presence transport (LOAD-BEARING HUB)

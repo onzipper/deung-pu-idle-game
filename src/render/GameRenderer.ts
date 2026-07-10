@@ -105,6 +105,7 @@ import {
 } from "@/render/views/projectileView";
 import { NpcSpeechBubble } from "@/render/fx/npcSpeechBubble";
 import { gateTapSide } from "@/render/environment/zoneGates";
+import { FieldProps } from "@/render/environment/fieldProps";
 import { TOWN_NPCS, type TownNpcId } from "@/render/townNpcs";
 import { createTownLlamaActor, type TownLlamaActor } from "@/render/environment/townLlama";
 import {
@@ -231,6 +232,12 @@ export class GameRenderer {
   /** The last ghost render list `setGhosts()` received — applied every `draw()` with the
    * real dt (so the rig walk cadence uses the same clock as `fx/`). */
   private ghostList: readonly GhostDrawItem[] = [];
+  /** FREE-FIELD (Phase 6): static world props living in the SHARED `entities`
+   * sort domain (foot-sort siblings of hero/enemy/ghost roots — see
+   * `environment/fieldProps.ts`). Built in `create()`, driven by `setZone()`
+   * every `draw()` (identity-gated no-op in steady state), torn down in
+   * `destroy()`. Null until `create()`. */
+  private fieldProps: FieldProps | null = null;
   private enemyPool: Pool<EnemyView> | null = null;
   private projectilePool: Pool<ProjectileView> | null = null;
   private bossView: BossView | null = null;
@@ -469,6 +476,12 @@ export class GameRenderer {
     // interleaves peers with my hero/enemy roots (was the separate `ghosts`
     // container, which could only sort ghosts among themselves).
     this.ghostLayer = new GhostLayer(entities, { worldFx: this.worldFx });
+    // FREE-FIELD (Phase 6): world props join the SAME shared `entities` sort
+    // domain so actors pass in front of / behind them by foot row. Combat
+    // feedback stays safe by construction — fx/overlay layers sit ABOVE
+    // `entities`, so a prop's zIndex (in-container only) can never occlude
+    // damage numbers / the boss plate / tap markers.
+    this.fieldProps = new FieldProps(entities, { worldFx: this.worldFx });
 
     // W5 atmosphere runtime: day/night tint + weather + critters, composed on
     // top of the same five layers (see `atmosphere.ts`'s doc comment for the
@@ -665,6 +678,11 @@ export class GameRenderer {
     // method (W5) instead of a second `zoneAt` call — same value either way.
     const zone = zoneAt(state.location);
     this.worldFx.setZone(zone);
+    // FREE-FIELD (Phase 6): (re)bind the zone's static field props — identity-
+    // gated no-op unless the zone or depth flag changed (zero steady-state
+    // alloc). Must follow `worldFx.setZone` so foot/depth resolve on the right
+    // ground; placed once, no per-frame sort churn.
+    this.fieldProps?.setZone(zone);
 
     this.environment?.update(dt, state);
 
@@ -868,6 +886,8 @@ export class GameRenderer {
     this.ghostLayer?.destroy();
     this.ghostLayer = null;
     this.ghostList = [];
+    this.fieldProps?.destroy();
+    this.fieldProps = null;
     this.heroPool = null;
     this.enemyPool = null;
     this.projectilePool = null;
