@@ -73,6 +73,42 @@ export function planeYForDepth(d: number): number {
 }
 
 /**
+ * The per-map walkable play FIELD rect (FREE-FIELD Phase 1, `docs/world-arc-freefield-v1.md` §3).
+ * `x ∈ [minX, maxX]` = the established hunt/walk bounds (`hunt.heroMinX` .. `fieldWidth −
+ * fieldRightMargin`) so x behaviour stays byte-identical; `y ∈ [minY, maxY]` = the depth-field
+ * edges (`plane.bandFar` .. `plane.bandNear`), now a tall field the hero explores rather than a
+ * cosmetic band. THE single seam every field clamp routes through (manual moveTo x+y, town walk,
+ * dash landing, combat hero x-clamp) — no scattered absolute-position literals (they rot). Takes
+ * `mapId` to future-proof per-map fields even though every map is `fieldWidth` 900 today.
+ *
+ * Pure/deterministic: a stateless read of `CONFIG` (no RNG, no wall-clock). The `y` extents are
+ * map-independent today but returned per-call so a future per-map field height needs no call-site
+ * change. NOT an x-only API — `y` is a first-class field axis (do not assume x-only in new code).
+ */
+export interface FieldRect {
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+}
+
+/** Fallback field width for an unknown map id — the single home of the old scattered `?? 900`. */
+const DEFAULT_FIELD_WIDTH = 900;
+
+export function fieldRect(mapId: string): FieldRect {
+  const map = CONFIG.world.maps.find((m) => m.id === mapId);
+  const fieldWidth = map?.fieldWidth ?? DEFAULT_FIELD_WIDTH;
+  const P = CONFIG.plane;
+  const H = CONFIG.hunt;
+  return {
+    minX: H.heroMinX,
+    maxX: fieldWidth - H.fieldRightMargin,
+    minY: P.bandFar,
+    maxY: P.bandNear,
+  };
+}
+
+/**
  * Enemy (incl. asura elite + boss-summoned add) depth row: a stable per-id scatter across the
  * FULL band, so a crowd reads with real front/back rows. Ported from the retired render depth-
  * assignment (see git history) → `depthOffsetY`. Deterministic per spawn id (no RNG draw), so

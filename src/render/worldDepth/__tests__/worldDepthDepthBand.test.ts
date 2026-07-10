@@ -65,10 +65,11 @@ describe("worldDepth depth band — experiment ⑨", () => {
   it("headroom budget: worst-case FEET line stays inside the 300px view", () => {
     // The experiment pivots actor roots at the rig feet line, so on screen
     //   feetY = terrain.groundY(x) + depthOffsetY(d)   (scale-independent).
-    // Deepest terrain dip + nearest depth row is the plan's documented
-    // worst case: 232 + 10 + 40 = 282 < WORLD_HEIGHT 300.
+    // Deepest terrain dip + nearest depth row is the plan's documented worst case.
+    // FREE-FIELD (Phase 1): near offset 40 → 56, so 232 + 10 + 56 = 298. Phase 2 grew
+    // WORLD_HEIGHT 300 → 312 so contact shadows drawn below these feet no longer clip.
     const worstFeetY = GROUND_Y + TERRAIN_MAX_OFFSET + depthOffsetY(1);
-    expect(worstFeetY).toBe(282);
+    expect(worstFeetY).toBe(298);
     expect(worstFeetY).toBeLessThan(WORLD_HEIGHT);
     // And the far/high edge never rises above the sky band the silhouettes
     // reserve (sanity that the band + terrain crest stay on-screen too).

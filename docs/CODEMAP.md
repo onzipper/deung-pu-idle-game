@@ -23,6 +23,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/config/index.ts` — `CONFIG` — the one home for all tunable balance constants/curves (sim-sweepable)
 - `src/engine/config/items.ts` — item-template catalog + per-stage drop tables (`ITEM_TEMPLATES`, `dropTableForStage`); contract file shared w/ server claim/equip
 - `src/engine/config/refine.ts` — M7.6 ตีบวก refine tunables + pure `refinedStat`/cost/success-chance derivations (engine never rolls)
+- `src/engine/config/worldArc.ts` — World Arc v1 (epic phase 4, docs/world-arc-freefield-v1.md §2): `WORLD_ARC` naming/theme data for the 10 owner-locked arc areas + `arcAreaForMap` lookup; dormant data-only mapping onto `CONFIG.world.maps` (areas 1-6 -> map1-map6, areas 7-10 unmapped) — no behavior reads it yet
 
 ### src/engine/state/
 
@@ -68,7 +69,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/systems/mainQuest.ts` — main chapter chain wrapping the goal-ladder; completion derived from world unlock state
 - `src/engine/systems/manual.ts` — manual play intents (`moveTo`/`attackTarget`/`cancelCommand`) onto hero's transient command
 - `src/engine/systems/movement.ts` — formation anchor easing (`updateAnchor`); per-entity movement lives in combat.ts
-- `src/engine/systems/plane.ts` — R4 depth-plane y: id-hashed band scatter at spawn (`Entity.planeY`) + `stepPlaneY` pure per-step hero ease (Wave C1 hero y steering — cosmetic, never gates combat; enemies/boss static)
+- `src/engine/systems/plane.ts` — depth-plane y: id-hashed field scatter at spawn (`Entity.planeY`) + `stepPlaneY` pure per-step hero ease (cosmetic, never gates combat; enemies/boss static) + `fieldRect(mapId)` free-field play-field seam (the shared x/y clamp bounds)
 - `src/engine/systems/questRewards.ts` — single choke point (`grantQuestReward`) for main/daily quest rewards (gold/materials/potions only)
 - `src/engine/systems/quests.ts` — class-change quest framework: offer rule, accept intent, objective counting
 - `src/engine/systems/shadow.ts` — M8 party shadow-body takeover flag transition + lane-policy for disconnected members
@@ -76,12 +77,13 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/engine/systems/stats.ts` — derived hero stats: level+base-stats+tier+gear → atk/hp/mana/`combatPower`
 - `src/engine/systems/targeting.ts` — pure positional queries (`nearestAny`, `aliveHeroes`, `enemyTargets`)
 - `src/engine/systems/townNpcs.ts` — town NPC anchor geometry + interaction-range reads (ป้าปุ๊/ลุงดึ๋ง)
+- `src/engine/systems/walkable.ts` — walkable-area v1: optional per-map outline polygon + `clampToWalkable(mapId,x,y)` nearest-reachable resolver (falls back bit-identically to fieldRect when absent; intake seam, off hot path)
 - `src/engine/systems/world.ts` — zone/navigation layer: maps, farm-zone unlock, transit, boss-room progression, respawn
 - `src/engine/systems/worldBoss.ts` — hourly world boss "เสี่ยจ๋อง": pure schedule helpers + spawn/AI/death engine hooks
 
 ### src/engine/__tests__/
 
-- `src/engine/__tests__/` — full engine regression + determinism suite (canonical sim gates, class/skill/quest/party/asura/ninja/refine/lockstep behavior, byte-identical hash checks); `balance-sim.ts` + `helpers.ts` support files; 43 files
+- `src/engine/__tests__/` — full engine regression + determinism suite (canonical sim gates, class/skill/quest/party/asura/ninja/refine/lockstep/world-arc-data behavior, byte-identical hash checks); `balance-sim.ts` + `helpers.ts` support files; 45 files
 - `src/engine/lockstep/__tests__/` — lockstep turn-executor multi-client hash-equality tests; 1 file
 
 ### src/server/
@@ -233,7 +235,8 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/environment/sky.ts` — flat-rect sky band + horizon glow builders (built once, no scroll).
 - `src/render/environment/groundBand.ts` — static ground band fill + highlight + baked speckle texture, built once per biome.
 - `src/render/environment/bossArena.ts` — boss-room-only fixed gate-pillar + lintel + vignette framing, built once.
-- `src/render/environment/__tests__/` — pins grand-expansion biomes, town llama, town honor board, asura zones, gate hit-test, gate lock overlay, gate props, parallax layer, terrain ground; 9 files.
+- `src/render/environment/fieldProps.ts` (`FieldProps`) — static world props in the shared `entities` foot-sort domain (build-once, zone-pooled, depth-seam placed); placeholder stump prop + authored farm placement + unread blocker hook.
+- `src/render/environment/__tests__/` — pins grand-expansion biomes, town llama, town honor board, asura zones, gate hit-test, gate lock overlay, gate props, parallax layer, terrain ground, free-field ground coverage + tap↔field parity, field-prop interleave/flat-fallback/scene-swap; 11 files.
 
 ### src/render/views/
 - `src/render/views/hpBar.ts` — shared HP-bar drawer (dark track + green/red fill, flips under 35%) used by all views.
@@ -272,7 +275,7 @@ Layer contracts live in the layer READMEs: `src/engine/README.md` · `src/render
 - `src/render/audio/sfxMap.ts` — `GameEvent`→synth recipe palette data (`SFX_PARAMS`) + per-event `play*` functions.
 
 ### src/render/__tests__/
-- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + issue #50 Wave 5 `hitTestGhost()`'s exact hit-test composition (`ghostHitTest.test.ts`); 3 files.
+- `src/render/__tests__/` — pins world-depth entity placement + fullscreen layout transform math + `hitTestGhost()` hit-test composition + ghost↔actor depth interleave + Phase 6 field-prop combat-feedback layer/non-tappable guards (`fieldPropsGuard.test.ts`); 5 files.
 ## Zone C — src/ui/**, src/app/(game)/**, src/app root, src/i18n/**, src/lab/**
 
 ### src/app/(game)/ — game-loop host + party/presence transport (LOAD-BEARING HUB)

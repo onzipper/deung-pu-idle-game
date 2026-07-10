@@ -267,12 +267,13 @@
 
 > Spec เต็ม: `docs/world-arc-freefield-v1.md`. โลก = 10 areas (Capital Outskirts → Rift Sanctum); field = free-field 2.5D (คลิก/แตะจุดไหนก็ได้ที่ไปถึงได้, ถนน = visual guide, depth จากตำแหน่งเท้า). Wave 1 depth language + R4 x/y plumbing = substrate ที่เก็บไว้ทั้งหมด. **Tracking (owner 2026-07-11): slices ข้างล่าง = phases ใน Epic ใหญ่ / implementation PR ใหญ่อันเดียว — ห้ามแตกเป็น micro-issues เว้นแต่ owner สั่งเอง; old issue stack ปิดหมดแล้ว (superseded/not planned).**
 
-- [x] **Spec + docs reset** (`docs/world-arc-freefield-v1.md`; map-direction/decision-index/current-state synced)
-- [ ] **Slice 1 — free-field foundation** (engine: field rect แทน narrow band, 2D step จริงสำหรับ moveTo x/y, IRON invariant คงเดิม, lockstep+determinism tests, sim gates ต้องนิ่ง)
-- [ ] **Slice 2 — field board + tap-anywhere** (render/ui: ground เต็ม field rect บน placeholder tones, tap→world inversion เต็มสนาม desktop+mobile)
-- [ ] **Slice 3 — enemy/NPC field placement** (2D points ใน field, deterministic)
-- [ ] **Slice 4 — World Arc scaffolding** (ชื่อ/ids/theme hooks 10 areas + mapping ที่ owner เซ็น; data-only, balance ไม่ขยับ)
-- [ ] **Slice 5 — walkable polygon v1** · **Slice 6 — prop foot-sort + blockers**
+- [x] **Spec + docs reset** (`docs/world-arc-freefield-v1.md`; map-direction/decision-index/current-state synced; merged PR #80)
+- [x] **Phase 1 — free-field foundation** (Draft **PR #81**: `fieldRect(mapId)` seam, band −24/40 → −64/56 field height 120, honest 2D manual moveTo ผ่าน `dhypot` — diagonal ไม่เร็วกว่าแกนเดี่ยว, ทุก intake clamp ผ่าน field rect, IRON invariant คงเดิม, SAVE v20 ไม่ขยับ)
+- [x] **Phase 2 — field board + tap-anywhere** (PR #81: WORLD_HEIGHT 300→312, `HORIZON_Y` composition — far-row ยืนบนพื้นไม่ใช่ฟ้า, ground base fill เต็ม field ทุกโซน, tap ได้ทั้งสนาม desktop+mobile, ping ที่จุดแตะ)
+- [x] **Phase 3 — enemy/NPC field placement** (PR #81: enemy scatter เต็ม band ใหม่ deterministic, NPC ได้ planeY engine-owned, interaction x-only pinned)
+- [x] **Phase 4 — World Arc scaffolding** (PR #81: `config/worldArc.ts` dormant 10-area table, mapping 1:1 map1-6→areas 1-6 รอ owner review — คำถามเปิด: map6 hell-city ใกล้ Ashen Gate #8 มากกว่า)
+- [x] **Phase 5 — walkable polygon v1** (PR #81: optional per-map outline + nearest-reachable clamp, ไม่มี navmesh; ยังไม่มี map ไหนใช้ polygon จริง — รอ design) · **Phase 6 — prop foot-sort + blockers foundation** (PR #81: `fieldProps.ts` ใน shared sort domain + combat-feedback guards test-pinned + blocker data hook dormant)
+- [ ] Owner playtest ของ playable slice (PR #81 Draft) → merge confirm
 - [ ] Area visual passes (1→10) — gated per-area บน owner reference (references-first)
 
 ## M9 — Economy & Competition

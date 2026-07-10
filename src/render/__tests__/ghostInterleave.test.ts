@@ -33,8 +33,8 @@ import {
 
 const DT = 1 / 60;
 /** Live plane-band edges (planeToDepth maps these to d=0 far, d=1 near). */
-const FAR = DEPTH_OFFSET_FAR; // -24, upstage → depthZIndex 0
-const NEAR = DEPTH_OFFSET_NEAR; // 40, downstage → depthZIndex 1000
+const FAR = DEPTH_OFFSET_FAR; // -64, upstage → depthZIndex 0
+const NEAR = DEPTH_OFFSET_NEAR; // 56, downstage → depthZIndex 1000
 
 function item(over: Partial<GhostDrawItem> & { cid: string }): GhostDrawItem {
   return { name: over.cid, cls: "swordsman", tier: 1, x: 0, alpha: 1, ...over };

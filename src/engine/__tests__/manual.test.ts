@@ -10,6 +10,7 @@ import {
   type Enemy,
   type GameState,
 } from "@/engine";
+import { FIXED_DT } from "@/engine/core/loop";
 import { makeStubEnemy, forceBoss, soloSave } from "./helpers";
 
 /**
@@ -241,14 +242,15 @@ describe("manual play (M7.8)", () => {
 });
 
 /**
- * R4 Wave C2 — moveTo gains an OPTIONAL depth-row `y`. An x-only move is byte-identical to
- * pre-C2 (command shape + event, home-row steering, x-only arrival); an x/y move clamps y to
- * the plane band at intake and steers the hero's planeY while walking, clearing only when BOTH
- * axes arrive. y is cosmetic (never gates combat). Non-finite y → treated as absent (x-only).
+ * R4 Wave C2 → FREE-FIELD Phase 1 — moveTo gains an OPTIONAL depth-row `y`. An x-only move is
+ * byte-identical to pre-C2 (command shape + event, home-row steering, x-only arrival); an x/y
+ * move clamps y to the play FIELD at intake and now walks an HONEST straight line to (x, y) at
+ * the walk speed (diagonal not faster than axis-aligned; both axes arrive together, snapping onto
+ * the exact point). y is cosmetic (never gates combat). Non-finite y → treated as absent (x-only).
  */
-describe("manual play — moveTo x/y (R4 Wave C2)", () => {
-  const NEAR = CONFIG.plane.bandNear; // 40
-  const FAR = CONFIG.plane.bandFar; // -24
+describe("manual play — moveTo x/y (free-field 2D)", () => {
+  const NEAR = CONFIG.plane.bandNear; // 56
+  const FAR = CONFIG.plane.bandFar; // -64
   const YEPS = CONFIG.plane.yArriveEps;
 
   it("x-only moveTo is byte-identical: command + event carry NO y (home-row steer)", () => {
@@ -289,58 +291,84 @@ describe("manual play — moveTo x/y (R4 Wave C2)", () => {
     expect("y" in s.heroes[0].command!).toBe(false);
   });
 
-  it("hunt-phase x/y move: the hero converges to (x, y); command clears only when BOTH arrive", () => {
+  it("hunt-phase x/y move walks a straight line to (x,y); both axes arrive together, snapping onto the point", () => {
     const s = initGameState(2, soloSave("swordsman", 3));
     s.spawnPaused = true;
     s.enemies = [];
     const h = s.heroes[0];
-    h.planeY = FAR; // start a full band away from the near-row target
+    h.x = 100;
+    h.planeY = FAR; // start a full field away from the near-row target
     const goalX = 600;
 
     step(s, { moveTo: { x: goalX, y: NEAR } });
     expect(h.command).toEqual({ kind: "move", x: goalX, y: NEAR });
 
-    // Run until the command clears — arrival must gate on BOTH axes. Track that planeY
-    // actually REACHED the commanded row while the command was live (once it clears, the
-    // idle C1 home-steering nudges planeY back one step, so we sample it WHILE active).
+    // planeY climbs monotonically toward NEAR while walking (no independent y ease that would
+    // race x); the command clears only when the straight-line distance is within arriveEps.
     let cleared = -1;
-    let yReached = false;
-    for (let i = 0; i < 400; i++) {
+    let prevY = FAR - 1e-9;
+    for (let i = 0; i < 600; i++) {
       step(s, {});
       if (h.command) {
-        expect(h.planeY!).toBeLessThanOrEqual(NEAR + 1e-9); // never overshoots the target row
-        if (Math.abs(h.planeY! - NEAR) <= YEPS) yReached = true;
+        expect(h.planeY!).toBeGreaterThanOrEqual(prevY); // monotone toward the near row
+        expect(h.planeY!).toBeLessThanOrEqual(NEAR + 1e-9); // never overshoots
+        prevY = h.planeY!;
       } else {
         cleared = i;
         break;
       }
     }
     expect(cleared).toBeGreaterThan(0);
-    expect(yReached).toBe(true); // y converged to the commanded lane during the walk
-    expect(Math.abs(h.x - goalX)).toBeLessThanOrEqual(CONFIG.manual.arriveEps); // and x arrived
+    // On completion the hero SNAPS onto the exact tapped point — both axes arrived together.
+    expect(h.x).toBe(goalX);
+    expect(h.planeY).toBe(NEAR);
   });
 
-  it("x arrives first but the command PERSISTS until y also arrives (y-gated completion)", () => {
+  it("a pure-y move (x already at target) keeps x fixed and eases planeY to the row, then completes", () => {
     const s = initGameState(3, soloSave("swordsman", 3));
     s.spawnPaused = true;
     s.enemies = [];
     const h = s.heroes[0];
     h.x = 300;
     h.planeY = FAR;
-    // Command x == current x (instantly x-arrived) but a far y → must NOT clear until y eases in.
+    // Command x == current x (a pure depth move): x must never move; planeY eases along the line.
     step(s, { moveTo: { x: 300, y: NEAR } });
     expect(h.command).not.toBeNull();
-    step(s, {});
-    expect(h.command).not.toBeNull(); // x done, y still easing → command HELD (y-gated)
-    expect(h.planeY!).toBeGreaterThan(FAR); // y is moving toward NEAR
-    let yReached = false;
-    for (let i = 0; i < 200 && h.command; i++) {
+
+    let prevY = FAR - 1e-9;
+    for (let i = 0; i < 300 && h.command; i++) {
       step(s, {});
-      if (h.command && Math.abs(h.planeY! - NEAR) <= YEPS) yReached = true;
+      expect(h.x).toBe(300); // pure-y: x is untouched every step
+      if (h.command) {
+        expect(h.planeY!).toBeGreaterThanOrEqual(prevY); // monotone toward NEAR
+        prevY = h.planeY!;
+      }
     }
-    expect(h.command).toBeNull(); // cleared once y landed
-    expect(yReached).toBe(true); // it held until planeY reached the commanded row
+    expect(h.command).toBeNull(); // cleared once the row was reached
+    expect(h.planeY).toBe(NEAR); // snapped onto the exact row
     expect(h.x).toBe(300); // never walked (x was already there)
+  });
+
+  it("a diagonal move is NOT faster than an axis-aligned one (normalized 2D speed)", () => {
+    // The per-step displacement magnitude never exceeds one frame's walk budget. The OLD dishonest
+    // model moved x at huntSpeed AND y at ySpeed at once → up to sqrt(175²+120²) ≈ 212 > 175.
+    const s = initGameState(5, soloSave("swordsman", 3));
+    s.spawnPaused = true;
+    s.enemies = [];
+    const h = s.heroes[0];
+    h.x = 100;
+    h.planeY = FAR;
+    const budget = CONFIG.hunt.huntSpeed * FIXED_DT;
+    step(s, { moveTo: { x: 800, y: NEAR } });
+    let px = h.x;
+    let py = h.planeY!;
+    for (let i = 0; i < 60 && h.command; i++) {
+      step(s, {});
+      const disp = Math.hypot(h.x - px, h.planeY! - py);
+      expect(disp).toBeLessThanOrEqual(budget + 1e-9);
+      px = h.x;
+      py = h.planeY!;
+    }
   });
 
   it("is deterministic across two runs with an x/y command active", () => {

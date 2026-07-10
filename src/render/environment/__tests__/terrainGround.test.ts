@@ -147,8 +147,8 @@ describe("BiomeScene — flat zones and the terrain-off path render today's rect
   });
 });
 
-describe("BiomeScene — a genuinely non-flat farm zone gets the polygon + backing strip", () => {
-  it("adds exactly one extra top-level child (strip+polygon replace the single rect) and survives update()", () => {
+describe("BiomeScene — a genuinely non-flat farm zone overlays the terrain polygon on the base fill", () => {
+  it("adds exactly one extra top-level child (base fill + polygon vs the base fill alone) and survives update()", () => {
     const zone = findFarmZoneWithPreset("map1", "hills");
     const biome = biomeForZone(zone);
     const state = initGameState(1);

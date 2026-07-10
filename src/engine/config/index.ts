@@ -669,10 +669,22 @@ export const CONFIG = {
   // panel (main/daily quest claims) — player-only, never botted, same as the smith. x=400
   // sits clear of pahpu (230±42 -> 188-272) and lungdueng (560±42 -> 518-602), and clear
   // of the ambient town-llama patch (~690).
+  //
+  // FREE-FIELD (Phase 3, `docs/world-arc-freefield-v1.md` §3): each anchor also carries an
+  // explicit ground-plane depth row `planeY` (world-y OFFSET, same axis as `Entity.planeY` —
+  // 0 = on the town ground line). NPCs are PLACED, not hash-scattered (unlike enemies): these
+  // are deterministic design constants, so every client agrees without any RNG draw. `planeY: 0`
+  // makes the pre-free-field render placement EXPLICIT (render previously pinned NPCs to the
+  // town `GROUND_Y`) and engine-owned, so render Phase 2+ reads one truth for NPC depth instead
+  // of hardcoding the ground line. Zero-visual-change today; a per-NPC depth STAGGER (standing a
+  // town row upstage of the hero's front interaction lane) is a later render/owner taste pass —
+  // change these numbers, not the interaction geometry. INTERACTION stays x-ONLY (`npcInRange`):
+  // `planeY` never gates tap-to-talk / the bot walk, so walk-order trips fire at the same x
+  // distances (IRON invariant — y never gates gameplay, mirrors combat).
   townNpcs: [
-    { id: "npc:pahpu", x: 230, radius: 42 },
-    { id: "npc:lungdueng", x: 560, radius: 42 },
-    { id: "npc:elder", x: 400, radius: 42 },
+    { id: "npc:pahpu", x: 230, radius: 42, planeY: 0 },
+    { id: "npc:lungdueng", x: 560, radius: 42, planeY: 0 },
+    { id: "npc:elder", x: 400, radius: 42, planeY: 0 },
   ],
 
   // ---- party / hero base ----
@@ -938,10 +950,21 @@ export const CONFIG = {
   // in place of recomputing depth, and the R4-R5 x/y milestone will move entities along.
   // A parity test pins these to the render constants — keep them in lock-step, never diverge.
   plane: {
-    /** World-y offset at depth d=0 (far/upstage row, raised toward the horizon). ≡ DEPTH_OFFSET_FAR. */
-    bandFar: -24,
-    /** World-y offset at depth d=1 (near/downstage row, dropped toward the camera). ≡ DEPTH_OFFSET_NEAR. */
-    bandNear: 40,
+    /**
+     * World-y offset at depth d=0 (far/upstage row, raised toward the horizon). ≡ DEPTH_OFFSET_FAR.
+     *
+     * FREE-FIELD (Phase 1): widened from −24 → −64. The old ±(−24..40) "depth band" was a narrow
+     * cosmetic strip; the free-field 2.5D model turns it into a TALL per-map play FIELD the hero
+     * genuinely explores in x AND y (see `fieldRect`, `docs/world-arc-freefield-v1.md` §3). Kept
+     * bit-exact to `render/worldDepth/depthBand.DEPTH_OFFSET_FAR` (parity-tested) — sync both sides.
+     */
+    bandFar: -64,
+    /**
+     * World-y offset at depth d=1 (near/downstage row, dropped toward the camera). ≡ DEPTH_OFFSET_NEAR.
+     * FREE-FIELD (Phase 1): widened 40 → 56 (field height 120). Worst-case feet = groundY(232) +
+     * terrain dip(≤10) + 56 = 298 < WORLD_HEIGHT 312 (Phase 2 grew render headroom 300->312 for shadow room).
+     */
+    bandNear: 56,
     /** Party depth-fan band endpoints (a party spreads slot 0..last across [min,max]). ≡ HERO_BAND_MIN/MAX. */
     heroBandMin: 0.45,
     heroBandMax: 0.85,

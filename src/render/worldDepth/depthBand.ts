@@ -13,17 +13,22 @@
  * All three are strictly monotonic in d (test-enforced) so the band never
  * "folds": if A is nearer than B it is ALWAYS lower, bigger, and in front.
  * Offsets share the plan's headroom budget with terrain: worst-case feet
- * ≈ GROUND_Y + 10 (terrain) + 40 (near offset) = 282 < WORLD_HEIGHT 300.
+ * ≈ GROUND_Y + 10 (terrain) + 56 (near offset) = 298 < WORLD_HEIGHT 312
+ * (Phase 2 grew it 300 → 312 so contact shadows below these feet don't clip).
  */
 
 // ---------------------------------------------------------------------------
 // Knobs — the band's screen-space envelope.
 // ---------------------------------------------------------------------------
 
-/** y offset at d=0 (far row: raised toward the horizon). */
-export const DEPTH_OFFSET_FAR = -24;
-/** y offset at d=1 (near row: dropped toward the camera). */
-export const DEPTH_OFFSET_NEAR = 40;
+/**
+ * y offset at d=0 (far row: raised toward the horizon).
+ * FREE-FIELD (Phase 1): −24 → −64 — the depth band becomes a tall per-map play FIELD. Kept
+ * bit-exact to engine `CONFIG.plane.bandFar` (parity-tested in `plane.test.ts`) — sync both.
+ */
+export const DEPTH_OFFSET_FAR = -64;
+/** y offset at d=1 (near row: dropped toward the camera). FREE-FIELD (Phase 1): 40 → 56. ≡ `CONFIG.plane.bandNear`. */
+export const DEPTH_OFFSET_NEAR = 56;
 /**
  * Root scale at d=0 (far / upstage).
  *

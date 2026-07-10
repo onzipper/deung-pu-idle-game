@@ -16,11 +16,18 @@ import { zoneAt } from "@/engine/systems/world";
 import type { TownNpcId } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
 
-/** A resolved town-NPC anchor: id + world-x feet position + interaction half-width. */
+/**
+ * A resolved town-NPC anchor: id + world-x feet position + interaction half-width + the
+ * deterministic ground-plane depth row `planeY` (world-y OFFSET, same axis as `Entity.planeY`;
+ * FREE-FIELD Phase 3). NPCs are PLACED (design constants in `CONFIG.townNpcs`), never
+ * hash-scattered — so all clients agree with no RNG draw. `planeY` is presentation depth ONLY:
+ * `npcInRange` gates on `x` alone, so it never affects tap-to-talk or the bot walk.
+ */
 export interface TownNpcAnchor {
   id: TownNpcId;
   x: number;
   radius: number;
+  planeY: number;
 }
 
 /** The config anchor for `id` (throws on an unknown id — the union is closed). */

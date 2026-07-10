@@ -30,8 +30,8 @@ import { hashUnit, type Zone } from "@/engine";
  * Invert `planeY` (a world-y OFFSET, the output of the engine's `planeYForDepth`
  * / render's `depthOffsetY`) back to its depth d ∈ [0,1]. Bit-exact round-trip
  * of `depthOffsetY` for every hash/party/solo value the engine produces (the
- * band width 64 is a power of two, so the lerp is losslessly invertible —
- * verified exhaustively), so `depthOffsetY(planeToDepth(planeY)) === planeY` and
+ * free-field band width 120 was re-verified exhaustively lossless — every FNV
+ * hash row satisfies `depthOffsetY(planeToDepth(planeY)) === planeY`), so
  * `depthScale`/`depthZIndex` reproduce the pre-cutover render-owned values
  * EXACTLY. This is THE depth source at the seam (R4 Wave C0): engine `planeY`
  * flows through the SAME footY/scale/zIndex pipeline, no dual path.
@@ -43,7 +43,7 @@ export function planeToDepth(planeY: number): number {
 /**
  * The depth d where depthOffsetY(d) === 0 (no vertical lift). depthOffsetY is
  * linear FAR→NEAR, so solve DEPTH_OFFSET_FAR + (NEAR−FAR)·d = 0. With the
- * shipped band knobs (−24, 40) this is 24/64 = 0.375 (pinned by test). Returned
+ * free-field band knobs (−64, 56) this is 64/120 = 0.5333… (pinned by test). Returned
  * by `depthOf` when the depth flag is OFF so any consumer that (wrongly) feeds
  * it back through depthOffsetY still gets 0.
  */

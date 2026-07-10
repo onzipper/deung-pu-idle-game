@@ -14,8 +14,18 @@ import { CONFIG } from "@/engine/config";
 /** Logical world width in engine units (spawnX=860 plus a small margin). */
 export const WORLD_WIDTH = 900;
 
-/** Logical world height in engine units (ground + headroom above/below it). */
-export const WORLD_HEIGHT = 300;
+/**
+ * Logical world height in engine units (ground + headroom above/below it).
+ *
+ * FREE-FIELD (Phase 2): grown 300 → 312. The taller depth field pushes worst-case
+ * feet to `GROUND_Y(232) + terrain dip(≤10) + bandNear(56) = 298`, and contact
+ * shadows draw a few px BELOW the feet — 2px of headroom clipped them at the near
+ * edge. This is decorative render-side headroom only (engine never reads
+ * WORLD_HEIGHT; the world's own aspect is now 900:312, feeding the letterbox fit +
+ * visible-rect + camera clip + `filterArea`, all aspect-relative so the 3:1-style
+ * equivalence property holds at the new aspect — see `fullscreenLayout.test.ts`).
+ */
+export const WORLD_HEIGHT = 312;
 
 /** Ground line, straight from engine config — the single source of truth. */
 export const GROUND_Y = CONFIG.layout.groundY;

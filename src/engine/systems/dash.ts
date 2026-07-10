@@ -15,15 +15,10 @@
 
 import { CONFIG } from "@/engine/config";
 import { clamp } from "@/engine/core/math";
+import { fieldRect } from "@/engine/systems/plane";
+import { clampToWalkable } from "@/engine/systems/walkable";
 import type { Hero } from "@/engine/entities";
 import type { GameState } from "@/engine/state";
-
-/** The current zone's walkable right edge (mirrors combat.ts `fieldMaxX` — the dash lands
- *  on the field, never off-screen). Kept local so dash stays a standalone primitive. */
-function fieldMaxX(state: GameState): number {
-  const map = CONFIG.world.maps.find((m) => m.id === state.location.mapId);
-  return map?.fieldWidth ?? 900;
-}
 
 /**
  * Blink `hero` to land adjacent to a target at world-x `targetX`, on the FAR side (dash
@@ -44,31 +39,39 @@ export function dashHeroTo(
   targetPlaneY?: number,
 ): number {
   const nj = CONFIG.ninja;
-  const hunt = CONFIG.hunt;
   const fromX = hero.x;
+  // FREE-FIELD (Phase 1): the walkable landing bounds come from the shared `fieldRect` seam.
+  const field = fieldRect(state.location.mapId);
   // Land on the far side of the target (blink through), so a follow-up strike sits in range.
   const fromLeft = fromX <= targetX;
   const desired = targetX + (fromLeft ? nj.dashLandGap : -nj.dashLandGap);
   // Cap the hop (short blink for skill 1; unbounded for the field-wide chain/ult).
   const hop = clamp(desired - fromX, -maxReach, maxReach);
-  // Keep the landing on the walkable field (never blink off-screen or into the spawn edge).
-  const toX = clamp(fromX + hop, hunt.heroMinX, fieldMaxX(state) - hunt.fieldRightMargin);
+  const landX = fromX + hop;
 
-  hero.x = toX;
-  // R4 Wave C2 — OPTIONAL depth-row landing. The CALLER passes the target's `planeY` ONLY
-  // when the dash target is a `state.enemies` member (see `enemyDashPlaneY`); a boss /
-  // world-boss / synthetic-x target passes nothing, so the hero's `planeY` is UNCHANGED
-  // (C1 rule: never adopt the boss lane — bosses render on the static neutral path). When
-  // present it is CLAMPED to the band (owner reminder #1: never trust the caller) and only
-  // written when the hero actually has a `planeY` (hand-built literals may omit it). Purely
-  // cosmetic — planeY gates no combat. The x math above is UNCHANGED (byte-identical dash x).
+  // R4 Wave C2 / Phase 5 — OPTIONAL depth-row landing. The CALLER passes the target's `planeY`
+  // ONLY when the dash target is a `state.enemies` member (see `enemyDashPlaneY`); a boss /
+  // world-boss / synthetic-x target passes nothing, so the hero's `planeY` is UNCHANGED (C1 rule:
+  // never adopt the boss lane — bosses render on the static neutral path). When present AND the
+  // hero has a `planeY`, the landing resolves as a 2D point through the WALKABLE outline (nearest
+  // reachable — never off-field; owner reminder #1: never trust the caller). Otherwise only x is
+  // clamped to the field rect (planeY untouched). Purely cosmetic — planeY gates no combat. With
+  // no per-map outline both paths are BYTE-IDENTICAL to the pre-phase-5 field-rect clamp.
+  let toX: number;
   if (
     typeof targetPlaneY === "number" &&
     Number.isFinite(targetPlaneY) &&
     typeof hero.planeY === "number"
   ) {
-    hero.planeY = clamp(targetPlaneY, CONFIG.plane.bandFar, CONFIG.plane.bandNear);
+    const landed = clampToWalkable(state.location.mapId, landX, targetPlaneY);
+    toX = landed.x;
+    hero.planeY = landed.y;
+  } else {
+    // Keep the landing on the walkable field (never blink off-screen or into the spawn edge).
+    toX = clamp(landX, field.minX, field.maxX);
   }
+
+  hero.x = toX;
   state.events.push({ type: "heroDashed", heroId: hero.id, fromX, toX });
   return toX;
 }

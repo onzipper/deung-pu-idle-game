@@ -294,7 +294,7 @@ describe("M8 lockstep — a slot shadowed mid-run stays hash-identical across cl
   });
 });
 
-describe("R4 Wave C2 — moveTo{x,y} rides the relay as an opaque payload", () => {
+describe("R4 Wave C2 → free-field 2D — moveTo{x,y} rides the relay as an opaque payload", () => {
   const NEAR = CONFIG.plane.bandNear;
   const FAR = CONFIG.plane.bandFar;
 
@@ -327,10 +327,11 @@ describe("R4 Wave C2 — moveTo{x,y} rides the relay as an opaque payload", () =
     expect(wiredClient.state.heroes[1].command).toEqual({ kind: "move", x: 480, y: FAR });
   });
 
-  it("2-client relay with MIXED x-only and x/y lanes stays byte-identical every turn", () => {
-    // slot 0 issues x/y moves (alternating band edges), slot 1 issues x-only moves. runRelay
-    // asserts per-turn hash equality across both clients — the x/y field flows through the
-    // turn machinery deterministically, and the x-only lane is unaffected by the new field.
+  it("2-client relay with MIXED x-only and honest-2D x/y lanes stays byte-identical every turn", () => {
+    // slot 0 issues x/y moves that alternate BOTH the x target AND the band edge — long diagonals
+    // that exercise the free-field honest-2D step (normalized `dhypot` direction). slot 1 issues
+    // x-only moves. runRelay asserts per-turn hash equality across both clients — the 2D step is
+    // deterministic (dhypot uses only IEEE sqrt), and the x-only lane is unaffected by the field.
     const script = (slot: number, turn: number): FrameInput | null => {
       if (turn < 3) return null;
       if (slot === 0 && turn % 20 === 0)

@@ -4,16 +4,18 @@
 > round is superseded, append the old block to `docs/history/claude-status-log.md` —
 > never let this file grow into a log. Target: short enough to read every session.
 
-_Last updated: 2026-07-11 (World Arc v1 + free-field direction approved conceptually; old issue stack closed; big-epic workflow adopted)._ 
+_Last updated: 2026-07-11 (free-field epic PR #81 implemented — phases 1–6 complete, Draft awaiting owner playtest)._ 
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → R2.5–R2.9 ✅ → R3 presence คนจริง ✅ (merged + relay deployed) → R4 engine x,y CODE-COMPLETE (substrate KEPT) → R4.5 Wave 1 depth language ✅ (owner-passed, KEPT) → **ACTIVE: World Arc v1 + Free-field 2.5D** — spec `docs/world-arc-freefield-v1.md`, Draft PR #80 (**owner approved the direction conceptually 2026-07-11; NOT merged yet**). Later phases (free-field slices, 2D combat targeting flip, shared elites) live INSIDE the coming epic plan, not as standalone issues.
-- **Workflow reset (owner 2026-07-11)**: the old issue stack is **closed/superseded (not planned)**; future work must be opened **only as a large Epic or a large implementation PR** with phases inside it — no micro-task issues, no issue ping-pong.
-- **Branches**: `main` = R3 block (PR #63). `develop` = R4.5 Wave 1.2 + AI role memory. `r45/world-arc-freefield-v1` = new-direction spec (Draft PR #80).
-- **Suite**: 2461 tests green at Wave 1.2 close-out, tsc/eslint clean. Patch notes current: 2026-07-10e (R3 presence).
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → R2.5–R2.9 ✅ → R3 presence คนจริง ✅ (merged + relay deployed) → R4 engine x,y CODE-COMPLETE (substrate KEPT) → R4.5 Wave 1 depth language ✅ (owner-passed, KEPT) → World Arc v1 + Free-field 2.5D spec ✅ (PR #80 merged, owner-approved) → **ACTIVE: free-field implementation epic — Draft PR #81 (`r45/freefield-epic-v1`), phases 1–6 ALL implemented, awaiting owner playtest of the playable slice**. Later: 2D combat targeting flip + shared elites as later epic phases.
+- **Workflow (owner 2026-07-11)**: old issue stack closed/superseded; work opens **only as a large Epic or large implementation PR** with phases inside — no micro-task issues.
+- **Branches**: `main` = R3 block (PR #63). `develop` = spec merge (PR #80). `r45/freefield-epic-v1` = the epic (Draft PR #81).
+- **Suite**: **2510 tests green** at epic close-out (49 new), tsc/eslint clean, production build passes. Patch notes current: 2026-07-10e (R3 presence — epic patch notes come at merge time).
 
 ## Latest work
+
+- **Free-field epic implemented (Draft PR #81, 2026-07-11)** — the playable vertical slice of `docs/world-arc-freefield-v1.md`, 6 phases in one big PR: **P1 engine foundation** (`fieldRect(mapId)` seam; band −24/40 → **−64/56** = field height 120, render constants parity-synced; manual `moveTo {x,y}` = honest straight-line 2D at huntSpeed via `dhypot`, diagonal never faster, both axes snap at one arriveEps gate; every intake clamps through the field rect) · **P2 field board** (WORLD_HEIGHT 300→312 decorative headroom; new `HORIZON_Y` — sky/silhouettes moved up so far-row actors stand on ground; opaque ground base fill covers the full field every zone; tap-anywhere spans the field via the formula-driven seams; ping at tapped row) · **P3 placement** (enemy scatter fills the widened band deterministically; NPCs get engine-owned `planeY`; interactions stay x-only, pinned) · **P4 World Arc scaffolding** (`config/worldArc.ts` dormant 10-area table; 1:1 map1–6 mapping documented for owner review; asura outside the arc) · **P5 walkable v1** (optional per-map polygon + nearest-reachable clamp — never silent-fail; squared-distance math, no navmesh; no live map uses one yet) · **P6 field props foundation** (`fieldProps.ts` props in the shared foot-sort domain; combat feedback can never be hidden — layer order + non-tappable + interleave all test-pinned; blocker data hook dormant). **IRON invariant intact throughout — y never gates combat; sim gates unmoved (verified in-suite + two independent agent sim runs). SAVE_VERSION 20 untouched; relay/DB untouched.**
 
 - **DIRECTION RESET — World Arc v1 + Free-field 2.5D** (owner 2026-07-10, approved conceptually 2026-07-11): the x-axis-first field model and the Map2 "Greenmill Hamlet" design are retired — hard reset, not a patch. New spec: `docs/world-arc-freefield-v1.md` — world = 10 areas (Capital Outskirts → Farm Border Road → Old Forest Path → Moonshade Grove → Forgotten Shrine → Hollow Ravine → Crystal Fault → Ashen Gate → Otherworld Verge → Rift Sanctum); field = free-field 2.5D (click/tap any reachable point, real x/y positioning, road = visual guide, depth from foot position, walkable data phased in later). KEPT: projection C + Wave 1 depth language (owner-passed) + Wave 1.2 shared sort domain + all R4 x/y plumbing. SUPERSEDED (factual status): old Wave 2 PRs #73/#74/#76 **closed**; #75 merged into the stack branch only, never into develop; the whole old planning-issue stack **closed as superseded/not planned**. Wave 2B WIP preserved in a labeled stash on `r45/issue-69-wave2b-ground`. Decision index, map-direction, ROADMAP (M8.15), docs README synced.
 - **Owner eye-test verdicts (2026-07-10)**: R4.5 Wave 1 depth/scale/contact-shadow direction **passed**. R4 x/y mobile experience not accepted yet — there is no approved mobile gameplay/HUD design; that design question now folds into the future epic plan (its old tracking issue is closed) and does not block desktop work.
@@ -26,9 +28,9 @@ _Last updated: 2026-07-11 (World Arc v1 + free-field direction approved conceptu
 
 ## Blockers / owed
 
-1. **PR #80 merge timing** — direction approved conceptually (2026-07-11); PR stays **Draft, docs-only** until the owner says merge.
-2. **Web deploy from `main`** — R3 block merged (PR #63); relay deployed ✅; **NO `prisma db push`**. Post-deploy spot check: bot-off default บน prod · 2 identities เห็นกัน ~8Hz · tap profile · relay-down degrade เงียบ.
-3. **Free-field implementation epic** — not opened yet; when the owner asks, open ONE large Epic / large implementation PR carrying slices 1–6 as internal phases (see `docs/world-arc-freefield-v1.md`).
+1. **Owner playtest of PR #81** (Draft) — the playable slice: click/tap anywhere → hero walks in real x/y → depth/shadow/sort read correctly → combat unchanged. Desktop first; check day/night, town, boss rooms, ghosts. Merge only on owner confirm.
+2. **Owner decision queued in PR #81**: arc→map mapping default is 1:1 (map1–6 → areas 1–6); open question — map6's hell-city theme reads closer to area 8 Ashen Gate (pure data swap either way, nothing reads it yet).
+3. **Web deploy from `main`** — R3 block merged (PR #63); relay deployed ✅; **NO `prisma db push`**. Post-deploy spot check: bot-off default บน prod · 2 identities เห็นกัน ~8Hz · tap profile · relay-down degrade เงียบ.
 
 ## Owner decisions affecting immediate work
 
@@ -48,7 +50,7 @@ _Last updated: 2026-07-11 (World Arc v1 + free-field direction approved conceptu
 
 ## Next recommended work
 
-- Owner: decide merge timing for Draft PR #80 (spec/docs only).
-- On owner go: open the **free-field implementation Epic / big PR plan** — slices 1–6 as phases inside ONE plan. Phase 1 (engine field-rect foundation) + Phase 2 (field board + tap-anywhere) = the smallest owner-testable vertical slice.
+- Owner: playtest the PR #81 slice; answer the arc-mapping question; merge confirm when it feels right.
+- After merge: patch notes for the free-field slice (i18n th+en) + a real shaped walkable polygon on one map (design-driven) + per-NPC depth stagger (taste pass).
 - Area visual passes wait on per-area owner references (attach in `docs/references/`, link from `docs/ui-reference-map.md`).
-- 2D combat targeting flip = a later phase inside the epic (crit design question gets answered there), after free-field phases 1–3.
+- 2D combat targeting flip = a later epic phase (crit design question gets answered there) — substrate is now fully in place.

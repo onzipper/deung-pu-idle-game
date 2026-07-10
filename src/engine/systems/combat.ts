@@ -40,17 +40,11 @@ import {
   nearestTarget,
   nearestWithin,
 } from "@/engine/systems/targeting";
-import { heroPlaneY, stepPlaneY } from "@/engine/systems/plane";
+import { heroPlaneY, stepPlaneY, fieldRect } from "@/engine/systems/plane";
 import type { Hero, Enemy, Boss, Projectile, CombatTarget, ManualCommand } from "@/engine/entities";
 import type { GameState, HitSource } from "@/engine/state";
 
 const L = CONFIG.layout;
-
-/** The current zone's walkable right edge (M6 "สนามล่ามอน" hero clamp). */
-function fieldMaxX(state: GameState): number {
-  const map = CONFIG.world.maps.find((m) => m.id === state.location.mapId);
-  return map?.fieldWidth ?? 900;
-}
 
 /**
  * Nearest alive target to `x` for the hero auto-hunt, tie-broken by the LOWER id
@@ -364,8 +358,11 @@ export function updateHeroes(state: GameState): void {
   // (boss forced-combat overrides them, exactly like the AUTO-off toggle).
   const bossPhase = state.phase === "boss";
   const commandTargets = bossPhase ? [] : getTargets(state);
-  const minX = hunt.heroMinX;
-  const maxX = fieldMaxX(state) - hunt.fieldRightMargin;
+  // FREE-FIELD (Phase 1): the walkable field bounds come from the shared `fieldRect` seam
+  // (same values as the old local `heroMinX` / `fieldWidth − fieldRightMargin` — byte-identical).
+  const field = fieldRect(state.location.mapId);
+  const minX = field.minX;
+  const maxX = field.maxX;
 
   // TARGET-SPREAD + BOSS DOG-PILE (M8 "party feel pack", owner "แต่มีบอส ทุกคนต้องรุม"). Only a
   // MULTI-HERO cohort spreads — solo keeps plain `huntTarget` (byte-identical). A boss ALWAYS
@@ -413,35 +410,67 @@ export function updateHeroes(state: GameState): void {
     // the renderer faces the movement direction instead. See `Hero.aimX`.
     let aimTarget: CombatTarget | null = null;
     let manualActive = false;
+    // FREE-FIELD (Phase 1): true when THIS step ran an honest 2D manual move (it already wrote
+    // `planeY`), so the cosmetic y-steering block below skips this hero — no double y move.
+    let manual2D = false;
     if (!bossPhase && h.command) {
       const cmd: ManualCommand = h.command;
       if (cmd.kind === "move") {
-        // Walk to x, IGNORING huntable targets (no attacking; aggro is unchanged —
-        // engaged mobs keep hitting the hero). Arrival COMPLETES the command; this step
-        // then falls through to auto-hunt (AUTO on) / idle.
+        // Walk to the commanded point, IGNORING huntable targets (no attacking; aggro is
+        // unchanged — engaged mobs keep hitting the hero). Arrival COMPLETES the command; this
+        // step then falls through to auto-hunt (AUTO on) / idle.
         //
-        // R4 Wave C2 — a move command may carry a depth-row `y`. It then arrives only when
-        // BOTH x (`arriveEps`) AND the depth-row y (`plane.yArriveEps`) have landed; while
-        // x is done but y is still easing the command PERSISTS (manualActive holds the hero
-        // at cmd.x + suppresses auto-hunt) and the y-steering block below pulls planeY to
-        // cmd.y. An x-only move (`cmd.y` undefined, or a hand-built hero with no planeY) is
-        // BYTE-IDENTICAL to pre-C2 — yArrived is trivially true, so this reduces to the old
-        // x-only arrival test. The x movement math + move-or-attack ordering are UNCHANGED.
-        const xArrived = Math.abs(h.x - cmd.x) <= CONFIG.manual.arriveEps;
-        const yArrived =
-          cmd.y === undefined ||
-          typeof h.planeY !== "number" ||
-          Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
-        if (xArrived && yArrived) {
-          // R4.5 Wave 1.1 — LATCH the tapped depth row so the hero HOLDS it after the command
-          // clears (idle steering below uses `planeYHold ?? home`). An x-only move (`cmd.y`
-          // undefined = NPC / gate / legacy tap) CLEARS the hold → home-row return, byte-for-byte
-          // pre-Wave-1.1. `cmd.y` was band-clamped at intake (`applyManualCommand`).
-          h.planeYHold = cmd.y;
-          h.command = null;
+        // FREE-FIELD (Phase 1) — HONEST 2D. A move command carrying a depth-row `y` (and a hero
+        // that HAS a `planeY`) walks the STRAIGHT LINE to (x, y) at the hero's walk speed: the
+        // per-frame budget `huntSpeed × dt` is split between the axes by the normalized direction
+        // (via `dhypot`), so a diagonal is NOT faster than an axis-aligned move and BOTH axes
+        // arrive TOGETHER. This REPLACES the old dishonest model (x at huntSpeed + y easing
+        // independently at ySpeed). Arrival unifies to ONE distance gate: complete when the
+        // remaining straight-line distance is within `manual.arriveEps` — SNAPPING both axes onto
+        // the exact tapped (x, y) so the hero lands precisely on the point (the tapped row is
+        // latched as `planeYHold`). The step budget (2.9px) < arriveEps (6), so the snap is a
+        // sub-eps settle, imperceptible. Sets `manual2D` so the y-steering block skips this hero.
+        //
+        // An x-ONLY move (`cmd.y` undefined) OR a hand-built hero WITHOUT a `planeY` takes the
+        // legacy path below, BYTE-IDENTICAL to pre-Phase-1 (same arrival test, same x math, same
+        // home-row/hold y-steering). The x-movement math + move-or-attack ordering are UNCHANGED.
+        const cy = cmd.y;
+        const py = h.planeY;
+        if (cy !== undefined && typeof py === "number") {
+          const dx = cmd.x - h.x;
+          const dy = cy - py;
+          const dist = dhypot(dx, dy);
+          if (dist <= CONFIG.manual.arriveEps) {
+            // Within one arrive-eps of the point → SNAP both axes + latch the tapped row + finish.
+            h.x = cmd.x;
+            h.planeY = cy;
+            h.planeYHold = cy;
+            h.command = null;
+            manual2D = true; // planeY already exact — skip the y-steering re-nudge this step
+          } else {
+            const s = (hunt.huntSpeed * FIXED_DT) / dist; // fraction of the remaining line this frame
+            goalX = h.x + dx * s; // honest x landing (|Δ| ≤ the per-frame x cap → the stepper applies it exactly)
+            h.planeY = py + dy * s; // honest y landing (y-steering skipped via manual2D)
+            manualActive = true;
+            manual2D = true;
+          }
         } else {
-          goalX = cmd.x;
-          manualActive = true;
+          // R4 Wave C2 legacy x-only / no-planeY path. `yArrived` is trivially true here (cmd.y
+          // undefined OR planeY untracked), so this reduces to the old x-only arrival test.
+          const xArrived = Math.abs(h.x - cmd.x) <= CONFIG.manual.arriveEps;
+          const yArrived =
+            cmd.y === undefined ||
+            typeof h.planeY !== "number" ||
+            Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
+          if (xArrived && yArrived) {
+            // R4.5 Wave 1.1 — an x-only move (`cmd.y` undefined = NPC / gate / legacy tap) CLEARS
+            // the hold → home-row return, byte-for-byte pre-Wave-1.1.
+            h.planeYHold = cmd.y;
+            h.command = null;
+          } else {
+            goalX = cmd.x;
+            manualActive = true;
+          }
         }
       } else {
         // Attack a specific target: close to range + fight it until it dies (target
@@ -614,7 +643,9 @@ export function updateHeroes(state: GameState): void {
     // `planeY`, so y can never gate an attack (targeting stays x-only on the ground line). Guarded
     // on `typeof h.planeY === "number"` so a hand-built Hero literal WITHOUT a planeY (outer-layer
     // test fixture) stays untouched → byte-identical stateHash (planeY folds present-only).
-    if (typeof h.planeY === "number") {
+    if (typeof h.planeY === "number" && !manual2D) {
+      // FREE-FIELD (Phase 1): skipped when `manual2D` ran an honest 2D manual move this step (it
+      // already wrote `planeY` along the straight line) — running this would double-move y.
       // Steer toward an ENGAGED FARM MOB's row, else hold/return home. Excluded from steering:
       //  • the BOSS PHASE (stage/quest boss) and an engaged WORLD BOSS (`aimTarget.id === wbId`):
       //    bosses RENDER on the static DEPTH_NEUTRAL path, IGNORING their stamped near-row (+40),

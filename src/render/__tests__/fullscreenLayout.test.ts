@@ -18,11 +18,15 @@ import {
 } from "@/render/layout";
 import { createCamera, setViewW, updateCamera, type CameraTarget } from "@/render/worldDepth/camera";
 
-/** A representative spread of real-world screen aspects. */
+/** A representative spread of real-world screen aspects. `worldAspect` is the
+ *  world's OWN aspect (WORLD_WIDTH:WORLD_HEIGHT) — the byte-identical-to-
+ *  `computeWorldTransform` boundary (Phase 2 grew WORLD_HEIGHT so it's no longer
+ *  exactly 3:1; deriving it keeps the test from rotting on the next tweak). */
+const WORLD_ASPECT_H = (1800 * WORLD_HEIGHT) / WORLD_WIDTH;
 const ASPECTS: Record<string, { w: number; h: number }> = {
   "16:9 landscape": { w: 1920, h: 1080 },
   "9:16 portrait": { w: 1080, h: 1920 },
-  "3:1 (world's own aspect)": { w: 1800, h: 600 },
+  "world's own aspect": { w: 1800, h: WORLD_ASPECT_H },
   "ultrawide 21:9": { w: 2560, h: 1080 },
 };
 
@@ -70,10 +74,10 @@ describe.each(Object.entries(ASPECTS))("computeFullscreenTransform — %s", (_la
   });
 });
 
-describe("computeFullscreenTransform — exactly 3:1 (the world's own aspect)", () => {
+describe("computeFullscreenTransform — exactly the world's own aspect", () => {
   it("equals today's computeWorldTransform exactly (headroom=footroom=0, viewWorldW=WORLD_WIDTH)", () => {
     const w = 1800;
-    const h = 600; // 1800/600 = 3 = WORLD_WIDTH/WORLD_HEIGHT
+    const h = WORLD_ASPECT_H; // 1800/h === WORLD_WIDTH/WORLD_HEIGHT
     const t = computeFullscreenTransform(w, h);
     const legacy = computeWorldTransform(w, h);
     expect(t.scale).toBe(legacy.scale);
@@ -84,11 +88,11 @@ describe("computeFullscreenTransform — exactly 3:1 (the world's own aspect)", 
     expect(t.viewWorldW).toBeCloseTo(WORLD_WIDTH, 6);
   });
 
-  it("a narrower-than-3:1 (letterboxed-today) screen still has zero headroom/footroom", () => {
-    // width-bound already fits height exactly at 3:1; anything with MORE
-    // relative height (taller/narrower) is the portrait case covered above —
-    // this checks the boundary itself is stable under floating point.
-    const t = computeFullscreenTransform(900, 300);
+  it("a narrower-than-world-aspect (letterboxed-today) screen still has zero headroom/footroom", () => {
+    // width-bound already fits height exactly at the world's own aspect; anything
+    // with MORE relative height (taller/narrower) is the portrait case covered
+    // above — this checks the boundary itself is stable under floating point.
+    const t = computeFullscreenTransform(WORLD_WIDTH, WORLD_HEIGHT);
     expect(t.headroom).toBeCloseTo(0, 6);
     expect(t.footroom).toBeCloseTo(0, 6);
   });
@@ -124,8 +128,8 @@ describe("computeVisibleWorldRect — mask/filterArea extents", () => {
     expect(rect.height).toBeGreaterThan(0);
   });
 
-  it("at exactly 3:1 the rect collapses to the fixed BLEED_X/SKY_BLEED/GROUND_BLEED box", () => {
-    const rect = computeVisibleWorldRect(1800, 600);
+  it("at exactly the world's own aspect the rect collapses to the fixed BLEED_X/SKY_BLEED/GROUND_BLEED box", () => {
+    const rect = computeVisibleWorldRect(1800, WORLD_ASPECT_H);
     expect(rect.x).toBeCloseTo(-BLEED_X, 6);
     expect(rect.width).toBeCloseTo(WORLD_WIDTH + BLEED_X * 2, 6);
     expect(rect.y).toBeCloseTo(0, 6);
