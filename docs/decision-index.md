@@ -20,6 +20,7 @@ Locked owner + architecture decisions. **Do not re-propose anything marked Locke
 | Refine success-% shown to player | Locked (R2) | Single-sourced from `src/engine/config/refine.ts` for UI + server | `docs/ui-reference-map.md` |
 | Flat shop pricing (priceStageBase 1.0 — potions cost base forever) | Locked, with accepted debt | Owner call; late-game gold accumulates faster — event sinks planned, revisit before central marketplace | `docs/history/claude-status-log.md` |
 | Legendary (ตำราตำนาน) content never appears in patch notes | Locked | Discovery is fully in-game | owner 2026-07-09 |
+| Map2 = Greenmill Hamlet / Farm Border Road; zone-progression (a): zones 6-10 = hamlet/golden field -> broken cart road -> lantern bend -> forest mouth outer/deep | Locked (2026-07-10) | Owner confirmed on PR #73 vs the #79 Reference v1 board; option (b) full-composition-per-zone rejected | issue #79, PR #73, `docs/map-direction.md` |
 | Skill leveling (gold sink) + collections | Backlog (parked) | Owner parked; do not build uninvited | `docs/ui-reference-map.md` |
 | Guilds / pets / equipment sets / channels | On hold | Owner พัก | `docs/ui-reference-map.md` |
 

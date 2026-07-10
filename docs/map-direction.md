@@ -71,11 +71,12 @@ per `render/README.md`).
   **hamlet/farm → broken road → lantern bend → forest mouth.**
 - The main dirt road is the navigation anchor — readability first, always.
 
-### Zone-progression mapping (interpretation (a) — recommended, owner-confirmable)
+### Zone-progression mapping (interpretation (a) — OWNER-CONFIRMED 2026-07-10)
 
 The reference board draws ONE composed map; engine map2 is FIVE separate
 900-unit farm zones. The warm→mysterious progression spreads ACROSS the zones,
-matching the mob-level gradient:
+matching the mob-level gradient (owner confirmed (a) on PR #73; option (b)
+"full composition per zone" was rejected — do not re-propose):
 
 | Engine zone (stage) | Reference areas | Mood |
 |---|---|---|
