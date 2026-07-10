@@ -27,6 +27,16 @@ pnpm test src/engine/lockstep
 ```
 Determinism/hash-equality suites to never break: `src/engine/__tests__/determinism.test.ts`, `src/engine/__tests__/float-determinism-guard.test.ts`, `src/engine/lockstep/__tests__/lockstep.test.ts` (multi-client hash-equal over thousands of turns). Also run the canonical balance sim after any tunable/behavior change (see [economy.md](./economy.md)).
 
+## Depth plane / y at spawn (R4 Wave A)
+
+The engine owns each entity's **ground-plane depth row**: `Entity.planeY` (optional on `Hero`/`Enemy`/`Boss`), assigned once at spawn by `systems/plane.ts` and configured under `CONFIG.plane`. It is the world-y OFFSET (relative to the ground line; 0 = on the line) an entity sits at for its depth — a stateless id-hashed scatter (`hashUnit` → `planeYForDepth`) for mobs, the class formation row for a solo hero (party fans by lockstep slot), the near/downstage row for bosses.
+
+- **Provenance**: the band + hero rows are a VERBATIM port of `render/worldDepth/{depthBand,depthAssign}.ts` (the engine may not import render). `CONFIG.plane.bandFar/bandNear/heroBand*/formationDepth` mirror `DEPTH_OFFSET_FAR/NEAR` + `HERO_*_DEPTH`; a parity test in `plane.test.ts` pins the engine values. Keep the two in lock-step.
+- **Determinism**: pure FNV-1a of the entity id — never the wave RNG, never a wall-clock. Same id → same `planeY` on every client, so it is folded into `stateHash` (present-only) as a divergence canary.
+- **Wave A is behaviour-neutral**: `planeY` is UNUSED by combat/movement/targeting (combat stays x-based on the ground line) and by render placement (render still computes its own depth). The legacy `Entity.y` (the render torso-anchor that `hit`/`fastTravel` events carry) is untouched.
+- **No SAVE bump**: the live entity arrays are never persisted, so `planeY` is recomputed at spawn on every load (transient, like `command`/`aimX`). Proven in `plane.test.ts`.
+- **Wave B / R4-R5 handoff**: render will read `entity.planeY` in place of recomputing depth; the x/y milestone will MOVE entities along it (ease at `CONFIG.plane.ySpeed`, unused today). Cohort builders that stand up a >1-hero party should set `hero.planeY = heroPlaneY(cls, slot, size)` to reproduce render's party fan (`makeHero` defaults to the solo row).
+
 ## Known risks
 
 - Any change that touches ordering, RNG draw sites, or floating-point paths risks a **desync** between party lockstep clients — the hash-equality tests in `src/engine/lockstep/` are the guard; treat a failure here as a stop-everything bug, not a flaky test.

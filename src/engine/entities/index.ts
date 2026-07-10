@@ -513,6 +513,20 @@ export interface Hero {
   evadeCd: number;
   evadeHpMark: number;
   evadeMarkCd: number;
+  /**
+   * DEPTH-PLANE row (R4 Wave A "engine-owned deterministic y") — the world-y OFFSET (relative
+   * to the ground line, 0 = on the line) this hero stands at for its depth, assigned once at
+   * spawn by `systems/plane.heroPlaneY` (class formation row solo; party fans by lockstep slot).
+   * Ported from render's depth band so Wave-B render can READ this in place of recomputing its
+   * own depth; the R4-R5 x/y milestone will MOVE entities along it (eased at `CONFIG.plane.ySpeed`).
+   *
+   * Wave A: UNUSED by combat/movement/targeting and by render placement (behaviour-neutral). NEW
+   * deterministic sim state — folded into `stateHash` (present-only). TRANSIENT: NOT persisted
+   * (the live entity arrays never are), so it is recomputed at spawn on every load — NO SAVE bump.
+   * OPTIONAL on the type only so hand-built Hero literals in the outer layers stay valid; the
+   * factory (`makeHero`) always populates it.
+   */
+  planeY?: number;
 }
 
 export interface Enemy {
@@ -560,6 +574,14 @@ export interface Enemy {
    * ordinary mob (a plain mob is byte-identical to pre-endgame). Transient (never persisted).
    */
   elite?: boolean;
+  /**
+   * DEPTH-PLANE row (R4 Wave A) — the world-y OFFSET this mob sits at for its depth, a stable
+   * per-id scatter across the full band (`systems/plane.enemyPlaneY`), assigned at spawn. Same
+   * contract as `Hero.planeY`: ported from render's depth band, UNUSED this wave (behaviour-
+   * neutral), folded into `stateHash` (present-only), TRANSIENT (no persistence / no SAVE bump).
+   * OPTIONAL on the type so hand-built Enemy literals stay valid; `makeEnemy`/`makeBossAdd` set it.
+   */
+  planeY?: number;
 }
 
 /**
@@ -627,6 +649,14 @@ export interface Boss {
    * outer layers remain valid. Transient (the boss is never persisted).
    */
   variety?: BossVarietyState;
+  /**
+   * DEPTH-PLANE row (R4 Wave A) — the world-y OFFSET this boss stands at, a single fixed NEAR
+   * (downstage) row (`systems/plane.bossPlaneY`), matching render's frontmost boss draw. Same
+   * contract as `Hero.planeY`: ported from render's depth band, UNUSED this wave (behaviour-
+   * neutral), folded into `stateHash` (present-only), TRANSIENT (no persistence / no SAVE bump).
+   * OPTIONAL on the type so pre-existing boss literals stay valid; `makeBoss`/`makeWorldBoss` set it.
+   */
+  planeY?: number;
 }
 
 /**

@@ -24,10 +24,10 @@
  *   gold · goldEarned · materials · lootSalt · lootCounter
  *   traveling · fastTravelCast · autoHunt (the one global toggle a lane mutates)
  *   consumables (counts) · consumableCds (sorted)
- *   PER HERO (slot order): id/cls/x/y/hp/maxHp/cd/dead/reviveTimer/mana/maxMana/
+ *   PER HERO (slot order): id/cls/x/y/planeY/hp/maxHp/cd/dead/reviveTimer/mana/maxMana/
  *     atkBuff(mult,timer)/level/xp/tier/statPoints/stats(str,dex,int,vit)/skillCds/
  *     autoSlots/equipped(weapon,armor,refine)/command/config(all 7 fields)/shadowed
- *   enemies (array order): id/kind/hp/maxHp/x/y/atk/speed/size/behavior/range/cd/
+ *   enemies (array order): id/kind/hp/maxHp/x/y/planeY/atk/speed/size/behavior/range/cd/
  *     engageOffset/homeX/aggressive/aggroRadius/engaged
  *   boss (+variety mechanic timers) · projectiles (array order, all fields)
  *
@@ -111,6 +111,12 @@ function hashHero(h: number, hero: Hero): number {
   h = str(h, hero.cls);
   h = num(h, hero.x);
   h = num(h, hero.y);
+  // R4 Wave A depth-plane y (engine-owned deterministic y at spawn) — sim-relevant NEW state,
+  // folded present-only so a state WITHOUT it (hand-built literals) hashes byte-identically to
+  // pre-feature. Every factory-built hero HAS it; it is a pure fn of already-hashed state (id /
+  // slot / partySize), so lockstep clients always agree — folding it just makes the canary also
+  // catch a plane-math divergence.
+  if (typeof hero.planeY === "number") h = num(h, hero.planeY);
   h = num(h, hero.hp);
   h = num(h, hero.maxHp);
   h = num(h, hero.cd);
@@ -171,6 +177,8 @@ function hashEnemy(h: number, e: Enemy): number {
   h = num(h, e.maxHp);
   h = num(h, e.x);
   h = num(h, e.y);
+  // R4 Wave A depth-plane y (present-only, see hashHero) — every spawned mob has it.
+  if (typeof e.planeY === "number") h = num(h, e.planeY);
   h = num(h, e.atk);
   h = num(h, e.speed);
   h = num(h, e.size);
@@ -193,6 +201,8 @@ function hashBoss(h: number, b: Boss): number {
   h = num(h, b.id);
   h = num(h, b.x);
   h = num(h, b.y);
+  // R4 Wave A depth-plane y (present-only, see hashHero) — makeBoss/makeWorldBoss set it.
+  if (typeof b.planeY === "number") h = num(h, b.planeY);
   h = num(h, b.hp);
   h = num(h, b.maxHp);
   h = num(h, b.atk);

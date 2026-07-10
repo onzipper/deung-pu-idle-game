@@ -245,6 +245,14 @@
 - [x] **W5 Tap profile**: `GameRenderer.hitTestGhost` (sibling `hitTestNpc`, อ่าน renderer ghost list ไม่แตะ engine) ลำดับแตะ npc→มอน→ประตู→ghost→พื้น, แตะ ghost = zero `pendingInput` · `GhostProfileCard` (ModalPortal, view-only: ชื่อ/ไอคอนคลาส/ชื่อ tier, ไม่มีปุ่ม social)
 - [ ] **W6 Guard + owner playtest + deploy**: `ghostGuard.test.ts` ขยายพิสูจน์ inject `pa` + taps ⇒ hash เท่ากันทุกกรณี (in flight) · เจ้าของเล่นจริง 2 client (action pose อ่านง่าย/ไม่ล้ำ engine, tap-profile card feel) · **deploy: redeploy relay ก่อน (opcode `pa` ใหม่) แล้วค่อย web** — ไม่มี `prisma db push`
 
+## M8.13 — R4-R5 "เอนจิ้นแกน x,y" (never-downgrade zone; sim re-adjudicate เต็มรอบ)
+
+> เริ่มจากรากก่อน: เอนจิ้นเป็นเจ้าของแกน y (ระนาบความลึก) ก่อน แล้วค่อย render cutover + สกิลเรขาคณิต 2D ตามมา
+
+- [x] **Wave A — engine-owned deterministic y at spawn (#51)**: `Entity.planeY` ใหม่ (optional บน Hero/Enemy/Boss) เซ็ตตอน spawn ทุกจุด (hunt/world respawn, asura elite, boss, world boss, hero) ด้วย `systems/plane.ts` — id-hashed band scatter **port มาจาก render/worldDepth/{depthBand,depthAssign} เป๊ะ** (`CONFIG.plane`: bandFar -24/bandNear 40/formationDepth/heroBand*/ySpeed), fold เข้า `stateHash` (present-only, canary), **TRANSIENT — ไม่ persist → ไม่ bump SAVE_VERSION** (พิสูจน์ใน plane.test.ts). **Behaviour-neutral**: combat ยัง x-based, render ยังคิด depth เอง, `Entity.y` (torso anchor เดิม) ไม่แตะ · sim gates ไม่ขยับ
+- [ ] **Wave B — render cutover**: render อ่าน `entity.planeY` แทนการคิด depth เอง (drop `depthOf`/hashUnit ฝั่ง render) + cohort builder fan party ด้วย `heroPlaneY(cls, slot, size)` — flag ใน issue #51 return
+- [ ] **Wave C+ — 2D movement + สกิลเรขาคณิต + minimap** (never-downgrade; balance-sim re-adjudicate เต็มรอบ)
+
 ## M9 — Economy & Competition
 
 - [ ] ตลาดกลาง: ลงขาย/ซื้อด้วยเงินในเกม + atomic transaction + audit trail + anti-dupe
