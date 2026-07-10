@@ -1,8 +1,12 @@
 /**
  * Ghost-presence render layer (docs/ghost-presence-design.md §3.5). Draws OTHER online
- * players in my zone as walk/idle-only "ghosts" beneath my own hero — no combat pose,
- * no fx, no camera/timeDirector/audio, no hit-testing (they live in a display container
- * excluded from `hitTestPointer`, which only scans `state.enemies`/`worldBoss`).
+ * players in my zone as walk/idle-only "ghosts" — no combat pose, no fx, no camera/
+ * timeDirector/audio, no combat hit-testing. Since R4.5 Wave 1.2 (#69) ghost roots live
+ * in GameRenderer's SHARED `entities` container (as siblings of my hero/enemy roots) so a
+ * depth-ON world interleaves them by ground row instead of flatly stacking them under my
+ * party. They are still absent from `hitTestPointer`, which scans engine `state.enemies`/
+ * `worldBoss` (view-maps / state), NEVER the container's children — a ghost has no engine
+ * entity, so it can't be a combat target regardless of which container hosts its view.
  *
  * Reuses the real `HeroView`/`updateHeroView` rig by feeding it a synthesized display-
  * only stub (`HeroRenderModel`) per ghost — the walk cycle falls out for free from the
@@ -64,6 +68,21 @@ function actionToPose(a: GhostActionKind | undefined): GhostPose {
  *  comfortably past the rig's combat-aim deadband so the flip is decisive. */
 const FACING_AIM_REACH = 100;
 
+/**
+ * The fixed, strongly-backmost zIndex ghosts take when the depth band is OFF
+ * (R4.5 Wave 1.2 #69). Ghost roots now live in the SHARED `entities` container
+ * alongside my heroes/enemies (so a depth-ON world can interleave them by row),
+ * which means their sort key is meaningful against local actors even when depth
+ * is off. This value sits below every local-actor key used with the flag off —
+ * heroes/enemies `0`, town NPCs `-500`, the world boss `-10000` — so a flat
+ * world keeps the pre-#69 "ghosts draw under my whole party" z-order (previously
+ * guaranteed by a separate below-`entities` container). With depth ON, ghosts
+ * instead take `depthZIndex(d)` ∈ [0,1000] and interleave properly; the stage
+ * boss's `+10000` stays frontmost and the world boss's `-10000` stays behind the
+ * band, exactly as for local actors.
+ */
+const GHOST_FLAT_ZINDEX = -11000;
+
 /** One ghost to draw this frame. Structurally matches `GhostStore.GhostRenderItem` — kept
  *  as a LOCAL interface so `render/` takes no import from the app/ui layer (one-way flow).
  *  `facing`/`action`/`at` are present ONLY for a peer seen via the R3 `pa` stream; a plain
@@ -109,6 +128,15 @@ function stub(item: GhostDrawItem): HeroRenderModel {
 }
 
 export class GhostLayer {
+  /**
+   * The SHARED actor container (GameRenderer's `entities`), NOT a private sub-
+   * container of our own (R4.5 Wave 1.2 #69). Ghost roots are added as direct
+   * siblings of the hero/enemy roots so they all sort in ONE `sortableChildren`
+   * depth domain — a separate sub-container could only ever sort its ghosts
+   * among themselves, never interleaved with local actors. We own only the
+   * ghost views we add to it; `destroy()` removes just those, never the shared
+   * container itself (GameRenderer owns its lifecycle).
+   */
   private readonly container: Container;
   private readonly views = new Map<string, HeroView>();
   /** Per-ghost last PLAYED action counter (`pa.at`) — the edge-trigger memory: a pose
@@ -120,12 +148,17 @@ export class GhostLayer {
   private readonly worldFx: WorldFxContext | null;
 
   constructor(parent: Container, opts?: { worldFx?: WorldFxContext }) {
-    this.container = new Container();
-    // Depth-sort ghosts among themselves when the depth flag is on; off → every
-    // ghost gets the same neutral zIndex → stable sort keeps insertion order.
+    // `parent` IS the shared actor container (GameRenderer's `entities`) — ghost
+    // roots become direct siblings of the hero/enemy roots so they share ONE
+    // depth sort domain (#69). Do NOT wrap them in a private sub-container (that
+    // would sort ghosts only among themselves) and do NOT re-parent/offset them
+    // (the shared container is at identity, same as the old sub-container was —
+    // no double-applied pivot, known-traps #3). `sortableChildren` is idempotent
+    // here (GameRenderer already sets it on `entities`); kept so a bare-Container
+    // test construction still sorts.
+    this.container = parent;
     this.container.sortableChildren = true;
     this.worldFx = opts?.worldFx ?? null;
-    parent.addChild(this.container);
   }
 
   /** Rebuild the ghost display set for this frame. `dt` = the real render delta (drives
@@ -200,7 +233,15 @@ export class GhostLayer {
         );
         view.y = this.worldFx.footY(item.x, d);
         view.scale.set(this.worldFx.depthScaleOf(d));
-        view.zIndex = depthZIndex(d);
+        // Shared sort domain (#69): now that ghost roots are siblings of the
+        // local hero/enemy roots in `entities`, their zIndex is meaningful
+        // against those actors. Depth ON → `depthZIndex(d)` (interleave near-
+        // over-far with heroes/enemies, matching GameRenderer.placeActor's own
+        // key). Depth OFF → a fixed backmost key so a flat world keeps ghosts
+        // behind my whole party, exactly like the pre-#69 separate-container
+        // z-order (see `GHOST_FLAT_ZINDEX`). `depthEnabled()` is read off the
+        // same seam that drives `depthOf`, so the two can't disagree.
+        view.zIndex = this.worldFx.depthEnabled() ? depthZIndex(d) : GHOST_FLAT_ZINDEX;
       }
     }
     // Sweep ghosts that vanished from the list.
@@ -220,7 +261,11 @@ export class GhostLayer {
     return this.views.get(cid);
   }
 
-  /** Full teardown (renderer destroy / StrictMode unmount). */
+  /** Full teardown (renderer destroy / StrictMode unmount). Removes+destroys ONLY
+   *  our own ghost roots — the container is the SHARED `entities` layer owned by
+   *  GameRenderer (#69), so destroying it here would take my heroes/enemies with
+   *  it. Local-actor sorting is undisturbed: pulling a ghost child out of a
+   *  `sortableChildren` container leaves the surviving siblings' zIndex order intact. */
   destroy(): void {
     for (const view of this.views.values()) {
       this.container.removeChild(view);
@@ -228,6 +273,5 @@ export class GhostLayer {
     }
     this.views.clear();
     this.lastPlayedAt.clear();
-    this.container.destroy({ children: true });
   }
 }
