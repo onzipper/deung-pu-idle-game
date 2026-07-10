@@ -4,6 +4,22 @@
 > เอกสารนี้คือ **brief ถาวร** สำหรับทุก wave ของ R2 และรอบถัดๆ ไป — mockup ชิ้นไหนลงรอบไหน เคาะอะไรไปแล้วบ้าง
 > เงื่อนไข "งาน art ต้องเริ่มจาก reference ของเจ้าของ" **ผ่านแล้ว**สำหรับ UI chrome ทั้งชุดนี้ · **เฟสแรก = art จากโค้ดล้วน** (CSS/SVG/emoji — ห้ามเลียนไอคอนวาดสี/ภาพ painted ของ mockup จนกว่าจะมี asset pipeline ของเจ้าของ)
 
+## Canonical owner visual reference (AI memory)
+
+- **ชื่อไฟล์ต้นฉบับ:** `ตัวอย่าง Assets MMORPG 2.5D.png` (เจ้าของส่ง 2026-07-09; source image อยู่ใน owner-provided files — เอกสารนี้เป็น canonical text memory จนกว่าจะ commit binary เข้า repo)
+- **ภาพรวม:** asset/concept board ของ MMORPG 2.5D บนเว็บ สไตล์ fantasy pixel + HD effects บนพื้นหลังเข้ม จัดเป็นชุดตัวอย่างโลก ตัวละคร มอนสเตอร์ UI ไอคอน และ VFX พร้อม gameplay HUD composition
+- **1. World & Environment:** town · forest · dungeon · desert · snow field · hell gate, tileset grass/dirt/stone/water/wood และ props เช่นต้นไม้ หิน ลัง ถัง รั้ว ป้าย/โคม
+- **2. Character & Animation:** player sprite ชุดเกราะดำ/ม่วงแต้มทอง + อาวุธพลังงาน, reference ระบุ 10 directions และ state idle/walk/attack/skill/damage/die
+- **3. Monster & NPC:** family silhouettes ที่แยกอ่านง่าย เช่น slime/mushroom/skeleton/orc/beast/ent/demon และ NPC หลายบทบาทพร้อมภาษากล่องพูด
+- **4. UI Elements:** HP/MP/EXP bars, button states normal/hover/press/disabled, menu icons, popup/item detail, tabs, toast/notification และกรอบ rarity
+- **5. Skill Icons:** icon สีเรืองแสงแยก family ม่วง/ฟ้า/ไฟ/holy/dark; ต้องอ่านออกใน tile ขนาดเล็ก ไม่ใช่เพียงสวยตอนขยาย
+- **6. Items & Equipment:** weapon · armor · accessory · consumable/material เป็นไอคอน fantasy pixel ที่ silhouette ชัดและแยก family ได้
+- **7. Effects & VFX:** skill effects, buff icons, damage numbers และ CRITICAL แบบแรงแต่ยังอ่าน gameplay ได้; reference เป็น visual language ไม่ใช่คำสั่งให้แทน code-drawn 60fps FX ทั้งหมด
+- **8. UI Layout Example:** gameplay 2.5D/town scene + portrait/HP/MP/EXP ซ้ายบน · quest/chat ซ้าย · minimap ขวาบน · menu rail ขวา · skill hotbar/AUTO ด้านล่าง
+- **9. Bot UI:** แผงตั้งค่า BOT มี auto-skill 1–4, movement/map mode, attack/loot toggles, HP/MP potion thresholds และปุ่มบันทึก
+- **Binding art direction:** Pixel + HD effect hybrid · colorful fantasy · detailed but readable · Dark Fantasy base · Gold + Purple identity · Thai-first readability (Kanit/Prompt)
+- **Interpretation rule:** ใช้ภาพนี้เป็น direction/taxonomy/hierarchy reference — ห้าม pixel-copy หรือสร้าง painted imitation แบบ throwaway; implementation ปัจจุบันยังคง code-drawn + fallback จน owner เปิด asset-pipeline scope
+
 ## การเคาะของเจ้าของ (2026-07-09 — ตัดสินแล้ว อย่ารื้อ)
 
 | เรื่อง | เคาะ |
