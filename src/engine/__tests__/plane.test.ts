@@ -27,10 +27,12 @@ import { soloSave } from "./helpers";
  * stamps a deterministic `planeY`; (3) `planeY` is TRANSIENT — never persisted, recomputed
  * on load — so it needs NO SAVE_VERSION bump.
  *
- * The band/row knobs are DUPLICATED from render/worldDepth/{depthBand,depthAssign}.ts (the
- * engine may not import render). This suite pins the engine CONFIG.plane values to those
- * render constants by literal — keep them in lock-step; if render's DEPTH_OFFSET_* /
- * HERO_*_DEPTH ever change, these literals (and CONFIG.plane) must change with them.
+ * The BAND knobs (bandFar/bandNear) mirror render's surviving `depthBand.DEPTH_OFFSET_*`
+ * (the engine may not import render) — keep them in lock-step; if those render constants
+ * change, the pinned literals (and CONFIG.plane) must change with them. As of R4 Wave C0
+ * the render-side depth ASSIGNMENT source (`depthAssign` heroDepth/enemyDepth/ghostDepth +
+ * its HERO_* row constants) is RETIRED — depth is engine-owned — so the hero-row knobs
+ * (heroBandMin/Max, formationDepth) are now engine-only invariants with no render twin.
  */
 
 const CLASSES: HeroClass[] = ["swordsman", "archer", "mage", "ninja"];
@@ -46,14 +48,16 @@ describe("plane helpers — determinism + render-band parity", () => {
     }
   });
 
-  it("CONFIG.plane knobs are pinned to the render depth band (ported constants)", () => {
-    // ≡ render/worldDepth/depthBand.DEPTH_OFFSET_FAR / DEPTH_OFFSET_NEAR
+  it("CONFIG.plane band knobs stay pinned to render depthBand; hero rows are engine-owned", () => {
+    // ≡ render/worldDepth/depthBand.DEPTH_OFFSET_FAR / DEPTH_OFFSET_NEAR (still the
+    // live render band math — keep in lock-step).
     expect(CONFIG.plane.bandFar).toBe(-24);
     expect(CONFIG.plane.bandNear).toBe(40);
-    // ≡ render/worldDepth/depthAssign.HERO_BAND_MIN / HERO_BAND_MAX
+    // Hero-row knobs: engine-owned invariants since R4 Wave C0 (the render-side
+    // depthAssign HERO_* constants they used to mirror are retired). Pinned so
+    // Wave C1 can't drift them unnoticed.
     expect(CONFIG.plane.heroBandMin).toBe(0.45);
     expect(CONFIG.plane.heroBandMax).toBe(0.85);
-    // ≡ render/worldDepth/depthAssign.HERO_SOLO_DEPTH (per-class today = all equal)
     for (const c of CLASSES) expect(CONFIG.plane.formationDepth[c]).toBe(0.65);
   });
 

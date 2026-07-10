@@ -22,20 +22,9 @@ import {
   DEPTH_OFFSET_FAR,
   DEPTH_OFFSET_NEAR,
 } from "./depthBand";
-import { heroDepth, enemyDepth, ghostDepth } from "./depthAssign";
 import { createTerrain, type Terrain } from "./terrain";
 import { terrainForZone } from "./terrainZone";
-import type { Zone } from "@/engine";
-
-/**
- * R4 Wave B flag: read the engine-owned `entity.planeY` (systems/plane.ts,
- * stamped at spawn/party-join) as the depth source instead of recomputing the
- * render-side hash. DEFAULT ON — the engine's plane math is a VERBATIM port of
- * `depthBand`/`depthAssign`, so the two are byte-identical (proven exhaustively
- * by `worldDepthEngineYIdentity.test.ts`). Flip to `false` to fall back to the
- * pre-cutover render-owned hash path; that path stays intact this wave.
- */
-export const WORLD_DEPTH_FROM_ENGINE_Y = true;
+import { hashUnit, type Zone } from "@/engine";
 
 /**
  * Invert `planeY` (a world-y OFFSET, the output of the engine's `planeYForDepth`
@@ -43,9 +32,9 @@ export const WORLD_DEPTH_FROM_ENGINE_Y = true;
  * of `depthOffsetY` for every hash/party/solo value the engine produces (the
  * band width 64 is a power of two, so the lerp is losslessly invertible —
  * verified exhaustively), so `depthOffsetY(planeToDepth(planeY)) === planeY` and
- * `depthScale`/`depthZIndex` reproduce the render-owned path EXACTLY. This lets
- * the seam feed engine `planeY` through the SAME footY/scale/zIndex pipeline the
- * hash path uses, keeping the flag ON/OFF pixel-identical.
+ * `depthScale`/`depthZIndex` reproduce the pre-cutover render-owned values
+ * EXACTLY. This is THE depth source at the seam (R4 Wave C0): engine `planeY`
+ * flows through the SAME footY/scale/zIndex pipeline, no dual path.
  */
 export function planeToDepth(planeY: number): number {
   return (planeY - DEPTH_OFFSET_FAR) / (DEPTH_OFFSET_NEAR - DEPTH_OFFSET_FAR);
@@ -63,23 +52,22 @@ export const DEPTH_NEUTRAL = -DEPTH_OFFSET_FAR / (DEPTH_OFFSET_NEAR - DEPTH_OFFS
 export type WorldFxKind = "hero" | "enemy" | "ghost";
 
 export interface WorldFxContext {
-  /**
-   * Turn depth / terrain effects on or off (both default OFF = today). `engineY`
-   * (R4 Wave B) selects the engine-owned `planeY` cutover; omitted → the module
-   * default `WORLD_DEPTH_FROM_ENGINE_Y` (ON), so existing `{depth,terrain}`
-   * callers get the cutover for free while keeping the OFF path selectable.
-   */
-  setFlags(f: { depth: boolean; terrain: boolean; engineY?: boolean }): void;
+  /** Turn depth / terrain effects on or off (both default OFF = today). */
+  setFlags(f: { depth: boolean; terrain: boolean }): void;
   /** Bind the current zone's terrain (null → flat). Cached: zero re-alloc. */
   setZone(zone: Zone | null): void;
   /** Ground line y at world x (terrain flag ? zone terrain : GROUND_Y). */
   groundY(x: number): number;
   /**
-   * Depth d for an actor (depth flag ? assigned : DEPTH_NEUTRAL). When the
-   * `engineY` flag is on AND a live `planeY` is supplied (Hero/Enemy carry it;
-   * ghosts pass `scatterPlaneY(cid)`), d is inverted from that engine value
-   * instead of recomputed here — the R4 Wave B cutover. `planeY` null/omitted
-   * (an entity without one) falls back to the render-owned hash path.
+   * Depth d for an actor (depth flag off → DEPTH_NEUTRAL). Depth is engine-owned
+   * (R4 Wave C0): the caller supplies the entity's engine `planeY` (Hero/Enemy
+   * carry it; ghosts pass `scatterPlaneY(cid)`) and d is inverted from it via
+   * `planeToDepth`. `planeY` null/omitted is a defensive case only — after
+   * Wave A/B every live actor is stamped — and degrades to a stable id-hash row
+   * (`hashUnit(id)`, the value the engine's own scatter inverts to), NOT the flat
+   * neutral line, so a stray actor still gets a plausible depth. `kind`/`slot`/
+   * `partySize` are retained for the call shape (unused now the hash-assignment
+   * path is retired; Wave C1 may reintroduce per-slot logic).
    */
   depthOf(
     kind: WorldFxKind,
@@ -102,7 +90,6 @@ const FLAT_TERRAIN: Terrain = createTerrain("flat", WORLD_WIDTH);
 export function createWorldFxContext(): WorldFxContext {
   let depthOn = false;
   let terrainOn = false;
-  let engineYOn = WORLD_DEPTH_FROM_ENGINE_Y;
   let terrain: Terrain = FLAT_TERRAIN;
 
   const groundY = (x: number): number => (terrainOn ? terrain.groundY(x) : GROUND_Y);
@@ -111,7 +98,6 @@ export function createWorldFxContext(): WorldFxContext {
     setFlags(f) {
       depthOn = f.depth;
       terrainOn = f.terrain;
-      engineYOn = f.engineY ?? WORLD_DEPTH_FROM_ENGINE_Y;
     },
     setZone(zone) {
       terrain = zone ? terrainForZone(zone) : FLAT_TERRAIN;
@@ -119,14 +105,15 @@ export function createWorldFxContext(): WorldFxContext {
     groundY,
     depthOf(kind, id, slot, partySize, planeY) {
       if (!depthOn) return DEPTH_NEUTRAL;
-      // R4 Wave B: read the engine-owned plane row when present. `planeToDepth`
-      // is a bit-exact inverse, so this is pixel-identical to the hash path
-      // below for every value the engine stamps (Hero/Enemy `planeY`, ghost
-      // `scatterPlaneY(cid)`) — flag ON === flag OFF.
-      if (engineYOn && planeY != null) return planeToDepth(planeY);
-      if (kind === "hero") return heroDepth(slot ?? 0, partySize ?? 1);
-      if (kind === "ghost") return ghostDepth(typeof id === "string" ? id : String(id));
-      return enemyDepth(typeof id === "number" ? id : Number(id));
+      // Depth is engine-owned (R4 Wave C0): invert the entity's engine `planeY`.
+      // `planeToDepth` is a bit-exact inverse of the plane offset, so footY/scale/
+      // zIndex reproduce the pre-cutover values EXACTLY.
+      if (planeY != null) return planeToDepth(planeY);
+      // Defensive fallback — should not happen post-Wave-A (every live Hero/Enemy/
+      // Boss + party hero is stamped). A stray actor with no engine row degrades to
+      // a stable id-hash scatter (the same value the engine's enemyPlaneY/
+      // scatterPlaneY invert to) rather than snapping to the flat neutral line.
+      return hashUnit(id);
     },
     footY(x, d) {
       return depthOn ? groundY(x) + depthOffsetY(d) : groundY(x);

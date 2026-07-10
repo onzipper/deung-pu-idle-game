@@ -1206,9 +1206,9 @@ export class GameRenderer {
     let best: GhostDrawItem | null = null;
     let bestDist = Infinity;
     for (const g of this.ghostList) {
-      // R4 Wave B: ghosts have no live engine entity — place off the engine's
-      // shared scatter math (`scatterPlaneY(cid)`), which inverts to the same
-      // `ghostDepth(cid)` hash the draw path used, so the tap matches the feet.
+      // Ghosts have no live engine entity — place off the engine's shared scatter
+      // math (`scatterPlaneY(cid)`), the same engine-owned depth source the draw
+      // path uses (R4 Wave C0), so the tap matches the feet.
       const d = this.worldFx.depthOf("ghost", g.cid, undefined, undefined, scatterPlaneY(g.cid));
       const scl = this.worldFx.depthScaleOf(d);
       const cy = enemyTapCenterY(GHOST_TAP_CENTER_SIZE, this.worldFx.footY(g.x, d), scl);
