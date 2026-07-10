@@ -13,10 +13,16 @@ import type { HeroClass } from "@/engine";
 
 const HERO_CLASSES: readonly HeroClass[] = ["swordsman", "archer", "mage", "ninja"];
 
-/** Positional interpolation window: a ghost eases from its previous to its latest
- *  sampled x over this long after each snapshot arrives, which is what feeds the rig's
- *  x-delta walk animation (heroView derives locomotion from |dx|/dt). ~one publish beat. */
-const LERP_MS = 350;
+/** Positional smoothing time-constant (ms). A ghost eases toward its latest anchor by
+ *  exponential decay — `1 - e^(-elapsed/τ)` of the remaining gap — reaching ~95% in ~3τ.
+ *  This is what feeds the rig's x-delta walk animation (heroView derives locomotion from
+ *  |dx|/dt). Chosen over a fixed-window LINEAR lerp because, at the 8Hz `pa` beat, a linear
+ *  lerp never completed before the next anchor and each re-anchor teleported x forward (a
+ *  visible per-beat stair-step — the "robotic" feel). Exponential + capturing the CURRENT
+ *  eased position as the next anchor's start (see `applyAction`/`upsert`) gives C0 position
+ *  continuity AND distance-proportional velocity (no snap, no rubber-band). τ=90ms keeps
+ *  ghosts responsive (~1-beat trail) while reading smoothly at both 8Hz `pa` and 3Hz `p`. */
+const LERP_TAU_MS = 90;
 /** Fade-in on first appearance / fade-out ramp before prune. */
 const FADE_MS = 350;
 /** A ghost with no fresh snapshot for this long is pruned (peer left / went silent).
@@ -166,12 +172,29 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+/** Exponential ease of `prev` toward `target` after `elapsedMs` since the anchor. Pure +
+ *  headless-testable. Monotonic (never overshoots `target`), C0-continuous, and — because
+ *  the rate is proportional to the remaining gap — velocity-continuous across re-anchors as
+ *  long as the caller seeds the next `prev` with the CURRENT sample (which the store does).
+ *  At elapsed 0 → `prev`; as elapsed → ∞ → `target`. */
+export function easeToward(prev: number, target: number, elapsedMs: number): number {
+  const f = 1 - Math.exp(-Math.max(0, elapsedMs) / LERP_TAU_MS);
+  return prev + (target - prev) * f;
+}
+
 export class GhostStore {
   private readonly ghosts = new Map<string, GhostRecord>();
   /** Identity keys (cid OR displayName) to drop: my own cid + my cohort peers, who are
    *  already fully simulated as real heroes — see `setExcluded`'s doc + design §3.4. */
   private excluded: ReadonlySet<string> = new Set();
   private cap = GHOST_CAP_DEFAULT;
+
+  /** This ghost's eased world-x at `nowMs` — a pure read of its current anchor (no mutation),
+   *  shared by `list()` (per-frame draw) and the re-anchor sites (which seed the NEXT anchor's
+   *  `prevX` with it, so a fresh anchor never teleports the visible position). */
+  private sampleX(g: GhostRecord, nowMs: number): number {
+    return easeToward(g.prevX, g.lastX, nowMs - g.lerpAt);
+  }
 
   /**
    * Ingest one peer snapshot. Junk is ignored; a stale/duplicate `t` for a known ghost
@@ -203,9 +226,9 @@ export class GhostStore {
       return;
     }
     if (snap.t <= existing.lastSeq && snap.t !== 0) return; // stale/duplicate (t:0 = keepalive-less sender)
-    existing.prevX = existing.lastX;
+    existing.prevX = this.sampleX(existing, nowMs); // start from where we VISIBLY are (no snap)
     existing.lastX = snap.x;
-    existing.lerpAt = nowMs; // keepalive also re-anchors the lerp
+    existing.lerpAt = nowMs; // keepalive also re-anchors the ease
     existing.lastAt = nowMs;
     existing.lastSeq = snap.t;
     existing.name = snap.name;
@@ -236,8 +259,8 @@ export class GhostStore {
     const g = this.ghosts.get(action.cid);
     if (!g) return; // action without keepalive presence — not liveness, so never spawns
     if (!this.acceptActionCounter(g, action.at, nowMs)) return;
-    g.prevX = g.lastX;
-    g.lastX = action.x; // fresher than the keepalive x — advance the lerp target
+    g.prevX = this.sampleX(g, nowMs); // continuity: ease from the current visible x, not the old target
+    g.lastX = action.x; // fresher than the keepalive x — advance the ease target
     g.lerpAt = nowMs; // ...but NOT `lastAt`: an action must not keep a silent peer alive
     g.facing = action.facing;
     g.action = action.a;
@@ -297,8 +320,7 @@ export class GhostStore {
       if (this.excluded.has(g.cid) || (g.name && this.excluded.has(g.name))) continue;
       const silence = nowMs - g.lastAt; // prune/fade keyed to the keepalive clock ONLY
       if (silence > SILENCE_PRUNE_MS) continue;
-      const lerpF = clamp01((nowMs - g.lerpAt) / LERP_MS); // ...position lerp to its own anchor
-      const x = g.prevX + (g.lastX - g.prevX) * lerpF;
+      const x = this.sampleX(g, nowMs); // ...position eases to its own anchor (see easeToward)
       const fadeIn = clamp01((nowMs - g.firstAt) / FADE_MS);
       const fadeOut =
         silence > SILENCE_PRUNE_MS - FADE_MS

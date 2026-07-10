@@ -104,11 +104,14 @@ describe("GhostStore.applyAction — pose/facing, liveness, stale/reset", () => 
     expect(gs.list(300)[0]).toMatchObject({ action: "skill1", at: 500 });
   });
 
-  it("a `pa` position is fresher than the keepalive: it re-anchors the lerp target", () => {
+  it("a `pa` position is fresher than the keepalive: it re-anchors the ease target", () => {
     const gs = new GhostStore();
     gs.upsert(snap("p1", 100, 1), 0); // sitting at x=100
     gs.ingestAction({ v: 1, cid: "p1", x: 200, f: 1, a: "walk", at: 1 }, 1_000);
-    expect(gs.list(1_000)[0].x).toBeCloseTo(100, 3); // lerp just re-anchored -> prev
-    expect(gs.list(1_175)[0].x).toBeCloseTo(150, 0); // halfway through the 350ms window
+    expect(gs.list(1_000)[0].x).toBeCloseTo(100, 3); // ease just re-anchored -> prev
+    expect(gs.list(1_090)[0].x).toBeCloseTo(163.2, 0); // one time-constant (90ms) into the ease
+    const settled = gs.list(1_500)[0].x; // past ~3τ: settled, no overshoot
+    expect(settled).toBeGreaterThan(199);
+    expect(settled).toBeLessThanOrEqual(200);
   });
 });
