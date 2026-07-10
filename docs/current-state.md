@@ -8,9 +8,9 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 
 ## Where we are
 
-- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → **R2.5–R2.9 ✅ (game screen / tracker+dock / Wave A / Wave B safe / icon slice #60 — merged to develop) → R3 presence คนจริง ✅ code-complete (#50, Draft PR #62 staged by wave, awaiting owner review)** → R4–R5 engine x,y → R6 shared elites.
-- **Branches**: `develop` = R2 ถึง R2.9 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44). R3 = Draft PR #62 from `r3/issue-50-presence-actions`.
-- **Suite**: 2350+ tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10e (R3 presence).
+- **Arc**: Open World MMO (GDD v3) — R1 new look ✅ → R2 UI sweep ✅ → R2.5–R2.9 ✅ → **R3 presence คนจริง ✅ MERGED (#50 / PR #62, owner eye-test passed + tune round; RELAY DEPLOYED by owner 2026-07-10 — web side goes live with the next develop→main deploy)** → R4–R5 engine x,y → R6 shared elites.
+- **Branches**: `develop` = R2 ถึง R3 (ahead of `main`). `main` = M8.8 R1 (last merge PR #44).
+- **Suite**: 2375 tests green, tsc/eslint/next build clean. Patch notes current: 2026-07-10e (R3 presence).
 
 ## Latest work
 
@@ -20,9 +20,9 @@ _Last updated: 2026-07-10 (post-R2.8 Wave B safe #58; history log v14–v15)._
 
 ## Blockers / owed
 
-1. **R3 Draft PR #62**: owner review → ready-for-review → merge confirm → deploy **relay FIRST** then web → 2-tab manual test (snapshot fast · ~8Hz alive · tap profile no-command · relay-down silent degrade).
+1. **Relay deployed ✅ (owner, 2026-07-10) — web deploy pending**: R3 web side goes live with the develop→`main` block. **NO `prisma db push` pending.**
 2. **Owner eye-test ค้าง**: R2.9 icon slice (#60 ยังเปิดรอ eye-test) + ก้อน R2.5–R2.6 เดิม (fullscreen/FTUE/minimap ฯลฯ).
-3. On owner confirm → **merge develop→`main` as ONE block** (never without per-merge confirm) → deploy relay FIRST then web. **NO `prisma db push` pending.**
+3. On owner confirm → **merge develop→`main` as ONE block** (never without per-merge confirm) → **web deploy** (relay ทำไปแล้ว).
 
 ## Owner decisions affecting immediate work
 
