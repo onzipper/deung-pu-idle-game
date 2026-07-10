@@ -37,7 +37,7 @@
  * balance pass before this ships as a headline feature.
  */
 
-import { initGameState, makeHero } from "@/engine";
+import { heroPlaneY, initGameState, makeHero } from "@/engine";
 import type {
   EquippedGear,
   GameState,
@@ -185,6 +185,7 @@ export function buildCohortState(
   s.materials = sharedSave.materials;
   const sorted = [...order].sort((a, b) => a.slot - b.slot);
   s.heroClass = sorted[0]?.progression.cls ?? s.heroClass;
+  const partySize = sorted.length;
   s.heroes = sorted.map(({ slot, progression: p }, i) => {
     const hero = makeHero(
       i + 1,
@@ -211,6 +212,13 @@ export function buildCohortState(
     // caller) keeps `makeHero`'s formation-anchor default untouched.
     const knownX = positions?.get(slot);
     if (knownX !== undefined) hero.x = knownX;
+    // R4 Wave B party fan: `makeHero` stamps only the SOLO plane row, so overwrite
+    // with the cohort-slot fan (`heroPlaneY(cls, cohortIndex, partySize)`) — the
+    // render depth cutover reads this to reproduce today's party fan. Cohort index
+    // `i` === the hero's index in `state.heroes` === render's `slot`; a 1-member
+    // "cohort" (solo rebuild) gives `heroPlaneY(cls,0,1)` = the solo row, byte-
+    // identical to `makeHero`. Deterministic (no RNG/clock), folded into stateHash.
+    hero.planeY = heroPlaneY(p.cls, i, partySize);
     return hero;
   });
   s.nextId = sorted.length + 1;

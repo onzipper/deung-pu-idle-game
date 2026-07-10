@@ -13,7 +13,7 @@
  */
 
 import { Container } from "pixi.js";
-import type { HeroClass } from "@/engine";
+import { scatterPlaneY, type HeroClass } from "@/engine";
 import { GROUND_Y } from "@/render/layout";
 import { depthZIndex } from "@/render/worldDepth/depthBand";
 import type { WorldFxContext } from "@/render/worldDepth/worldFxContext";
@@ -171,7 +171,11 @@ export class GhostLayer {
       // by depth, sort near-over-far. OFF-identity: footY≡GROUND_Y (cancels the
       // pivot), depthScaleOf≡1, equal neutral zIndex → insertion order.
       if (this.worldFx) {
-        const d = this.worldFx.depthOf("ghost", item.cid);
+        // R4 Wave B: a ghost has no live engine entity, so place it off the
+        // engine's shared scatter math (`scatterPlaneY(cid)`) — the seam inverts
+        // that back to the same `ghostDepth(cid)` hash row (bit-exact), so the
+        // engineY-ON path is pixel-identical to the pre-cutover hash placement.
+        const d = this.worldFx.depthOf("ghost", item.cid, undefined, undefined, scatterPlaneY(item.cid));
         view.y = this.worldFx.footY(item.x, d);
         view.scale.set(this.worldFx.depthScaleOf(d));
         view.zIndex = depthZIndex(d);

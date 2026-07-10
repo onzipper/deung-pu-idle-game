@@ -19,7 +19,13 @@
  */
 
 import { Application, Container, Graphics, Rectangle, Text } from "pixi.js";
-import { isDailyComplete, mainQuestChapters, tomePagesFound, zoneAt } from "@/engine";
+import {
+  isDailyComplete,
+  mainQuestChapters,
+  scatterPlaneY,
+  tomePagesFound,
+  zoneAt,
+} from "@/engine";
 import type { GameEvent, HitTargetKind } from "@/engine/state";
 import type { GameState } from "@/engine/state";
 import { Pool } from "@/render/Pool";
@@ -638,7 +644,10 @@ export class GameRenderer {
         displayName: this.heroDisplayNames?.get(h.id) ?? null,
         socialBadge: this.heroSocialBadges?.get(String(h.id)) ?? null,
       });
-      this.placeActor(view, h.x, this.worldFx.depthOf("hero", h.id, slot, partySize));
+      // R4 Wave B: hand the engine-owned `h.planeY` (solo formation row, or the
+      // party fan stamped at cohort build) to the seam — it reads that in place
+      // of recomputing the hero depth, falling back to the hash path if absent.
+      this.placeActor(view, h.x, this.worldFx.depthOf("hero", h.id, slot, partySize, h.planeY));
     });
     heroPool.endFrame();
 
@@ -659,7 +668,9 @@ export class GameRenderer {
     for (const e of state.enemies) {
       const view = this.enemyPool.get(e.id);
       updateEnemyView(view, e, { dt, events: frameEvents, mapId: enemyMapId });
-      const d = this.worldFx.depthOf("enemy", e.id);
+      // R4 Wave B: engine-owned `e.planeY` (stable per-id band scatter; boss adds
+      // carry it too) drives the row — hash fallback if absent.
+      const d = this.worldFx.depthOf("enemy", e.id, undefined, undefined, e.planeY);
       this.placeActor(view, e.x, d);
       this.enemyDepthScratch.set(e.id, d);
     }
@@ -1078,7 +1089,9 @@ export class GameRenderer {
     let bestId: number | null = null;
     let bestDist = Infinity;
     for (const e of state.enemies) {
-      const d = this.worldFx.depthOf("enemy", e.id);
+      // R4 Wave B: same engine-owned row the draw path uses, so the tap ellipse
+      // tracks the rendered feet exactly.
+      const d = this.worldFx.depthOf("enemy", e.id, undefined, undefined, e.planeY);
       const scl = this.worldFx.depthScaleOf(d);
       // Ellipse center rides the entity's lifted foot line + depth scale; radii
       // scale with depth too. Flags off → GROUND_Y − 14·size, radii 16/22·size.
@@ -1193,7 +1206,10 @@ export class GameRenderer {
     let best: GhostDrawItem | null = null;
     let bestDist = Infinity;
     for (const g of this.ghostList) {
-      const d = this.worldFx.depthOf("ghost", g.cid);
+      // R4 Wave B: ghosts have no live engine entity — place off the engine's
+      // shared scatter math (`scatterPlaneY(cid)`), which inverts to the same
+      // `ghostDepth(cid)` hash the draw path used, so the tap matches the feet.
+      const d = this.worldFx.depthOf("ghost", g.cid, undefined, undefined, scatterPlaneY(g.cid));
       const scl = this.worldFx.depthScaleOf(d);
       const cy = enemyTapCenterY(GHOST_TAP_CENTER_SIZE, this.worldFx.footY(g.x, d), scl);
       const rx = Math.max(touchHalf, GHOST_TAP_RX * scl);
