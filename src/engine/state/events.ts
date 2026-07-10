@@ -241,7 +241,12 @@ export type GameEvent =
   // `heroShadowed.heroIdx` below; render gates the ring-ping fx on it (`=== the local
   // client's `povHeroIndex`) so a PEER's tap-to-move/tap-a-monster never rings on my
   // screen. Solo is always lane 0 === default `povHeroIndex` 0 — pixel-identical.
-  | { type: "moveOrdered"; x: number; heroIdx: number }
+  // R4 Wave C2: OPTIONAL `y` = the CLAMPED depth-row (planeY) the move was commanded at,
+  // present only when the tap carried a plane row (x-only taps omit it → byte-shaped like
+  // pre-C2). One-way render hint so the ground click-marker ping lands at the tapped DEPTH
+  // (FxController.onMoveOrdered offsets the ring by it); absent → +0 (ground line, identical).
+  // Additive/transient like every event field — never hashed or persisted.
+  | { type: "moveOrdered"; x: number; y?: number; heroIdx: number }
   | { type: "targetLocked"; id: number; heroIdx: number }
   | { type: "commandCancelled"; heroIdx: number }
   // Shadow-body transition (M8 party P2 — "ร่างเงา", design §9). Fires on the STEP a

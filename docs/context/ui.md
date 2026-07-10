@@ -33,6 +33,7 @@ Key suites: `src/ui/components/__tests__/gameHudLayout.test.tsx` (fullscreen/FTU
 - Windows 10 has no Unicode-13+ emoji glyphs — icons must be pre-2020 emoji or CSS/SVG-drawn (`src/ui/components/icons.tsx`).
 - Gear/item lookups: never bare-index `ITEM_TEMPLATES[id]` — legendary/fortifier items live outside that table; use `lookupTemplate`/`ALL_ITEM_TEMPLATES` (3 shipped bugs from this class; auto-sell's absence-skip is a deliberate, documented exception).
 - New content ids (class/skill/quest/item) need entries in **both** `messages/th.json` and `messages/en.json` — coverage is test-enforced for gear (`src/ui/gear/__tests__/itemI18n.test.ts`) and codex (`src/ui/codex/__tests__/entries.test.ts`).
+- **R4 Wave C2 tap→moveTo carries a depth row**: a ground tap's `PointerHitResult` now reports `{ kind: "ground", x, planeY }` — `hitTestPointer` inverts the tapped world-y through the depth band (`tapToPlaneY`, the inverse of `depthBand.depthOffsetY`, clamped) so `queueMoveTo(x, planeY)` sends an x/y move (`FrameInput.moveTo = { x, y? }`). The engine re-clamps `y` at intake, so the UI need not (defense in depth). NPC/gate approach walks stay **x-only** `queueMoveTo(x)` (home/ground row). Same single arena tap handler for desktop + mobile — do not add a second `pendingInput` drain.
 
 ## Do not touch
 

@@ -263,9 +263,17 @@ export interface HeroDailies {
  * arrive as `FrameInput` intents (moveTo / attackTarget / cancelCommand) and paving
  * M8 lockstep. TRANSIENT — lives on the (never-persisted) live hero, cleared on any
  * zone arrival (world.reviveHeroesFull) and never written to `SaveData`.
+ *
+ * R4 Wave C2 — a `move` command gains an OPTIONAL depth-row `y` (the target `planeY`,
+ * already CLAMPED to `[CONFIG.plane.bandFar, CONFIG.plane.bandNear]` at intake in
+ * `systems/manual.applyManualCommand`). When present the hero STEERS its `planeY` toward
+ * `y` (via the same `stepPlaneY` ease) while walking, and the command clears only once
+ * BOTH x (`CONFIG.manual.arriveEps`) and y (`CONFIG.plane.yArriveEps`) arrive. An x-only
+ * `move` (y absent) is byte-identical to pre-C2: the C1 home-row steering runs and arrival
+ * gates on x alone. COSMETIC (planeY gates no combat) — targeting/range stay x-only.
  */
 export type ManualCommand =
-  | { kind: "move"; x: number }
+  | { kind: "move"; x: number; y?: number }
   | { kind: "attack"; targetId: number };
 
 /**

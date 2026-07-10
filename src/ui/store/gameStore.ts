@@ -464,8 +464,10 @@ export interface PendingInput {
   materialsDelta: number | null;
   /** Manual play (M7.8): tap-the-ground move order, or `null` (last-wins per
    * frame — a tap walks to exactly one x; the engine clamps it to the zone's
-   * walkable bounds). */
-  moveTo: { x: number } | null;
+   * walkable bounds). R4 Wave C2: OPTIONAL `y` = the tap's depth row (planeY),
+   * band-clamped by the engine at intake; omitted for x-only orders (NPC/gate
+   * approach walks, which stay on the ground/home row). */
+  moveTo: { x: number; y?: number } | null;
   /** Manual play (M7.8): tap-a-monster attack order, or `null` (last-wins per
    * frame). An invalid/dead/despawned id is a no-op engine-side. */
   attackTarget: { id: number } | null;
@@ -1725,8 +1727,9 @@ export interface HudState {
    * calls — see `PendingInput.materialsDelta`'s doc). */
   creditMaterials: (amount: number) => void;
   /** Queue a manual play (M7.8) tap-the-ground move order (last-wins per
-   * frame) — see `PendingInput.moveTo`'s doc. */
-  queueMoveTo: (x: number) => void;
+   * frame) — see `PendingInput.moveTo`'s doc. R4 Wave C2: optional `planeY`
+   * (the tapped depth row) makes it an x/y move; omit for an x-only walk. */
+  queueMoveTo: (x: number, planeY?: number) => void;
   /** Queue a manual play (M7.8) tap-a-monster attack order (last-wins per
    * frame) — see `PendingInput.attackTarget`'s doc. */
   queueAttackTarget: (id: number) => void;
@@ -2303,9 +2306,14 @@ export const useGameStore = create<HudState>((set, get) => ({
   // internal moveTo (`startNpcTrip`/`advanceNpcTrip`/`startGateTrip`/
   // `advanceGateTrip`) writes `pendingInput.moveTo` directly rather than
   // calling this action, so starting/advancing one never self-cancels.
-  queueMoveTo: (x) =>
+  queueMoveTo: (x, planeY) =>
     set((s) => ({
-      pendingInput: { ...s.pendingInput, moveTo: { x } },
+      pendingInput: {
+        ...s.pendingInput,
+        // R4 Wave C2: carry the tapped depth row when present (x/y move); a plain x-only
+        // order (NPC/gate approach) omits `y`, so the command stays a home-row walk.
+        moveTo: planeY === undefined ? { x } : { x, y: planeY },
+      },
       npcTrip: s.npcTrip === "idle" ? s.npcTrip : "idle",
       npcTripTarget: s.npcTrip === "idle" ? s.npcTripTarget : null,
       gateTrip: s.gateTrip === "idle" ? s.gateTrip : "idle",

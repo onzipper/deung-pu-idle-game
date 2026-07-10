@@ -22,8 +22,8 @@ import {
   zoneAt,
 } from "@/engine";
 import type { GameState, GameEvent, HeroQuest } from "@/engine";
-import { dashHeroTo } from "@/engine/systems/dash";
-import { makeStubEnemy, soloSave } from "./helpers";
+import { dashHeroTo, enemyDashPlaneY } from "@/engine/systems/dash";
+import { makeStubEnemy, soloSave, forceBoss } from "./helpers";
 
 /**
  * NINJA (นินจา, SAVE v18 — docs/ninja-design.md) engine wave. Covers: class creation +
@@ -166,6 +166,52 @@ describe("dash primitive", () => {
     const rb = dashHeroTo(b, b.heroes[0], 500);
     expect(ra).toBe(rb);
     expect(a.rngState).toBe(rng0); // the dash never touches the seeded stream
+  });
+
+  // ---- R4 Wave C2: optional depth-row landing ----
+  it("lands the hero on the target enemy's depth row when a planeY is passed (clamped)", () => {
+    const s = ninjaState();
+    const h = s.heroes[0];
+    h.x = 200;
+    h.planeY = CONFIG.plane.bandFar; // start far/upstage
+    const mobRow = CONFIG.plane.bandNear; // a near-row mob
+    dashHeroTo(s, h, 400, Infinity, mobRow);
+    expect(h.planeY).toBe(mobRow); // adopted the mob's row on landing
+
+    // An out-of-band target row is clamped to the band edge (never trust the caller).
+    dashHeroTo(s, h, 500, Infinity, CONFIG.plane.bandNear + 999);
+    expect(h.planeY).toBe(CONFIG.plane.bandNear);
+  });
+
+  it("leaves the hero's planeY UNCHANGED when no target row is passed (boss/world-boss rule)", () => {
+    const s = ninjaState();
+    const h = s.heroes[0];
+    h.x = 200;
+    h.planeY = 5;
+    dashHeroTo(s, h, 400); // no targetPlaneY (a boss/world-boss/synthetic-x dash)
+    expect(h.planeY).toBe(5); // never adopts a lane
+  });
+
+  it("enemyDashPlaneY resolves a farm mob's row but NOT a boss (dash-at-boss holds the row)", () => {
+    // Farm mob: resolvable → dash adopts its row.
+    const s = ninjaState();
+    const h = s.heroes[0];
+    h.planeY = CONFIG.plane.bandFar;
+    const mob = { ...makeStubEnemy(1, 400), planeY: CONFIG.plane.bandNear };
+    s.enemies = [mob];
+    expect(enemyDashPlaneY(s, mob)).toBe(CONFIG.plane.bandNear);
+    dashHeroTo(s, h, mob.x, Infinity, enemyDashPlaneY(s, mob));
+    expect(h.planeY).toBe(CONFIG.plane.bandNear); // blinked onto the mob's lane
+
+    // Boss: NOT a state.enemies member → undefined → dash leaves the row untouched (C1 rule).
+    const s2 = ninjaState();
+    forceBoss(s2);
+    const h2 = s2.heroes[0];
+    h2.planeY = 7;
+    const boss = s2.boss!;
+    expect(enemyDashPlaneY(s2, boss)).toBeUndefined();
+    dashHeroTo(s2, h2, boss.x, Infinity, enemyDashPlaneY(s2, boss));
+    expect(h2.planeY).toBe(7); // never adopted the boss's near row
   });
 });
 

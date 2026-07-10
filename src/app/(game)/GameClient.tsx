@@ -3342,7 +3342,12 @@ export function GameClient() {
         return;
       }
 
-      if (hit) useGameStore.getState().queueMoveTo(hit.x);
+      // R4 Wave C2: a ground tap carries the DEPTH ROW it landed on (`hit.planeY`, inverted
+      // from the tapped world-y through the depth band in `hitTestPointer`) so the move order
+      // steers the hero's plane (x/y move). Desktop + mobile share this one tap handler; the
+      // engine re-clamps `planeY` into the band at intake. Queued once, drained once per frame
+      // (respects the rAF one-shot-intent drain — no second drain added; known-traps #1).
+      if (hit) useGameStore.getState().queueMoveTo(hit.x, hit.planeY);
     }
     arenaEl.addEventListener("click", onArenaClick);
 

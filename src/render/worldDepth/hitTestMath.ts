@@ -82,3 +82,18 @@ export function enemyTapCenterY(size: number, footY: number, depthScl: number): 
 export function worldBossTapCenterY(baseCY: number, lift: number): number {
   return baseCY + lift;
 }
+
+/**
+ * R4 Wave C2 — INVERT a tap's world-y into a depth-row `planeY` (the value a
+ * `moveTo{x,y}` intent carries). `planeY` is exactly the offset `depthBand.depthOffsetY`
+ * ADDS on top of the ground line (`screenWorldY = groundY + depthOffsetY(d)`), so the
+ * inverse is simply `worldY − groundY`, CLAMPED to the band's `[far, near]` envelope
+ * (a tap above/below the band saturates to the edge row — same clamp the engine re-applies
+ * at intake, owner reminder #1). Pure (only −, clamp); no new constants — the band edges
+ * are `depthBand`'s own forward-map endpoints, so this exactly inverts `depthOffsetY`.
+ * The caller passes the un-projected world-y from `canvasToWorld` + the render `GROUND_Y`.
+ */
+export function tapToPlaneY(worldY: number, groundY: number, far: number, near: number): number {
+  const offset = worldY - groundY;
+  return Math.max(far, Math.min(near, offset));
+}

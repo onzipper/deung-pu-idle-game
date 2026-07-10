@@ -28,7 +28,7 @@ import {
   type SkillType,
 } from "@/engine/config";
 import { applyAoeDamage, applyDamage } from "@/engine/systems/damage";
-import { dashHeroTo } from "@/engine/systems/dash";
+import { dashHeroTo, enemyDashPlaneY } from "@/engine/systems/dash";
 import { heroAtkOf } from "@/engine/systems/stats";
 import {
   aliveHeroes,
@@ -292,7 +292,10 @@ function applySkillEffect(
       // within `def.range`; nothing here draws from the RNG stream (dashHeroTo is pure).
       const tgt = nearestWithin(targets, hero.x, def.range);
       if (!tgt) return;
-      dashHeroTo(state, hero, tgt.x, CONFIG.ninja.dashMaxReach);
+      // R4 Wave C2 — land on the target mob's depth row (`enemyDashPlaneY` returns undefined
+      // for a boss / world-boss → planeY unchanged). Call-site plumbing only; x math + range
+      // + damage are UNCHANGED.
+      dashHeroTo(state, hero, tgt.x, CONFIG.ninja.dashMaxReach, enemyDashPlaneY(state, tgt));
       applyDamage(state, tgt, Math.round(heroAtkOf(hero) * def.mult), "skill");
       return;
     }
@@ -332,7 +335,8 @@ function applySkillEffect(
           }
         }
         if (!next) break;
-        dashHeroTo(state, hero, next.x);
+        // R4 Wave C2 — each hop lands on that mob's depth row (boss → undefined → unchanged).
+        dashHeroTo(state, hero, next.x, Infinity, enemyDashPlaneY(state, next));
         applyDamage(state, next, dmg, "skill");
         hit.add(next.id);
       }
@@ -347,7 +351,22 @@ function applySkillEffect(
       const cx = inRange.length
         ? inRange.reduce((sum, e) => sum + e.x, 0) / inRange.length
         : hero.x;
-      dashHeroTo(state, hero, cx);
+      // R4 Wave C2 — blink to the enemy CENTROID's depth row too: average the in-range FARM
+      // mobs' rows (boss / world-boss are excluded by `enemyDashPlaneY` → not counted, so the
+      // C1 "never adopt boss lane" rule holds). No mob row available → undefined → planeY
+      // unchanged. The float division mirrors `cx`'s own (both feed the hash via x/planeY; a
+      // basic op, never a banned transcendental). Field-wide strike geometry is UNCHANGED.
+      let rowSum = 0;
+      let rowN = 0;
+      for (const e of inRange) {
+        const py = enemyDashPlaneY(state, e);
+        if (py !== undefined) {
+          rowSum += py;
+          rowN++;
+        }
+      }
+      const cy = rowN > 0 ? rowSum / rowN : undefined;
+      dashHeroTo(state, hero, cx, Infinity, cy);
       const dmg = Math.round(heroAtkOf(hero) * def.mult);
       for (const e of targets) applyDamage(state, e, dmg, "skill");
       return;

@@ -27,10 +27,16 @@ import { defaultHeroConfig, emptyDailies } from "@/engine/entities";
 import { GROUND_Y } from "@/render/layout";
 import { createEnemyView, updateEnemyView } from "@/render/views/enemyView";
 import { createHeroView, updateHeroView } from "@/render/views/heroView";
-import { depthZIndex } from "@/render/worldDepth/depthBand";
+import {
+  depthOffsetY,
+  depthZIndex,
+  DEPTH_OFFSET_FAR,
+  DEPTH_OFFSET_NEAR,
+} from "@/render/worldDepth/depthBand";
 import {
   canvasToWorld,
   enemyTapCenterY,
+  tapToPlaneY,
   worldScale,
 } from "@/render/worldDepth/hitTestMath";
 import {
@@ -303,3 +309,36 @@ describe("world-depth hit-test: screen tap round-trips to world coords", () => {
 function TOUCH(base: { scale: number }, cam: { scale: number }): number {
   return 24 / worldScale(base, cam);
 }
+
+// ---------------------------------------------------------------------------
+// 5. R4 Wave C2 tap→planeY inverse — `tapToPlaneY` exactly inverts `depthOffsetY`
+//    (the forward map), clamping a tap above/below the band to the edge row.
+// ---------------------------------------------------------------------------
+describe("world-depth tap→planeY: inverts depthOffsetY through the band", () => {
+  it("round-trips a depth d → screen-y → planeY back to depthOffsetY(d)", () => {
+    for (const d of [0, 0.25, 0.5, 0.75, 1]) {
+      const offset = depthOffsetY(d); // the forward map = the entity's planeY
+      const worldY = GROUND_Y + offset; // its on-screen ground-relative y (flat ground)
+      const planeY = tapToPlaneY(worldY, GROUND_Y, DEPTH_OFFSET_FAR, DEPTH_OFFSET_NEAR);
+      expect(planeY).toBeCloseTo(offset, 9); // exact inverse
+    }
+  });
+
+  it("clamps a tap ABOVE the band to the far edge and BELOW to the near edge", () => {
+    // Way above the horizon → saturates to the far (upstage) row.
+    expect(tapToPlaneY(GROUND_Y - 999, GROUND_Y, DEPTH_OFFSET_FAR, DEPTH_OFFSET_NEAR)).toBe(
+      DEPTH_OFFSET_FAR,
+    );
+    // Way below the camera → saturates to the near (downstage) row.
+    expect(tapToPlaneY(GROUND_Y + 999, GROUND_Y, DEPTH_OFFSET_FAR, DEPTH_OFFSET_NEAR)).toBe(
+      DEPTH_OFFSET_NEAR,
+    );
+  });
+
+  it("respects a terrain-lifted ground line (subtracts it, leaving only the depth offset)", () => {
+    const lift = 8; // e.g. a sloped-ground sample
+    const groundLine = GROUND_Y + lift;
+    const worldY = groundLine + 12; // a +12 depth offset atop the lifted ground
+    expect(tapToPlaneY(worldY, groundLine, DEPTH_OFFSET_FAR, DEPTH_OFFSET_NEAR)).toBeCloseTo(12, 9);
+  });
+});

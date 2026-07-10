@@ -41,6 +41,7 @@ export function dashHeroTo(
   hero: Hero,
   targetX: number,
   maxReach: number = Infinity,
+  targetPlaneY?: number,
 ): number {
   const nj = CONFIG.ninja;
   const hunt = CONFIG.hunt;
@@ -54,6 +55,32 @@ export function dashHeroTo(
   const toX = clamp(fromX + hop, hunt.heroMinX, fieldMaxX(state) - hunt.fieldRightMargin);
 
   hero.x = toX;
+  // R4 Wave C2 — OPTIONAL depth-row landing. The CALLER passes the target's `planeY` ONLY
+  // when the dash target is a `state.enemies` member (see `enemyDashPlaneY`); a boss /
+  // world-boss / synthetic-x target passes nothing, so the hero's `planeY` is UNCHANGED
+  // (C1 rule: never adopt the boss lane — bosses render on the static neutral path). When
+  // present it is CLAMPED to the band (owner reminder #1: never trust the caller) and only
+  // written when the hero actually has a `planeY` (hand-built literals may omit it). Purely
+  // cosmetic — planeY gates no combat. The x math above is UNCHANGED (byte-identical dash x).
+  if (
+    typeof targetPlaneY === "number" &&
+    Number.isFinite(targetPlaneY) &&
+    typeof hero.planeY === "number"
+  ) {
+    hero.planeY = clamp(targetPlaneY, CONFIG.plane.bandFar, CONFIG.plane.bandNear);
+  }
   state.events.push({ type: "heroDashed", heroId: hero.id, fromX, toX });
   return toX;
+}
+
+/**
+ * The depth-row a dash should LAND on for a `target`, or `undefined` when it must NOT change
+ * the hero's row. Returns the enemy's own `planeY` iff `target` is a live `state.enemies`
+ * member with a numeric row — a BOSS / world-boss (not in `state.enemies`) or a plane-less
+ * mob returns `undefined`, so `dashHeroTo` leaves `planeY` untouched (C1 "never adopt boss
+ * lane"). Pure lookup by id; no RNG, no wall-clock. Used by the ninja dash skill call sites.
+ */
+export function enemyDashPlaneY(state: GameState, target: { id: number }): number | undefined {
+  const e = state.enemies.find((m) => m.id === target.id);
+  return e && typeof e.planeY === "number" ? e.planeY : undefined;
 }
