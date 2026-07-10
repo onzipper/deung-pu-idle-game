@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  CONFIG,
   initGameState,
   step,
   makeHero,
@@ -449,6 +450,24 @@ describe("worldBoss solo forced-boss", () => {
     }
     expect(wbEntity.hp).toBeLessThan(hp0); // the bot is now piling on
     expect(worldBossDamageDealt(s)!.damage).toBeGreaterThan(0);
+  });
+
+  it("R4.5 Wave 1.1: a hold set during a world-boss fight steers to the HELD row, never the boss row", () => {
+    const s = seatSoloOnBoss(5);
+    const wbEntity = s.worldBoss!.entity!;
+    wbEntity.hp = wbEntity.maxHp - 1; // engage it (human first hit)
+    const bx = wbEntity.x;
+    const h = s.heroes[0];
+    const far = CONFIG.plane.bandFar;
+    const bossRow = wbEntity.planeY!; // near/downstage
+    h.planeYHold = far; // latched far-upstage row
+    h.planeY = bossRow; // start ON the boss's row so a wrong "adopt boss lane" would hold here
+    for (let i = 0; i < 120; i++) {
+      s.heroes[0].x = bx; // stay engaged (aimTarget = world boss)
+      updateHeroes(s);
+    }
+    expect(h.planeY).toBeCloseTo(far, 6); // pulled to the HELD row while fighting the boss
+    expect(h.planeY!).toBeLessThan(bossRow - 1); // decisively NOT the boss's lane
   });
 });
 

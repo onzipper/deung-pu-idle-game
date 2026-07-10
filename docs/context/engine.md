@@ -61,6 +61,16 @@ Steering rules (the y-target each step):
 - **Events (additive, decided by audit)**: `moveOrdered` gains an optional `y` (the clamped commanded row) so the render tap-ping lands at the tapped depth (`FxController.onMoveOrdered` offsets the ring by it; absent → +0, pixel-identical). `heroDashed` is UNCHANGED — its shadow-streak/afterimage draws at a fixed `HERO_MID_Y` band and the hero's own view follows the live `planeY`, so no from/to-y is needed.
 - **Iron invariant still holds**: `planeY` (incl. the new command `y`) is never read by targeting/range/cooldown — the sim issues no manual commands, so `pnpm sim` gates are unmoved.
 
+### Wave 1.1 — manual y HOLD (R4.5)
+
+A completed `moveTo{x,y}` now **LATCHES** its tapped depth row so the hero HOLDS it after the command clears (map/field readability), instead of the C1 snap back to the class home row. The latch is a new transient `Hero.planeYHold?: number` (never persisted — `toSaveData` picks only progression/economy; **no SAVE bump, still v20**).
+
+- **Set**: when a `move` command carrying a `y` arrives on BOTH axes, `h.planeYHold = cmd.y` (the intake-clamped row). Wired at both completion sites — the hunt-phase arrival in `combat.updateHeroes` and `manual.tickTownManualWalk`.
+- **Clear**: an **x-only** move completes with `cmd.y === undefined`, so the same assignment writes `undefined` → the hold drops and the hero returns to its home row, **byte-for-byte pre-Wave-1.1**. Also cleared on every zone arrival (`world.reviveHeroesFull`, alongside `h.command = null`), so a held row never leaks across a transit.
+- **Steering priority** (the idle y-target becomes `planeYHold ?? home`): ENGAGED farm mob → mob lane (wins WHILE engaged; after disengage/kill → `hold ?? home`) · ACTIVE move-with-y command → `command.y` · boss / world boss → `hold ?? home` (STILL never the boss's stamped row) · idle → `hold ?? home`. The home row is still the stateless `heroPlaneY(cls, slot, size)` recompute.
+- **stateHash**: `planeYHold` folds in **present-only** (like `planeY`) — it shapes future `planeY` trajectories, so it is a cheap desync canary; a state that never latched a hold (x-only moves, every pre-Wave-1.1 / sim run) hashes byte-identically. Lockstep 2-client equality stays green.
+- **Cosmetic invariant unchanged**: `planeYHold` never reaches targeting/range/cooldown/skills — the sim issues no manual commands, so `pnpm sim` is unmoved.
+
 ## Known risks
 
 - Any change that touches ordering, RNG draw sites, or floating-point paths risks a **desync** between party lockstep clients — the hash-equality tests in `src/engine/lockstep/` are the guard; treat a failure here as a stop-everything bug, not a flaky test.

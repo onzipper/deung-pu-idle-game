@@ -26,7 +26,7 @@
  *   consumables (counts) · consumableCds (sorted)
  *   PER HERO (slot order): id/cls/x/y/planeY/hp/maxHp/cd/dead/reviveTimer/mana/maxMana/
  *     atkBuff(mult,timer)/level/xp/tier/statPoints/stats(str,dex,int,vit)/skillCds/
- *     autoSlots/equipped(weapon,armor,refine)/command/config(all 7 fields)/shadowed
+ *     autoSlots/equipped(weapon,armor,refine)/command/planeYHold(present-only)/config(all 7 fields)/shadowed
  *   enemies (array order): id/kind/hp/maxHp/x/y/planeY/atk/speed/size/behavior/range/cd/
  *     engageOffset/homeX/aggressive/aggroRadius/engaged
  *   boss (+variety mechanic timers) · projectiles (array order, all fields)
@@ -149,6 +149,11 @@ function hashHero(h: number, hero: Hero): number {
   } else {
     h = num(str(h, "attack"), hero.command.targetId);
   }
+  // R4.5 Wave 1.1 depth-row HOLD — a transient latch that shapes FUTURE `planeY` trajectories
+  // (idle steering targets `planeYHold ?? home`), so it folds in as a cheap desync canary. Present-
+  // only: a state that never latched a hold (x-only moves, every pre-Wave-1.1 run) hashes byte-
+  // identically to before. Every client latches it from the same arrived command, so they agree.
+  if (typeof hero.planeYHold === "number") h = num(h, hero.planeYHold);
   // Per-hero automation config (replicated shared state).
   const c = hero.config;
   h = bool(h, c.autoCast);

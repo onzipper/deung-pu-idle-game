@@ -93,8 +93,25 @@ function run(turns: number, withGhosts: boolean, onTap?: () => void): number[] {
     }
     if (ghosts) {
       // Garbage of every shape, plus a plausible-but-junk snapshot, ingested + queried the
-      // whole run — none of it may reach the sim.
-      ghosts.upsert({ v: 1, cid: "g" + (t % 4), name: "junk", cls: "wizard", tier: 9, x: Math.sin(t) * 9e9, t }, t);
+      // whole run — none of it may reach the sim. R4.5 Wave 1.1 (issue #69): `py` variants
+      // (valid in-band, wildly out-of-band, wrong-typed) folded into the SAME adversarial
+      // feed — the field is render/store-only, so it must never perturb the hash trajectory
+      // either.
+      const pyVariant: unknown =
+        t % 5 === 0 ? Math.sin(t) * 9e9 : t % 5 === 1 ? "not-a-number" : t % 5 === 2 ? NaN : t % 2;
+      ghosts.upsert(
+        {
+          v: 1,
+          cid: "g" + (t % 4),
+          name: "junk",
+          cls: "wizard",
+          tier: 9,
+          x: Math.sin(t) * 9e9,
+          t,
+          py: pyVariant,
+        },
+        t,
+      );
       ghosts.upsert("not an object", t);
       ghosts.upsert({ garbage: true }, t);
       ghosts.upsert(null, t);

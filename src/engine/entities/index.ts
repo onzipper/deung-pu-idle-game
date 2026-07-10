@@ -535,6 +535,24 @@ export interface Hero {
    * factory (`makeHero`) always populates it.
    */
   planeY?: number;
+  /**
+   * DEPTH-ROW HOLD (R4.5 Wave 1.1 "manual y hold") — the depth row a completed manual
+   * `moveTo{x,y}` LATCHES so the hero keeps the tapped row after its command clears, instead
+   * of snapping back to its class home row (map/field readability). SET when a move command
+   * that carried a `y` arrives on BOTH axes (`combat.updateHeroes` hunt path + `tickTownManualWalk`);
+   * CLEARED (→ `undefined`) when an x-only move (NPC / gate / legacy tap) completes and on any
+   * zone arrival (`world.reviveHeroesFull`), restoring the pre-Wave-1.1 x-only home-row return
+   * byte-for-byte.
+   *
+   * STEERING: it becomes the IDLE / boss-phase / post-disengage y-target (`hold ?? home`). An
+   * ACTIVE move-with-y command (`command.y`) and an ENGAGED farm mob's lane still WIN over it
+   * while active; a boss / world boss NEVER adopts its lane (hold or home, never the boss row).
+   *
+   * TRANSIENT — NEVER persisted (`toSaveData` picks only progression/economy; NO SAVE bump, still
+   * v20) and rebuilt `undefined` on load. Folded into `stateHash` present-only (it shapes future
+   * `planeY` trajectories) as a cheap desync canary. OPTIONAL so hand-built literals stay valid.
+   */
+  planeYHold?: number;
 }
 
 export interface Enemy {

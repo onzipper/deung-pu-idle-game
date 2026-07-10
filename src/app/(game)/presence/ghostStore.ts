@@ -9,9 +9,22 @@
  * (`__tests__/ghostGuard.test.ts`) pins that structurally.
  */
 
-import type { HeroClass } from "@/engine";
+import { CONFIG, type HeroClass } from "@/engine";
 
 const HERO_CLASSES: readonly HeroClass[] = ["swordsman", "archer", "mage", "ninja"];
+
+/** R4.5 Wave 1.1 (issue #69): the live ground-plane depth-row band, read-only from the
+ *  engine's own `CONFIG.plane` (never mutated — this store has zero engine-state coupling,
+ *  `ghostGuard.test.ts` pins it). Defense-in-depth clamp for an inbound `py`: a peer on a
+ *  stale/mismatched build could send an out-of-band value, so a received row is clamped to
+ *  this range rather than trusted verbatim (the render-side clamp the fallback path already
+ *  gets for free from `scatterPlaneY`). */
+const PLANE_Y_MIN = Math.min(CONFIG.plane.bandFar, CONFIG.plane.bandNear);
+const PLANE_Y_MAX = Math.max(CONFIG.plane.bandFar, CONFIG.plane.bandNear);
+
+function clampPlaneY(v: number): number {
+  return v < PLANE_Y_MIN ? PLANE_Y_MIN : v > PLANE_Y_MAX ? PLANE_Y_MAX : v;
+}
 
 /** Positional smoothing time-constant (ms). A ghost eases toward its latest anchor by
  *  exponential decay — `1 - e^(-elapsed/τ)` of the remaining gap — reaching ~95% in ~3τ.
@@ -60,6 +73,11 @@ export interface GhostSnapshot {
   x: number;
   /** Monotonic per-sender sequence counter — older-or-equal `t` is ignored (dedup/stale). */
   t: number;
+  /** R4.5 Wave 1.1 (issue #69): the peer's live ground-plane depth row, or `null` when the
+   *  wire payload omitted/mangled `py` (older sender build, or defense-in-depth reject) —
+   *  NEVER `0`, so the render layer can tell "no live row" apart from "row zero" and fall
+   *  back to `scatterPlaneY(cid)` exactly as it did before this field existed. */
+  planeY: number | null;
 }
 
 /** A validated inbound ACTION frame (R3 `pa` — the visual action stream, design §5 wave 3).
@@ -97,6 +115,12 @@ export interface GhostRenderItem {
   /** The latest accepted action counter — the render layer edge-triggers a pose when this
    *  advances (see `ghostLayer.ts`). */
   at?: number;
+  /** R4.5 Wave 1.1 (issue #69): interpolated live ground-plane depth row this frame —
+   *  present ONLY once the peer has sent a `p` snapshot carrying `py`. `undefined` means
+   *  "no live row known" (older sender build, or the sender's engine hero has none yet);
+   *  the render layer falls back to `scatterPlaneY(cid)` exactly as it did before this
+   *  field existed. */
+  planeY?: number;
 }
 
 interface GhostRecord {
@@ -125,6 +149,15 @@ interface GhostRecord {
   actionAt: number;
   lastActionAtMs: number;
   hasAction: boolean;
+  /** R4.5 Wave 1.1 (issue #69): last-known live depth row and the one before it (for the
+   *  lerp), or `null` when no `p` snapshot has ever carried a `py`. DELIBERATELY anchored
+   *  by its OWN clock (`planeYAt`), NOT the shared `lerpAt` — `lerpAt` is re-stamped by
+   *  every `pa` action beat (8Hz) to re-anchor x, but `pa` carries no `py` this wave; reusing
+   *  `lerpAt` here would reset the ease's elapsed time on every action beat and the row would
+   *  never visibly converge. Advanced ONLY by `upsert` (the `p` handler). */
+  prevPlaneY: number | null;
+  lastPlaneY: number | null;
+  planeYAt: number;
 }
 
 /** Validate + normalize a raw wire payload into a `GhostSnapshot`, or `null` if junk.
@@ -146,7 +179,12 @@ export function parseGhostSnapshot(raw: unknown): GhostSnapshot | null {
   const tier: 1 | 2 | 3 = tierNum === 3 ? 3 : tierNum === 2 ? 2 : 1;
   const name = typeof r.name === "string" ? r.name : "";
   const t = typeof r.t === "number" && Number.isFinite(r.t) ? r.t : 0;
-  return { cid, name, cls, tier, x, t };
+  // R4.5 Wave 1.1: `py` is additive/optional — a missing field, a wrong type (e.g. a
+  // string), or a non-finite value (NaN/Infinity) all resolve to `null` ("no live row"),
+  // never `0`. An in-range-but-noisy number is clamped, not rejected (defense-in-depth).
+  const planeY =
+    typeof r.py === "number" && Number.isFinite(r.py) ? clampPlaneY(r.py) : null;
+  return { cid, name, cls, tier, x, t, planeY };
 }
 
 /** Validate a raw `pa` action payload into a `GhostAction`, or `null` if junk. Strict on
@@ -196,6 +234,14 @@ export class GhostStore {
     return easeToward(g.prevX, g.lastX, nowMs - g.lerpAt);
   }
 
+  /** R4.5 Wave 1.1: this ghost's eased live depth row at `nowMs`, or `null` if no `p`
+   *  snapshot has ever carried a `py` — same continuity discipline as `sampleX` (the ease
+   *  target is a "current visible value → new target" chain, never a raw snap). */
+  private samplePlaneY(g: GhostRecord, nowMs: number): number | null {
+    if (g.lastPlaneY === null) return null;
+    return easeToward(g.prevPlaneY ?? g.lastPlaneY, g.lastPlaneY, nowMs - g.planeYAt);
+  }
+
   /**
    * Ingest one peer snapshot. Junk is ignored; a stale/duplicate `t` for a known ghost
    * is ignored; an excluded identity is dropped. `nowMs` = the receive time (real clock).
@@ -222,6 +268,9 @@ export class GhostStore {
         actionAt: 0,
         lastActionAtMs: 0,
         hasAction: false,
+        prevPlaneY: snap.planeY,
+        lastPlaneY: snap.planeY,
+        planeYAt: nowMs,
       });
       return;
     }
@@ -234,6 +283,20 @@ export class GhostStore {
     existing.name = snap.name;
     existing.cls = snap.cls;
     existing.tier = snap.tier;
+    // R4.5 Wave 1.1: re-anchor the depth-row ease from wherever it's VISIBLY eased to right
+    // now (mirrors the x treatment above) — never jump straight to the raw snap. A snapshot
+    // with no `py` (older sender, or a defensive gap) drops the row back to "unknown" so the
+    // render layer falls back to `scatterPlaneY(cid)` rather than freezing a stale row. A
+    // row appearing for the FIRST time (no prior known row to ease from) starts exactly at
+    // the snap, same as a brand-new ghost above.
+    existing.prevPlaneY =
+      snap.planeY === null
+        ? null
+        : existing.lastPlaneY === null
+          ? snap.planeY
+          : this.samplePlaneY(existing, nowMs);
+    existing.lastPlaneY = snap.planeY;
+    existing.planeYAt = nowMs;
   }
 
   /** Parse + apply one raw `pa` action frame (mirrors `upsert`'s one-call surface for the
@@ -321,6 +384,7 @@ export class GhostStore {
       const silence = nowMs - g.lastAt; // prune/fade keyed to the keepalive clock ONLY
       if (silence > SILENCE_PRUNE_MS) continue;
       const x = this.sampleX(g, nowMs); // ...position eases to its own anchor (see easeToward)
+      const planeY = this.samplePlaneY(g, nowMs); // R4.5 Wave 1.1: null -> caller falls back
       const fadeIn = clamp01((nowMs - g.firstAt) / FADE_MS);
       const fadeOut =
         silence > SILENCE_PRUNE_MS - FADE_MS
@@ -336,6 +400,9 @@ export class GhostStore {
         // Action fields only for a peer that has actually sent a `pa` — a `p`-only ghost
         // omits them so the render layer draws it exactly as before.
         ...(g.hasAction ? { facing: g.facing, action: g.action, at: g.actionAt } : null),
+        // R4.5 Wave 1.1: live depth row only when known — a `p`-only-legacy or not-yet-
+        // stamped peer omits it, so the render layer falls back to `scatterPlaneY(cid)`.
+        ...(planeY !== null ? { planeY } : null),
         lastAt: g.lastAt,
       });
     }
@@ -354,6 +421,7 @@ export class GhostStore {
       ...(it.action !== undefined
         ? { facing: it.facing, action: it.action, at: it.at }
         : null),
+      ...(it.planeY !== undefined ? { planeY: it.planeY } : null),
     }));
   }
 }

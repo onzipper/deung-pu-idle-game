@@ -413,6 +413,9 @@ function reviveHeroesFull(state: GameState): void {
     // move/attack command so a stale tap never carries across a transit / into a
     // boss room (boss forced-combat owns the hero there anyway).
     h.command = null;
+    // R4.5 Wave 1.1: also drop the manual depth-row HOLD — a new zone starts on the
+    // class home row (the C1 idle rule), so a held row never leaks across a transit.
+    h.planeYHold = undefined;
   }
 }
 

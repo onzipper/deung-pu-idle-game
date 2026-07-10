@@ -433,6 +433,11 @@ export function updateHeroes(state: GameState): void {
           typeof h.planeY !== "number" ||
           Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
         if (xArrived && yArrived) {
+          // R4.5 Wave 1.1 — LATCH the tapped depth row so the hero HOLDS it after the command
+          // clears (idle steering below uses `planeYHold ?? home`). An x-only move (`cmd.y`
+          // undefined = NPC / gate / legacy tap) CLEARS the hold → home-row return, byte-for-byte
+          // pre-Wave-1.1. `cmd.y` was band-clamped at intake (`applyManualCommand`).
+          h.planeYHold = cmd.y;
           h.command = null;
         } else {
           goalX = cmd.x;
@@ -620,11 +625,18 @@ export function updateHeroes(state: GameState): void {
       // reproducing the spawn/cohort stamp (`heroPlaneY`; solo reduces to the solo formation row).
       const engagedMob = !bossPhase && aimTarget && aimTarget.id !== wbId ? aimTarget : null;
       const homeRow = heroPlaneY(h.cls, state.heroes.indexOf(h), state.heroes.length);
+      // R4.5 Wave 1.1 — the IDLE / boss-phase / post-disengage target is `planeYHold ?? home`:
+      // a completed `moveTo{x,y}` LATCHES its tapped row (set on arrival above) so the hero HOLDS
+      // it after the command clears, instead of snapping to the class home row. An x-only move
+      // (or any state that never set a hold) leaves `planeYHold` undefined → HOME, byte-for-byte
+      // pre-Wave-1.1. Recomputed home is still stateless (matches the spawn/cohort stamp).
+      const idleRow = typeof h.planeYHold === "number" ? h.planeYHold : homeRow;
       // R4 Wave C2 — an ACTIVE move command carrying a depth-row `y` steers the hero to that
-      // row (already band-clamped at intake). Priority: an ENGAGED farm mob's lane wins (an
-      // ATTACK command sets aimTarget → engagedMob; a MOVE command never sets aimTarget, so
-      // engagedMob is null and the command row is used); else HOME. An x-only move (`cmd.y`
-      // undefined) and every non-move state fall through to HOME — byte-identical to C1.
+      // row (already band-clamped at intake). Priority: an ENGAGED farm mob's lane wins WHILE
+      // engaged (an ATTACK command sets aimTarget → engagedMob; a MOVE command never sets
+      // aimTarget, so engagedMob is null and the command row is used); then the active move
+      // command row; else the HELD row (or HOME if no hold). A boss / world boss NEVER adopts
+      // its own lane — it falls through to `idleRow` (hold or home), never the boss row.
       const moveCmd = !bossPhase && h.command && h.command.kind === "move" ? h.command : null;
       let yTarget: number;
       if (engagedMob && typeof engagedMob.planeY === "number") {
@@ -632,7 +644,7 @@ export function updateHeroes(state: GameState): void {
       } else if (moveCmd && typeof moveCmd.y === "number") {
         yTarget = moveCmd.y;
       } else {
-        yTarget = homeRow;
+        yTarget = idleRow;
       }
       h.planeY = stepPlaneY(h.planeY, yTarget, FIXED_DT);
     }

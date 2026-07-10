@@ -12,6 +12,8 @@
 
 import { describe, it, expect } from "vitest";
 import { Container } from "pixi.js";
+import { scatterPlaneY } from "@/engine";
+import { createWorldFxContext, type WorldFxContext } from "@/render/worldDepth/worldFxContext";
 import { GhostLayer, type GhostDrawItem } from "../ghostLayer";
 
 const DT = 1 / 60;
@@ -22,6 +24,16 @@ function item(over: Partial<GhostDrawItem> & { cid: string; cls: GhostDrawItem["
 
 function make(): GhostLayer {
   return new GhostLayer(new Container());
+}
+
+/** A depth-flag-ON world-fx context (R4.5 Wave 1.1 placement needs the seam actually
+ *  live — the bare `make()` ghosts above stay flags-off/no-op for the pose tests). */
+function makeWithDepth(): { gl: GhostLayer; ctx: WorldFxContext } {
+  const ctx = createWorldFxContext();
+  ctx.setFlags({ depth: true, terrain: false });
+  ctx.setZone(null);
+  const gl = new GhostLayer(new Container(), { worldFx: ctx });
+  return { gl, ctx };
 }
 
 describe("GhostLayer — R3 pose mapping", () => {
@@ -101,5 +113,54 @@ describe("GhostLayer — invariants", () => {
     // Same cid returns with a LOWER counter (fresh session) -> must pulse again.
     gl.update([item({ cid: "g1", cls: "swordsman", action: "basic", at: 1 })], DT);
     expect(gl.viewFor("g1")?.anim.attack?.kind).toBe("swing");
+  });
+});
+
+describe("GhostLayer — R4.5 Wave 1.1 (issue #69) live planeY placement", () => {
+  it("draws at the peer's live planeY when present (not the scatter fallback)", () => {
+    const { gl, ctx } = makeWithDepth();
+    const planeY = 10; // within the live plane band [-24, 40]
+    gl.update([item({ cid: "g1", cls: "swordsman", x: 50, planeY })], DT);
+    const view = gl.viewFor("g1")!;
+    const d = ctx.depthOf("ghost", "g1", undefined, undefined, planeY);
+    expect(view.y).toBeCloseTo(ctx.footY(50, d), 5);
+    // Sanity: this is NOT the same row the scatter fallback would have chosen (proves the
+    // live value actually drove placement, not a coincidental match).
+    const fallbackD = ctx.depthOf("ghost", "g1", undefined, undefined, scatterPlaneY("g1"));
+    if (Math.abs(planeY - scatterPlaneY("g1")) > 0.5) {
+      expect(view.y).not.toBeCloseTo(ctx.footY(50, fallbackD), 3);
+    }
+  });
+
+  it("falls back to scatterPlaneY(cid) when planeY is absent (today's behavior, pinned)", () => {
+    const { gl, ctx } = makeWithDepth();
+    gl.update([item({ cid: "g2", cls: "mage", x: 50 })], DT); // no planeY field at all
+    const view = gl.viewFor("g2")!;
+    const d = ctx.depthOf("ghost", "g2", undefined, undefined, scatterPlaneY("g2"));
+    expect(view.y).toBeCloseTo(ctx.footY(50, d), 5);
+  });
+
+  it("two ghosts with different live planeY end up at different foot rows", () => {
+    const { gl } = makeWithDepth();
+    gl.update(
+      [
+        item({ cid: "gA", cls: "archer", x: 0, planeY: -20 }),
+        item({ cid: "gB", cls: "archer", x: 0, planeY: 35 }),
+      ],
+      DT,
+    );
+    const yA = gl.viewFor("gA")!.y;
+    const yB = gl.viewFor("gB")!.y;
+    expect(Math.abs(yA - yB)).toBeGreaterThan(1);
+  });
+
+  it("the contact shadow rides the live-row placement (child of the placed root)", () => {
+    const { gl } = makeWithDepth();
+    gl.update([item({ cid: "g1", cls: "swordsman", x: 50, planeY: 30 })], DT);
+    const view = gl.viewFor("g1") as unknown as { contactShadow?: { position: { y: number } } };
+    // The shadow is a CHILD positioned in the root's local space (see entityShadow.ts) —
+    // its presence + the root's own y (already asserted above) together prove it tracks
+    // the live row (no separate world-space anchor to drift out of sync).
+    expect(view.contactShadow).toBeDefined();
   });
 });

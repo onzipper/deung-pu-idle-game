@@ -138,6 +138,12 @@ export function tickTownManualWalk(state: GameState): void {
       typeof h.planeY !== "number" ||
       Math.abs(h.planeY - cmd.y) <= CONFIG.plane.yArriveEps;
     if (xArrived && yArrived) {
+      // R4.5 Wave 1.1 — LATCH the tapped depth row (or CLEAR it for an x-only walk), mirroring
+      // the hunt-phase arrival in `combat.updateHeroes`. Town has no idle steering to consume the
+      // hold, but keeping the set/clear here means the hero carries the held row consistently if
+      // it steps into a farm zone (where `reviveHeroesFull` then clears it on arrival). `cmd.y`
+      // was band-clamped at intake; undefined (x-only) clears the hold → pre-Wave-1.1 behaviour.
+      h.planeYHold = cmd.y;
       h.command = null;
       continue;
     }
